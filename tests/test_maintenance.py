@@ -17,7 +17,7 @@ def age(path, days):
 
 
 def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
-    ws = themes.resolve(config, "vlm")
+    ws = themes.resolve(config, "theme-vlm")
     themes.ensure_workspace(ws)
     digest_dir = config.research_root / "_overview" / ".ezra" / "digest"
     digest_dir.mkdir(parents=True)
@@ -48,7 +48,7 @@ def test_claude_project_dir_name_matches_claude_code():
 
 
 def test_dump_state_writes_sql_and_notion_ids(config, store):
-    store.upsert_thread("C1", "1.1", "vlm", "sess")
+    store.upsert_thread("C1", "1.1", "theme-vlm", "sess")
     (config.state_dir / "notion.json").write_text(json.dumps({"home_page_id": "p"}))
     out = maintenance.dump_state(config)
     assert "INSERT INTO \"threads\"" in (out / "ezra.sql").read_text()

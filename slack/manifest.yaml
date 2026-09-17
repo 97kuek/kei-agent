@@ -27,6 +27,8 @@ settings:
       - message.channels
       - message.groups
       - member_joined_channel
+      - channel_rename
+      - group_rename
       - reaction_added
       - reaction_removed
   interactivity:

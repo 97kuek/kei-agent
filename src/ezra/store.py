@@ -162,6 +162,9 @@ class Store:
         with self.conn:
             self.conn.execute("UPDATE threads SET nudged = 1 WHERE channel = ? AND thread_ts = ?", (channel, thread_ts))
 
+    def threads_awaiting(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM threads WHERE awaiting_since IS NOT NULL").fetchall()
+
     def threads_updated_since(self, since: float) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM threads WHERE updated_at >= ? ORDER BY channel_name, updated_at", (since,)

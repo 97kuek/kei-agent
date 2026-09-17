@@ -60,6 +60,14 @@ async def serve() -> None:
     async def handle_member_joined(event):
         await assistant.on_member_joined(event)
 
+    @app.event("channel_rename")
+    async def handle_channel_rename(event):
+        await assistant.on_channel_rename(event)
+
+    @app.event("group_rename")
+    async def handle_group_rename(event):
+        await assistant.on_channel_rename(event)
+
     @app.event("reaction_added")
     async def handle_reaction_added(event):
         await assistant.on_reaction_added(event)

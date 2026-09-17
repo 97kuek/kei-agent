@@ -42,9 +42,11 @@ session_retention_days = 90
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]
-# Assistantの改善: 要望を docs/backlog.md に記録するだけ
-improve = ["assistant-improve"]
-# 上記以外のチャンネルは、すべて研究テーマとして扱う
+# Ezra の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
+improve = ["research-ezra"]
+# この接頭辞で始まるチャンネルを研究テーマとして扱う（theme-vlm-counting → ~/research/vlm-counting/）
+# それ以外のチャンネル（inbox など）は Ezra の対象外
+theme_prefix = "theme-"
 
 [sandbox]
 # Bash（sandbox内）から接続してよいドメイン

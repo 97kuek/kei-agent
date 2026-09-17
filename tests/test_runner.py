@@ -4,7 +4,7 @@ from ezra import runner, themes
 
 
 def test_settings_limit_theme_to_its_directory(config):
-    ws = themes.resolve(config, "vlm")
+    ws = themes.resolve(config, "theme-vlm")
     settings = runner.build_settings(config, ws)
     allow = settings["permissions"]["allow"]
     assert f"Read(/{ws.cwd}/**)" in allow
@@ -23,7 +23,7 @@ def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
 
 
 def test_command_resumes_session_and_ignores_user_settings(config):
-    ws = themes.resolve(config, "vlm")
+    ws = themes.resolve(config, "theme-vlm")
     cmd = runner.build_command(config, ws, "sess-1")
     assert cmd[cmd.index("--resume") + 1] == "sess-1"
     assert cmd[cmd.index("--setting-sources") + 1] == ""
