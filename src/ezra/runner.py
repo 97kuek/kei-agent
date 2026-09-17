@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,6 +148,13 @@ def apply_event(result: RunResult, event: dict) -> str | None:
     return None
 
 
+def _kill_group(pid: int) -> None:
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 async def run_claude(
     config: Config,
     ws: Workspace,
@@ -165,6 +173,8 @@ async def run_claude(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         limit=16 * 1024 * 1024,
+        # 上限時間で止めるとき、中で動いている Bash などもまとめて止められるよう、別のプロセスグループにする
+        start_new_session=True,
     )
     proc.stdin.write(prompt.encode("utf-8"))
     proc.stdin.close()
@@ -186,7 +196,7 @@ async def run_claude(
         await asyncio.wait_for(read_stdout(), timeout=config.run_timeout_minutes * 60)
         await proc.wait()
     except TimeoutError:
-        proc.kill()
+        _kill_group(proc.pid)
         await proc.wait()
         result.timed_out = True
         result.is_error = True

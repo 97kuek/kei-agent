@@ -13,7 +13,7 @@ from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "research-overview", "C9": "assistant-improve"})
+    slack = FakeSlack({"C1": "theme-vlm", "C5": "research-overview", "C9": "research-ezra"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -22,7 +22,7 @@ def env(config, store, monkeypatch):
 
 
 def make_theme(config, name="vlm", keywords=("vision language model counting",)):
-    ws = themes.resolve(config, name)
+    ws = themes.resolve(config, f"theme-{name}")
     themes.ensure_workspace(ws)
     if keywords is not None:
         md = ws.cwd / "CLAUDE.md"
@@ -184,13 +184,14 @@ async def test_night_skips_when_notion_is_down(env, config):
 async def test_literature_posts_only_when_new(env, config, store):
     scheduler, assistant, slack, claude = env
     make_theme(config, "vlm")
-    make_theme(config, "research-log", keywords=None)
+    slack.channels["C2"] = "theme-notes"
+    make_theme(config, "notes", keywords=None)
+    make_theme(config, "archived")  # Ezra のいない（アーカイブした）テーマは見張らない
     claude.behaviors = [{"text": "papers/ に変更はありません。\n\nNO_NEW_PAPERS"}]
 
     detail = await scheduler.run_literature("2026-09-18")
 
-    assert detail["themes"]["vlm"]["status"] == "no_new"
-    assert detail["themes"]["research-log"]["status"] == "no_keywords"
+    assert detail["themes"] == {"theme-vlm": {"status": "no_new"}, "theme-notes": {"status": "no_keywords"}}
     assert slack.posted() == []
     assert "vision language model counting" in claude.calls[0]["prompt"]
 
@@ -208,10 +209,10 @@ async def test_literature_posts_only_when_new(env, config, store):
 async def test_daily_posts_to_overview_and_notion(env, config, store):
     scheduler, assistant, slack, claude = env
     ws = make_theme(config, "vlm")
-    store.upsert_thread("C1", "10.1", "vlm", "s1")
+    store.upsert_thread("C1", "10.1", "theme-vlm", "s1")
     (ws.cwd / ".ezra" / "threads").mkdir(parents=True)
     (ws.cwd / ".ezra" / "threads" / "10.1.md").write_text("# log")
-    store.record_schedule("literature", "2026-09-18", {"themes": {"vlm": {"status": "no_new"}}})
+    store.record_schedule("literature", "2026-09-18", {"themes": {"theme-vlm": {"status": "no_new"}}})
     store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
     assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
@@ -224,8 +225,8 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert call["cwd"] == config.research_root / "_overview"
     digest = config.research_root / "_overview" / ".ezra" / "digest" / "2026-09-18-daily.md"
     text = digest.read_text()
-    assert "10.1.md" in text and "#vlm: 新着なし" in text
-    assert "条件Cも回して（#vlm）: 完了 71%" in text
+    assert "10.1.md" in text and "theme-vlm: 新着なし" in text
+    assert "条件Cも回して（vlm）: 完了 71%" in text
     assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
     assert "返事が要る" in text and "中間発表" in text
     header, body = slack.posted()
@@ -235,14 +236,24 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert detail["notion_url"] == note.url
 
 
-async def test_digest_lists_stalled_themes(env, config, store):
-    scheduler, *_ = env
+async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
+    from ezra.digest import DigestBuilder
+    scheduler, assistant, *_ = env
     make_theme(config, "old-theme")
-    store.upsert_thread("C7", "1.1", "old-theme", "s")
+    make_theme(config, "archived")
+    store.upsert_thread("C7", "1.1", "theme-old-theme", "s")
+    store.upsert_thread("C8", "2.1", "theme-archived", "s")
     store.conn.execute("UPDATE threads SET updated_at = ?", (time.time() - 5 * 86400,))
-    digest = await scheduler.build_digest(time.time() - 86400, time.time(), "t")
+    store.set_awaiting("C7", "1.1", True)
+    store.set_awaiting("C8", "2.1", True)
+
+    digest = await DigestBuilder(config, store, assistant).build(
+        time.time() - 86400, time.time(), "t", {"theme-old-theme"})
+
     stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
-    assert "#old-theme" in stalled
+    waiting = digest.split("## 返事待ちのスレッド")[1].split("##")[0]
+    assert "#theme-old-theme" in stalled and "archived" not in stalled
+    assert "#theme-old-theme" in waiting and "archived" not in waiting
 
 
 async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config, store):
@@ -276,6 +287,7 @@ async def test_member_joined_registers_theme_in_notion(env, config):
     scheduler, assistant, slack, claude = env
     await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
     assert assistant.notion.themes == {"vlm": "https://example.slack.com/archives/C1"}
+    assert (config.research_root / "vlm" / "CLAUDE.md").exists()
 
 
 # 返事待ちへの声かけ
@@ -307,3 +319,48 @@ async def test_maintenance_reports_backup_failure(env, config):
     detail = await scheduler.run_maintenance("2026-09-18")
     assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0}
     assert slack.posted()[-1]["channel"] == "C9" and "バックアップに失敗" in slack.posted()[-1]["text"]
+
+
+async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatch):
+    scheduler, assistant, slack, claude = env
+    make_theme(config)
+    task = assistant.notion.add_task("Slack が落ちている", "vlm")
+
+    async def broken_post(**kw):
+        raise RuntimeError("slack is down")
+
+    monkeypatch.setattr(slack, "chat_postMessage", broken_post)
+    detail = await scheduler.run_night("2026-09-18")
+
+    assert task.status == "確認待ち" and "slack is down" in assistant.notion.results[task.id]
+    assert detail["tasks"][0]["status"] == "error"
+
+
+async def test_night_task_from_other_channel_runs_in_theme_channel(env, config):
+    scheduler, assistant, slack, claude = env
+    make_theme(config)
+    task = assistant.notion.add_task("別のチャンネルで作った", "vlm",
+                                     slack_url="https://example.slack.com/archives/C9/p1789636798229039")
+    slack.replies = [{"ts": "1789636798.229039", "user": "UME", "text": "別のチャンネルで作った"}]
+
+    await scheduler.run_night("2026-09-18")
+
+    assert slack.posted()[0] == {"channel": "C1", "text": "🌙 Task: 別のチャンネルで作った"}
+    assert claude.calls[0]["cwd"] == config.research_root / "vlm"
+
+
+async def test_nudge_failure_is_not_retried_every_minute(env, store, monkeypatch):
+    scheduler, assistant, slack, claude = env
+    store.upsert_thread("C1", "10.1", "theme-vlm", "s")
+    store.set_awaiting("C1", "10.1", True)
+    store.conn.execute("UPDATE threads SET awaiting_since = ?", (time.time() - 30 * 3600,))
+    calls = []
+
+    async def archived(**kw):
+        calls.append(kw)
+        raise RuntimeError("is_archived")
+
+    monkeypatch.setattr(slack, "chat_postMessage", archived)
+    await scheduler.nudge_stale_threads()
+    await scheduler.nudge_stale_threads()
+    assert len(calls) == 1

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -24,11 +23,3 @@ def config(tmp_path: Path) -> Config:
 @pytest.fixture
 def store(config: Config) -> Store:
     return Store(config.db_path)
-
-
-@pytest.fixture
-def backlog_config(config: Config, tmp_path: Path, monkeypatch) -> Config:
-    """backlog をリポジトリではなく tmp に書くための設定。"""
-    fake_repo = tmp_path / "repo"
-    (fake_repo / "docs").mkdir(parents=True)
-    return replace(config, repo_root=fake_repo)

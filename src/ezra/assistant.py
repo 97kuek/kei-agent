@@ -242,7 +242,8 @@ class Assistant:
 
     async def on_message(self, event: dict) -> None:
         """スレッド内の、メンションなしの返信。Ezra が動いているスレッドだけに反応する。"""
-        if event.get("subtype") not in (None, "file_share") or event.get("bot_id"):
+        # thread_broadcast は「以下にも投稿する」をつけた返信
+        if event.get("subtype") not in (None, "file_share", "thread_broadcast") or event.get("bot_id"):
             return
         thread_ts = event.get("thread_ts")
         if not thread_ts or thread_ts == event.get("ts"):
@@ -273,9 +274,12 @@ class Assistant:
         except ValueError as e:
             await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
             return
+        if ws.kind is ChannelKind.OTHER:
+            await self.slack.chat_postMessage(channel=channel, text=themes.other_channel_message(self.config))
+            return
         created = themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.IMPROVE:
-            text = "Ezra です。このチャンネルでメンションされた要望は `docs/backlog.md` に記録します。"
+            text = f"Ezra です。このチャンネルでメンションされた要望は `{self.config.backlog_path}` に記録します。"
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Ezra です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
         else:
@@ -284,20 +288,26 @@ class Assistant:
                 f"Ezra です。このチャンネルのテーマ用に `{ws.cwd}` を{state}。"
                 "研究の前提を `CLAUDE.md` に書いておくと、依頼のたびに説明しなくて済みます。"
             )
-            await self.register_theme(name, channel, ws)
+            await self.register_theme(channel, ws)
         await self.slack.chat_postMessage(channel=channel, text=text)
 
-    async def register_theme(self, name: str, channel: str, ws: Workspace) -> None:
-        if self.notion is None:
+    async def on_channel_rename(self, event: dict) -> None:
+        """チャンネル名が変わったら、覚えている名前を捨てる（テーマの対応がずれないように）。"""
+        channel = (event.get("channel") or {}).get("id")
+        if channel:
+            self.channel_names.pop(channel, None)
+
+    async def register_theme(self, channel: str, ws: Workspace) -> None:
+        if self.notion is None or ws.theme is None:
             return
         slack_url = f"{self.team_url}archives/{channel}" if self.team_url else ""
         try:
-            await asyncio.to_thread(self.notion.ensure_theme, name, slack_url, f"{ws.cwd}/")
+            await asyncio.to_thread(self.notion.ensure_theme, ws.theme, slack_url, f"{ws.cwd}/")
         except NotionError as e:
-            await self.notify_trouble(f"Notion にテーマ「{name}」を登録できませんでした: {e}")
+            await self.notify_trouble(f"Notion にテーマ「{ws.theme}」を登録できませんでした: {e}")
 
     async def notify_trouble(self, text: str) -> None:
-        """うまくいかなかったことを #assistant-improve に知らせる。"""
+        """うまくいかなかったことを、Ezra の改善のチャンネルに知らせる。"""
         log.warning(text)
         try:
             ids = await self.channel_ids()
@@ -305,7 +315,7 @@ class Assistant:
             if channel:
                 await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {text[:2500]}")
         except Exception:
-            log.exception("#assistant-improve に知らせられません")
+            log.exception("Ezra の改善のチャンネルに知らせられません")
 
     async def permalink(self, channel: str, ts: str) -> str:
         resp = await self.slack.chat_getPermalink(channel=channel, message_ts=ts)
@@ -321,9 +331,10 @@ class Assistant:
         channel, ts = item["channel"], item["ts"]
         name = await self.channel_name(channel)
         try:
-            if themes.resolve(self.config, name).kind is not ChannelKind.THEME:
-                return
+            ws = themes.resolve(self.config, name)
         except ValueError:
+            return
+        if ws.kind is not ChannelKind.THEME:
             return
         message = await self.fetch_message(channel, ts) or {}
         req = Request(channel, name, message.get("thread_ts") or ts, None, "")
@@ -336,7 +347,7 @@ class Assistant:
         quoted = "\n".join(f"> {line}" for line in text.splitlines()) or "> （本文なし）"
         body = f"Slack で 🌙 をつけて作った Task。\n\n{quoted}\n\n元のメッセージ: {link}"
         try:
-            task = await asyncio.to_thread(self.notion.create_night_task, title, name, link, body)
+            task = await asyncio.to_thread(self.notion.create_night_task, title, ws.theme, link, body)
         except NotionError as e:
             await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れませんでした")
             await self.notify_trouble(f"🌙 の Task を Notion に作れませんでした: {e}")
@@ -434,18 +445,29 @@ class Assistant:
         except ValueError as e:
             await self.post(req, f"{FAILED_PREFIX} {e}")
             return None
+        if ws.kind is ChannelKind.OTHER:
+            if req.message_ts:
+                await self.post(req, themes.other_channel_message(self.config))
+            return None
         if ws.kind is ChannelKind.IMPROVE:
             await self.record_backlog(req)
             return None
         themes.ensure_workspace(ws)
-        async with self.thread_locks[(req.channel, req.thread_ts)]:
-            async with self.semaphore:
-                try:
-                    return await self.run(req, ws)
-                except Exception as e:
-                    log.exception("依頼の処理に失敗しました")
-                    await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
-                    return None
+        key = (req.channel, req.thread_ts)
+        lock = self.thread_locks[key]
+        try:
+            async with lock:
+                async with self.semaphore:
+                    try:
+                        return await self.run(req, ws)
+                    except Exception as e:
+                        log.exception("依頼の処理に失敗しました")
+                        await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
+                        return None
+        finally:
+            # 待っている依頼がなければ、スレッドごとのロックを捨てる（増え続けないように）
+            if not lock.locked() and self.thread_locks.get(key) is lock:
+                del self.thread_locks[key]
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         assert ws.cwd is not None
@@ -494,7 +516,12 @@ class Assistant:
             reason = "上限時間を超えたので止めました" if result.timed_out else "; ".join(result.errors)[:1500]
             await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {reason or '原因不明'}")
 
-        await self.upload_outputs(req, ws.cwd, changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since))
+        try:
+            await self.upload_outputs(req, ws.cwd, changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since))
+        except Exception as e:
+            # 結果はもう返しているので、添付だけ失敗したことを伝える
+            log.exception("outputs/ のファイルを添付できません")
+            await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できませんでした: `{type(e).__name__}: {e}`")
         await self.handle_job_requests(ws.cwd)
         return result
 
@@ -560,7 +587,7 @@ class Assistant:
         path = self.config.backlog_path
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
-            path.write_text("# Ezra への要望\n\n`#assistant-improve` で受け付けた要望。新しいものが下。\n", encoding="utf-8")
+            path.write_text(f"# Ezra への要望\n\n`#{req.channel_name}` で受け付けた要望。新しいものが下。\n", encoding="utf-8")
         link = ""
         try:
             resp = await self.slack.chat_getPermalink(channel=req.channel, message_ts=req.message_ts or req.thread_ts)
@@ -571,7 +598,7 @@ class Assistant:
         body = req.text.replace("\n", "\n  ")
         with path.open("a", encoding="utf-8") as f:
             f.write(f"\n- [ ] {stamp} {body} {link}\n")
-        await self.post(req, "要望を `docs/backlog.md` に記録しました。")
+        await self.post(req, f"要望を `{path}` に記録しました。")
 
     # ジョブ
 
@@ -611,9 +638,15 @@ class Assistant:
             ))
 
     async def job_loop(self) -> None:
+        failing = False
         while True:
             try:
                 await self.poll_jobs()
-            except Exception:
+                failing = False
+            except Exception as e:
                 log.exception("ジョブの確認に失敗しました")
+                if not failing:
+                    # 失敗が続いている間は、最初の1回だけ知らせる
+                    await self.notify_trouble(f"ジョブの状態を確認できません（pueue が止まっていませんか）: {type(e).__name__}: {e}")
+                failing = True
             await asyncio.sleep(self.config.job_poll_seconds)

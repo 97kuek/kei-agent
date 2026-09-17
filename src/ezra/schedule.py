@@ -14,10 +14,11 @@ from datetime import time as dtime
 from pathlib import Path
 
 from ezra import maintenance, themes
-from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text, format_duration
+from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text
+from ezra.digest import DigestBuilder, theme_dirs
 from ezra.notion import NotionError
-from ezra.notion_store import Note, Task, parse_slack_permalink, summarize
 from ezra.config import Config
+from ezra.notion_store import Note, Task, parse_slack_permalink, summarize
 from ezra.store import Store
 from ezra.themes import OVERVIEW_DIR
 
@@ -29,8 +30,6 @@ TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
 WEEKDAYS = "月火水木金土日"
-# Daily の材料に入れるノートの本文の長さ
-NOTE_EXCERPT = 1500
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -61,17 +60,6 @@ def search_keywords(claude_md: Path) -> list[str]:
         return []
     return [line.strip()[2:].strip() for line in m.group(1).splitlines()
             if line.strip().startswith("- ") and line.strip()[2:].strip()]
-
-
-def theme_dirs(research_root: Path) -> list[Path]:
-    if not research_root.is_dir():
-        return []
-    return sorted(p for p in research_root.iterdir()
-                  if p.is_dir() and not p.name.startswith((".", "_")) and (p / "CLAUDE.md").exists())
-
-
-def _ts(value: float | None) -> str:
-    return datetime.fromtimestamp(value).strftime("%m/%d %H:%M") if value else "-"
 
 
 class Scheduler:
@@ -144,9 +132,16 @@ class Scheduler:
         for task in tasks:
             try:
                 done.append(await self._run_night_task(task, ids))
-            except NotionError as e:
-                await self.assistant.notify_trouble(f"夜間の Task「{task.title}」の途中で Notion に書けませんでした: {e}")
-                done.append({"title": task.title, "status": "error", "url": task.url})
+            except Exception as e:
+                # 「実行中」のまま残ると二度と実行されないので、確認待ちに戻して知らせる
+                log.exception("夜間の Task「%s」が止まりました", task.title)
+                reason = f"途中で止まりました: {type(e).__name__}: {e}"
+                await self.assistant.notify_trouble(f"夜間の Task「{task.title}」が{reason}")
+                try:
+                    await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
+                except NotionError:
+                    pass
+                done.append({"title": task.title, "status": "error", "reason": reason, "url": task.url})
         try:
             remaining = await asyncio.to_thread(notion.count_tonight_tasks)
         except NotionError:
@@ -157,20 +152,23 @@ class Scheduler:
         notion = self.assistant.notion
         info = {"title": task.title, "url": task.url, "theme": ", ".join(task.theme_names)}
         theme = task.theme_names[0] if task.theme_names else None
-        if theme is None or theme not in ids:
-            reason = "テーマを設定してください" if theme is None else f"テーマ「{theme}」のチャンネルに Ezra がいません"
+        channel_name = themes.theme_channel_name(self.config, theme) if theme else None
+        if theme is None or channel_name not in ids:
+            reason = ("テーマを設定してください" if theme is None
+                      else f"テーマ「{theme}」のチャンネル #{channel_name} に Ezra がいません")
             await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
             return {**info, "status": "確認待ち", "reason": reason}
 
         await asyncio.to_thread(notion.update_task, task.id, "実行中")
         body = await asyncio.to_thread(notion.page_markdown, task.id)
-        channel = ids[theme]
+        channel = ids[channel_name]
         source = parse_slack_permalink(task.slack_url)
         message: dict = {}
-        if source:
+        # 元のメッセージがテーマのチャンネルにあるときだけ、そのスレッドで続ける
+        if source and source[0] == channel:
             message = await self.assistant.fetch_message(*source) or {}
         if message:
-            channel, message_ts = source
+            message_ts = source[1]
             thread_ts = message.get("thread_ts") or message_ts
         else:
             message_ts = None
@@ -187,7 +185,7 @@ class Scheduler:
         )
         if message:
             text += f"\n## 元の Slack のメッセージ\n\n{clean_text(message.get('text', ''))}\n"
-        req = Request(channel, theme, thread_ts, None, text, trigger="night", files=message.get("files") or [])
+        req = Request(channel, channel_name, thread_ts, None, text, trigger="night", files=message.get("files") or [])
         result = await self.assistant.process(req)
 
         if result is None or result.is_error:
@@ -211,13 +209,12 @@ class Scheduler:
             since = min(since, date.fromisoformat(last["day"]))
         results = {}
         for cwd in theme_dirs(self.config.research_root):
-            name = cwd.name
+            name = themes.theme_channel_name(self.config, cwd.name)
+            if name not in ids:
+                continue  # アーカイブしたテーマや、Ezra のいないテーマは見張らない
             keywords = search_keywords(cwd / "CLAUDE.md")
             if not keywords:
                 results[name] = {"status": "no_keywords"}
-                continue
-            if name not in ids:
-                results[name] = {"status": "no_channel"}
                 continue
             ws = themes.resolve(self.config, name)
             prompt = (
@@ -240,108 +237,12 @@ class Scheduler:
 
     # Daily と振り返り
 
-    async def build_digest(self, since: float, now: float, title: str) -> str:
-        """Daily と振り返りの材料。Claude はこれと、ここに書いたファイルを読んで書く。"""
-        root = self.config.research_root
-        lines = [f"# {title}", "", f"対象: {_ts(since)} 〜 {_ts(now)}", ""]
-
-        lines += ["## やり取りのあったスレッド", ""]
-        threads = [r for r in self.store.threads_updated_since(since)]
-        for r in threads:
-            try:
-                ws = themes.resolve(self.config, r["channel_name"])
-            except ValueError:
-                continue
-            if ws.cwd is None:
-                continue
-            log_path = ws.cwd / ".ezra" / "threads" / f"{r['thread_ts']}.md"
-            if log_path.exists():
-                lines.append(f"- #{r['channel_name']}（最後 {_ts(r['updated_at'])}）: `{log_path}`")
-        if not threads:
-            lines.append("- なし")
-
-        lines += ["", "## 終わったジョブ", ""]
-        jobs = self.store.jobs_finished_since(since)
-        for j in jobs:
-            took = format_duration(j.finished_at - j.started_at) if j.started_at and j.finished_at else "-"
-            lines.append(f"- `{j.cwd}` ジョブ{j.id}「{j.name}」: {j.status}（{took}）{j.detail or ''}")
-        if not jobs:
-            lines.append("- なし")
-
-        lines += ["", "## 夜間の Task", ""]
-        last_night = self.store.last_schedule("night")
-        night = json.loads(last_night["detail"] or "{}") if last_night and last_night["ran_at"] >= since else {}
-        for t in night.get("tasks") or []:
-            lines.append(f"- {t.get('title')}（#{t.get('theme') or '-'}）: {t.get('status')} "
-                         f"{t.get('summary') or t.get('reason') or ''} {t.get('url') or ''}".rstrip())
-        if not night.get("tasks"):
-            lines.append("- なし" if night.get("status") != "error" else f"- Notion から読めなかった: {night.get('error')}")
-
-        lines += ["", "## 先行研究の新着", ""]
-        last_lit = self.store.last_schedule("literature")
-        if last_lit and last_lit["ran_at"] >= since:
-            for name, info in (json.loads(last_lit["detail"] or "{}").get("themes") or {}).items():
-                status = {"posted": "新着あり（テーマのチャンネルに投稿済み）", "no_new": "新着なし",
-                          "no_keywords": "CLAUDE.md に検索キーワードがない", "no_channel": "チャンネルが見つからない",
-                          "error": "エラー"}.get(info.get("status"), info.get("status"))
-                lines.append(f"- #{name}: {status}")
-        else:
-            lines.append("- この期間は確認していない")
-
-        lines += ["", f"## {self.config.schedule.stall_days}日以上やり取りのないテーマ", ""]
-        activity = self.store.last_activity_by_channel_name()
-        limit = now - self.config.schedule.stall_days * 86400
-        stalled = [(d.name, activity.get(d.name)) for d in theme_dirs(root)
-                   if (activity.get(d.name) or d.stat().st_mtime) < limit]
-        lines += [f"- #{name}（最後のやり取り {_ts(last)}）" for name, last in stalled] or ["- なし"]
-
-        lines += ["", "## 返事待ちのスレッド", ""]
-        waiting = [r for r in self.store.conn.execute("SELECT * FROM threads WHERE awaiting_since IS NOT NULL")]
-        lines += [f"- #{r['channel_name']}（{_ts(r['awaiting_since'])} から）" for r in waiting] or ["- なし"]
-
-        yesterday = (datetime.fromtimestamp(now).date() - timedelta(days=1)).isoformat()
-        review = self.overview_dir / "reviews" / f"{yesterday}.md"
-        lines += ["", "## 前日の振り返り（ファイル）", "", f"- `{review}`" if review.exists() else "- なし"]
-
-        lines += ["", *await self._notion_digest(since, now)]
-        return "\n".join(lines) + "\n"
-
-    async def _notion_digest(self, since: float, now: float) -> list[str]:
-        notion = self.assistant.notion
-        if notion is None:
-            return ["## Notion", "", "- 設定されていない"]
-        today = datetime.fromtimestamp(now).date()
-        try:
-            notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since),
-                                            ["計画", "考察", "振り返り"])
-            awaiting = await asyncio.to_thread(notion.awaiting_tasks)
-            due = await asyncio.to_thread(notion.tasks_due_within, today, 3)
-            milestones = await asyncio.to_thread(notion.upcoming_milestones, today)
-            tonight = await asyncio.to_thread(notion.count_tonight_tasks)
-        except NotionError as e:
-            await self.assistant.notify_trouble(f"Daily の材料を Notion から読めませんでした: {e}")
-            return ["## Notion", "", f"- 読めなかった: {e}"]
-
-        lines = ["## Notion: 前回以降に書かれた計画・考察・振り返りのノート", ""]
-        for n in notes:
-            body = n.body if len(n.body) <= NOTE_EXCERPT else n.body[:NOTE_EXCERPT] + "…（続きは Notion）"
-            lines += [f"### {n.kind}: {n.title}（{n.day or '-'}） {n.url}", "", body or "（本文なし）", ""]
-        if not notes:
-            lines += ["- なし", ""]
-        lines += ["## Notion: 確認待ちの Task", ""]
-        lines += [f"- {t.title}（#{', '.join(t.theme_names) or '-'}） {t.url}" for t in awaiting] or ["- なし"]
-        lines += ["", "## Notion: 期日が3日以内の Task", ""]
-        lines += [f"- {t.due} {t.title}（{t.status}・{t.assignee or '-'}） {t.url}" for t in due] or ["- なし"]
-        lines += ["", "## Notion: 近いマイルストーン", ""]
-        lines += [f"- {m['due']} {m['name']} {m['url']}" for m in milestones] or ["- なし"]
-        lines += ["", f"- 今夜やる Task: {tonight} 件"]
-        return lines
-
-    async def _write_digest(self, kind: str, day: str, since: float) -> Path:
+    async def _write_digest(self, kind: str, day: str, since: float, ids: dict[str, str]) -> Path:
         path = self.overview_dir / ".ezra" / "digest" / f"{day}-{kind}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         title = {"daily": f"Daily の材料 {day}", "review": f"振り返りの材料 {day}"}[kind]
-        path.write_text(await self.build_digest(since, time.time(), title), encoding="utf-8")
+        text = await DigestBuilder(self.config, self.store, self.assistant).build(since, time.time(), title, set(ids))
+        path.write_text(text, encoding="utf-8")
         return path
 
     async def _save_note(self, channel: str, thread_ts: str, title: str, kind: str, day: str,
@@ -363,7 +264,7 @@ class Scheduler:
             return {"status": "no_channel"}
         last = self.store.last_schedule("daily", before_day=day)
         since = last["ran_at"] if last else time.time() - 86400
-        digest = await self._write_digest("daily", day, since)
+        digest = await self._write_digest("daily", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
             f"[Ezra の定期処理: Daily {day}]\n"
@@ -392,7 +293,7 @@ class Scheduler:
         if channel is None:
             return {"status": "no_channel"}
         since = datetime.combine(date.fromisoformat(day), dtime(0, 0)).timestamp()
-        digest = await self._write_digest("review", day, since)
+        digest = await self._write_digest("review", day, since, ids)
         review_path = self.overview_dir / "reviews" / f"{day}.md"
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
@@ -445,9 +346,13 @@ class Scheduler:
         hours = self.config.schedule.unanswered_hours
         for row in self.store.threads_to_nudge(time.time() - hours * 3600):
             req = Request(row["channel"], row["channel_name"], row["thread_ts"], None, "")
-            await self.assistant.post(
-                req, f"⏰ 返事待ちのまま{hours}時間たちました。続けるときは、このスレッドに返信してください。"
-            )
+            try:
+                await self.assistant.post(
+                    req, f"⏰ 返事待ちのまま{hours}時間たちました。続けるときは、このスレッドに返信してください。"
+                )
+            except Exception:
+                # アーカイブしたチャンネルなどに投稿できなくても、毎分やり直さない
+                log.warning("返事待ちのスレッドに声をかけられません: #%s %s", row["channel_name"], row["thread_ts"], exc_info=True)
             self.store.mark_nudged(row["channel"], row["thread_ts"])
 
 
