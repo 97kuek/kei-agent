@@ -12,8 +12,8 @@ from pathlib import Path
 from ezra.config import Config
 from ezra.themes import ChannelKind, Workspace
 
-# claude -p の子プロセスに渡さない環境変数。Bash から Slack のトークンが見えないようにする
-_STRIPPED_ENV_PREFIXES = ("SLACK_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_")
+# claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
+_STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_")
 _KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 
 
