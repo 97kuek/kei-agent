@@ -6,7 +6,7 @@ Ezra は、Slack で頼んだ研究の作業を Mac 上の Claude Code が進め
 ## 変更する前に
 
 - 設計の判断を変えるときは、先に `docs/plan.md` の該当する表を直し、理由も書く
-- Notion の構成を変えるときは `docs/notion-layout.md` と `src/ezra/notion.py` を合わせて直す
+- Notion の構成を変えるときは `docs/notion-layout.md`、`src/ezra/notion.py`（作る側）、`src/ezra/notion_store.py`（読み書きする側）を合わせて直す
 - 大きな変更（Slack App の権限、sandbox の設定、フェーズの順番）は、Issue で相談してから始める
 - 使っていて気づいた要望は、Slack の `#assistant-improve` に書くと `docs/backlog.md` に記録される
 
@@ -26,6 +26,7 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の手�
 - Slack を通る動きを変えたときは、手元で `uv run ezra` を起動し、テーマのチャンネルで実際に頼んで確かめる
 - 定期処理を変えたときは、`uv run ezra-schedule <night|literature|daily|review>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
 - `claude -p` の権限や sandbox を変えたときは、テーマのディレクトリの外に書き込めないことを確かめる
+- Notion を読み書きする処理を変えたときは、本物の研究ホームで Task やノートを作って確かめ、確認用のページはゴミ箱に移す
 
 ## 書き方
 
