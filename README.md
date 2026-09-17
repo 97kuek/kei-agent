@@ -16,11 +16,13 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 
 ## 使い方
 
+- 研究テーマごとに `#theme-<テーマ名>` のチャンネルを作り、Ezra を招待する（`~/research/<テーマ名>/` と Notion のテーマができる）
 - テーマのチャンネルで `@Ezra 〜して` と頼む。スレッド内の続きはメンションなしでよい
 - 添付したファイルは `inputs/` に保存され、`outputs/` に新しくできたファイルはスレッドに添付される
 - 長い処理は Ezra がジョブにし、終わると同じスレッドで会話を再開して報告する
 - 自分のメッセージに 🌙 をつけると、Notion に「今夜やる」の Task ができる。Notion で直接「今夜やる」にした Task も含めて、夜間（01:30）に実行し、結果を Slack と Notion に返す
 - 決まった時刻に、先行研究の新着（07:00、テーマのチャンネル）、Daily（08:00）、振り返りの材料（21:00）が届く（`#research-overview` と Notion のノート）
+- Ezra への要望は `#research-ezra` に `@Ezra` をつけて書く
 - 返事待ちのまま24時間たったスレッドには、Ezra が一度だけ声をかける
 
 ## ドキュメント
@@ -31,7 +33,6 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 | Codex App 側の使い方、依頼文のテンプレート | `docs/codex.md` |
 | 設計とフェーズ | `docs/plan.md` |
 | Notion の研究ホームの構成 | `docs/notion-layout.md` |
-| 要望（`#assistant-improve`） | `docs/backlog.md` |
 | 変更の手順、コミットメッセージの書き方 | `CONTRIBUTING.md` |
 
 ## 保守

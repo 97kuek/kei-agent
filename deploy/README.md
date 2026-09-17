@@ -7,12 +7,24 @@
 1. 個人用のワークスペースを作る
 2. チャンネルを作る。名前は `config.toml` の `[channels]` と合わせる
 
-   | 種類 | チャンネル名（既定） | Ezra の動き |
+   | 種類 | チャンネル名 | Ezra の動き |
    |---|---|---|
-   | 研究全体 | `#research-overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/` |
+   | 研究全体 | `#research-overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
-   | Assistantの改善 | `#assistant-improve` | 要望を `docs/backlog.md` に記録するだけ |
-   | 研究テーマ | 上記以外（例: `#vlm-counting`） | `~/research/<チャンネル名>/` で作業する |
+   | Ezra の改善 | `#research-ezra` | 要望を `~/research/_overview/backlog.md` に記録するだけ。Ezra がうまく動かなかったときの知らせもここに届く |
+   | 研究テーマ | `#theme-<テーマ名>`（例: `#theme-vlm-counting`） | `~/research/<テーマ名>/` で作業する。Notion のテーマの名前も `<テーマ名>` |
+   | それ以外 | `#inbox` など | 対象外。招待やメンションをすると、名前の付け方を案内するだけ |
+
+3. サイドバーのカテゴリ（セクション）で分ける（Slack の画面で、チャンネル一覧の「︙」→「セクションを作成」）
+
+   | カテゴリ | チャンネル |
+   |---|---|
+   | 研究全体 | `#research-overview`、`#research-strategy` |
+   | 研究テーマ | `#theme-*` |
+   | Ezra | `#research-ezra` |
+   | 個人 | Ezra を使わないチャンネル |
+
+4. テーマを終えたら、チャンネルをアーカイブする。Ezra は Daily の材料や論文の新着で、そのテーマを見なくなる。作業用ディレクトリはバックアップに残る
 
 ## 2. Slack App「Ezra」
 
@@ -48,7 +60,7 @@ uv run ezra
 確認すること（ステップ1〜3）:
 
 - ログに `Ezra を起動しました` が出て、Slack で Ezra がオンラインになる
-- テーマのチャンネルに Ezra を招待すると、`~/research/<チャンネル名>/` と `CLAUDE.md` ができる
+- `#theme-<テーマ名>` のチャンネルに Ezra を招待すると、`~/research/<テーマ名>/` と `CLAUDE.md` ができる
 - `@Ezra このディレクトリの中身を教えて` にスレッドで返信が来る。メンションなしのメッセージには反応しない
 
 ## 5. 常時起動（launchd）
