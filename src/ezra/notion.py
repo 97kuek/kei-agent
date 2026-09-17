@@ -135,6 +135,16 @@ MILESTONES = {
 }
 
 
+# ノートのテンプレート。API ではテンプレートを作れないので、Notion の画面で空のテンプレートを作っておき、中身をここで書く
+NOTE_TEMPLATES = [
+    ("計画", "## 目的\n\n## 仮説\n\n## 条件（何を変えて何を測るか）\n\n## 判断の基準（どうなったら仮説を支持するか）\n\n"
+             "## Ezra への依頼\n\nSlack に貼る依頼文。数分以上かかる処理はジョブにしてよい"),
+    ("考察", "## 問い\n\n## 結果（図や Slack のスレッドへのリンク）\n\n## 解釈\n\n## 次の一手"),
+    ("議論メモ", "## 相手（Codex、指導教員など）\n\n## 論点\n\n## 決めたこと\n\n## 宿題"),
+]
+_BLANK_TEMPLATE_NAMES = {"", "New page", "新規ページ", "Untitled", "無題"}
+
+
 def _eq_select(prop: str, value: str) -> dict:
     return {"property": prop, "select": {"equals": value}}
 
@@ -263,6 +273,30 @@ class Setup:
             })
             self.log.append(f"ホームに追加: {title}")
 
+    def note_templates(self) -> None:
+        """ノートのテンプレートに名前・種類・本文を書く。空のテンプレートが足りなければ知らせる。"""
+        from ezra.notion_store import markdown_to_blocks
+
+        notes = self.state["databases"]["notes"]
+        resp = self.notion.request("GET", f"/data_sources/{notes['data_source_id']}/templates")
+        templates = resp.get("templates", [])
+        names = {t["name"] for t in templates}
+        blanks = [t for t in templates if t["name"] in _BLANK_TEMPLATE_NAMES]
+        for kind, body in NOTE_TEMPLATES:
+            if kind in names:
+                continue
+            if not blanks:
+                self.log.append(f"テンプレート「{kind}」の空の枠がありません。Notion のノートで「新規テンプレート」を作ってから、もう一度実行してください")
+                continue
+            template = blanks.pop(0)
+            self.notion.request("PATCH", f"/pages/{template['id']}", {"properties": {
+                "タイトル": {"title": [{"type": "text", "text": {"content": kind}}]},
+                "種類": {"select": {"name": kind}},
+                "書いた人": {"select": {"name": "自分"}},
+            }})
+            self.notion.request("PATCH", f"/blocks/{template['id']}/children", {"children": markdown_to_blocks(body)})
+            self.log.append(f"テンプレートを作成: {kind}")
+
     def run(self) -> None:
         self.notion.request("PATCH", f"/pages/{self.home}", {"icon": {"type": "emoji", "emoji": "🔬"}})
         themes = self.database("themes", self.home, "テーマ", THEMES)
@@ -320,6 +354,7 @@ class Setup:
                 "sorts": [{"property": "期日", "direction": "ascending"}],
             }),
         ])
+        self.note_templates()
         self.save()
 
     def add_theme(self, name: str, purpose: str, slack_url: str, directory: str) -> None:
