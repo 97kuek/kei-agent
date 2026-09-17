@@ -1,20 +1,10 @@
-# Research Support Assistant「Ezra」
+# Ezra
 
-Slack で研究の作業を頼むと、自分の Mac の Claude Code（`claude -p`）が作業し、経過と結果を同じスレッドに返す研究室の助手。
-研究支援アシスタント「Doctor AI」の構想資料をもとに作っている。設計の判断は `docs/plan.md`。
+- Slack で研究の作業を頼むと、自分の Mac のClaude Codeが作業し、経過と結果を同じスレッドに返す研究室のアシスタント
 
-```
-Codex App（考える・音声で議論）
-   │ 依頼文
-   ▼
-Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
-   ▲                       ├─ claude -p（sandbox、テーマのディレクトリの中だけ）
-   │ 経過・結果・図         ├─ pueue（数分以上かかるジョブ）
-   └───────────────────────┘
-                           ~/research/<theme>/  （CLAUDE.md, inputs, outputs, logs, papers）
-```
+![Ezra の構成](docs/architecture.svg)
 
-## 使い方
+##　利用方法
 
 - 研究テーマごとにチャンネルを作り、Ezra を招待する（`#vlm-counting` なら `~/research/vlm-counting/` と Notion のテーマができる）
 - テーマのチャンネルで `@Ezra 〜して` と頼む。スレッド内の続きはメンションなしでよい
@@ -25,6 +15,8 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 - Ezra への要望は `#research-ezra` に `@Ezra` をつけて書く
 - 返事待ちのまま24時間たったスレッドには、Ezra が一度だけ声をかける
 
+![Ezra の1日](docs/schedule.svg)
+
 ## ドキュメント
 
 | 内容 | 場所 |
@@ -33,6 +25,7 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 | Codex App 側の使い方、依頼文のテンプレート | `docs/codex.md` |
 | 設計とフェーズ | `docs/plan.md` |
 | Notion の研究ホームの構成 | `docs/notion-layout.md` |
+| 構成図（`docs/architecture.svg`）と1日の流れ（`docs/schedule.svg`） | `docs/` |
 | 変更の手順、コミットメッセージの書き方 | `CONTRIBUTING.md` |
 
 ## 保守
