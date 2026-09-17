@@ -1,7 +1,7 @@
 # Research Support Assistant「Ezra」
 
 Slack で研究の作業を頼むと、自分の Mac の Claude Code（`claude -p`）が作業し、経過と結果を同じスレッドに返す研究室の助手。
-構想は `doctor-ai-concept.pdf`、設計の判断は `docs/plan.md`。
+研究支援アシスタント「Doctor AI」の構想資料をもとに作っている。設計の判断は `docs/plan.md`。
 
 ```
 Codex App（考える・音声で議論）
@@ -30,7 +30,9 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 | セットアップ（Slack App、秘密情報、常時起動） | `deploy/README.md` |
 | Codex App 側の使い方、依頼文のテンプレート | `docs/codex.md` |
 | 設計とフェーズ | `docs/plan.md` |
+| Notion の研究ホームの構成 | `docs/notion-layout.md` |
 | 要望（`#assistant-improve`） | `docs/backlog.md` |
+| 変更の手順、コミットメッセージの書き方 | `CONTRIBUTING.md` |
 
 ## 開発
 
@@ -47,6 +49,7 @@ uv run pytest
 | `src/ezra/jobs.py` | ジョブの依頼の検証、pueue への投入、状態の追跡 |
 | `src/ezra/themes.py` | チャンネル、テーマ、作業用ディレクトリの対応 |
 | `src/ezra/schedule.py` | 決まった時刻の処理（先行研究、Daily、振り返り、夜間 Task、声かけ） |
+| `src/ezra/notion.py` | Notion の研究ホームを作る（フェーズ3の接続も兼ねる） |
 | `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間） |
 | `plugin/` | `claude -p` に読み込ませる skill（`ezra:job`、`ezra:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |
