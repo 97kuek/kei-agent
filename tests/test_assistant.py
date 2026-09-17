@@ -11,7 +11,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack, write_request
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "theme-vlm", "C9": "research-ezra", "C5": "research-overview", "C3": "inbox"})
+    slack = FakeSlack({"C1": "vlm", "C9": "research-ezra", "C5": "research-overview"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     pueue = FakePueue()
@@ -78,7 +78,7 @@ async def test_messages_that_should_not_trigger(env):
 
 async def test_missing_session_is_restored_from_thread_history(env, store):
     assistant, slack, claude, _ = env
-    store.upsert_thread("C1", "10.1", "theme-vlm", "lost-session")
+    store.upsert_thread("C1", "10.1", "vlm", "lost-session")
     slack.replies = [
         {"ts": "10.1", "user": "UME", "text": "<@UBOT> 条件Aで回して"},
         {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "⏳ 作業中"},
@@ -137,21 +137,9 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
     assert slack.texts()[-1] == f"要望を `{config.research_root / '_overview' / 'backlog.md'}` に記録しました。"
 
 
-async def test_channel_without_theme_prefix_is_not_a_theme(env, config):
-    assistant, slack, claude, _ = env
-
-    await assistant.on_mention({"channel": "C3", "user": "UME", "ts": "40.1", "text": "<@UBOT> これやって"})
-    await settle(assistant)
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C3"})
-
-    assert claude.calls == []
-    assert not (config.research_root / "inbox").exists()
-    assert all("theme-<テーマ名>" in t for t in slack.texts())
-
-
 async def test_thread_broadcast_reply_continues_thread(env, store):
     assistant, slack, claude, _ = env
-    store.upsert_thread("C1", "10.1", "theme-vlm", "s")
+    store.upsert_thread("C1", "10.1", "vlm", "s")
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",
                                 "subtype": "thread_broadcast", "text": "チャンネルにも送った返信"})
     await settle(assistant)
@@ -160,10 +148,10 @@ async def test_thread_broadcast_reply_continues_thread(env, store):
 
 async def test_channel_rename_forgets_cached_name(env):
     assistant, slack, claude, _ = env
-    assert await assistant.channel_name("C1") == "theme-vlm"
-    slack.channels["C1"] = "theme-vlm-counting"
-    await assistant.on_channel_rename({"channel": {"id": "C1", "name": "theme-vlm-counting"}})
-    assert await assistant.channel_name("C1") == "theme-vlm-counting"
+    assert await assistant.channel_name("C1") == "vlm"
+    slack.channels["C1"] = "vlm-counting"
+    await assistant.on_channel_rename({"channel": {"id": "C1", "name": "vlm-counting"}})
+    assert await assistant.channel_name("C1") == "vlm-counting"
 
 
 async def test_upload_failure_does_not_hide_result(env, config, monkeypatch):
@@ -254,7 +242,7 @@ async def test_same_thread_runs_one_at_a_time(env, monkeypatch):
         return await claude(*args, **kwargs)
 
     monkeypatch.setattr(runner, "run_claude", slow)
-    assistant.store.upsert_thread("C1", "10.1", "theme-vlm", "s")
+    assistant.store.upsert_thread("C1", "10.1", "vlm", "s")
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "a"})
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "b"})
     await settle(assistant)

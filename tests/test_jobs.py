@@ -17,7 +17,7 @@ from ezra.jobs import (
 
 @pytest.fixture
 def theme(config):
-    ws = themes.resolve(config, "theme-vlm")
+    ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
     (ws.cwd / "scripts").mkdir()
     (ws.cwd / "scripts" / "sweep.py").write_text("print('hi')")
@@ -85,7 +85,7 @@ def test_interpret_pueue_status(status, expected):
 # JobManager
 
 async def test_submit_request_from_known_thread(config, store, theme):
-    store.upsert_thread("C1", "100.1", "theme-vlm", None)
+    store.upsert_thread("C1", "100.1", "vlm", None)
     pueue = FakePueue()
     manager = JobManager(config, store, pueue)
     path = write_request(theme.cwd, action="submit", request_id="r1", channel="C1", thread_ts="100.1",
@@ -108,7 +108,7 @@ async def test_submit_request_from_known_thread(config, store, theme):
 
 
 async def test_submit_rejects_thread_of_another_theme(config, store, theme):
-    store.upsert_thread("C2", "200.1", "theme-other", None)
+    store.upsert_thread("C2", "200.1", "other", None)
     pueue = FakePueue()
     manager = JobManager(config, store, pueue)
     write_request(theme.cwd, action="submit", request_id="r2", channel="C2", thread_ts="200.1",
@@ -120,7 +120,7 @@ async def test_submit_rejects_thread_of_another_theme(config, store, theme):
 
 
 async def test_refresh_reports_finished_job_once(config, store, theme):
-    store.upsert_thread("C1", "100.1", "theme-vlm", None)
+    store.upsert_thread("C1", "100.1", "vlm", None)
     pueue = FakePueue()
     manager = JobManager(config, store, pueue)
     write_request(theme.cwd, action="submit", request_id="r3", channel="C1", thread_ts="100.1",
@@ -140,7 +140,7 @@ async def test_refresh_reports_finished_job_once(config, store, theme):
 
 
 async def test_cancel_request_kills_running_job(config, store, theme):
-    store.upsert_thread("C1", "100.1", "theme-vlm", None)
+    store.upsert_thread("C1", "100.1", "vlm", None)
     pueue = FakePueue()
     manager = JobManager(config, store, pueue)
     write_request(theme.cwd, action="submit", request_id="r4", channel="C1", thread_ts="100.1",

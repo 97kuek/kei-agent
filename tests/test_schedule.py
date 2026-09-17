@@ -13,7 +13,7 @@ from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "theme-vlm", "C5": "research-overview", "C9": "research-ezra"})
+    slack = FakeSlack({"C1": "vlm", "C5": "research-overview", "C9": "research-ezra"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -22,7 +22,7 @@ def env(config, store, monkeypatch):
 
 
 def make_theme(config, name="vlm", keywords=("vision language model counting",)):
-    ws = themes.resolve(config, f"theme-{name}")
+    ws = themes.resolve(config, name)
     themes.ensure_workspace(ws)
     if keywords is not None:
         md = ws.cwd / "CLAUDE.md"
@@ -184,14 +184,14 @@ async def test_night_skips_when_notion_is_down(env, config):
 async def test_literature_posts_only_when_new(env, config, store):
     scheduler, assistant, slack, claude = env
     make_theme(config, "vlm")
-    slack.channels["C2"] = "theme-notes"
+    slack.channels["C2"] = "notes"
     make_theme(config, "notes", keywords=None)
     make_theme(config, "archived")  # Ezra のいない（アーカイブした）テーマは見張らない
     claude.behaviors = [{"text": "papers/ に変更はありません。\n\nNO_NEW_PAPERS"}]
 
     detail = await scheduler.run_literature("2026-09-18")
 
-    assert detail["themes"] == {"theme-vlm": {"status": "no_new"}, "theme-notes": {"status": "no_keywords"}}
+    assert detail["themes"] == {"vlm": {"status": "no_new"}, "notes": {"status": "no_keywords"}}
     assert slack.posted() == []
     assert "vision language model counting" in claude.calls[0]["prompt"]
 
@@ -209,10 +209,10 @@ async def test_literature_posts_only_when_new(env, config, store):
 async def test_daily_posts_to_overview_and_notion(env, config, store):
     scheduler, assistant, slack, claude = env
     ws = make_theme(config, "vlm")
-    store.upsert_thread("C1", "10.1", "theme-vlm", "s1")
+    store.upsert_thread("C1", "10.1", "vlm", "s1")
     (ws.cwd / ".ezra" / "threads").mkdir(parents=True)
     (ws.cwd / ".ezra" / "threads" / "10.1.md").write_text("# log")
-    store.record_schedule("literature", "2026-09-18", {"themes": {"theme-vlm": {"status": "no_new"}}})
+    store.record_schedule("literature", "2026-09-18", {"themes": {"vlm": {"status": "no_new"}}})
     store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
     assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
@@ -225,7 +225,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert call["cwd"] == config.research_root / "_overview"
     digest = config.research_root / "_overview" / ".ezra" / "digest" / "2026-09-18-daily.md"
     text = digest.read_text()
-    assert "10.1.md" in text and "theme-vlm: 新着なし" in text
+    assert "10.1.md" in text and "vlm: 新着なし" in text
     assert "条件Cも回して（vlm）: 完了 71%" in text
     assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
     assert "返事が要る" in text and "中間発表" in text
@@ -241,19 +241,19 @@ async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, co
     scheduler, assistant, *_ = env
     make_theme(config, "old-theme")
     make_theme(config, "archived")
-    store.upsert_thread("C7", "1.1", "theme-old-theme", "s")
-    store.upsert_thread("C8", "2.1", "theme-archived", "s")
+    store.upsert_thread("C7", "1.1", "old-theme", "s")
+    store.upsert_thread("C8", "2.1", "archived", "s")
     store.conn.execute("UPDATE threads SET updated_at = ?", (time.time() - 5 * 86400,))
     store.set_awaiting("C7", "1.1", True)
     store.set_awaiting("C8", "2.1", True)
 
     digest = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "t", {"theme-old-theme"})
+        time.time() - 86400, time.time(), "t", {"old-theme"})
 
     stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
     waiting = digest.split("## 返事待ちのスレッド")[1].split("##")[0]
-    assert "#theme-old-theme" in stalled and "archived" not in stalled
-    assert "#theme-old-theme" in waiting and "archived" not in waiting
+    assert "#old-theme" in stalled and "archived" not in stalled
+    assert "#old-theme" in waiting and "archived" not in waiting
 
 
 async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config, store):
@@ -351,7 +351,7 @@ async def test_night_task_from_other_channel_runs_in_theme_channel(env, config):
 
 async def test_nudge_failure_is_not_retried_every_minute(env, store, monkeypatch):
     scheduler, assistant, slack, claude = env
-    store.upsert_thread("C1", "10.1", "theme-vlm", "s")
+    store.upsert_thread("C1", "10.1", "vlm", "s")
     store.set_awaiting("C1", "10.1", True)
     store.conn.execute("UPDATE threads SET awaiting_since = ?", (time.time() - 30 * 3600,))
     calls = []

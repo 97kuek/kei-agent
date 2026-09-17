@@ -274,9 +274,6 @@ class Assistant:
         except ValueError as e:
             await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
             return
-        if ws.kind is ChannelKind.OTHER:
-            await self.slack.chat_postMessage(channel=channel, text=themes.other_channel_message(self.config))
-            return
         created = themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.IMPROVE:
             text = f"Ezra です。このチャンネルでメンションされた要望は `{self.config.backlog_path}` に記録します。"
@@ -298,13 +295,13 @@ class Assistant:
             self.channel_names.pop(channel, None)
 
     async def register_theme(self, channel: str, ws: Workspace) -> None:
-        if self.notion is None or ws.theme is None:
+        if self.notion is None:
             return
         slack_url = f"{self.team_url}archives/{channel}" if self.team_url else ""
         try:
-            await asyncio.to_thread(self.notion.ensure_theme, ws.theme, slack_url, f"{ws.cwd}/")
+            await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, slack_url, f"{ws.cwd}/")
         except NotionError as e:
-            await self.notify_trouble(f"Notion にテーマ「{ws.theme}」を登録できませんでした: {e}")
+            await self.notify_trouble(f"Notion にテーマ「{ws.channel_name}」を登録できませんでした: {e}")
 
     async def notify_trouble(self, text: str) -> None:
         """うまくいかなかったことを、Ezra の改善のチャンネルに知らせる。"""
@@ -347,7 +344,7 @@ class Assistant:
         quoted = "\n".join(f"> {line}" for line in text.splitlines()) or "> （本文なし）"
         body = f"Slack で 🌙 をつけて作った Task。\n\n{quoted}\n\n元のメッセージ: {link}"
         try:
-            task = await asyncio.to_thread(self.notion.create_night_task, title, ws.theme, link, body)
+            task = await asyncio.to_thread(self.notion.create_night_task, title, name, link, body)
         except NotionError as e:
             await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れませんでした")
             await self.notify_trouble(f"🌙 の Task を Notion に作れませんでした: {e}")
@@ -444,10 +441,6 @@ class Assistant:
             ws = themes.resolve(self.config, req.channel_name)
         except ValueError as e:
             await self.post(req, f"{FAILED_PREFIX} {e}")
-            return None
-        if ws.kind is ChannelKind.OTHER:
-            if req.message_ts:
-                await self.post(req, themes.other_channel_message(self.config))
             return None
         if ws.kind is ChannelKind.IMPROVE:
             await self.record_backlog(req)
