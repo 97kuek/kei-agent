@@ -1,0 +1,36 @@
+# Ezra の設定。秘密情報（トークン）はここに書かず、環境変数で渡す（deploy/README.md を参照）。
+
+# テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない
+research_root = "~/research"
+# SQLite などBotの状態を置く場所
+state_dir = "~/.local/state/ezra"
+
+# claude -p を同時に動かす上限（違うスレッドどうし）
+max_concurrent_runs = 2
+# claude -p 1回の上限時間。長い作業はジョブにする
+run_timeout_minutes = 30
+# ジョブの状態を確認する間隔
+job_poll_seconds = 60
+# pueue の ezra グループで同時に走らせるジョブ数
+job_parallel = 1
+# 空なら Claude Code の既定のモデル
+model = ""
+
+[channels]
+# 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
+overview = ["research-overview", "research-strategy"]
+# Assistantの改善: 要望を docs/backlog.md に記録するだけ
+improve = ["assistant-improve"]
+# 上記以外のチャンネルは、すべて研究テーマとして扱う
+
+[sandbox]
+# Bash（sandbox内）から接続してよいドメイン
+allowed_domains = [
+  "export.arxiv.org",
+  "arxiv.org",
+  "api.semanticscholar.org",
+  "pypi.org",
+  "files.pythonhosted.org",
+]
+# 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
+allow_write = ["~/.cache/uv"]
