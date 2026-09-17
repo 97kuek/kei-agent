@@ -54,10 +54,10 @@ Codex で議論して決めた作業は、次の形で Ezra に送る。最初�
 
 ## 4. 振り返り（毎晩 21:00）
 
-Ezra が `#research-overview` に「振り返りの材料」を投稿し、`~/research/_overview/reviews/<日付>.md` に同じ内容と問いを書く。
+Ezra が `#research-overview` に「振り返りの材料」を投稿し、`~/research/_overview/reviews/<日付>.md` と Notion の「ノート」（種類: 振り返り）に同じ内容と問いを書く。
 
 1. Codex App でそのファイルを開き、音声チャットで振り返る
-2. 結論を、ファイルの「Codex での振り返り」に書くか、Slack のスレッドに貼る（Ezra がファイルに追記する）
+2. 結論を、Notion の振り返りページの「Codex での振り返り」に書くか、Slack のスレッドに貼る（Ezra がファイルと Notion に追記する）
 3. 翌朝 08:00 の Daily に反映される
 
 ## 5. 音声での議論
