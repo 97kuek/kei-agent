@@ -87,12 +87,28 @@ class ConfigError(ValueError):
     pass
 
 
-def _section(cls, data: dict, name: str):
-    """config.toml の [name] を cls にする。知らないキーは、どれが違うかを示して止める。"""
-    known = {f.name for f in fields(cls)}
+# 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
+TOP_LEVEL_KEYS = {
+    "research_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
+    "job_poll_seconds", "job_parallel", "model", "channels", "sandbox", "schedule", "maintenance",
+}
+CHANNELS_KEYS = {"overview", "improve"}
+SANDBOX_KEYS = {"allowed_domains", "allow_write"}
+
+
+def _check_keys(data: dict, known: set[str], where: str) -> None:
+    """知らないキーがあれば、どれが違うかを示して止める。"""
     unknown = sorted(set(data) - known)
     if unknown:
-        raise ConfigError(f"config.toml の [{name}] に知らないキーがあります: {', '.join(unknown)}（使えるキー: {', '.join(sorted(known))}）")
+        raise ConfigError(
+            f"config.toml の {where} に知らないキーがあります: {', '.join(unknown)}"
+            f"（使えるキー: {', '.join(sorted(known))}）"
+        )
+
+
+def _section(cls, data: dict, name: str):
+    """config.toml の [name] を cls にする。"""
+    _check_keys(data, {f.name for f in fields(cls)}, f"[{name}]")
     return cls(**data)
 
 
@@ -107,6 +123,9 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
     sandbox = data.get("sandbox", {})
+    _check_keys(data, TOP_LEVEL_KEYS, "一番外側")
+    _check_keys(channels, CHANNELS_KEYS, "[channels]")
+    _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
         state_dir=_expand(data.get("state_dir", "~/.local/state/ezra")),
