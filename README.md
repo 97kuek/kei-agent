@@ -34,6 +34,11 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 | 要望（`#assistant-improve`） | `docs/backlog.md` |
 | 変更の手順、コミットメッセージの書き方 | `CONTRIBUTING.md` |
 
+## 保守
+
+- 毎晩 22:00 に、古いファイルを整理し、`~/research/` を非公開の GitHub リポジトリにバックアップする
+- ログは 5MB ごとに回す（`deploy/README.md` の8章）
+
 ## 開発
 
 ```zsh
@@ -51,6 +56,11 @@ uv run pytest
 | `src/ezra/schedule.py` | 決まった時刻の処理（先行研究、Daily、振り返り、夜間 Task、声かけ） |
 | `src/ezra/notion.py` | Notion の API の接続と、研究ホームを作るコマンド |
 | `src/ezra/notion_store.py` | Task とノートの読み書き（夜間の Task、Daily、振り返り） |
+| `src/ezra/maintenance.py` | 毎晩の保守（古いファイルの整理、研究データのバックアップ） |
 | `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間） |
 | `plugin/` | `claude -p` に読み込ませる skill（`ezra:job`、`ezra:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |
+
+## ライセンス
+
+MIT（`LICENSE`）

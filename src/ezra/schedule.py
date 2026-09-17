@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from ezra import themes
+from ezra import maintenance, themes
 from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text, format_duration
 from ezra.notion import NotionError
 from ezra.notion_store import Note, Task, parse_slack_permalink, summarize
@@ -24,7 +24,7 @@ from ezra.themes import OVERVIEW_DIR
 log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
-TASK_NAMES = ("night", "literature", "daily", "review")
+TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
@@ -104,7 +104,12 @@ class Scheduler:
             return
         for name in TASK_NAMES:
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
-            day = due_day(now, getattr(sched, name), catch_up)
+            if name == "maintenance":
+                maint = self.config.maintenance
+                hhmm = maint.time if maint.enabled else ""
+            else:
+                hhmm = getattr(sched, name)
+            day = due_day(now, hhmm, catch_up)
             if day is None or self.store.schedule_ran(name, day):
                 continue
             # 実行中に次の tick で二重に動かないよう、先に記録する
@@ -420,6 +425,19 @@ class Scheduler:
         await self.assistant.post(Request(channel, self.overview_channel_name, thread_ts, None, ""), footer)
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None}
+
+    # 保守
+
+    async def run_maintenance(self, day: str) -> dict:
+        detail: dict = {"status": "done"}
+        detail["removed"] = await asyncio.to_thread(maintenance.cleanup, self.config, maintenance.claude_projects_dir())
+        if self.config.maintenance.backup:
+            try:
+                detail["backup"] = await maintenance.backup(self.config, day)
+            except maintenance.BackupError as e:
+                await self.assistant.notify_trouble(f"研究データのバックアップに失敗しました: {e}")
+                detail = {**detail, "status": "error", "error": str(e)}
+        return detail
 
     # 声かけ
 

@@ -68,6 +68,9 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     # 01:30 の夜間、07:00 の先行研究、08:00 の Daily が1回ずつ。21:00 はまだ
     assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("daily", "2026-09-18")]
 
+    await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
+    assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
+
 
 # 🌙 の夜間 Task
 
@@ -296,3 +299,11 @@ async def test_awaiting_marker_nudges_once_and_clears_on_reply(env, config, stor
 
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.9", "thread_ts": "10.1", "text": "含めて"})
     assert store.get_thread("C1", "10.1")["awaiting_since"] is None
+
+
+async def test_maintenance_reports_backup_failure(env, config):
+    scheduler, assistant, slack, claude = env
+    config.research_root.mkdir(parents=True, exist_ok=True)  # Git のリポジトリではない
+    detail = await scheduler.run_maintenance("2026-09-18")
+    assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0}
+    assert slack.posted()[-1]["channel"] == "C9" and "バックアップに失敗" in slack.posted()[-1]["text"]

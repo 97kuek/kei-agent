@@ -33,6 +33,19 @@ class ScheduleConfig:
 
 
 @dataclass(frozen=True)
+class MaintenanceConfig:
+    enabled: bool = True
+    # 毎晩の保守（古いファイルの整理とバックアップ）を行う時刻。振り返りのあとにする
+    time: str = "22:00"
+    # ~/research を Git でコミットして push する（deploy/backup-init.sh で準備する）
+    backup: bool = True
+    # Daily と振り返りの材料のファイルを残す日数
+    digest_retention_days: int = 30
+    # テーマのディレクトリで動かした Claude のセッションの記録を残す日数
+    session_retention_days: int = 90
+
+
+@dataclass(frozen=True)
 class Config:
     research_root: Path
     state_dir: Path
@@ -50,6 +63,7 @@ class Config:
     claude_bin: str = "claude"
     pueue_bin: str = "pueue"
     schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
+    maintenance: MaintenanceConfig = field(default_factory=lambda: MaintenanceConfig())
 
     @property
     def db_path(self) -> Path:
@@ -96,4 +110,5 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         claude_bin=env.get("EZRA_CLAUDE_BIN", "claude"),
         pueue_bin=env.get("EZRA_PUEUE_BIN", "pueue"),
         schedule=ScheduleConfig(**schedule),
+        maintenance=MaintenanceConfig(**data.get("maintenance", {})),
     )

@@ -98,6 +98,29 @@ source ~/.config/zsh/local/research-assistant.zsh
 uv run ezra-notion-setup <研究ホームのページID>
 ```
 
+## 8. バックアップとログ
+
+`~/research/` を非公開の GitHub リポジトリ（`research-data`）にし、毎晩 22:00 に Ezra がコミットして push する。
+Ezra の状態（SQLite の中身を SQL にしたものと、Notion の ID）も `~/research/_ezra_state/` に書き出して一緒に保存する。
+50MB を超えるファイルは GitHub に置けないので、自動でコミットから外す。
+
+```zsh
+deploy/backup-init.sh              # 最初の1回だけ。非公開リポジトリを作って最初の push をする
+uv run ezra-schedule maintenance   # 今すぐ整理とバックアップを1回動かす
+```
+
+別の Mac に移すときは、`research-data` を `~/research` に clone し、`_ezra_state/ezra.sql` から状態を戻す（`sqlite3 ~/.local/state/ezra/ezra.db < ~/research/_ezra_state/ezra.sql`）。
+
+同じ 22:00 に、古いファイルを整理する（日数は `config.toml` の `[maintenance]`）。
+
+| 整理するもの | 残す日数 |
+|---|---|
+| Daily と振り返りの材料（`_overview/.ezra/digest/`） | 30日 |
+| テーマのディレクトリで動かした Claude のセッションの記録（`~/.claude/projects/` のうち `~/research` の下に対応するものだけ） | 90日。消えたセッションのスレッドは、次に返信したときにスレッドの履歴から続きを始める |
+
+ログは Ezra 自身が `~/Library/Logs/ezra/ezra.log` に書き、5MB ごとに回して5世代だけ残す。
+`~/Library/Logs/ezra/launchd.log` には、起動に失敗したときの出力だけが残る。
+
 ## 状態の置き場所
 
 | もの | 場所 |
@@ -106,4 +129,5 @@ uv run ezra-notion-setup <研究ホームのページID>
 | スレッドとセッション、ジョブ、実行時間 | `~/.local/state/ezra/ezra.db` |
 | テーマの作業用ディレクトリ | `~/research/` |
 | ジョブ | `pueue status --group ezra` |
-| ログ | `~/Library/Logs/ezra/ezra.log`（launchd のとき） |
+| ログ | `~/Library/Logs/ezra/ezra.log`（5MB ごとに回す）、起動の失敗は `launchd.log` |
+| バックアップ | `~/research/.git` → GitHub の非公開リポジトリ `research-data` |
