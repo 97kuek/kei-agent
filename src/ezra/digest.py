@@ -108,8 +108,9 @@ class DigestBuilder:
             channel = d.name
             if channel not in active_channels:
                 continue
+            # 一度も依頼のなかったテーマは、招待しただけなので停滞として扱わない
             last = activity.get(channel)
-            if (last or d.stat().st_mtime) < limit:
+            if last is not None and last < limit:
                 lines.append(f"- #{channel}（最後のやり取り {_ts(last)}）")
         return lines if len(lines) > 3 else lines + ["- なし"]
 

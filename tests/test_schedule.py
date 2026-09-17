@@ -256,6 +256,22 @@ async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, co
     assert "#old-theme" in waiting and "archived" not in waiting
 
 
+async def test_digest_skips_theme_never_asked(env, config, store):
+    """招待しただけで一度も依頼のないテーマは、止まっているテーマに数えない。"""
+    import os
+    from ezra.digest import DigestBuilder
+    scheduler, assistant, *_ = env
+    ws = make_theme(config, "just-invited")
+    old = time.time() - 5 * 86400
+    os.utime(ws.cwd, (old, old))
+
+    digest = await DigestBuilder(config, store, assistant).build(
+        time.time() - 86400, time.time(), "t", {"just-invited"})
+
+    stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
+    assert "just-invited" not in stalled and "なし" in stalled
+
+
 async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config, store):
     scheduler, assistant, slack, claude = env
     review = config.research_root / "_overview" / "reviews" / "2026-09-18.md"
