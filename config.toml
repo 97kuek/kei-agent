@@ -31,6 +31,14 @@ stall_days = 3
 # 失敗したジョブや確認待ちを、この時間放置したら声をかける
 unanswered_hours = 24
 
+[maintenance]
+# 毎晩の保守。古いファイルを整理してから、~/research を非公開の Git リポジトリに push する
+enabled = true
+time = "22:00"
+backup = true
+digest_retention_days = 30
+session_retention_days = 90
+
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]

@@ -11,5 +11,8 @@ if [[ ! -r "$SECRETS" ]]; then
 fi
 source "$SECRETS"
 
+# ログは Ezra 自身が 5MB ごとに回す。launchd の標準出力には、起動に失敗したときの出力だけが残る
+export EZRA_LOG_FILE="$HOME/Library/Logs/ezra/ezra.log"
+
 cd "${0:A:h}/.."
 exec uv run --frozen ezra

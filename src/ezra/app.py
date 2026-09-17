@@ -6,6 +6,8 @@ import asyncio
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
@@ -77,11 +79,28 @@ async def serve() -> None:
         schedule_loop.cancel()
 
 
-def main() -> None:
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUPS = 5
+
+
+def setup_logging(env: dict[str, str] | None = None) -> None:
+    """EZRA_LOG_FILE があれば、5MB ごとに回して5世代だけ残す。なければ標準エラーに出す。"""
+    env = dict(os.environ) if env is None else env
+    handlers: list[logging.Handler] = []
+    if env.get("EZRA_LOG_FILE"):
+        path = Path(env["EZRA_LOG_FILE"]).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(RotatingFileHandler(path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"))
     logging.basicConfig(
-        level=os.environ.get("EZRA_LOG_LEVEL", "INFO"),
+        level=env.get("EZRA_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers or None,
+        force=True,
     )
+
+
+def main() -> None:
+    setup_logging()
     asyncio.run(serve())
 
 
