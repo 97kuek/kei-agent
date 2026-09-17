@@ -6,6 +6,8 @@ authors = [
     { name = "97kuek", email = "keitaro.ueki@icloud.com" }
 ]
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "aiohttp>=3.14.3",
     "slack-bolt>=1.30.0",
