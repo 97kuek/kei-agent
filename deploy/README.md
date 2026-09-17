@@ -29,6 +29,8 @@
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
 export EZRA_ALLOWED_USER_ID="U..."
+# Notion のコネクト「Ezra」のアクセストークン（研究ホームを作るとき、フェーズ3で使う）
+export NOTION_TOKEN="ntn_..."
 # 任意: Semantic Scholar の APIキー（なくても動くが、混雑時に 429 になりやすい）
 # export S2_API_KEY="..."
 ```
@@ -84,6 +86,17 @@ uv run ezra-schedule daily        # night / literature / daily / review
 ```
 
 テーマの先行研究を見張るには、テーマの `CLAUDE.md` の「## 検索キーワード」に、1行に1つ英語で書く。
+
+## 7. Notion の研究ホーム
+
+1. Notion の開発者ツール → コネクション → 新規コネクト（アクセストークン方式、名前 `Ezra`）を作り、トークンを秘密情報のファイルの `NOTION_TOKEN` に書く
+2. Notion で空のページ「研究ホーム」を作り、コネクトの「コンテンツへのアクセス」にそのページを追加する
+3. 次を実行する（何度実行しても重複しない）
+
+```zsh
+source ~/.config/zsh/local/research-assistant.zsh
+uv run ezra-notion-setup <研究ホームのページID>
+```
 
 ## 状態の置き場所
 

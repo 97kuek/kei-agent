@@ -14,6 +14,7 @@ dependencies = [
 [project.scripts]
 ezra = "ezra.app:main"
 ezra-schedule = "ezra.schedule:main"
+ezra-notion-setup = "ezra.notion:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
