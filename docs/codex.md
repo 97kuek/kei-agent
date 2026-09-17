@@ -14,6 +14,8 @@ Codex App で `~/research/` をプロジェクトとして開く。これで次�
 | 文献調査の結果 | `~/research/<theme>/papers/` |
 | スレッドの経緯（依頼と Ezra の返答） | `~/research/<theme>/.ezra/threads/<thread_ts>.md` |
 | ジョブの状態 | `~/research/<theme>/.ezra/jobs/<ID>.json` |
+| Daily | `~/research/_overview/daily/<日付>.md` |
+| 振り返りの材料 | `~/research/_overview/reviews/<日付>.md` |
 
 Codex に最初に伝えておくとよいこと（プロジェクトの指示として `~/research/AGENTS.md` に置いてもよい）:
 
@@ -50,7 +52,15 @@ Codex で議論して決めた作業は、次の形で Ezra に送る。最初�
 （例: 条件ごとの精度の表と、95%区間つきの図。所要が長ければジョブにする）
 ```
 
-## 4. 音声での議論
+## 4. 振り返り（毎晩 21:00）
+
+Ezra が `#research-overview` に「振り返りの材料」を投稿し、`~/research/_overview/reviews/<日付>.md` に同じ内容と問いを書く。
+
+1. Codex App でそのファイルを開き、音声チャットで振り返る
+2. 結論を、ファイルの「Codex での振り返り」に書くか、Slack のスレッドに貼る（Ezra がファイルに追記する）
+3. 翌朝 08:00 の Daily に反映される
+
+## 5. 音声での議論
 
 Codex App の音声チャット（**Start new voice chat**）で議論する。Plus 以上のプランが必要で、音声チャットは同時に1つまで。
 結論が出たら、「Ezra への依頼文をテンプレートで作って」と頼み、テキストで確認してから送る。

@@ -32,6 +32,11 @@ MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 SLACK_TEXT_LIMIT = 11000
 
+NIGHT_REACTION = "crescent_moon"
+DONE_REACTION = "white_check_mark"
+# Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
+AWAITING_MARKER = "❓ 確認:"
+
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 _UNSAFE_FILENAME = re.compile(r"[^\w.\-]+")
 
@@ -48,6 +53,8 @@ class Request:
     files: list[dict] = field(default_factory=list)
     # これ以降に更新された outputs/ のファイルも添付する（ジョブが作ったファイル用）
     outputs_since: float | None = None
+    # 終わったあと、依頼者の返事待ちとして扱う（失敗したジョブのあとなど）
+    awaiting_after: bool = False
 
 
 def clean_text(text: str) -> str:
@@ -273,10 +280,91 @@ class Assistant:
             )
         await self.slack.chat_postMessage(channel=channel, text=text)
 
+    async def on_reaction_added(self, event: dict) -> None:
+        """自分のメッセージに 🌙 をつけると、夜間の Task になる。"""
+        item = event.get("item") or {}
+        if event.get("reaction") != NIGHT_REACTION or item.get("type") != "message":
+            return
+        if not self.is_allowed(event.get("user")) or event.get("item_user") != event.get("user"):
+            return
+        name = await self.channel_name(item["channel"])
+        try:
+            if themes.resolve(self.config, name).kind is not ChannelKind.THEME:
+                return
+        except ValueError:
+            return
+        self.store.add_night_task(item["channel"], item["ts"])
+
+    async def on_reaction_removed(self, event: dict) -> None:
+        item = event.get("item") or {}
+        if event.get("reaction") != NIGHT_REACTION or not self.is_allowed(event.get("user")):
+            return
+        self.store.remove_pending_night_task(item.get("channel", ""), item.get("ts", ""))
+
+    async def fetch_message(self, channel: str, ts: str) -> dict | None:
+        resp = await self.slack.conversations_replies(channel=channel, ts=ts, inclusive=True, limit=200)
+        for m in resp.get("messages", []):
+            if m.get("ts") == ts:
+                return m
+        return None
+
+    async def channel_ids(self) -> dict[str, str]:
+        """Ezra が参加しているチャンネルの、名前から ID への対応。"""
+        ids: dict[str, str] = {}
+        cursor = None
+        while True:
+            resp = await self.slack.conversations_list(
+                types="public_channel,private_channel", exclude_archived=True, limit=200, cursor=cursor
+            )
+            for c in resp.get("channels", []):
+                if c.get("is_member"):
+                    ids[c["name"]] = c["id"]
+                    self.channel_names[c["id"]] = c["name"]
+            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                return ids
+
+    async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str) -> runner.RunResult:
+        """スレッドを作らずに claude -p を動かす（定期処理用）。結果を見てから投稿先を決める。"""
+        assert ws.cwd is not None
+        themes.ensure_workspace(ws)
+        async with self.semaphore:
+            run_id = self.store.start_run("", "", channel_name, trigger)
+            result = await runner.run_claude(self.config, ws, prompt, None, "", "")
+            self.store.end_run(run_id, result.is_error, result.cost_usd)
+        return result
+
+    async def publish(self, channel: str, channel_name: str, ws: Workspace, header: str,
+                      result: runner.RunResult, footer: str = "") -> str:
+        """見出しをチャンネルに投稿し、結果をそのスレッドに返す。スレッドで続きを話せるようにする。"""
+        assert ws.cwd is not None
+        resp = await self.slack.chat_postMessage(channel=channel, text=header)
+        thread_ts = resp["ts"]
+        req = Request(channel, channel_name, thread_ts, None, "")
+        if result.session_id:
+            self.store.upsert_thread(channel, thread_ts, channel_name, result.session_id)
+        if result.text:
+            append_thread_log(ws.cwd, channel_name, thread_ts, "Ezra", result.text)
+            for chunk in split_text(result.text):
+                await self.post(req, chunk, markdown=True)
+        if result.is_error:
+            await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {'; '.join(result.errors)[:1500] or '原因不明'}")
+        if footer:
+            await self.post(req, footer)
+        return thread_ts
+
+    async def react_done(self, channel: str, ts: str) -> None:
+        try:
+            await self.slack.reactions_add(channel=channel, timestamp=ts, name=DONE_REACTION)
+        except Exception:
+            log.debug("リアクションをつけられません", exc_info=True)
+
     # 依頼の処理
 
     async def submit(self, req: Request) -> None:
         """依頼を受け付けて、裏で処理を始める。"""
+        if req.trigger == "message":
+            self.store.set_awaiting(req.channel, req.thread_ts, False)
         if req.message_ts:
             try:
                 await self.slack.reactions_add(channel=req.channel, timestamp=req.message_ts, name="eyes")
@@ -286,25 +374,26 @@ class Assistant:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def process(self, req: Request) -> None:
+    async def process(self, req: Request) -> runner.RunResult | None:
         try:
             ws = themes.resolve(self.config, req.channel_name)
         except ValueError as e:
             await self.post(req, f"{FAILED_PREFIX} {e}")
-            return
+            return None
         if ws.kind is ChannelKind.IMPROVE:
             await self.record_backlog(req)
-            return
+            return None
         themes.ensure_workspace(ws)
         async with self.thread_locks[(req.channel, req.thread_ts)]:
             async with self.semaphore:
                 try:
-                    await self.run(req, ws)
+                    return await self.run(req, ws)
                 except Exception as e:
                     log.exception("依頼の処理に失敗しました")
                     await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
+                    return None
 
-    async def run(self, req: Request, ws: Workspace) -> None:
+    async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         assert ws.cwd is not None
         saved = await self.save_files(req.files, ws.cwd)
         prompt = req.text
@@ -338,6 +427,8 @@ class Assistant:
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
+        awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
+        self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await progress.finish(ok=not result.is_error)
 
         if result.text:
@@ -350,6 +441,7 @@ class Assistant:
 
         await self.upload_outputs(req, ws.cwd, changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since))
         await self.handle_job_requests(ws.cwd)
+        return result
 
     async def post(self, req: Request, text: str, markdown: bool = False) -> None:
         if markdown:
@@ -446,6 +538,7 @@ class Assistant:
                 text=job_resume_prompt(job),
                 trigger="job",
                 outputs_since=job.submitted_at,
+                awaiting_after=job.status != "succeeded",
             ))
 
     async def job_loop(self) -> None:

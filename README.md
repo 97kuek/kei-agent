@@ -19,6 +19,9 @@ Slack  ──Socket Mode──▶  Ezra（このリポジトリ）
 - テーマのチャンネルで `@Ezra 〜して` と頼む。スレッド内の続きはメンションなしでよい
 - 添付したファイルは `inputs/` に保存され、`outputs/` に新しくできたファイルはスレッドに添付される
 - 長い処理は Ezra がジョブにし、終わると同じスレッドで会話を再開して報告する
+- 自分のメッセージに 🌙 をつけると、夜間（01:30）の Task になる。終わると ✅ がつく
+- 決まった時刻に、先行研究の新着（07:00、テーマのチャンネル）、Daily（08:00）、振り返りの材料（21:00）が届く（`#research-overview`）
+- 返事待ちのまま24時間たったスレッドには、Ezra が一度だけ声をかける
 
 ## ドキュメント
 
@@ -43,6 +46,7 @@ uv run pytest
 | `src/ezra/runner.py` | `claude -p` の起動、sandbox と権限の設定、stream-json の読み取り |
 | `src/ezra/jobs.py` | ジョブの依頼の検証、pueue への投入、状態の追跡 |
 | `src/ezra/themes.py` | チャンネル、テーマ、作業用ディレクトリの対応 |
-| `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、実行時間） |
+| `src/ezra/schedule.py` | 決まった時刻の処理（先行研究、Daily、振り返り、夜間 Task、声かけ） |
+| `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間） |
 | `plugin/` | `claude -p` に読み込ませる skill（`ezra:job`、`ezra:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |

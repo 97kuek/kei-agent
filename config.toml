@@ -16,6 +16,21 @@ job_parallel = 1
 # 空なら Claude Code の既定のモデル
 model = ""
 
+[schedule]
+# 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
+enabled = true
+literature = "07:00"  # 先行研究の新着（テーマごと）
+daily = "08:00"       # Daily（#research-overview）
+review = "21:00"      # 振り返りの材料（#research-overview）
+night = "01:30"       # 🌙 をつけた Task
+# Mac のスリープなどで逃した処理を、何時間後まで実行するか
+catch_up_hours = 3
+night_max_tasks = 5
+# この日数やり取りのないテーマを Daily で触れる
+stall_days = 3
+# 失敗したジョブや確認待ちを、この時間放置したら声をかける
+unanswered_hours = 24
+
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]

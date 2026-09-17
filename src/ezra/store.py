@@ -34,6 +34,25 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at REAL,
     reported INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS night_tasks (
+    channel TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    started_at REAL,
+    finished_at REAL,
+    channel_name TEXT,
+    thread_ts TEXT,
+    summary TEXT,
+    PRIMARY KEY (channel, ts)
+);
+CREATE TABLE IF NOT EXISTS schedule_runs (
+    name TEXT NOT NULL,
+    day TEXT NOT NULL,
+    ran_at REAL NOT NULL,
+    detail TEXT,
+    PRIMARY KEY (name, day)
+);
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL,
@@ -87,6 +106,16 @@ class Store:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(threads)")}
+        with self.conn:
+            if "awaiting_since" not in columns:
+                # Ezra の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
+                self.conn.execute("ALTER TABLE threads ADD COLUMN awaiting_since REAL")
+            if "nudged" not in columns:
+                self.conn.execute("ALTER TABLE threads ADD COLUMN nudged INTEGER NOT NULL DEFAULT 0")
 
     # threads
 
@@ -114,6 +143,106 @@ class Store:
                 "UPDATE threads SET session_id = NULL, updated_at = ? WHERE channel = ? AND thread_ts = ?",
                 (time.time(), channel, thread_ts),
             )
+
+    def set_awaiting(self, channel: str, thread_ts: str, awaiting: bool) -> None:
+        with self.conn:
+            if awaiting:
+                self.conn.execute(
+                    "UPDATE threads SET awaiting_since = ?, nudged = 0 WHERE channel = ? AND thread_ts = ?",
+                    (time.time(), channel, thread_ts),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE threads SET awaiting_since = NULL, nudged = 0 WHERE channel = ? AND thread_ts = ?",
+                    (channel, thread_ts),
+                )
+
+    def threads_to_nudge(self, older_than: float) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM threads WHERE awaiting_since IS NOT NULL AND awaiting_since <= ? AND nudged = 0",
+            (older_than,),
+        ).fetchall()
+
+    def mark_nudged(self, channel: str, thread_ts: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE threads SET nudged = 1 WHERE channel = ? AND thread_ts = ?", (channel, thread_ts))
+
+    def threads_updated_since(self, since: float) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM threads WHERE updated_at >= ? ORDER BY channel_name, updated_at", (since,)
+        ).fetchall()
+
+    def last_activity_by_channel_name(self) -> dict[str, float]:
+        rows = self.conn.execute("SELECT channel_name, MAX(updated_at) AS last FROM threads GROUP BY channel_name")
+        return {r["channel_name"]: r["last"] for r in rows}
+
+    # night tasks
+
+    def add_night_task(self, channel: str, ts: str) -> bool:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO night_tasks (channel, ts, status, created_at) VALUES (?, ?, 'pending', ?)",
+                (channel, ts, time.time()),
+            )
+        return cur.rowcount == 1
+
+    def remove_pending_night_task(self, channel: str, ts: str) -> bool:
+        with self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM night_tasks WHERE channel = ? AND ts = ? AND status = 'pending'", (channel, ts)
+            )
+        return cur.rowcount == 1
+
+    def reset_running_night_tasks(self) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE night_tasks SET status = 'pending', started_at = NULL WHERE status = 'running'")
+
+    def pending_night_tasks(self, limit: int) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM night_tasks WHERE status = 'pending' ORDER BY created_at LIMIT ?", (limit,)
+        ).fetchall()
+
+    def count_pending_night_tasks(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM night_tasks WHERE status = 'pending'").fetchone()[0]
+
+    def update_night_task(self, channel: str, ts: str, **fields) -> None:
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self.conn:
+            self.conn.execute(f"UPDATE night_tasks SET {cols} WHERE channel = ? AND ts = ?", (*fields.values(), channel, ts))
+
+    def night_tasks_finished_since(self, since: float) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM night_tasks WHERE finished_at >= ? ORDER BY finished_at", (since,)
+        ).fetchall()
+
+    # schedule
+
+    def schedule_ran(self, name: str, day: str) -> bool:
+        return self.conn.execute(
+            "SELECT 1 FROM schedule_runs WHERE name = ? AND day = ?", (name, day)
+        ).fetchone() is not None
+
+    def record_schedule(self, name: str, day: str, detail: dict | None = None) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO schedule_runs (name, day, ran_at, detail) VALUES (?, ?, ?, ?)",
+                (name, day, time.time(), json.dumps(detail or {}, ensure_ascii=False)),
+            )
+
+    def last_schedule(self, name: str, before_day: str | None = None) -> sqlite3.Row | None:
+        if before_day is None:
+            return self.conn.execute(
+                "SELECT * FROM schedule_runs WHERE name = ? ORDER BY ran_at DESC LIMIT 1", (name,)
+            ).fetchone()
+        return self.conn.execute(
+            "SELECT * FROM schedule_runs WHERE name = ? AND day < ? ORDER BY day DESC LIMIT 1", (name, before_day)
+        ).fetchone()
+
+    def jobs_finished_since(self, since: float) -> list[Job]:
+        rows = self.conn.execute(
+            "SELECT * FROM jobs WHERE finished_at >= ? ORDER BY finished_at", (since,)
+        ).fetchall()
+        return [Job(**dict(r)) for r in rows]
 
     # jobs
 

@@ -64,6 +64,27 @@ launchctl print gui/$(id -u)/com.ezra.assistant | grep -E 'state|last exit'
 `claude` は、ふだんのログイン（キーチェーン）で動く。launchd からログイン情報を読めないときは、
 `claude setup-token` で作ったトークンを `CLAUDE_CODE_OAUTH_TOKEN` として秘密情報のファイルに足す。
 
+## 6. 決まった時刻の処理
+
+時刻は `config.toml` の `[schedule]` で変えられる。Mac がスリープしていて時刻を逃した処理は、起きたときに実行する（夜間の Task は12時間、それ以外は3時間以内）。
+
+夜間（01:30）にも Task を進めたいときは、一度だけ次を実行して、毎晩 01:25 に Mac を起こす（電源につないでおく）。
+
+```zsh
+sudo pmset repeat wakeorpoweron MTWRFSU 01:25:00
+pmset -g sched   # 確認
+sudo pmset repeat cancel   # やめるとき
+```
+
+今すぐ1回動かして確かめるときは、次を実行する（`--record` を付けなければ、今日の本番の実行には影響しない）。
+
+```zsh
+source ~/.config/zsh/local/research-assistant.zsh
+uv run ezra-schedule daily        # night / literature / daily / review
+```
+
+テーマの先行研究を見張るには、テーマの `CLAUDE.md` の「## 検索キーワード」に、1行に1つ英語で書く。
+
 ## 状態の置き場所
 
 | もの | 場所 |

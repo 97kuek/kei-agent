@@ -60,6 +60,7 @@ def search_arxiv(query: str, limit: int, sort: str) -> list[dict]:
             "title": _short(entry.findtext(f"{ATOM}title"), 300),
             "authors": [a.findtext(f"{ATOM}name", "") for a in entry.findall(f"{ATOM}author")],
             "year": int(entry.findtext(f"{ATOM}published", "0")[:4] or 0),
+            "published": entry.findtext(f"{ATOM}published", "")[:10],
             "venue": entry.findtext(f"{ARXIV_NS}journal_ref") or "arXiv",
             "citations": None,
             "url": abs_url,

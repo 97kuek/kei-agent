@@ -13,6 +13,7 @@ from slack_bolt.async_app import AsyncApp
 from ezra.assistant import Assistant
 from ezra.config import load_config
 from ezra.jobs import JobManager, Pueue
+from ezra.schedule import Scheduler
 from ezra.store import Store
 
 log = logging.getLogger("ezra")
@@ -54,12 +55,22 @@ async def serve() -> None:
     async def handle_member_joined(event):
         await assistant.on_member_joined(event)
 
+    @app.event("reaction_added")
+    async def handle_reaction_added(event):
+        await assistant.on_reaction_added(event)
+
+    @app.event("reaction_removed")
+    async def handle_reaction_removed(event):
+        await assistant.on_reaction_removed(event)
+
     job_loop = asyncio.create_task(assistant.job_loop())
+    schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
     log.info("Ezra を起動しました（bot user: %s, research_root: %s）", auth["user_id"], config.research_root)
     try:
         await AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start_async()
     finally:
         job_loop.cancel()
+        schedule_loop.cancel()
 
 
 def main() -> None:

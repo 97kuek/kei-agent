@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +15,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _expand(path: str) -> Path:
     return Path(os.path.expanduser(path)).resolve()
+
+
+@dataclass(frozen=True)
+class ScheduleConfig:
+    enabled: bool = True
+    # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
+    literature: str = "07:00"
+    daily: str = "08:00"
+    review: str = "21:00"
+    night: str = "01:30"
+    # Mac のスリープなどで逃した処理を、何時間後まで実行するか
+    catch_up_hours: float = 3
+    night_max_tasks: int = 5
+    stall_days: int = 3
+    unanswered_hours: int = 24
 
 
 @dataclass(frozen=True)
@@ -34,6 +49,7 @@ class Config:
     allow_write: tuple[Path, ...] = ()
     claude_bin: str = "claude"
     pueue_bin: str = "pueue"
+    schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
 
     @property
     def db_path(self) -> Path:
@@ -60,6 +76,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         with path.open("rb") as f:
             data = tomllib.load(f)
 
+    schedule = data.get("schedule", {})
     channels = data.get("channels", {})
     sandbox = data.get("sandbox", {})
     return Config(
@@ -78,4 +95,5 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
         claude_bin=env.get("EZRA_CLAUDE_BIN", "claude"),
         pueue_bin=env.get("EZRA_PUEUE_BIN", "pueue"),
+        schedule=ScheduleConfig(**schedule),
     )
