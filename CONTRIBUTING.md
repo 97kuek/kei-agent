@@ -8,7 +8,7 @@ Ezra は、Slack で頼んだ研究の作業を Mac 上の Claude Code が進め
 - 設計の判断を変えるときは、先に `docs/plan.md` の該当する表を直し、理由も書く
 - Notion の構成を変えるときは `docs/notion-layout.md`、`src/ezra/notion.py`（作る側）、`src/ezra/notion_store.py`（読み書きする側）を合わせて直す
 - 大きな変更（Slack App の権限、sandbox の設定、フェーズの順番）は、Issue で相談してから始める
-- 使っていて気づいた要望は、Slack の `#assistant-improve` に書くと `docs/backlog.md` に記録される
+- 使っていて気づいた要望は、Slack の `#research-ezra` で `@Ezra` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
 
 ## 開発の準備
 
