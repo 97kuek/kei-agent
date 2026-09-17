@@ -53,8 +53,6 @@ class Config:
     allowed_user_id: str
     overview_channels: tuple[str, ...] = ("research-overview", "research-strategy")
     improve_channels: tuple[str, ...] = ("research-ezra",)
-    # この接頭辞で始まるチャンネルだけを研究テーマとして扱う
-    theme_channel_prefix: str = "theme-"
     max_concurrent_runs: int = 2
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
@@ -116,7 +114,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         allowed_user_id=env.get("EZRA_ALLOWED_USER_ID", ""),
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
-        theme_channel_prefix=channels.get("theme_prefix", Config.theme_channel_prefix),
         max_concurrent_runs=int(data.get("max_concurrent_runs", 2)),
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),

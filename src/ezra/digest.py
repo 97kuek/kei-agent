@@ -105,7 +105,7 @@ class DigestBuilder:
         activity = self.store.last_activity_by_channel_name()
         limit = now - days * 86400
         for d in theme_dirs(self.config.research_root):
-            channel = themes.theme_channel_name(self.config, d.name)
+            channel = d.name
             if channel not in active_channels:
                 continue
             last = activity.get(channel)

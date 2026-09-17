@@ -152,10 +152,9 @@ class Scheduler:
         notion = self.assistant.notion
         info = {"title": task.title, "url": task.url, "theme": ", ".join(task.theme_names)}
         theme = task.theme_names[0] if task.theme_names else None
-        channel_name = themes.theme_channel_name(self.config, theme) if theme else None
+        channel_name = theme
         if theme is None or channel_name not in ids:
-            reason = ("テーマを設定してください" if theme is None
-                      else f"テーマ「{theme}」のチャンネル #{channel_name} に Ezra がいません")
+            reason = "テーマを設定してください" if theme is None else f"テーマのチャンネル #{theme} に Ezra がいません"
             await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
             return {**info, "status": "確認待ち", "reason": reason}
 
@@ -209,7 +208,7 @@ class Scheduler:
             since = min(since, date.fromisoformat(last["day"]))
         results = {}
         for cwd in theme_dirs(self.config.research_root):
-            name = themes.theme_channel_name(self.config, cwd.name)
+            name = cwd.name
             if name not in ids:
                 continue  # アーカイブしたテーマや、Ezra のいないテーマは見張らない
             keywords = search_keywords(cwd / "CLAUDE.md")

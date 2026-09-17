@@ -44,9 +44,8 @@ session_retention_days = 90
 overview = ["research-overview", "research-strategy"]
 # Ezra の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
 improve = ["research-ezra"]
-# この接頭辞で始まるチャンネルを研究テーマとして扱う（theme-vlm-counting → ~/research/vlm-counting/）
-# それ以外のチャンネル（inbox など）は Ezra の対象外
-theme_prefix = "theme-"
+# 上記以外で Ezra を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
+# 個人用のチャンネルには Ezra を招待しない
 
 [sandbox]
 # Bash（sandbox内）から接続してよいドメイン
