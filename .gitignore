@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .env
 *.local.zsh
+
+# 構想資料（他の人の資料なので含めない）
+doctor-ai-concept.pdf
