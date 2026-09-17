@@ -48,6 +48,8 @@ class Notion:
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             raise NotionError(f"{method} {path}: {e.code} {detail}") from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise NotionError(f"{method} {path}: {e}") from None
 
     def children(self, block_id: str) -> list[dict]:
         results, cursor = [], None
