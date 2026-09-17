@@ -13,6 +13,7 @@ from slack_bolt.async_app import AsyncApp
 from ezra.assistant import Assistant
 from ezra.config import load_config
 from ezra.jobs import JobManager, Pueue
+from ezra.notion_store import load_notion
 from ezra.schedule import Scheduler
 from ezra.store import Store
 
@@ -41,6 +42,8 @@ async def serve() -> None:
         jobs=JobManager(config, store, pueue),
         bot_token=os.environ["SLACK_BOT_TOKEN"],
         bot_user_id=auth["user_id"],
+        notion=load_notion(config),
+        team_url=auth.get("url", ""),
     )
 
     @app.event("app_mention")
@@ -65,7 +68,8 @@ async def serve() -> None:
 
     job_loop = asyncio.create_task(assistant.job_loop())
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
-    log.info("Ezra を起動しました（bot user: %s, research_root: %s）", auth["user_id"], config.research_root)
+    log.info("Ezra を起動しました（bot user: %s, research_root: %s, Notion: %s）",
+             auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
     try:
         await AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start_async()
     finally:

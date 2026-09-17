@@ -132,7 +132,7 @@ async def test_improve_channel_records_backlog(env, backlog_config, store):
     await settle(assistant)
 
     backlog = (backlog_config.repo_root / "docs" / "backlog.md").read_text()
-    assert "経過をもっと細かく" in backlog and "https://slack.example/p1" in backlog
+    assert "経過をもっと細かく" in backlog and "https://example.slack.com/archives/C9/p201" in backlog
     assert claude.calls == []
     assert slack.texts()[-1] == "要望を `docs/backlog.md` に記録しました。"
 

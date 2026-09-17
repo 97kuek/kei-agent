@@ -19,6 +19,8 @@ import aiohttp
 from ezra import runner, themes
 from ezra.config import Config
 from ezra.jobs import JobManager, log_tail
+from ezra.notion import NotionError
+from ezra.notion_store import NotionStore
 from ezra.store import Job, Store
 from ezra.themes import ChannelKind, Workspace
 
@@ -198,8 +200,12 @@ class Progress:
 
 
 class Assistant:
-    def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str):
+    def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str,
+                 notion: NotionStore | None = None, team_url: str = ""):
         self.config = config
+        self.notion = notion
+        # チャンネルへのリンクを作るのに使う（例: https://example.slack.com/）
+        self.team_url = team_url
         self.store = store
         self.slack = slack
         self.jobs = jobs
@@ -278,7 +284,32 @@ class Assistant:
                 f"Ezra です。このチャンネルのテーマ用に `{ws.cwd}` を{state}。"
                 "研究の前提を `CLAUDE.md` に書いておくと、依頼のたびに説明しなくて済みます。"
             )
+            await self.register_theme(name, channel, ws)
         await self.slack.chat_postMessage(channel=channel, text=text)
+
+    async def register_theme(self, name: str, channel: str, ws: Workspace) -> None:
+        if self.notion is None:
+            return
+        slack_url = f"{self.team_url}archives/{channel}" if self.team_url else ""
+        try:
+            await asyncio.to_thread(self.notion.ensure_theme, name, slack_url, f"{ws.cwd}/")
+        except NotionError as e:
+            await self.notify_trouble(f"Notion にテーマ「{name}」を登録できませんでした: {e}")
+
+    async def notify_trouble(self, text: str) -> None:
+        """うまくいかなかったことを #assistant-improve に知らせる。"""
+        log.warning(text)
+        try:
+            ids = await self.channel_ids()
+            channel = next((ids[n] for n in self.config.improve_channels if n in ids), None)
+            if channel:
+                await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {text[:2500]}")
+        except Exception:
+            log.exception("#assistant-improve に知らせられません")
+
+    async def permalink(self, channel: str, ts: str) -> str:
+        resp = await self.slack.chat_getPermalink(channel=channel, message_ts=ts)
+        return resp["permalink"]
 
     async def on_reaction_added(self, event: dict) -> None:
         """自分のメッセージに 🌙 をつけると、夜間の Task になる。"""
@@ -287,19 +318,42 @@ class Assistant:
             return
         if not self.is_allowed(event.get("user")) or event.get("item_user") != event.get("user"):
             return
-        name = await self.channel_name(item["channel"])
+        channel, ts = item["channel"], item["ts"]
+        name = await self.channel_name(channel)
         try:
             if themes.resolve(self.config, name).kind is not ChannelKind.THEME:
                 return
         except ValueError:
             return
-        self.store.add_night_task(item["channel"], item["ts"])
+        message = await self.fetch_message(channel, ts) or {}
+        req = Request(channel, name, message.get("thread_ts") or ts, None, "")
+        if self.notion is None:
+            await self.post(req, f"{FAILED_PREFIX} Notion が設定されていないので、今夜の Task にできません")
+            return
+        text = clean_text(message.get("text", ""))
+        title = (text.splitlines() or ["Slack からの Task"])[0][:60] or "Slack からの Task"
+        link = await self.permalink(channel, ts)
+        quoted = "\n".join(f"> {line}" for line in text.splitlines()) or "> （本文なし）"
+        body = f"Slack で 🌙 をつけて作った Task。\n\n{quoted}\n\n元のメッセージ: {link}"
+        try:
+            task = await asyncio.to_thread(self.notion.create_night_task, title, name, link, body)
+        except NotionError as e:
+            await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れませんでした")
+            await self.notify_trouble(f"🌙 の Task を Notion に作れませんでした: {e}")
+            return
+        await self.post(req, f"🌙 今夜の Task にしました: <{task.url}|{task.title}>")
 
     async def on_reaction_removed(self, event: dict) -> None:
         item = event.get("item") or {}
-        if event.get("reaction") != NIGHT_REACTION or not self.is_allowed(event.get("user")):
+        if event.get("reaction") != NIGHT_REACTION or item.get("type") != "message":
             return
-        self.store.remove_pending_night_task(item.get("channel", ""), item.get("ts", ""))
+        if not self.is_allowed(event.get("user")) or self.notion is None:
+            return
+        link = await self.permalink(item["channel"], item["ts"])
+        try:
+            await asyncio.to_thread(self.notion.cancel_night_task, link)
+        except NotionError as e:
+            await self.notify_trouble(f"🌙 を外した Task を Notion で取り消せませんでした: {e}")
 
     async def fetch_message(self, channel: str, ts: str) -> dict | None:
         resp = await self.slack.conversations_replies(channel=channel, ts=ts, inclusive=True, limit=200)
@@ -429,6 +483,7 @@ class Assistant:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
+        await self.sync_review_conclusion(req)
         await progress.finish(ok=not result.is_error)
 
         if result.text:
@@ -442,6 +497,20 @@ class Assistant:
         await self.upload_outputs(req, ws.cwd, changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since))
         await self.handle_job_requests(ws.cwd)
         return result
+
+    async def sync_review_conclusion(self, req: Request) -> None:
+        """振り返りのスレッドに貼られた結論を、Notion の振り返りページにも追記する。"""
+        if req.trigger != "message" or self.notion is None:
+            return
+        link = self.store.notion_link(req.channel, req.thread_ts)
+        if link is None or link["kind"] != "review" or not req.text.strip():
+            return
+        stamp = datetime.now().strftime("%m/%d %H:%M")
+        try:
+            await asyncio.to_thread(self.notion.append_markdown, link["page_id"],
+                                    f"### Slack に貼った結論（{stamp}）\n\n{req.text}")
+        except NotionError as e:
+            await self.notify_trouble(f"振り返りの結論を Notion に追記できませんでした: {e}")
 
     async def post(self, req: Request, text: str, markdown: bool = False) -> None:
         if markdown:

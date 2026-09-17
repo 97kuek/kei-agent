@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 from ezra import runner
+from ezra.notion import NotionError
+from ezra.notion_store import Note, Task
 from ezra.jobs import REQUESTS_DIR
 
 
@@ -80,8 +82,8 @@ class FakeSlack:
         channels = [{"id": cid, "name": name, "is_member": True} for cid, name in self.channels.items()]
         return {"channels": channels, "response_metadata": {"next_cursor": ""}}
 
-    async def chat_getPermalink(self, **kw):
-        return {"permalink": "https://slack.example/p1"}
+    async def chat_getPermalink(self, channel, message_ts):
+        return {"permalink": f"https://example.slack.com/archives/{channel}/p{message_ts.replace('.', '')}"}
 
 
 class FakeClaude:
@@ -105,3 +107,101 @@ class FakeClaude:
             errors=behavior.get("errors", []),
         )
         return result
+
+
+class FakeNotion:
+    """NotionStore の代わり。Task とノートをメモリに持つ。"""
+
+    def __init__(self):
+        self.tasks: dict[str, Task] = {}
+        self.bodies: dict[str, str] = {}
+        self.results: dict[str, str] = {}
+        self.notes: list[Note] = []
+        self.appended: list[tuple[str, str]] = []
+        self.themes: dict[str, str] = {}
+        self.fail = False
+        self._n = 0
+
+    def _check(self):
+        if self.fail:
+            raise NotionError("503 Service Unavailable")
+
+    def add_task(self, title, theme=None, status="今夜やる", slack_url=None, body="", assignee="Ezra"):
+        self._n += 1
+        task = Task(f"task-{self._n}", title, status, assignee, "P1", None, slack_url,
+                    [f"theme-{theme}"] if theme else [], f"https://notion.example/task-{self._n}",
+                    [theme] if theme else [])
+        self.tasks[task.id] = task
+        self.bodies[task.id] = body
+        return task
+
+    def create_night_task(self, title, theme_name, slack_url, body):
+        self._check()
+        for t in self.tasks.values():
+            if t.slack_url == slack_url:
+                t.status = "今夜やる"
+                return t
+        return self.add_task(title, theme_name, slack_url=slack_url, body=body)
+
+    def cancel_night_task(self, slack_url):
+        self._check()
+        for t in self.tasks.values():
+            if t.slack_url == slack_url and t.status == "今夜やる":
+                t.status = "未着手"
+                return True
+        return False
+
+    def tonight_tasks(self, limit):
+        self._check()
+        return [t for t in self.tasks.values() if t.assignee == "Ezra" and t.status == "今夜やる"][:limit]
+
+    def count_tonight_tasks(self):
+        self._check()
+        return len([t for t in self.tasks.values() if t.assignee == "Ezra" and t.status == "今夜やる"])
+
+    def update_task(self, page_id, status=None, result=None, slack_url=None):
+        self._check()
+        task = self.tasks[page_id]
+        if status:
+            task.status = status
+        if result is not None:
+            self.results[page_id] = result
+        if slack_url:
+            task.slack_url = slack_url
+
+    def page_markdown(self, page_id):
+        return self.bodies.get(page_id, "")
+
+    def ensure_theme(self, name, slack_url, directory):
+        self._check()
+        if name in self.themes:
+            return False
+        self.themes[name] = slack_url
+        return True
+
+    def notes_edited_since(self, since, kinds):
+        self._check()
+        return [n for n in self.notes if n.kind in kinds]
+
+    def awaiting_tasks(self):
+        self._check()
+        return [t for t in self.tasks.values() if t.status == "確認待ち"]
+
+    def tasks_due_within(self, today, days):
+        self._check()
+        return []
+
+    def upcoming_milestones(self, today, limit=5):
+        self._check()
+        return [{"name": "中間発表", "due": "2026-10-01", "url": "https://notion.example/m1"}]
+
+    def create_note(self, title, kind, day, markdown, slack_url=None, file=None):
+        self._check()
+        note = Note(f"note-{len(self.notes) + 1}", title, kind, day, f"https://notion.example/note-{len(self.notes) + 1}",
+                    markdown)
+        self.notes.append(note)
+        return note
+
+    def append_markdown(self, page_id, markdown):
+        self._check()
+        self.appended.append((page_id, markdown))

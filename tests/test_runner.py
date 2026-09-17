@@ -37,13 +37,14 @@ def test_env_strips_secrets_and_adds_thread(config):
         "PATH": "/bin",
         "SLACK_BOT_TOKEN": "xoxb-secret",
         "SLACK_APP_TOKEN": "xapp-secret",
+        "NOTION_TOKEN": "ntn_secret",
         "EZRA_ALLOWED_USER_ID": "UME",
         "CLAUDECODE": "1",
         "CLAUDE_CODE_SESSION_ID": "parent",
         "CLAUDE_CODE_OAUTH_TOKEN": "keep",
     }
     env = runner.build_env(config, base, "C1", "123.456")
-    assert "SLACK_BOT_TOKEN" not in env and "SLACK_APP_TOKEN" not in env
+    assert "SLACK_BOT_TOKEN" not in env and "SLACK_APP_TOKEN" not in env and "NOTION_TOKEN" not in env
     assert "EZRA_ALLOWED_USER_ID" not in env
     assert "CLAUDECODE" not in env and "CLAUDE_CODE_SESSION_ID" not in env
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"

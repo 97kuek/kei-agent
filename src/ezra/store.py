@@ -34,17 +34,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at REAL,
     reported INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS night_tasks (
+CREATE TABLE IF NOT EXISTS notion_links (
     channel TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at REAL NOT NULL,
-    started_at REAL,
-    finished_at REAL,
-    channel_name TEXT,
-    thread_ts TEXT,
-    summary TEXT,
-    PRIMARY KEY (channel, ts)
+    thread_ts TEXT NOT NULL,
+    page_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    PRIMARY KEY (channel, thread_ts)
 );
 CREATE TABLE IF NOT EXISTS schedule_runs (
     name TEXT NOT NULL,
@@ -176,44 +171,19 @@ class Store:
         rows = self.conn.execute("SELECT channel_name, MAX(updated_at) AS last FROM threads GROUP BY channel_name")
         return {r["channel_name"]: r["last"] for r in rows}
 
-    # night tasks
+    # Slack のスレッドと Notion のページの対応（振り返りのスレッドなど）
 
-    def add_night_task(self, channel: str, ts: str) -> bool:
+    def link_notion(self, channel: str, thread_ts: str, page_id: str, kind: str) -> None:
         with self.conn:
-            cur = self.conn.execute(
-                "INSERT OR IGNORE INTO night_tasks (channel, ts, status, created_at) VALUES (?, ?, 'pending', ?)",
-                (channel, ts, time.time()),
+            self.conn.execute(
+                "INSERT OR REPLACE INTO notion_links (channel, thread_ts, page_id, kind) VALUES (?, ?, ?, ?)",
+                (channel, thread_ts, page_id, kind),
             )
-        return cur.rowcount == 1
 
-    def remove_pending_night_task(self, channel: str, ts: str) -> bool:
-        with self.conn:
-            cur = self.conn.execute(
-                "DELETE FROM night_tasks WHERE channel = ? AND ts = ? AND status = 'pending'", (channel, ts)
-            )
-        return cur.rowcount == 1
-
-    def reset_running_night_tasks(self) -> None:
-        with self.conn:
-            self.conn.execute("UPDATE night_tasks SET status = 'pending', started_at = NULL WHERE status = 'running'")
-
-    def pending_night_tasks(self, limit: int) -> list[sqlite3.Row]:
+    def notion_link(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
         return self.conn.execute(
-            "SELECT * FROM night_tasks WHERE status = 'pending' ORDER BY created_at LIMIT ?", (limit,)
-        ).fetchall()
-
-    def count_pending_night_tasks(self) -> int:
-        return self.conn.execute("SELECT COUNT(*) FROM night_tasks WHERE status = 'pending'").fetchone()[0]
-
-    def update_night_task(self, channel: str, ts: str, **fields) -> None:
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self.conn:
-            self.conn.execute(f"UPDATE night_tasks SET {cols} WHERE channel = ? AND ts = ?", (*fields.values(), channel, ts))
-
-    def night_tasks_finished_since(self, since: float) -> list[sqlite3.Row]:
-        return self.conn.execute(
-            "SELECT * FROM night_tasks WHERE finished_at >= ? ORDER BY finished_at", (since,)
-        ).fetchall()
+            "SELECT * FROM notion_links WHERE channel = ? AND thread_ts = ?", (channel, thread_ts)
+        ).fetchone()
 
     # schedule
 
