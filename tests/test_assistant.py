@@ -171,12 +171,61 @@ async def test_upload_failure_does_not_hide_result(env, config, monkeypatch):
     assert not any("内部エラー" in t for t in texts)
 
 
-async def test_thread_locks_do_not_grow(env):
+async def test_same_thread_requests_run_one_at_a_time(env, monkeypatch):
+    """同じスレッドの依頼は1つずつ動かす。
+
+    1件目が終わった直後に3件目が来ても、2件目と同時には走らせない。
+    同じスレッド = 同じセッションなので、2本の claude が同時に動くと会話が混ざる。
+    """
     assistant, slack, claude, _ = env
-    for i in range(3):
-        await assistant.on_mention({"channel": "C1", "user": "UME", "ts": f"1{i}.1", "text": "<@UBOT> x"})
+    gates = [asyncio.Event() for _ in range(3)]
+    state = {"running": 0, "peak": 0, "calls": 0}
+
+    async def gated(config, ws, prompt, session_id, channel, thread_ts, on_activity=None):
+        i = state["calls"]
+        state["calls"] += 1
+        state["running"] += 1
+        state["peak"] = max(state["peak"], state["running"])
+        await gates[i].wait()
+        state["running"] -= 1
+        return runner.RunResult(session_id="sess-1", text="結果です", is_error=False, errors=[])
+
+    async def pump(n=20):
+        for _ in range(n):
+            await asyncio.sleep(0)
+
+    monkeypatch.setattr(runner, "run_claude", gated)
+    # 1件目を動かし、2件目をそのうしろに並ばせる
+    for ts in ("10.1", "10.2"):
+        await assistant.on_mention({"channel": "C1", "user": "UME", "ts": ts, "thread_ts": "10.1", "text": "<@UBOT> x"})
+    await pump()
+    assert state["calls"] == 1
+
+    # 1件目を終わらせる。2件目が動き出したところで、3件目を出す
+    gates[0].set()
+    await pump()
+    assert state["calls"] == 2
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "<@UBOT> x"})
+    await pump()
+
+    assert state["peak"] == 1
+    assert state["calls"] == 2  # 3件目は2件目の終わりを待っている
+    for g in gates:
+        g.set()
     await settle(assistant)
-    assert assistant.thread_locks == {}
+    assert state["calls"] == 3 and state["peak"] == 1
+
+
+async def test_thread_lock_is_kept_for_later_requests(env):
+    """スレッドのロックは捨てずに残す。捨てると、あとから来た依頼が別のロックを取ってしまう。"""
+    assistant, slack, claude, _ = env
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
+    await settle(assistant)
+    first = assistant.thread_locks[("C1", "10.1")]
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "<@UBOT> y"})
+    await settle(assistant)
+    assert assistant.thread_locks[("C1", "10.1")] is first
 
 
 async def test_overview_channel_runs_in_overview_dir(env, config):

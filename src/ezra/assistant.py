@@ -446,21 +446,17 @@ class Assistant:
             await self.record_backlog(req)
             return None
         themes.ensure_workspace(ws)
-        key = (req.channel, req.thread_ts)
-        lock = self.thread_locks[key]
-        try:
-            async with lock:
-                async with self.semaphore:
-                    try:
-                        return await self.run(req, ws)
-                    except Exception as e:
-                        log.exception("依頼の処理に失敗しました")
-                        await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
-                        return None
-        finally:
-            # 待っている依頼がなければ、スレッドごとのロックを捨てる（増え続けないように）
-            if not lock.locked() and self.thread_locks.get(key) is lock:
-                del self.thread_locks[key]
+        # スレッドごとのロックは捨てずに残す。「待っている依頼がいるか」は release の直後に
+        # 一瞬だけ「いない」と見えるので、そこで捨てると、待っていた依頼が別のロックを取り、
+        # 同じスレッド（同じセッション）の claude が2本同時に走る
+        async with self.thread_locks[(req.channel, req.thread_ts)]:
+            async with self.semaphore:
+                try:
+                    return await self.run(req, ws)
+                except Exception as e:
+                    log.exception("依頼の処理に失敗しました")
+                    await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
+                    return None
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         assert ws.cwd is not None
