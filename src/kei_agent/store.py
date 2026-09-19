@@ -505,6 +505,10 @@ class Store:
             )
         return cur.lastrowid
 
+    def open_runs(self) -> list[sqlite3.Row]:
+        """終わりがまだ記録されていない実行（いま動いているもの）。古い順。"""
+        return self.conn.execute("SELECT * FROM runs WHERE ended_at IS NULL ORDER BY started_at").fetchall()
+
     def end_run(self, run_id: int, is_error: bool, cost_usd: float | None) -> None:
         with self.conn:
             self.conn.execute(

@@ -104,3 +104,37 @@ async def test_archiving_the_channel_drops_theme_domains(env, store):
     await assistant.on_channel_archive({"type": "channel_archive", "channel": "C1"})
     await asyncio.sleep(0)
     assert settings.theme_domains(store, "vlm") == []
+
+
+# いま動いているもの
+
+
+def test_home_shows_what_is_running(config, store):
+    import time
+
+    store.start_run("C1", "10.1", "vlm", "message")
+    finished = store.start_run("C1", "10.0", "vlm", "message")
+    store.end_run(finished, False, None)
+    job = store.add_job("r1", "C1", "10.1", str(config.research_root / "vlm"), "sweep", "scripts/sweep.py",
+                        status="queued")
+    store.update_job(job.id, pueue_id=3, status="running")
+    store.upsert_thread("C5", "20.1", "research-overview", None)
+    store.set_awaiting("C5", "20.1", True)
+
+    text = _texts(home.build_home(config, store, ["vlm"], is_owner=True))
+
+    assert "いま動いているもの" in text
+    assert "#vlm" in text and "依頼" in text            # 動いている依頼
+    assert "ジョブ 1「sweep」実行中" in text
+    assert "#research-overview" in text and "返事待ち" in text
+    assert str(int(time.time())) not in text            # 時刻ではなく経過時間で出す
+
+
+def test_home_says_when_nothing_is_running(config, store):
+    assert "いまは何も動いていません" in _texts(home.build_home(config, store, [], is_owner=True))
+
+
+async def test_refresh_button_rebuilds_the_home(env):
+    assistant, slack = env
+    await assistant.on_home_action(_action(home.REFRESH_ACTION, "refresh"))
+    assert _published(slack)["user_id"] == "UME"

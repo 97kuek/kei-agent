@@ -6,11 +6,19 @@
 
 from __future__ import annotations
 
+import time
+
 from kei_agent import settings
 from kei_agent.config import Config
+from kei_agent.slack_text import format_duration
 from kei_agent.store import Store
 
 ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
+REFRESH_ACTION = "kei_agent_home_refresh"
+# 決まった時刻の処理は、スレッドを持たない実行として記録される
+TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",
+                  "night": "夜間の Task", "handoff": "引き継ぎ", "literature": "先行研究の新着",
+                  "daily": "Daily", "review": "振り返り"}
 
 
 def _mrkdwn(text: str) -> dict:
@@ -25,6 +33,22 @@ def _button(text: str, action_id: str, value: str, style: str | None = None) -> 
     return button
 
 
+def _now_working(store: Store, now: float | None = None) -> list[str]:
+    """いま動いている依頼、走っているジョブ、返事待ちのスレッドを、短い行にして返す。"""
+    now = time.time() if now is None else now
+    lines = []
+    for run in store.open_runs():
+        kind = TRIGGER_LABELS.get(run["trigger"], run["trigger"])
+        lines.append(f"⏳ *#{run['channel_name']}* {kind}（{format_duration(now - run['started_at'])}）")
+    for job in store.active_jobs():
+        started = "実行中" if job.status == "running" else "順番待ち"
+        lines.append(f"🧪 ジョブ {job.id}「{job.name}」{started}"
+                     f"（投入から {format_duration(now - job.submitted_at)}）")
+    for row in store.threads_awaiting():
+        lines.append(f"❓ *#{row['channel_name']}* 返事待ち（{format_duration(now - row['awaiting_since'])}）")
+    return lines
+
+
 def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool) -> dict:
     if not is_owner:
         return {"type": "home", "blocks": [_mrkdwn("Kei Agent の設定は、依頼者だけが変えられます。")]}
@@ -33,6 +57,15 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         {"type": "header", "text": {"type": "plain_text", "text": "Kei Agent の設定"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             "ここで変えた内容は、再起動なしで次の作業から効きます。書き込み先や読ませない場所などは `config.toml` で管理します"}]},
+        {"type": "divider"},
+        _mrkdwn("*いま動いているもの*"),
+    ]
+    working = _now_working(store)
+    blocks.append(_mrkdwn("\n".join(working)) if working else
+                  {"type": "context", "elements": [{"type": "mrkdwn", "text": "いまは何も動いていません"}]})
+    blocks.append({"type": "actions", "elements": [_button("最新にする", REFRESH_ACTION, "refresh")]})
+
+    blocks += [
         {"type": "divider"},
         _mrkdwn("*接続先*"),
         # Slack の mrkdwn は、閉じる * の直後に全角の文字が続くと太字にならないので、説明は別の行にする

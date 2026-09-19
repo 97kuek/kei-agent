@@ -462,6 +462,7 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         except ValueError as e:
             await self.post(req, f"{FAILED_PREFIX} {e}")
             return None
+        await self.tell_if_waiting(req)
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
         themes.ensure_workspace(ws)
@@ -478,6 +479,13 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 log.exception("依頼の処理に失敗しました")
                 await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
                 return None
+
+    async def tell_if_waiting(self, req: Request) -> None:
+        """同じスレッドの前の作業が続いているときは、黙って待たせずに一言返す。"""
+        if req.trigger not in ("message", "voice"):
+            return
+        if self.thread_locks[(req.channel, req.thread_ts)].locked():
+            await self.post(req, "いま前の作業をしているから、終わったら取りかかるね。")
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         """1回分の依頼を claude に渡し、結果をスレッドに返す。スレッドのロックを取ってから呼ぶ。"""

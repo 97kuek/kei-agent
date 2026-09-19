@@ -909,3 +909,26 @@ async def test_open_runs_are_closed_on_start(env, store):
     await assistant.resume_interrupted()
     row = store.conn.execute("SELECT ended_at, is_error FROM runs WHERE id = ?", (run_id,)).fetchone()
     assert row["ended_at"] is not None and row["is_error"] == 1
+
+
+async def test_second_request_in_a_busy_thread_says_it_will_wait(env, monkeypatch):
+    """同じスレッドで続けて頼まれたら、黙って待たせずに一言返す。"""
+    assistant, slack, claude, _ = env
+    gate = asyncio.Event()
+
+    async def slow(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+        await gate.wait()
+        return await claude(config, ws, prompt, session_id, channel, thread_ts, on_activity, on_text)
+
+    monkeypatch.setattr(runner, "run_claude", slow)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
+    await asyncio.sleep(0)
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "図も"})
+    await asyncio.sleep(0)
+
+    assert "いま前の作業をしているから" in slack.texts()[0]
+    gate.set()
+    await settle(assistant)
+    # 順番に処理する（2件とも動く）
+    assert [c["prompt"] for c in claude.calls] == ["集計して", "図も"]
+    assert sum("いま前の作業" in (t or "") for t in slack.texts()) == 1

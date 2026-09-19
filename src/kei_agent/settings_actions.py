@@ -112,7 +112,9 @@ class SettingsActions:
             return
         action = (body.get("actions") or [{}])[0]
         kind, _, name = action.get("action_id", "").partition(":")
-        if kind == "kei_agent_home_remove_domain":
+        if kind == home.REFRESH_ACTION:
+            pass  # 表示を作り直すだけ
+        elif kind == "kei_agent_home_remove_domain":
             theme, _, domain = action.get("value", "").partition("\t")
             settings.remove_domain(self.store, theme, domain)
         elif kind == "kei_agent_home_add_domain":
