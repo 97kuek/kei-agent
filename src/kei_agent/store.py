@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS runs (
 -- 契約の上限に達して、あとでやり直すもの（assistant.py / schedule.py）
 CREATE TABLE IF NOT EXISTS deferred_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL,        -- request（スレッドの依頼） / schedule（決まった時刻の処理）
+    kind TEXT NOT NULL,        -- request（上限で止まった依頼） / schedule（決まった時刻の処理）
+                               -- / in_flight（いま処理中の依頼。終われば消す。残っていたら再起動で中断されたもの）
     payload TEXT NOT NULL,     -- JSON
     run_after REAL NOT NULL,
     created_at REAL NOT NULL,
@@ -241,6 +242,21 @@ class Store:
             (kind, now),
         ).fetchall()
         return [(r["id"], json.loads(r["payload"])) for r in rows]
+
+    def start_in_flight(self, payload: dict) -> int:
+        """処理中の依頼として控える。終わったら finish_deferred で消す。"""
+        return self.defer_run("in_flight", payload, 0)
+
+    def interrupted_requests(self) -> list[tuple[int, dict]]:
+        """前回の終了時に処理中だった依頼（再起動や強制終了で中断されたもの）。"""
+        return self.due_deferred("in_flight", time.time())
+
+    def end_open_runs(self) -> int:
+        """終わりが記録されていない実行を、止まったものとして閉じる（研究時間の集計がずれないように）。"""
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE runs SET ended_at = ?, is_error = 1 WHERE ended_at IS NULL", (time.time(),))
+        return cur.rowcount
 
     def finish_deferred(self, deferred_id: int) -> None:
         with self.conn:

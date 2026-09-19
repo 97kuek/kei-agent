@@ -98,3 +98,11 @@ def handoff_start_prompt(memo: str, previous_log: str) -> str:
         f"<handoff>\n{memo.strip()}\n</handoff>\n\n"
         f"細かい経緯が要るときは `{previous_log}` を読んでください。\n\n---\n\n"
     )
+
+
+def interrupted_prompt(text: str) -> str:
+    """再起動で途中で止まった依頼を、やり直すときに付ける文。"""
+    return (f"{HEADER} この依頼は、Kei Agent の再起動で途中で止まりました。"
+            "前回の作業の続きがファイルに残っていることがあるので、まず今の状態を確かめてから、"
+            "足りないところだけをやり直してください。\n\n"
+            f"止まった依頼:\n{text}")

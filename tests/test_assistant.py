@@ -9,6 +9,7 @@ from kei_agent import runner
 from kei_agent.assistant import Assistant
 from kei_agent.auto_messages import history_prompt
 from kei_agent.jobs import JobManager
+from kei_agent.request import Request
 from kei_agent.slack_text import split_text
 
 
@@ -803,3 +804,54 @@ async def test_long_finished_run_mentions(env, monkeypatch):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
     await settle(assistant)
     assert len(_mentions(slack)) == 1 and "終わった" in _mentions(slack)[0]
+
+
+# 再起動で途中で止まった依頼のやり直し
+
+
+async def test_request_is_recorded_while_it_runs(env, store, monkeypatch):
+    """強制終了されても拾えるよう、claude が動いている間は控えが残っている。"""
+    assistant, _, claude, _ = env
+    from kei_agent import runner
+    seen = []
+
+    async def watching(*args, **kw):
+        seen.append([p["text"] for _, p in store.interrupted_requests()])
+        return await claude(*args, **kw)
+
+    monkeypatch.setattr(runner, "run_claude", watching)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert seen == [["図を作って"]]
+    assert store.interrupted_requests() == []  # 終わったら消える
+
+
+async def test_interrupted_request_is_resumed_on_start(env, store):
+    """強制終了で控えが残ったまま起動したときは、断って続きからやり直す。"""
+    assistant, slack, claude, _ = env
+    store.start_in_flight(Request("C1", "vlm", "10.1", "10.1", "図を作って").to_payload())
+
+    assert await assistant.resume_interrupted() == 1
+    await settle(assistant)
+
+    assert store.interrupted_requests() == []
+    assert "途中で止まっちゃった" in slack.texts()[0]
+    assert "図を作って" in claude.calls[0]["prompt"] and "再起動で途中で止まりました" in claude.calls[0]["prompt"]
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
+
+
+async def test_finished_request_leaves_nothing_to_resume(env, store):
+    assistant, slack, claude, _ = env
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+    assert store.interrupted_requests() == []
+    assert await assistant.resume_interrupted() == 0
+
+
+async def test_open_runs_are_closed_on_start(env, store):
+    assistant, _, _, _ = env
+    run_id = store.start_run("C1", "10.1", "vlm", "message")
+    await assistant.resume_interrupted()
+    row = store.conn.execute("SELECT ended_at, is_error FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert row["ended_at"] is not None and row["is_error"] == 1

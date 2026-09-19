@@ -113,6 +113,8 @@ async def serve() -> None:
         await asyncio.wait_for(handler.connect_async(), CONNECT_TIMEOUT_SECONDS)
         # 自分を入れ替えたあとの起動なら、その結果をスレッドに知らせる（improve.py）
         await assistant.announce_update()
+        # 前の版で動いていて、入れ替えや強制終了で止まった依頼をやり直す
+        await assistant.resume_interrupted()
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()
     finally:

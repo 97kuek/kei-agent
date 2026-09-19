@@ -146,7 +146,7 @@ Kei Agent 本体が Notion の API（コネクト「Kei Agent」のトークン�
 
 ## 6. 手で使い始める手順（数日）
 
-2026-09-17 に、`uv run kei-agent-notion-setup <研究ホームのページID>` で、2〜4 章の構成（データベース、リレーション、ビュー、ホームの4つの欄）と、テーマ `ezra-trial` を作成済み。作ったものの ID は `~/.local/state/kei-agent/notion.json` にある。
+2026-09-17 に、`uv run kei-agent-notion-setup <研究ホームのページID>` で、2〜4 章の構成（データベース、リレーション、ビュー、ホームの4つの欄）とテーマ1件（試用。いまは削除済み）を作成済み。作ったものの ID は `~/.local/state/kei-agent/notion.json` にある。
 
 ノートには「計画」「考察」「議論メモ」のテンプレートがある（「新規」の横の ▼ から選ぶ）。API ではテンプレートの枠を作れないため、Notion の画面で空のテンプレートを作り、中身（名前、種類、書いた人、見出し）は `kei-agent-notion-setup` が書く。
 

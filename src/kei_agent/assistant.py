@@ -23,6 +23,7 @@ from pathlib import Path
 from kei_agent import ask, guard, improve, runner, settings, themes
 from kei_agent.auto_messages import (
     history_prompt,
+    interrupted_prompt,
     job_resume_prompt,
     job_status_label,
     rules_update_prompt,
@@ -461,7 +462,12 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         self.theme_runs.begin(req.channel_name, req.thread_ts)
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
-        result = await self._converse(req, ws, prompt, ui)
+        # 途中で終了させられても、次の起動で拾ってやり直せるように控えておく
+        in_flight = self.store.start_in_flight(req.to_payload())
+        try:
+            result = await self._converse(req, ws, prompt, ui)
+        finally:
+            self.store.finish_deferred(in_flight)
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if req.trigger in ("message", "voice"):
             self.store.count_turn(req.channel, req.thread_ts)
@@ -651,6 +657,28 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         self.store.defer_run("request", req.to_payload(), until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
         await self.post(req, f"{FAILED_PREFIX} Claude の契約の上限に達したみたい。{when} ごろに自動でやり直すね。")
+
+    # 再起動で途中で止まった依頼
+
+    async def resume_interrupted(self) -> int:
+        """前回の終了時に動いていた依頼を、スレッドに一言添えてやり直す。"""
+        interrupted = self.store.interrupted_requests()
+        self.store.end_open_runs()
+        for deferred_id, payload in interrupted:
+            self.store.finish_deferred(deferred_id)
+            req = Request.from_payload(payload)
+            if not req.text.strip():
+                continue
+            try:
+                await self.post(req, f"{FAILED_PREFIX} さっきの作業は Kei Agent の入れ替えで途中で止まっちゃった。"
+                                     "いまの状態を確かめて、続きからやり直すね。")
+            except Exception:
+                log.warning("中断を知らせられません", exc_info=True)
+            # 元のメッセージの 👀 は残したまま。やり直しが終われば ✅ か ⚠️ に変わる
+            await self.submit(replace(req, text=interrupted_prompt(req.text)))
+        if interrupted:
+            log.info("再起動で止まっていた依頼を %d 件やり直します", len(interrupted))
+        return len(interrupted)
 
     async def retry_deferred(self, now: float | None = None) -> None:
         """上限で止まった依頼を、明けたらやり直す。"""
