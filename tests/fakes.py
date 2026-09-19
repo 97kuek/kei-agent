@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from ezra import runner
+from ezra.jobs import REQUESTS_DIR
 from ezra.notion import NotionError
 from ezra.notion_store import Note, Task
-from ezra.jobs import REQUESTS_DIR
 
 
 class FakePueue:

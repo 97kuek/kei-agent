@@ -37,14 +37,21 @@ def _get(url: str, headers: dict[str, str] | None = None, retries: int = 4) -> b
     raise RuntimeError("unreachable")
 
 
+ARXIV_INTERVAL_SECONDS = 3.0
+_ARXIV_FIELD = re.compile(r"^\s*(all|ti|abs|au|co|jr|cat|rn|id):")
+
+
 def _short(text: str | None, n: int) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
 def search_arxiv(query: str, limit: int, sort: str) -> list[dict]:
+    time.sleep(ARXIV_INTERVAL_SECONDS)  # arXiv は連続アクセスに間隔をあけるよう求めている
     params = {
-        "search_query": query if ":" in query else " AND ".join(f"all:{w}" for w in query.split()),
+        # arXiv の項目指定（ti: など）で始まるときだけ、そのまま渡す。
+        # 自然文に : が入っているだけの質問を生で渡すと 400 か0件になる
+        "search_query": query if _ARXIV_FIELD.match(query) else " AND ".join(f"all:{w}" for w in query.split()),
         "start": 0,
         "max_results": limit,
         "sortBy": {"relevance": "relevance", "date": "submittedDate"}[sort],
@@ -98,7 +105,7 @@ def known_ids(papers_dir: Path) -> dict[str, str]:
     """papers/*.md の先頭にある `id:` を集める。"""
     ids = {}
     for md in sorted(papers_dir.glob("*.md")):
-        head = md.read_text(encoding="utf-8").split("\n---", 1)[0]
+        head = md.read_text(encoding="utf-8", errors="replace").split("\n---", 1)[0]
         m = re.search(r"^id:\s*(.+)$", head, re.MULTILINE)
         if m:
             ids[m.group(1).strip().strip("\"'")] = md.name
@@ -127,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     limit = max(1, min(args.limit, 50))
     try:
         papers = search_arxiv(args.query, limit, args.sort) if args.source == "arxiv" else search_s2(args.query, limit, args.year)
-    except (urllib.error.URLError, TimeoutError, ET.ParseError) as e:
+    except (urllib.error.URLError, TimeoutError, ET.ParseError, json.JSONDecodeError, RuntimeError) as e:
         hint = "混雑しています。少し待つか、別のソースを使ってください" if getattr(e, "code", None) == 429 else "取得に失敗しました"
         print(json.dumps({"error": f"{args.source}: {hint} ({e})"}, ensure_ascii=False), file=sys.stderr)
         return 1

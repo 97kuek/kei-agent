@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from ezra import themes
 from ezra.assistant import Assistant, format_duration
@@ -28,14 +26,6 @@ LITERATURE_STATUS = {
 
 def _ts(value: float | None) -> str:
     return datetime.fromtimestamp(value).strftime("%m/%d %H:%M") if value else "-"
-
-
-def theme_dirs(research_root: Path) -> list[Path]:
-    """CLAUDE.md のあるテーマのディレクトリ。_overview や _ezra_state などは含めない。"""
-    if not research_root.is_dir():
-        return []
-    return sorted(p for p in research_root.iterdir()
-                  if p.is_dir() and not p.name.startswith((".", "_")) and (p / "CLAUDE.md").exists())
 
 
 class DigestBuilder:
@@ -104,7 +94,7 @@ class DigestBuilder:
         lines = ["", f"## {days}日以上やり取りのないテーマ", ""]
         activity = self.store.last_activity_by_channel_name()
         limit = now - days * 86400
-        for d in theme_dirs(self.config.research_root):
+        for d in themes.theme_dirs(self.config):
             channel = d.name
             if channel not in active_channels:
                 continue

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ezra.config import Config, REPO_ROOT
+from ezra.config import REPO_ROOT, Config
 from ezra.store import Store
 
 

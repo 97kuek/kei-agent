@@ -27,6 +27,8 @@ REQUESTS_DIR = Path(".ezra/requests")
 JOBS_DIR = Path(".ezra/jobs")
 # ジョブのログの末尾を読むとき、読み込む最大の大きさ
 LOG_TAIL_BYTES = 64 * 1024
+# 書きかけのまま残った依頼のファイルを消すまでの秒数
+TMP_LIFETIME_SECONDS = 3600
 # ジョブに渡す環境変数。pueue は投入したプロセスの環境をそのまま保存するので、Slack のトークンなどを持ち込まない
 _JOB_ENV_KEYS = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL")
 
@@ -203,6 +205,10 @@ class JobManager:
         if not requests_dir.is_dir():
             return []
         outcomes = []
+        # 書き込みの途中で claude が落ちると `.xxx.tmp` が残る。誰も消さないので、ここで片づける
+        for leftover in requests_dir.glob(".*.tmp"):
+            if time.time() - leftover.stat().st_mtime > TMP_LIFETIME_SECONDS:
+                leftover.unlink(missing_ok=True)
         for path in sorted(requests_dir.glob("*.json")):
             outcome = await self._handle_request(path, cwd)
             if outcome is not None:

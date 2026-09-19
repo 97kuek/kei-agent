@@ -7,6 +7,10 @@ features:
   bot_user:
     display_name: Ezra
     always_online: true
+  # AI アプリとして扱う。作業中のステータス（agents.sessions.setStatus）と、
+  # 返事を流しながら見せる表示（chat.startStream）に必要
+  agent_view:
+    agent_description: 研究の作業を進めて、経過と結果をスレッドに返す
 oauth_config:
   scopes:
     bot:

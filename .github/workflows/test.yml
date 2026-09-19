@@ -19,5 +19,7 @@ jobs:
           enable-cache: true
       - name: 依存関係を入れる
         run: uv sync --frozen
+      - name: 書き方を確かめる
+        run: uvx ruff check src tests plugin
       - name: テストを実行する
         run: uv run pytest

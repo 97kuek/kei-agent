@@ -1,14 +1,14 @@
-import json
+import asyncio
 import time
 from datetime import datetime
 
 import pytest
+from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
 from ezra import runner, themes
 from ezra.assistant import Assistant
 from ezra.jobs import JobManager
 from ezra.schedule import Scheduler, due_day, search_keywords
-from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
 
 @pytest.fixture
@@ -259,6 +259,7 @@ async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, co
 async def test_digest_skips_theme_never_asked(env, config, store):
     """招待しただけで一度も依頼のないテーマは、止まっているテーマに数えない。"""
     import os
+
     from ezra.digest import DigestBuilder
     scheduler, assistant, *_ = env
     ws = make_theme(config, "just-invited")
@@ -355,8 +356,8 @@ async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatc
 async def test_night_task_from_other_channel_runs_in_theme_channel(env, config):
     scheduler, assistant, slack, claude = env
     make_theme(config)
-    task = assistant.notion.add_task("別のチャンネルで作った", "vlm",
-                                     slack_url="https://example.slack.com/archives/C9/p1789636798229039")
+    assistant.notion.add_task("別のチャンネルで作った", "vlm",
+                              slack_url="https://example.slack.com/archives/C9/p1789636798229039")
     slack.replies = [{"ts": "1789636798.229039", "user": "UME", "text": "別のチャンネルで作った"}]
 
     await scheduler.run_night("2026-09-18")
@@ -393,3 +394,29 @@ def test_interrupted_schedule_runs_again(store):
     store.record_schedule("daily", "2026-09-19", {"status": "posted"})
     assert store.mark_interrupted_schedules() == []
     assert store.schedule_ran("daily", "2026-09-19")
+
+
+async def test_theme_is_registered_in_notion_on_first_use(env, config):
+    """招待のイベントを取りこぼしても、初めて使うときに Notion のテーマの行ができる。"""
+    scheduler, assistant, slack, claude = env
+    make_theme(config, "vlm")
+    assert assistant.notion.themes == {}
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    while assistant.tasks:
+        await asyncio.gather(*list(assistant.tasks))
+
+    assert "vlm" in assistant.notion.themes
+
+
+async def test_moon_removed_from_someone_elses_message_is_ignored(env):
+    """🌙 をつけるときと同じく、外すときも自分のメッセージだけを見る。"""
+    scheduler, assistant, slack, claude = env
+    assistant.notion.add_task("誰かの Task", "vlm", slack_url="https://example.slack.com/archives/C1/p101")
+
+    await assistant.on_reaction_removed({
+        "user": "UME", "item_user": "USOMEONE", "reaction": "crescent_moon",
+        "item": {"type": "message", "channel": "C1", "ts": "10.1"},
+    })
+
+    assert [t.status for t in assistant.notion.tasks.values()] == ["今夜やる"]

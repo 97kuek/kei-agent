@@ -2,11 +2,11 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from fakes import FakeClaude, FakePueue, FakeSlack, write_request
 
 from ezra import runner
 from ezra.assistant import Assistant, history_prompt, split_text
 from ezra.jobs import JobManager
-from fakes import FakeClaude, FakePueue, FakeSlack, write_request
 
 
 @pytest.fixture
@@ -367,3 +367,27 @@ async def test_falls_back_to_a_plain_post_when_the_new_slack_api_is_unavailable(
 
     assert slack.posted()[-1] == {"channel": "C1", "thread_ts": "10.1", "markdown_text": "結果です"}
     assert slack.streamed() == []
+
+
+async def test_publish_records_the_thread_even_without_a_session(env, config, store):
+    """claude がセッションを作る前に落ちた日でも、そのスレッドへの返信に反応できるようにする。"""
+    assistant, slack, claude, _ = env
+    from ezra import themes
+
+    ws = themes.resolve(config, "research-overview")
+    themes.ensure_workspace(ws)
+    result = runner.RunResult(session_id=None, text="", is_error=True, errors=["起動できません"])
+
+    thread_ts = await assistant.publish("C5", "research-overview", ws, "🌙 振り返りの材料", result)
+
+    assert store.get_thread("C5", thread_ts) is not None
+
+
+def test_message_text_reads_messages_posted_as_markdown():
+    """流して見せた返事や markdown_text の投稿は、text が空で blocks に入る。"""
+    from ezra.assistant import message_text
+
+    assert message_text({"text": "ふつうの投稿"}) == "ふつうの投稿"
+    assert message_text({"text": "", "blocks": [{"type": "markdown", "text": "流した返事"}]}) == "流した返事"
+    assert message_text({"blocks": [{"type": "rich_text", "elements": [
+        {"elements": [{"type": "text", "text": "書き込み"}]}]}]}) == "書き込み"

@@ -73,6 +73,26 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name)
 
 
+def theme_dirs(config: Config) -> list[Path]:
+    """研究テーマの作業用ディレクトリ。`_overview` などの特別なものは含めない。
+
+    「どれがテーマか」の判断は resolve() に合わせる（2か所で別々に決めない）。
+    """
+    root = config.research_root
+    if not root.is_dir():
+        return []
+    dirs = []
+    for p in sorted(root.iterdir()):
+        if not p.is_dir() or p.name.startswith((".", "_")):
+            continue
+        try:
+            if resolve(config, p.name).kind is ChannelKind.THEME:
+                dirs.append(p)
+        except ValueError:
+            continue
+    return dirs
+
+
 def ensure_workspace(ws: Workspace) -> bool:
     """作業用ディレクトリとひな形を作る。新しく作ったら True。"""
     if ws.cwd is None:

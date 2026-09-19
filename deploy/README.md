@@ -28,6 +28,18 @@
 4. 自分のSlackユーザーIDを控える（Slack でプロフィール → ︙ → **メンバーIDをコピー**。`U` で始まる）
 5. **Agents & AI Apps** を有効にする。作業中のステータス（Bot の名前のところと入力欄の下に出る）と、返事を流しながら見せる表示に使う。有効にしなくても Ezra は動き、その場合は結果をまとめて投稿する
 
+   `slack/manifest.yaml` には `features.agent_view` が入っているので、**App Manifest** の画面に貼り直せば有効になる。コマンドで入れ替えるなら、**Settings → App Configuration Tokens** で作ったトークン（`xoxe-`）を使う。
+
+   ```zsh
+   TOKEN="xoxe-..." APP_ID="A..."   # App ID は api.slack.com/apps のアプリの Basic Information にある
+   python3 -c 'import json,sys,yaml; print(json.dumps({"manifest": yaml.safe_load(open("slack/manifest.yaml"))}))' \
+     | curl -s -X POST https://slack.com/api/apps.manifest.update \
+         -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+         --data @- --url-query app_id="$APP_ID" | python3 -m json.tool
+   ```
+
+   入れ替えたあとは **Install App** で入れ直す（権限が変わったとき）。
+
 ## 3. 秘密情報
 
 `~/.config/zsh/local/research-assistant.zsh` を作る（Git に入れない）。

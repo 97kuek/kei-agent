@@ -34,6 +34,8 @@ STATUS_INTERVAL_SECONDS = 3.0
 LOADING_MESSAGES = ("考えています…", "調べています…", "手を動かしています…")
 MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# Slack から受け取って inputs/ に保存する1ファイルの上限
+MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024
 SLACK_TEXT_LIMIT = 11000
 
 NIGHT_REACTION = "crescent_moon"
@@ -140,11 +142,27 @@ def job_resume_prompt(job: Job) -> str:
     )
 
 
+def message_text(message: dict) -> str:
+    """メッセージの本文。`markdown_text` や流して見せた返事は text が空で blocks に入る。"""
+    text = message.get("text") or ""
+    if text:
+        return text
+    parts = []
+    for block in message.get("blocks") or []:
+        if block.get("type") == "markdown" and block.get("text"):
+            parts.append(block["text"])
+        for element in block.get("elements") or []:
+            for item in element.get("elements") or []:
+                if item.get("type") == "text" and item.get("text"):
+                    parts.append(item["text"])
+    return "\n".join(parts)
+
+
 def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None) -> str:
     """セッションが失われたときに、スレッドの履歴から文脈を復元するためのプロンプト。"""
     lines = []
     for m in messages:
-        text = m.get("text") or ""
+        text = message_text(m)
         if m.get("ts") == exclude_ts or text.startswith((PROGRESS_PREFIX, DONE_PREFIX, FAILED_PREFIX)):
             continue
         who = "Ezra" if m.get("user") == bot_user_id or m.get("bot_id") else "依頼者"
@@ -251,6 +269,8 @@ class Assistant:
         self.semaphore = asyncio.Semaphore(config.max_concurrent_runs)
         self.thread_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
         self.channel_names: dict[str, str] = {}
+        # この起動で Notion に登録済みのテーマ（招待の取りこぼしを、使うときに埋める）
+        self.registered_themes: set[str] = set()
         self.tasks: set[asyncio.Task] = set()
 
     # Slack の出来事
@@ -312,6 +332,7 @@ class Assistant:
             await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
             return
         created = themes.ensure_workspace(ws)
+        self.registered_themes.add(name)
         if ws.kind is ChannelKind.IMPROVE:
             text = f"Ezra です。このチャンネルでメンションされた要望は `{self.config.backlog_path}` に記録します。"
         elif ws.kind is ChannelKind.OVERVIEW:
@@ -392,7 +413,9 @@ class Assistant:
         item = event.get("item") or {}
         if event.get("reaction") != NIGHT_REACTION or item.get("type") != "message":
             return
-        if not self.is_allowed(event.get("user")) or self.notion is None:
+        if not self.is_allowed(event.get("user")) or event.get("item_user") != event.get("user"):
+            return
+        if self.notion is None:
             return
         link = await self.permalink(item["channel"], item["ts"])
         try:
@@ -440,8 +463,8 @@ class Assistant:
         resp = await self.slack.chat_postMessage(channel=channel, text=header)
         thread_ts = resp["ts"]
         req = Request(channel, channel_name, thread_ts, None, "")
-        if result.session_id:
-            self.store.upsert_thread(channel, thread_ts, channel_name, result.session_id)
+        # セッションが作れなかった日でも、このスレッドへの返信には反応できるようにする
+        self.store.upsert_thread(channel, thread_ts, channel_name, result.session_id)
         if result.text:
             append_thread_log(ws.cwd, channel_name, thread_ts, "Ezra", result.text)
             for chunk in split_text(result.text):
@@ -495,17 +518,20 @@ class Assistant:
             await self.record_backlog(req)
             return None
         themes.ensure_workspace(ws)
+        if ws.kind is ChannelKind.THEME and ws.channel_name not in self.registered_themes:
+            # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
+            self.registered_themes.add(ws.channel_name)
+            await self.register_theme(req.channel, ws)
         # スレッドごとのロックは捨てずに残す。「待っている依頼がいるか」は release の直後に
         # 一瞬だけ「いない」と見えるので、そこで捨てると、待っていた依頼が別のロックを取り、
         # 同じスレッド（同じセッション）の claude が2本同時に走る
-        async with self.thread_locks[(req.channel, req.thread_ts)]:
-            async with self.semaphore:
-                try:
-                    return await self.run(req, ws)
-                except Exception as e:
-                    log.exception("依頼の処理に失敗しました")
-                    await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
-                    return None
+        async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
+            try:
+                return await self.run(req, ws)
+            except Exception as e:
+                log.exception("依頼の処理に失敗しました")
+                await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
+                return None
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         assert ws.cwd is not None
@@ -595,6 +621,9 @@ class Assistant:
                 url = f.get("url_private_download") or f.get("url_private")
                 if not url:
                     continue
+                if int(f.get("size") or 0) > MAX_DOWNLOAD_BYTES:
+                    log.warning("大きすぎる添付は保存しません: %s", f.get("name"))
+                    continue
                 name = _UNSAFE_FILENAME.sub("_", f.get("name") or f.get("id") or "file").lstrip(".") or "file"
                 dest = inputs / name
                 stem, suffix, n = dest.stem, dest.suffix, 1
@@ -603,7 +632,10 @@ class Assistant:
                     n += 1
                 async with http.get(url) as resp:
                     resp.raise_for_status()
-                    dest.write_bytes(await resp.read())
+                    # 全部をメモリに載せない
+                    with dest.open("wb") as out:
+                        async for chunk in resp.content.iter_chunked(1024 * 1024):
+                            out.write(chunk)
                 saved.append(str(dest.relative_to(cwd)))
         return saved
 

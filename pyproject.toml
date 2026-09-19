@@ -32,3 +32,13 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# 押さえたいのは「壊れている・読みにくい」ところ。時刻は端末のローカル時刻で扱う方針なので DTZ は外す
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF100"]
+# ASYNC240/ASYNC109: 小さなファイル操作と、上限時間を渡す関数は、このBotでは素直に書く
+ignore = ["E501", "ASYNC240", "ASYNC109"]

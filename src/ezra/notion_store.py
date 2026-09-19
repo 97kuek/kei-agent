@@ -195,7 +195,7 @@ def _strip_marks(line: str) -> str:
 def summarize(text: str, limit: int = RESULT_LIMIT) -> str:
     """Task の「結果」欄に入れる要約。見出しや空行を飛ばし、最初の数行を使う。"""
     lines = [_strip_marks(line).replace("**", "").replace("`", "").strip() for line in text.splitlines()]
-    joined = " / ".join(l for l in lines if l)
+    joined = " / ".join(line for line in lines if line)
     return joined if len(joined) <= limit else joined[: limit - 1] + "…"
 
 

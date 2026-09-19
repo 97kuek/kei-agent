@@ -51,33 +51,26 @@ async def serve() -> None:
         team_id=auth.get("team_id", ""),
     )
 
-    @app.event("app_mention")
-    async def handle_mention(event):
-        await assistant.on_mention(event)
+    def guard(handler):
+        """Slack の出来事の処理で例外が出ても、黙って無反応にならないようにする。"""
+        async def wrapped(event):
+            try:
+                await handler(event)
+            except Exception as e:
+                log.exception("Slack のイベントの処理に失敗しました")
+                await assistant.notify_trouble(f"Slack のイベントを処理できませんでした: {type(e).__name__}: {e}")
+        return wrapped
 
-    @app.event("message")
-    async def handle_message(event):
-        await assistant.on_message(event)
-
-    @app.event("member_joined_channel")
-    async def handle_member_joined(event):
-        await assistant.on_member_joined(event)
-
-    @app.event("channel_rename")
-    async def handle_channel_rename(event):
-        await assistant.on_channel_rename(event)
-
-    @app.event("group_rename")
-    async def handle_group_rename(event):
-        await assistant.on_channel_rename(event)
-
-    @app.event("reaction_added")
-    async def handle_reaction_added(event):
-        await assistant.on_reaction_added(event)
-
-    @app.event("reaction_removed")
-    async def handle_reaction_removed(event):
-        await assistant.on_reaction_removed(event)
+    for name, handler in (
+        ("app_mention", assistant.on_mention),
+        ("message", assistant.on_message),
+        ("member_joined_channel", assistant.on_member_joined),
+        ("channel_rename", assistant.on_channel_rename),
+        ("group_rename", assistant.on_channel_rename),
+        ("reaction_added", assistant.on_reaction_added),
+        ("reaction_removed", assistant.on_reaction_removed),
+    ):
+        app.event(name)(guard(handler))
 
     job_loop = asyncio.create_task(assistant.job_loop())
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())

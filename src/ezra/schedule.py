@@ -9,15 +9,16 @@ import logging
 import os
 import re
 import time
+from contextlib import suppress
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
 from ezra import maintenance, themes
 from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text
-from ezra.digest import DigestBuilder, theme_dirs
-from ezra.notion import NotionError
 from ezra.config import Config
+from ezra.digest import DigestBuilder
+from ezra.notion import NotionError
 from ezra.notion_store import Note, Task, parse_slack_permalink, summarize
 from ezra.store import Store
 from ezra.themes import OVERVIEW_DIR
@@ -137,10 +138,8 @@ class Scheduler:
                 log.exception("夜間の Task「%s」が止まりました", task.title)
                 reason = f"途中で止まりました: {type(e).__name__}: {e}"
                 await self.assistant.notify_trouble(f"夜間の Task「{task.title}」が{reason}")
-                try:
+                with suppress(NotionError):
                     await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
-                except NotionError:
-                    pass
                 done.append({"title": task.title, "status": "error", "reason": reason, "url": task.url})
         try:
             remaining = await asyncio.to_thread(notion.count_tonight_tasks)
@@ -207,7 +206,7 @@ class Scheduler:
         if last:
             since = min(since, date.fromisoformat(last["day"]))
         results = {}
-        for cwd in theme_dirs(self.config.research_root):
+        for cwd in themes.theme_dirs(self.config):
             name = cwd.name
             if name not in ids:
                 continue  # アーカイブしたテーマや、Ezra のいないテーマは見張らない
@@ -366,10 +365,12 @@ async def _run_once(name: str, record: bool) -> None:
     store = Store(config.db_path)
     slack = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     auth = await slack.auth_test()
-    assistant = Assistant(config, store, slack, JobManager(config, store, Pueue(config)),
-                          os.environ["SLACK_BOT_TOKEN"], auth["user_id"])
-    assistant.notion = load_notion(config)
-    assistant.team_url = auth.get("url", "")
+    pueue = Pueue(config)
+    await pueue.ensure_group()  # 夜間の Task がジョブを投入することがある
+    assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
+                          os.environ["SLACK_BOT_TOKEN"], auth["user_id"],
+                          notion=load_notion(config), team_url=auth.get("url", ""),
+                          team_id=auth.get("team_id", ""))
     scheduler = Scheduler(config, store, assistant)
     day = date.today().isoformat()
     detail = await scheduler.run_task(name, day, record=record)

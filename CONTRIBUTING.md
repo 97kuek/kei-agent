@@ -23,6 +23,7 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の手�
 ## 確認すること
 
 - `uv run pytest` がすべて通る（プルリクエストと `main` への push では、GitHub Actions でも実行される）
+- `uvx ruff check src tests plugin` が通る（設定は `pyproject.toml` の `[tool.ruff]`）
 - Slack を通る動きを変えたときは、手元で `uv run ezra` を起動し、テーマのチャンネルで実際に頼んで確かめる
 - 定期処理を変えたときは、`uv run ezra-schedule <night|literature|daily|review>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
 - `claude -p` の権限や sandbox を変えたときは、テーマのディレクトリの外に書き込めないことを確かめる

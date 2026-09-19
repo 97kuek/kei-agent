@@ -7,10 +7,9 @@ import json
 import os
 import signal
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from contextlib import suppress
 
 from ezra.config import Config, path_without_venv
 from ezra.themes import ChannelKind, Workspace
@@ -164,10 +163,8 @@ def _kill_group(pid: int) -> None:
     start_new_session=True で起動しているので、グループIDは claude の pid と同じ。
     claude 本体を回収したあとでも、残った子プロセスを止められるよう getpgid は使わない。
     """
-    try:
+    with suppress(ProcessLookupError, PermissionError):
         os.killpg(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
 
 
 async def run_claude(

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import time
 from dataclasses import replace
 
 import pytest
@@ -136,6 +135,6 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
             os.kill(pid, 0)
         except ProcessLookupError:
             break
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
     else:
         pytest.fail(f"claude が残したプロセス {pid} が生きています")
