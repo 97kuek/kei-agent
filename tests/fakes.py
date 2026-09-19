@@ -159,12 +159,15 @@ class FakeClaude:
                 await on_activity(value)
         if "side_effect" in behavior:
             behavior["side_effect"](ws.cwd)
-        result = runner.RunResult(
-            session_id=behavior.get("session_id", "sess-1"),
-            text=behavior.get("text", "結果です"),
-            is_error=behavior.get("is_error", False),
-            errors=behavior.get("errors", []),
-        )
+        # 実物と同じく、最後の result のイベントから組み立てる（上限の読み取りなども同じ道を通る）
+        result = runner.RunResult()
+        runner.apply_event(result, {
+            "type": "result",
+            "session_id": behavior.get("session_id", "sess-1"),
+            "result": behavior.get("text", "結果です"),
+            "is_error": behavior.get("is_error", False),
+            "errors": behavior.get("errors", []),
+        })
         if on_text and result.text:
             await on_text(result.text)
         return result

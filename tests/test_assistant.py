@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -630,3 +631,38 @@ async def test_updated_rules_are_passed_to_a_resumed_session_once(env, monkeypat
     await settle(assistant)
     assert "新しい決まり" in claude.calls[2]["prompt"] and claude.calls[2]["prompt"].endswith("もう一度")
     assert "新しい決まり" not in claude.calls[3]["prompt"]
+
+
+# 契約の上限（Claude AI usage limit）
+
+async def test_usage_limit_is_retried_after_it_resets(env, store, monkeypatch):
+    """上限に達したら、明ける時刻を伝えて、そのあと自動でやり直す。"""
+    assistant, slack, claude, _ = env
+    reset = time.time() + 3600
+    claude.behaviors = [{"is_error": True, "text": f"Claude AI usage limit reached|{int(reset)}", "errors": []},
+                        {"text": "やり直したよ"}]
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    texts = "\n".join(slack.texts())
+    assert "上限" in texts and "やり直す" in texts
+    assert "エラーで止まりました" not in texts        # ふつうのエラーとしては出さない
+    assert assistant.limited_until > time.time()
+    assert store.due_deferred("request", time.time()) == []      # まだ明けていない
+
+    deferred = store.due_deferred("request", reset + 120)
+    assert deferred and deferred[0][1]["text"] == "図を作って"
+
+    await assistant.retry_deferred(now=reset + 120)
+    await settle(assistant)
+    assert claude.calls[1]["prompt"] == "図を作って" and "やり直したよ" in slack.streamed()
+    assert store.due_deferred("request", reset + 200) == []       # 二度はやり直さない
+
+
+async def test_usage_limit_without_a_reset_time_waits_a_while(env, store):
+    assistant, slack, claude, _ = env
+    claude.behaviors = [{"is_error": True, "text": "Claude AI usage limit reached", "errors": []}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
+    await settle(assistant)
+    assert time.time() + 60 < assistant.limited_until <= time.time() + assistant.LIMIT_FALLBACK_SECONDS + 5

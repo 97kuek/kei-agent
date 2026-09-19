@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS runs (
     is_error INTEGER,
     cost_usd REAL
 );
+-- 契約の上限に達して、あとでやり直すもの（assistant.py / schedule.py）
+CREATE TABLE IF NOT EXISTS deferred_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,        -- request（スレッドの依頼） / schedule（決まった時刻の処理）
+    payload TEXT NOT NULL,     -- JSON
+    run_after REAL NOT NULL,
+    created_at REAL NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0
+);
 -- Ezra 自身を直す流れ（improve.py）
 CREATE TABLE IF NOT EXISTS improvements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,6 +217,27 @@ class Store:
                 (channel, thread_ts, channel_name, session_id, now, now),
             )
 
+    # 上限に達して、あとでやり直すもの
+
+    def defer_run(self, kind: str, payload: dict, run_after: float) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO deferred_runs (kind, payload, run_after, created_at) VALUES (?, ?, ?, ?)",
+                (kind, json.dumps(payload, ensure_ascii=False), run_after, time.time()),
+            )
+        return int(cur.lastrowid)
+
+    def due_deferred(self, kind: str, now: float) -> list[tuple[int, dict]]:
+        rows = self.conn.execute(
+            "SELECT id, payload FROM deferred_runs WHERE kind = ? AND done = 0 AND run_after <= ? ORDER BY id",
+            (kind, now),
+        ).fetchall()
+        return [(r["id"], json.loads(r["payload"])) for r in rows]
+
+    def finish_deferred(self, deferred_id: int) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE deferred_runs SET done = 1 WHERE id = ?", (deferred_id,))
+
     # Ezra 自身を直す流れ（improve.py）
 
     def improvement(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
@@ -336,6 +366,11 @@ class Store:
                 "INSERT OR REPLACE INTO schedule_runs (name, day, ran_at, detail) VALUES (?, ?, ?, ?)",
                 (name, day, time.time(), json.dumps(detail or {}, ensure_ascii=False)),
             )
+
+    def forget_schedule(self, name: str, day: str) -> None:
+        """その日の分の記録を消す（上限に当たったときなど、やり直せるようにする）。"""
+        with self.conn:
+            self.conn.execute("DELETE FROM schedule_runs WHERE name = ? AND day = ?", (name, day))
 
     def last_schedule(self, name: str, before_day: str | None = None) -> sqlite3.Row | None:
         if before_day is None:

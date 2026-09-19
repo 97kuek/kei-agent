@@ -56,6 +56,10 @@ export NOTION_TOKEN="ntn_..."
 export TOGGL_API_TOKEN="toggl_sk_..."
 export TOGGL_ORGANIZATION_ID="..."
 export TOGGL_WORKSPACE_ID="..."
+# 任意: Ezra が claude を動かすときのログイン。書かなければ、ふだんのログイン（キーチェーン）を使う。
+# `claude setup-token` で作ったトークンを入れると、手元の作業と別のアカウントで Ezra を動かせる
+# （契約の上限を分けたいときに使う）
+# export CLAUDE_CODE_OAUTH_TOKEN="..."
 # 任意: Semantic Scholar の APIキー（なくても動くが、混雑時に 429 になりやすい）
 # export S2_API_KEY="..."
 ```
@@ -88,8 +92,12 @@ tail -f ~/Library/Logs/ezra/ezra.log
 launchctl print gui/$(id -u)/com.ezra.assistant | grep -E 'state|last exit'
 ```
 
-`claude` は、ふだんのログイン（キーチェーン）で動く。launchd からログイン情報を読めないときは、
-`claude setup-token` で作ったトークンを `CLAUDE_CODE_OAUTH_TOKEN` として秘密情報のファイルに足す。
+`claude` は、ふだんのログイン（キーチェーン）で動く。launchd からログイン情報を読めないときや、
+手元の作業と別のアカウント（別の契約の枠）で Ezra を動かしたいときは、`claude setup-token` で作った
+トークンを `CLAUDE_CODE_OAUTH_TOKEN` として秘密情報のファイルに足す。
+
+契約の上限に達したときは、Ezra がスレッドに「◯時◯分ごろに自動でやり直す」と書き、明けてから
+止まった依頼を自分でやり直す。決まった時刻の処理も、上限の間は始めず、明けてから取りこぼしとして動かす。
 
 ## 6. 決まった時刻の処理
 

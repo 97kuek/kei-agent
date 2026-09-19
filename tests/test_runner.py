@@ -157,3 +157,24 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
         await asyncio.sleep(0.1)
     else:
         pytest.fail(f"claude が残したプロセス {pid} が生きています")
+
+
+def test_apply_event_reads_the_usage_limit_and_when_it_resets():
+    """claude -p は上限に達すると `Claude AI usage limit reached|<エポック秒>` を返す。"""
+    result = runner.RunResult()
+    runner.apply_event(result, {"type": "result", "is_error": True,
+                                "result": "Claude AI usage limit reached|1789800000"})
+    assert result.limit_reset_at == 1789800000
+
+
+def test_apply_event_without_a_reset_time_still_counts_as_a_limit():
+    result = runner.RunResult()
+    runner.apply_event(result, {"type": "result", "is_error": True,
+                                "errors": ["Claude AI usage limit reached"]})
+    assert result.limit_reset_at == runner.UNKNOWN_LIMIT_RESET
+
+
+def test_a_normal_error_is_not_a_usage_limit():
+    result = runner.RunResult()
+    runner.apply_event(result, {"type": "result", "is_error": True, "result": "rate limited by the tool"})
+    assert result.limit_reset_at is None

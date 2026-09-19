@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -44,6 +45,7 @@ TASK_DETAILS_LIMIT = 300
 FAILED_REACTION = "warning"
 # Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
 AWAITING_MARKER = "❓ 確認:"
+
 
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 _UNSAFE_FILENAME = re.compile(r"[^\w.\-]+")
@@ -368,6 +370,8 @@ class Assistant:
         self.idle.set()
         # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
         self.restart_requested = asyncio.Event()
+        # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
+        self.limited_until = 0.0
 
     @contextmanager
     def claude_running(self):
@@ -746,6 +750,12 @@ class Assistant:
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
             self.store.set_prompt_version(req.channel, req.thread_ts, version)
+        if result.limit_reset_at is not None:
+            await self.defer_for_limit(req, result.limit_reset_at)
+            self.store.set_awaiting(req.channel, req.thread_ts, True)
+            await ui.finish(result.text, awaiting=True)
+            await self.mark_answered(req, failed=True)
+            return result
         connect = self.new_connect_requests(ws, result.text, result.requested_domains)
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
@@ -790,6 +800,46 @@ class Assistant:
                 await method(channel=req.channel, timestamp=req.message_ts, name=name)
             except Exception:
                 log.debug("リアクションを変えられません", exc_info=True)
+
+    # 契約の上限（Claude AI usage limit）
+
+    # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
+    LIMIT_FALLBACK_SECONDS = 30 * 60
+    # 明けた直後に詰まらないよう、少しだけ余分に待つ
+    LIMIT_MARGIN_SECONDS = 60
+
+    def limit_until(self, reset_at: float, now: float | None = None) -> float:
+        """いつやり直すか。明ける時刻が古いまま返ることがあるので、過去ならしばらく待つ。"""
+        now = time.time() if now is None else now
+        if reset_at <= now:
+            return now + self.LIMIT_FALLBACK_SECONDS
+        return reset_at + self.LIMIT_MARGIN_SECONDS
+
+    async def defer_for_limit(self, req: Request, reset_at: float) -> None:
+        """上限に達した依頼を、明けてからやり直すものとして覚えておく。"""
+        until = self.limit_until(reset_at)
+        self.limited_until = max(self.limited_until, until)
+        self.store.defer_run("request", {
+            "channel": req.channel, "channel_name": req.channel_name, "thread_ts": req.thread_ts,
+            "message_ts": req.message_ts, "text": req.text, "trigger": req.trigger,
+            "outputs_since": req.outputs_since, "awaiting_after": req.awaiting_after,
+        }, until)
+        when = datetime.fromtimestamp(until).strftime("%H:%M")
+        await self.post(req, f"{FAILED_PREFIX} Claude の契約の上限に達したみたい。{when} ごろに自動でやり直すね。")
+
+    async def retry_deferred(self, now: float | None = None) -> None:
+        """上限で止まった依頼を、明けたらやり直す。"""
+        now = time.time() if now is None else now
+        for deferred_id, payload in self.store.due_deferred("request", now):
+            self.store.finish_deferred(deferred_id)
+            await self.post(Request(payload["channel"], payload["channel_name"], payload["thread_ts"], None, ""),
+                            "上限が明けたので、さっきの続きをやり直すね。")
+            await self.submit(Request(
+                channel=payload["channel"], channel_name=payload["channel_name"],
+                thread_ts=payload["thread_ts"], message_ts=payload["message_ts"], text=payload["text"],
+                trigger=payload["trigger"], outputs_since=payload["outputs_since"],
+                awaiting_after=payload["awaiting_after"],
+            ))
 
     # Ezra 自身を直す（docs/plan.md の12章）
 
@@ -1145,6 +1195,7 @@ class Assistant:
         while True:
             try:
                 await self.poll_jobs()
+                await self.retry_deferred()
                 failing = False
             except Exception as e:
                 log.exception("ジョブの確認に失敗しました")

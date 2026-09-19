@@ -438,3 +438,46 @@ async def test_moon_removed_from_someone_elses_message_is_ignored(env):
     })
 
     assert [t.status for t in assistant.notion.tasks.values()] == ["今夜やる"]
+
+
+# 契約の上限（Claude AI usage limit）
+
+async def test_tick_waits_while_the_usage_limit_is_on(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    ran = []
+    monkeypatch.setattr(scheduler, "run_task", lambda name, day, record=True: ran.append(name))
+    assistant.limited_until = time.time() + 3600
+
+    await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
+    assert ran == []
+
+
+async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monkeypatch):
+    """上限で止まった処理は、その日の分としては記録せず、明けてからやり直す。"""
+    scheduler, assistant, *_ = env
+    reset = time.time() + 3600
+    ran = []
+
+    async def hits_the_limit(name, day, record=True):
+        ran.append((name, day))
+        assistant.limited_until = reset
+        return {"status": "error"}
+
+    monkeypatch.setattr(scheduler, "run_task", hits_the_limit)
+    await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
+
+    assert ran == [("night", "2026-09-18")]                         # 1つ目で上限に当たって止まる
+    assert not scheduler.store.schedule_ran("night", "2026-09-18")  # その日の分としては記録しない
+    assert scheduler.store.due_deferred("schedule", reset + 120)    # 明けたらやり直す
+
+    done = []
+
+    async def works(name, day, record=True):
+        done.append((name, day))
+        scheduler.store.record_schedule(name, day, {"status": "done"})
+
+    monkeypatch.setattr(scheduler, "run_task", works)
+    assistant.limited_until = 0
+    await scheduler.catch_up_deferred(reset + 120)
+    assert done == [("night", "2026-09-18")]
+    assert scheduler.store.due_deferred("schedule", reset + 200) == []

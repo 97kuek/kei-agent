@@ -91,6 +91,10 @@ class Scheduler:
         sched = self.config.schedule
         if not sched.enabled:
             return
+        # Claude の契約の上限に達している間は、決まった時刻の処理も始めない（明けてからやり直す）
+        if self.assistant.limited_until > now.timestamp():
+            return
+        await self.catch_up_deferred(now.timestamp())
         for name in TASK_NAMES:
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
             # Slack（App Home）で変えた時刻を毎回読み直す。止めている処理は空文字
@@ -100,7 +104,8 @@ class Scheduler:
                 continue
             # 実行中に次の tick で二重に動かないよう、先に記録する
             self.store.record_schedule(name, day, {"status": "running"})
-            await self.run_task(name, day)
+            if not await self.run_or_defer(name, day, now.timestamp()):
+                return   # 上限に当たった。残りは明けてからにする
         await self.nudge_stale_threads()
 
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
@@ -113,6 +118,23 @@ class Scheduler:
         if record:
             self.store.record_schedule(name, day, detail)
         return detail
+
+    async def run_or_defer(self, name: str, day: str, now: float) -> bool:
+        """実行する。途中で契約の上限に当たったら、その日の分として残さず、明けてからやり直す。"""
+        await self.run_task(name, day)
+        if self.assistant.limited_until > now:
+            log.info("上限に当たったので、%s（%s）は明けてからやり直します", name, day)
+            self.store.forget_schedule(name, day)
+            self.store.defer_run("schedule", {"name": name, "day": day}, self.assistant.limited_until)
+            return False
+        return True
+
+    async def catch_up_deferred(self, now: float) -> None:
+        """上限で止まった決まった時刻の処理を、明けてからやり直す（猶予の時間を過ぎていても動かす）。"""
+        for deferred_id, payload in self.store.due_deferred("schedule", now):
+            self.store.finish_deferred(deferred_id)
+            if not self.store.schedule_ran(payload["name"], payload["day"]):
+                await self.run_or_defer(payload["name"], payload["day"], now)
 
     # 夜間の Task
 

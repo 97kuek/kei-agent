@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import signal
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -14,6 +15,12 @@ from dataclasses import dataclass, field
 from ezra import guard
 from ezra.config import Config, path_without_venv
 from ezra.themes import Workspace
+
+# 契約の上限に達したときに claude -p が返す文（`Claude AI usage limit reached|<エポック秒>`）。
+# 明ける時刻が古いまま返ることがあるので、過去の時刻はそのまま使わない
+_USAGE_LIMIT = re.compile(r"usage limit reached(?:\|(\d{10,13}))?", re.IGNORECASE)
+# 明ける時刻が分からないときに、これだけ待ってからやり直す（秒）
+UNKNOWN_LIMIT_RESET = -1.0
 
 # claude が終わったあと、プロセスが消えるのを待つ秒数
 EXIT_GRACE_SECONDS = 5
@@ -95,6 +102,8 @@ class RunResult:
     # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
     # Ezra が依頼者に [許可する] [断る] を聞く（docs/plan.md の11章）
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
+    # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
+    limit_reset_at: float | None = None
 
     @property
     def session_missing(self) -> bool:
@@ -127,6 +136,11 @@ def apply_event(result: RunResult, event: dict) -> str | None:
         result.cost_usd = event.get("total_cost_usd")
         result.duration_ms = event.get("duration_ms")
         result.errors = [str(e) for e in event.get("errors") or []]
+        if result.is_error:
+            match = _USAGE_LIMIT.search(" ".join([result.text, *result.errors]))
+            if match:
+                epoch = match.group(1)
+                result.limit_reset_at = float(epoch[:10]) if epoch else UNKNOWN_LIMIT_RESET
     return None
 
 
