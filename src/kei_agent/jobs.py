@@ -1,7 +1,7 @@
 """ジョブ: テーマのディレクトリに置かれた依頼を読み、pueue で走らせ、状態を追う。
 
-Claude からは skill のスクリプト（plugin/skills/job/scripts/ezra_job.py）で
-`.ezra/requests/*.json` に依頼を書くだけにし、検証と投入はここで行う。
+Claude からは skill のスクリプト（plugin/skills/job/scripts/kei_agent_job.py）で
+`.kei-agent/requests/*.json` に依頼を書くだけにし、検証と投入はここで行う。
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from ezra import themes
-from ezra.config import Config, path_without_venv
-from ezra.store import Job, Store, dumps
+from kei_agent import themes
+from kei_agent.config import Config, path_without_venv
+from kei_agent.store import Job, Store, dumps
 
 log = logging.getLogger(__name__)
 
-PUEUE_GROUP = "ezra"
-REQUESTS_DIR = Path(".ezra/requests")
-JOBS_DIR = Path(".ezra/jobs")
+PUEUE_GROUP = "kei-agent"
+REQUESTS_DIR = Path(".kei-agent/requests")
+JOBS_DIR = Path(".kei-agent/jobs")
 # ジョブのログの末尾を読むとき、読み込む最大の大きさ
 LOG_TAIL_BYTES = 64 * 1024
 # 書きかけのまま残った依頼のファイルを消すまでの秒数
@@ -123,7 +123,7 @@ def _parse_time(value: str | None) -> float | None:
 
 
 def interpret_pueue_status(task: dict) -> tuple[str, dict]:
-    """pueue の task から (Ezra の状態, 追加で保存する値) を作る。"""
+    """pueue の task から (Kei Agent の状態, 追加で保存する値) を作る。"""
     status = task.get("status")
     if isinstance(status, str):
         # 中身を持たない形で返る状態もある
@@ -249,7 +249,7 @@ class JobManager:
             self._write_state(job)
             return Outcome(req.channel, req.thread_ts, job, str(e))
         try:
-            task_id = await self.pueue.add(cwd, command, label=f"ezra-{job.id}")
+            task_id = await self.pueue.add(cwd, command, label=f"kei-agent-{job.id}")
         except RuntimeError as e:
             job = self.store.update_job(job.id, status="rejected", detail=f"pueue に投入できませんでした: {e}", reported=1)
             self._write_state(job)

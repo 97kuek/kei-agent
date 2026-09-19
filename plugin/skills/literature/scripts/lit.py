@@ -15,7 +15,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-USER_AGENT = "ezra-literature/0.1"
+USER_AGENT = "kei-agent-literature/0.1"
 ATOM = "{http://www.w3.org/2005/Atom}"
 ARXIV_NS = "{http://arxiv.org/schemas/atom}"
 S2_FIELDS = "title,authors,year,venue,citationCount,externalIds,url,abstract,openAccessPdf"

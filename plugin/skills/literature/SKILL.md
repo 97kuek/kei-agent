@@ -9,11 +9,11 @@ description: 先行研究や関連論文を arXiv と Semantic Scholar で探し
 
 ```bash
 # Semantic Scholar（引用数と出版年つき。年で絞れる）
-python3 "$EZRA_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source s2 --limit 20 --year 2023-
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source s2 --limit 20 --year 2023-
 # arXiv（新しいプレプリント。--sort date で新しい順）
-python3 "$EZRA_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source arxiv --sort date --limit 20
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source arxiv --sort date --limit 20
 # 保存済みの論文
-python3 "$EZRA_PLUGIN_DIR/skills/literature/scripts/lit.py" known
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" known
 ```
 
 - 検索語を2〜3通り変え、両方のソースを使う。Semantic Scholar が 429 を返し続けるときは arXiv と Web検索で補う

@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from ezra.config import Config
+from kei_agent.config import Config
 
 OVERVIEW_DIR = "_overview"
 THEME_SUBDIRS = ("inputs", "outputs", "logs", "papers")
 
 CLAUDE_MD_TEMPLATE = """# テーマ: {name}
 
-Slack の #{name} チャンネルに対応する作業用ディレクトリ。Ezra（Slack Bot）がここで作業する。
+Slack の #{name} チャンネルに対応する作業用ディレクトリ。Kei Agent（Slack Bot）がここで作業する。
 
 ## 研究の前提
 
@@ -33,7 +33,7 @@ Slack の #{name} チャンネルに対応する作業用ディレクトリ。Ez
 
 ## ジョブにする基準
 
-- 数分以上かかりそうな処理は、その場で実行せず `ezra:job` skill でジョブにする
+- 数分以上かかりそうな処理は、その場で実行せず `kei-agent:job` skill でジョブにする
 - それより短い処理は、その場で実行してよい
 """
 
@@ -48,7 +48,7 @@ class ChannelKind(Enum):
     THEME = "theme"
     OVERVIEW = "overview"
     IMPROVE = "improve"
-    # Ezra 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
+    # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
     SELF_FIX = "self_fix"
 
 
@@ -67,7 +67,7 @@ _SAFE_NAME = re.compile(r"^[^./_\\\x00][^/\\\x00]{0,79}$")
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・Ezra の改善以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・Kei Agent の改善以外は、すべて研究テーマとして扱う。"""
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
     if channel_name in config.overview_channels:

@@ -1,14 +1,14 @@
 # コントリビュートの手順
 
-Ezra は、Slack で頼んだ研究の作業を Mac 上の Claude Code が進めて、同じスレッドに結果を返す Bot です。
+Kei Agent は、Slack で頼んだ研究の作業を Mac 上の Claude Code が進めて、同じスレッドに結果を返す Bot です。
 全体の設計は `docs/plan.md`、セットアップは `deploy/README.md` にあります。
 
 ## 変更する前に
 
 - 設計の判断を変えるときは、先に `docs/plan.md` の該当する表を直し、理由も書く
-- Notion の構成を変えるときは `docs/notion-layout.md`、`src/ezra/notion.py`（作る側）、`src/ezra/notion_store.py`（読み書きする側）を合わせて直す
+- Notion の構成を変えるときは `docs/notion-layout.md`、`src/kei_agent/notion.py`（作る側）、`src/kei_agent/notion_store.py`（読み書きする側）を合わせて直す
 - 大きな変更（Slack App の権限、sandbox の設定、フェーズの順番）は、Issue で相談してから始める
-- 使っていて気づいた要望は、Slack の `#research-ezra` で `@Ezra` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
+- 使っていて気づいた要望は、Slack の `#research-agent` で `@Kei Agent` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
 
 ## 開発の準備
 
@@ -24,8 +24,8 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の手�
 
 - `uv run pytest` がすべて通る（プルリクエストと `main` への push では、GitHub Actions でも実行される）
 - `uvx ruff check src tests plugin` が通る（設定は `pyproject.toml` の `[tool.ruff]`）
-- Slack を通る動きを変えたときは、手元で `uv run ezra` を起動し、テーマのチャンネルで実際に頼んで確かめる
-- 定期処理を変えたときは、`uv run ezra-schedule <night|literature|daily|review>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
+- Slack を通る動きを変えたときは、手元で `uv run kei-agent` を起動し、テーマのチャンネルで実際に頼んで確かめる
+- 定期処理を変えたときは、`uv run kei-agent-schedule <night|literature|daily|review>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
 - `claude -p` の権限や sandbox を変えたときは、テーマのディレクトリの外に書き込めないことを確かめる
 - Notion を読み書きする処理を変えたときは、本物の研究ホームで Task やノートを作って確かめ、確認用のページはゴミ箱に移す
 
@@ -53,6 +53,6 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の手�
 
 ## ブランチとプルリクエスト
 
-- `main` は常に動く状態にする。launchd の Ezra は `main` を動かしている
+- `main` は常に動く状態にする。launchd の Kei Agent は `main` を動かしている
 - 作業はブランチで行い、プルリクエストで `main` に入れる
 - プルリクエストには、何を変えたか、どう確かめたかを書く

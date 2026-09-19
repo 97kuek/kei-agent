@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS deferred_runs (
     created_at REAL NOT NULL,
     done INTEGER NOT NULL DEFAULT 0
 );
--- Ezra 自身を直す流れ（improve.py）
+-- Kei Agent 自身を直す流れ（improve.py）
 CREATE TABLE IF NOT EXISTS improvements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL,
@@ -162,12 +162,18 @@ def _schedule_status(detail: str | None) -> str:
 
 # あとから足した列。既存のデータベースにも同じ形を用意する
 ADDED_COLUMNS = {
-    # Ezra の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
+    # Kei Agent の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
     "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0",
                 # この会話に渡した prompts/system.md の版（runner.system_prompt_version）
                 "prompt_version": "TEXT",
                 # エラーや上限で止まった依頼の文。次の依頼に文脈として渡す
-                "stalled_request": "TEXT"},
+                "stalled_request": "TEXT",
+                # 依頼者の依頼の数と、最後に「新しいスレッドで続ける」を出したときの数（handoff.py）
+                "turns": "INTEGER NOT NULL DEFAULT 0", "handoff_offered_at": "INTEGER NOT NULL DEFAULT 0",
+                # 前のスレッドからの引き継ぎメモ。このスレッドの最初の回に渡す
+                "handoff_memo": "TEXT",
+                # 区切って引き継いだ先のスレッド
+                "handed_off_to": "TEXT"},
 }
 
 
@@ -240,7 +246,7 @@ class Store:
         with self.conn:
             self.conn.execute("UPDATE deferred_runs SET done = 1 WHERE id = ?", (deferred_id,))
 
-    # Ezra 自身を直す流れ（improve.py）
+    # Kei Agent 自身を直す流れ（improve.py）
 
     def improvement(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
         return self.conn.execute(
@@ -291,6 +297,24 @@ class Store:
                 "UPDATE threads SET session_id = NULL, updated_at = ? WHERE channel = ? AND thread_ts = ?",
                 (time.time(), channel, thread_ts),
             )
+
+    def count_turn(self, channel: str, thread_ts: str) -> int:
+        """依頼者の依頼を1つ数え、これまでの数を返す。"""
+        with self.conn:
+            self.conn.execute("UPDATE threads SET turns = turns + 1 WHERE channel = ? AND thread_ts = ?",
+                              (channel, thread_ts))
+        row = self.get_thread(channel, thread_ts)
+        return row["turns"] if row else 0
+
+    def update_thread(self, channel: str, thread_ts: str, **values) -> None:
+        """引き継ぎの欄（handoff_offered_at、handoff_memo、handed_off_to）を書き換える。"""
+        allowed = {"handoff_offered_at", "handoff_memo", "handed_off_to"}
+        if not values or not set(values) <= allowed:
+            raise ValueError(f"書き換えられない欄です: {sorted(set(values) - allowed)}")
+        sets = ", ".join(f"{k} = ?" for k in values)
+        with self.conn:
+            self.conn.execute(f"UPDATE threads SET {sets} WHERE channel = ? AND thread_ts = ?",
+                              (*values.values(), channel, thread_ts))
 
     def set_awaiting(self, channel: str, thread_ts: str, awaiting: bool) -> None:
         with self.conn:

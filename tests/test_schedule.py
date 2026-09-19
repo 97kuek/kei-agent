@@ -5,15 +5,15 @@ from datetime import datetime
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
-from ezra import runner, themes
-from ezra.assistant import Assistant
-from ezra.jobs import JobManager
-from ezra.schedule import Scheduler, due_day, search_keywords
+from kei_agent import runner, themes
+from kei_agent.assistant import Assistant
+from kei_agent.jobs import JobManager
+from kei_agent.schedule import Scheduler, due_day, search_keywords
 
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "research-overview", "C9": "research-ezra"})
+    slack = FakeSlack({"C1": "vlm", "C5": "research-overview", "C9": "research-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -75,7 +75,7 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
 async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
     """App Home で変えた時刻は、再起動なしで次の tick から効く。止めた処理は動かさない。"""
     scheduler, *_ = env
-    from ezra import settings
+    from kei_agent import settings
     ran = []
 
     async def fake_run(name, day, record=True):
@@ -204,7 +204,7 @@ async def test_literature_posts_only_when_new(env, config, store):
     make_theme(config, "vlm")
     slack.channels["C2"] = "notes"
     make_theme(config, "notes", keywords=None)
-    make_theme(config, "archived")  # Ezra のいない（アーカイブした）テーマは見張らない
+    make_theme(config, "archived")  # Kei Agent のいない（アーカイブした）テーマは見張らない
     claude.behaviors = [{"text": "papers/ に変更はありません。\n\nNO_NEW_PAPERS"}]
 
     detail = await scheduler.run_literature("2026-09-18")
@@ -228,8 +228,8 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     scheduler, assistant, slack, claude = env
     ws = make_theme(config, "vlm")
     store.upsert_thread("C1", "10.1", "vlm", "s1")
-    (ws.cwd / ".ezra" / "threads").mkdir(parents=True)
-    (ws.cwd / ".ezra" / "threads" / "10.1.md").write_text("# log")
+    (ws.cwd / ".kei-agent" / "threads").mkdir(parents=True)
+    (ws.cwd / ".kei-agent" / "threads" / "10.1.md").write_text("# log")
     store.record_schedule("literature", "2026-09-18", {"themes": {"vlm": {"status": "no_new"}}})
     store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
@@ -241,7 +241,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
 
     call, = claude.calls
     assert call["cwd"] == config.research_root / "_overview"
-    digest = config.research_root / "_overview" / ".ezra" / "digest" / "2026-09-18-daily.md"
+    digest = config.research_root / "_overview" / ".kei-agent" / "digest" / "2026-09-18-daily.md"
     text = digest.read_text()
     assert "10.1.md" in text and "vlm: 新着なし" in text
     assert "条件Cも回して（vlm）: 完了 71%" in text
@@ -255,7 +255,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
 
 
 async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
-    from ezra.digest import DigestBuilder
+    from kei_agent.digest import DigestBuilder
     scheduler, assistant, *_ = env
     make_theme(config, "old-theme")
     make_theme(config, "archived")
@@ -278,7 +278,7 @@ async def test_digest_skips_theme_never_asked(env, config, store):
     """招待しただけで一度も依頼のないテーマは、止まっているテーマに数えない。"""
     import os
 
-    from ezra.digest import DigestBuilder
+    from kei_agent.digest import DigestBuilder
     scheduler, assistant, *_ = env
     ws = make_theme(config, "just-invited")
     old = time.time() - 5 * 86400
@@ -402,7 +402,7 @@ async def test_nudge_failure_is_not_retried_every_minute(env, store, monkeypatch
 
 
 def test_interrupted_schedule_runs_again(store):
-    """途中で Ezra が止まると「実行中」の記録が残る。そのままだと、その日は二度と動かない。"""
+    """途中で Kei Agent が止まると「実行中」の記録が残る。そのままだと、その日は二度と動かない。"""
     store.record_schedule("daily", "2026-09-19", {"status": "running"})
     assert store.schedule_ran("daily", "2026-09-19")
 

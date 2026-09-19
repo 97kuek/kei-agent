@@ -1,13 +1,13 @@
 #!/bin/zsh
-# Ezra を launchd に登録する（ログイン時に起動し、落ちたら再起動する）。
+# Kei Agent を launchd に登録する（ログイン時に起動し、落ちたら再起動する）。
 # 使い方: deploy/install.sh        登録して起動
 #         deploy/install.sh remove 登録を外す
 set -eu
 
-LABEL="com.ezra.assistant"
+LABEL="com.kei-agent.assistant"
 REPO="${0:A:h:h}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG_DIR="$HOME/Library/Logs/ezra"
+LOG_DIR="$HOME/Library/Logs/kei-agent"
 DOMAIN="gui/$(id -u)"
 
 if [[ "${1:-}" == "remove" ]]; then
@@ -33,5 +33,5 @@ plutil -lint "$PLIST" >/dev/null
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 launchctl kickstart -k "$DOMAIN/$LABEL"
-echo "登録しました。ログ: $LOG_DIR/ezra.log"
+echo "登録しました。ログ: $LOG_DIR/kei-agent.log"
 echo "状態の確認: launchctl print $DOMAIN/$LABEL | grep -E 'state|last exit'"

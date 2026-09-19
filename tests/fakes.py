@@ -3,10 +3,10 @@
 import json
 from pathlib import Path
 
-from ezra import runner
-from ezra.jobs import REQUESTS_DIR
-from ezra.notion import NotionError
-from ezra.notion_store import Note, Task
+from kei_agent import runner
+from kei_agent.jobs import REQUESTS_DIR
+from kei_agent.notion import NotionError
+from kei_agent.notion_store import Note, Task
 
 
 class FakePueue:
@@ -198,7 +198,7 @@ class FakeNotion:
         if self.fail:
             raise NotionError("503 Service Unavailable")
 
-    def add_task(self, title, theme=None, status="今夜やる", slack_url=None, body="", assignee="Ezra"):
+    def add_task(self, title, theme=None, status="今夜やる", slack_url=None, body="", assignee="Kei Agent"):
         self._n += 1
         task = Task(f"task-{self._n}", title, status, assignee, "P1", None, slack_url,
                     [f"theme-{theme}"] if theme else [], f"https://notion.example/task-{self._n}",
@@ -225,11 +225,11 @@ class FakeNotion:
 
     def tonight_tasks(self, limit):
         self._check()
-        return [t for t in self.tasks.values() if t.assignee == "Ezra" and t.status == "今夜やる"][:limit]
+        return [t for t in self.tasks.values() if t.assignee == "Kei Agent" and t.status == "今夜やる"][:limit]
 
     def count_tonight_tasks(self):
         self._check()
-        return len([t for t in self.tasks.values() if t.assignee == "Ezra" and t.status == "今夜やる"])
+        return len([t for t in self.tasks.values() if t.assignee == "Kei Agent" and t.status == "今夜やる"])
 
     def update_task(self, page_id, status=None, result=None, slack_url=None):
         self._check()

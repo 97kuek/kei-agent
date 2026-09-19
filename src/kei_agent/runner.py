@@ -12,9 +12,9 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 
-from ezra import guard
-from ezra.config import Config, path_without_venv
-from ezra.themes import Workspace
+from kei_agent import guard
+from kei_agent.config import Config, path_without_venv
+from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文（`Claude AI usage limit reached|<エポック秒>`）。
 # 明ける時刻が古いまま返ることがあるので、過去の時刻はそのまま使わない
@@ -60,9 +60,9 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str) -> dict[str, str]:
     env = guard.strip_env(base)
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
-    env["EZRA_CHANNEL"] = channel
-    env["EZRA_THREAD_TS"] = thread_ts
-    env["EZRA_PLUGIN_DIR"] = str(config.plugin_dir)
+    env["KEI_AGENT_CHANNEL"] = channel
+    env["KEI_AGENT_THREAD_TS"] = thread_ts
+    env["KEI_AGENT_PLUGIN_DIR"] = str(config.plugin_dir)
     return env
 
 
@@ -106,7 +106,7 @@ class RunResult:
     activities: list[str] = field(default_factory=list)
     timed_out: bool = False
     # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
-    # Ezra が依頼者に [許可する] [断る] を聞く（docs/plan.md の11章）
+    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/plan.md の11章）
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None

@@ -18,7 +18,7 @@
   </defs>
   <rect width="1160" height="520" fill="#FFFFFF"/>
   <text class="t" x="40" y="46" font-size="23" font-weight="600">机の上の音声対話（第0段階）</text>
-  <text class="s" x="40" y="70">相談は Codex（声）、作業は Claude（Slack）。人格はどちらも Ezra。決まったことと結果は Slack に残る</text>
+  <text class="s" x="40" y="70">相談は Codex（声）、作業は Claude（Slack）。人格はどちらも Kei Agent。決まったことと結果は Slack に残る</text>
 
   <rect class="lane" x="40" y="96" width="700" height="190" rx="14"/>
   <text class="s" x="58" y="120">声のやりとり（手元の Mac だけで完結）</text>
@@ -51,18 +51,18 @@
   <text class="s" x="628" y="284" text-anchor="middle">「amr-query に〜と頼むよ。いい？」</text>
 
   <rect class="lane" x="40" y="320" width="1080" height="160" rx="14"/>
-  <text class="s" x="58" y="344">Ezra 本体（Claude 側）</text>
+  <text class="s" x="58" y="344">Kei Agent 本体（Claude 側）</text>
   <rect class="box" x="60" y="358" width="220" height="96" rx="10"/>
   <text class="t" x="170" y="390" font-size="13" font-weight="600" text-anchor="middle">依頼を受け取る</text>
   <text class="m" x="170" y="412" text-anchor="middle">&lt;state_dir&gt;/asks/</text>
   <text class="s" x="170" y="434" text-anchor="middle">数秒ごとに見る。鍵は増やさない</text>
   <rect class="box" x="320" y="358" width="220" height="96" rx="10"/>
   <text class="t" x="430" y="390" font-size="13" font-weight="600" text-anchor="middle">スレッドを立てて作業</text>
-  <text class="s" x="430" y="412" text-anchor="middle">いつもの Ezra（Claude）</text>
+  <text class="s" x="430" y="412" text-anchor="middle">いつもの Kei Agent（Claude）</text>
   <text class="s" x="430" y="434" text-anchor="middle">結果も図も Slack に残る</text>
   <rect class="box" x="580" y="358" width="240" height="96" rx="10"/>
   <text class="t" x="700" y="390" font-size="13" font-weight="600" text-anchor="middle">終わりを見張る</text>
-  <text class="s" x="700" y="412" text-anchor="middle">声のレイヤが Ezra の記録を読む</text>
+  <text class="s" x="700" y="412" text-anchor="middle">声のレイヤが Kei Agent の記録を読む</text>
   <text class="s" x="700" y="434" text-anchor="middle">「終わったよ」と一言だけ</text>
   <rect class="box" x="860" y="358" width="240" height="96" rx="10"/>
   <text class="t" x="980" y="390" font-size="13" font-weight="600" text-anchor="middle">上限に当たったら</text>

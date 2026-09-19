@@ -1,4 +1,4 @@
-"""Slack から Ezra 自身を直す流れ（docs/plan.md の12章）。"""
+"""Slack から Kei Agent 自身を直す流れ（docs/plan.md の12章）。"""
 
 import asyncio
 import subprocess
@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from ezra import guard, improve, runner
-from ezra.assistant import Assistant
-from ezra.jobs import JobManager
+from kei_agent import guard, improve, runner
+from kei_agent.assistant import Assistant
+from kei_agent.jobs import JobManager
 
 
 def git(repo: Path, *args: str) -> str:
@@ -19,14 +19,14 @@ def git(repo: Path, *args: str) -> str:
 
 @pytest.fixture
 def repo(tmp_path):
-    """Ezra のリポジトリに見立てた git リポジトリ（origin は同じ tmp の中のベアリポジトリ）。"""
+    """Kei Agent のリポジトリに見立てた git リポジトリ（origin は同じ tmp の中のベアリポジトリ）。"""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", "-b", "main", str(origin)], check=True, capture_output=True)
     path = tmp_path / "repo"
     path.mkdir()
     git(path, "init", "-b", "main")
-    git(path, "config", "user.email", "ezra@example.com")
-    git(path, "config", "user.name", "Ezra")
+    git(path, "config", "user.email", "kei-agent@example.com")
+    git(path, "config", "user.name", "Kei Agent")
     (path / "src").mkdir()
     (path / "src" / "app.py").write_text("x = 1\n")
     (path / "config.toml").write_text("research_root = \"~/research\"\n")
@@ -40,7 +40,7 @@ def repo(tmp_path):
 @pytest.fixture
 def env(config, store, repo, monkeypatch):
     config = replace(config, repo_root=repo)
-    slack = FakeSlack({"C9": "research-ezra", "C1": "vlm"})
+    slack = FakeSlack({"C9": "research-agent", "C1": "vlm"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
@@ -122,12 +122,12 @@ async def test_improve_channel_records_backlog_and_plans_without_writing_code(en
     await settle(assistant)
 
     backlog = cfg.backlog_path.read_text()
-    assert "#research-ezra" in backlog and "経過をもっと細かく" in backlog
+    assert "#research-agent" in backlog and "経過をもっと細かく" in backlog
     call, = claude.calls
-    # 書けるのは一時ディレクトリだけ。読めるのは Ezra のリポジトリ
+    # 書けるのは一時ディレクトリだけ。読めるのは Kei Agent のリポジトリ
     assert call["cwd"] == cfg.state_dir / "improve" / "20.1" and call["cwd"].is_dir()
-    from ezra.themes import ChannelKind, Workspace
-    settings_json = guard.build_settings(cfg, Workspace("research-ezra", ChannelKind.IMPROVE, call["cwd"]))
+    from kei_agent.themes import ChannelKind, Workspace
+    settings_json = guard.build_settings(cfg, Workspace("research-agent", ChannelKind.IMPROVE, call["cwd"]))
     allow = settings_json["permissions"]["allow"]
     assert f"Read(/{cfg.repo_root}/**)" in allow and f"Edit(/{call['cwd']}/**)" in allow
     assert f"Edit(/{cfg.repo_root}/**)" not in allow
@@ -143,7 +143,7 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     await second_yes(assistant)
 
     row = assistant.store.improvement("C9", "20.1")
-    assert row["status"] == "review" and row["branch"] == "ezra/improve-20-1"
+    assert row["status"] == "review" and row["branch"] == "kei-agent/improve-20-1"
     assert claude.calls[-1]["cwd"] == Path(row["worktree"])   # 最後の回が worktree での直し
     assert git(Path(row["worktree"]), "log", "-1", "--format=%s") == "app.py の値を直す"
     texts = "\n".join(slack.texts())
@@ -157,8 +157,8 @@ async def test_start_marker_from_an_automatic_run_is_ignored(env):
     assistant, slack, claude, cfg = env
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}]
-    from ezra.assistant import Request
-    await assistant.submit(Request("C9", "research-ezra", "20.1", None, "ジョブが終わった", trigger="job"))
+    from kei_agent.request import Request
+    await assistant.submit(Request("C9", "research-agent", "20.1", None, "ジョブが終わった", trigger="job"))
     await settle(assistant)
     assert assistant.store.improvement("C9", "20.1") is None
 

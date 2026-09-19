@@ -1,10 +1,10 @@
 """机の上の音声対話（第0段階）。
 
 Aqua Voice などで喋った文を受け取り、Codex に渡し、返事を VOICEVOX で読み上げる。
-決まったことは Slack に残し、依頼は読み上げて確認してから Ezra に渡す。
+決まったことは Slack に残し、依頼は読み上げて確認してから Kei Agent に渡す。
 
 使い方:
-    uv run ezra-voice            # VOICEVOX アプリを立ち上げておく
+    uv run kei-agent-voice            # VOICEVOX アプリを立ち上げておく
     「新しく話そう」             # 会話を切る
     「じっくり考えて」を含める   # その回だけ深く考えさせる
     Enter だけ                   # 読み上げを止める
@@ -16,10 +16,10 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from ezra.config import Config, load_config
-from ezra_voice import bridge, journal, markers
-from ezra_voice.brain import Codex, today
-from ezra_voice.speech import Speaker, Voicevox
+from kei_agent.config import Config, load_config
+from kei_agent_voice import bridge, journal, markers
+from kei_agent_voice.brain import Codex, today
+from kei_agent_voice.speech import Speaker, Voicevox
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class Session:
         if turn.failed:
             return self.limit_message(turn.limit_reset)
         reply = markers.parse(turn.text)
-        journal.append(self.config, day, "Ezra（声）", turn.text, now)
+        journal.append(self.config, day, "Kei（声）", turn.text, now)
         if reply.theme:
             self.theme = reply.theme
         for decision in reply.decisions:
@@ -102,7 +102,7 @@ class Session:
 
     def limit_message(self, reset: str | None) -> str:
         when = f"{reset} ごろ" if reset else "しばらくして"
-        return f"Codex の上限に当たったみたい。{when}に戻るから、それまでは Slack の Ezra に頼んでね。"
+        return f"Codex の上限に当たったみたい。{when}に戻るから、それまでは Slack の Kei Agent に頼んでね。"
 
     # 声に出す
 
@@ -114,12 +114,12 @@ class Session:
     def say(self, text: str) -> None:
         if not text:
             return
-        print(f"Ezra> {text}")
+        print(f"Kei> {text}")
         for sentence in markers.sentences(text):
             self.speaker.say(sentence)
 
     def announce_finished(self) -> None:
-        """Ezra に渡した作業が終わっていたら、一言だけ伝える。"""
+        """Kei Agent に渡した作業が終わっていたら、一言だけ伝える。"""
         assert self.watcher is not None
         for done in self.watcher.finished():
             self.say(done.message)
@@ -136,7 +136,7 @@ def main() -> None:
     session = Session(config=config, codex=codex, speaker=speaker)
     if not speaker.enabled:
         print("VOICEVOX につながらないので、声なしで続けます（アプリを立ち上げると読み上げます）")
-    print("机の上の Ezra です。喋ってください（Enter だけで読み上げを止める、"
+    print("机の上の Kei です。喋ってください（Enter だけで読み上げを止める、"
           "「新しく話そう」で会話を切る、Ctrl-C で終わり）")
     try:
         while True:

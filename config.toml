@@ -1,9 +1,9 @@
-# Ezra の設定。秘密情報（トークン）はここに書かず、環境変数で渡す（deploy/README.md を参照）。
+# Kei Agent の設定。秘密情報（トークン）はここに書かず、環境変数で渡す（deploy/README.md を参照）。
 
 # テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない
 research_root = "~/research"
 # SQLite などBotの状態を置く場所
-state_dir = "~/.local/state/ezra"
+state_dir = "~/.local/state/kei-agent"
 
 # claude -p を同時に動かす上限（違うスレッドどうし）
 max_concurrent_runs = 2
@@ -11,10 +11,13 @@ max_concurrent_runs = 2
 run_timeout_minutes = 30
 # ジョブの状態を確認する間隔
 job_poll_seconds = 60
-# pueue の ezra グループで同時に走らせるジョブ数
+# pueue の kei-agent グループで同時に走らせるジョブ数
 job_parallel = 1
 # 空なら Claude Code の既定のモデル
 model = ""
+# 依頼者の依頼がこの回数たまったスレッドでは、[新しいスレッドで続ける] ボタンを出す。0 なら回数では出さない
+# （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
+handoff_after_turns = 8
 
 [schedule]
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
@@ -42,10 +45,10 @@ session_retention_days = 90
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]
-# Ezra の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
-improve = ["research-ezra"]
-# 上記以外で Ezra を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
-# 個人用のチャンネルには Ezra を招待しない
+# Kei Agent の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
+improve = ["research-agent"]
+# 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
+# 個人用のチャンネルには Kei Agent を招待しない
 
 [sandbox]
 # Bash（sandbox内）から接続してよいドメイン
@@ -56,9 +59,9 @@ allowed_domains = [
   "pypi.org",
   "files.pythonhosted.org",
 ]
-# テーマごとに要る接続先は、ここには書かず Slack で許可する（App Home か、Ezra が聞いてくるボタン）
+# テーマごとに要る接続先は、ここには書かず Slack で許可する（App Home か、Kei Agent が聞いてくるボタン）
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
 allow_write = ["~/.cache/uv"]
 # sandbox の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
-# 秘密情報や鍵の置き場所を塞ぐ。書かなければ src/ezra/config.py の DEFAULT_DENY_READ を使う
+# 秘密情報や鍵の置き場所を塞ぐ。書かなければ src/kei_agent/config.py の DEFAULT_DENY_READ を使う
 # deny_read = ["~/.config/zsh/local", "~/.ssh", "~/.aws", "~/.claude", "~/.config/gh"]

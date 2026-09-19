@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from ezra import settings
-from ezra.config import MaintenanceConfig, ScheduleConfig
+from kei_agent import settings
+from kei_agent.config import MaintenanceConfig, ScheduleConfig
 
 
 def test_domains_are_kept_per_theme(store):

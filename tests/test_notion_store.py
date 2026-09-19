@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from ezra.notion import Notion, NotionError
-from ezra.notion_store import (
+from kei_agent.notion import Notion, NotionError
+from kei_agent.notion_store import (
     NotionStore,
     blocks_to_markdown,
     load_notion,
@@ -74,7 +74,7 @@ def test_create_night_task_links_theme(state):
         {"results": [{"id": "theme-1"}], "has_more": False},  # テーマを探す
         {"id": "task-1", "url": "https://notion.example/task-1", "properties": {
             "タイトル": {"title": [{"plain_text": "条件C"}]}, "状態": {"status": {"name": "今夜やる"}},
-            "担当": {"select": {"name": "Ezra"}}, "優先度": {"select": None}, "期日": {"date": None},
+            "担当": {"select": {"name": "Kei Agent"}}, "優先度": {"select": None}, "期日": {"date": None},
             "テーマ": {"relation": [{"id": "theme-1"}]}, "Slack": {"url": "https://s/p1"}}},
         {"properties": {"名前": {"title": [{"plain_text": "vlm"}]}}},  # テーマ名を引く
     ])
@@ -134,7 +134,7 @@ def test_blocks_to_markdown_reads_nested_blocks():
 
 
 def test_request_waits_and_retries_when_notion_is_busy(monkeypatch):
-    from ezra import notion as notion_module
+    from kei_agent import notion as notion_module
 
     notion = Notion("ntn_x")
     calls = []
@@ -152,7 +152,7 @@ def test_request_waits_and_retries_when_notion_is_busy(monkeypatch):
 
 
 def test_request_gives_up_after_retrying(monkeypatch):
-    from ezra import notion as notion_module
+    from kei_agent import notion as notion_module
 
     notion = Notion("ntn_x")
     monkeypatch.setattr(notion, "_send", lambda *a: (_ for _ in ()).throw(

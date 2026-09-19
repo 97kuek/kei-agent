@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Ezra のジョブを投入・確認・取り消すための小さなCLI（標準ライブラリだけで動く）。
+"""Kei Agent のジョブを投入・確認・取り消すための小さなCLI（標準ライブラリだけで動く）。
 
-このスクリプトは依頼をファイルに書くだけで、実際に pueue へ投入するのは Ezra 本体。
+このスクリプトは依頼をファイルに書くだけで、実際に pueue へ投入するのは Kei Agent 本体。
 Claude Code の sandbox の中から呼ばれるので、カレントディレクトリ（テーマの作業用ディレクトリ）の外には書かない。
 """
 
@@ -15,8 +15,8 @@ import time
 import uuid
 from pathlib import Path
 
-REQUESTS_DIR = Path(".ezra/requests")
-JOBS_DIR = Path(".ezra/jobs")
+REQUESTS_DIR = Path(".kei-agent/requests")
+JOBS_DIR = Path(".kei-agent/jobs")
 
 
 def _write_request(payload: dict) -> str:
@@ -24,8 +24,8 @@ def _write_request(payload: dict) -> str:
     request_id = uuid.uuid4().hex
     payload = {
         "request_id": request_id,
-        "channel": os.environ.get("EZRA_CHANNEL", ""),
-        "thread_ts": os.environ.get("EZRA_THREAD_TS", ""),
+        "channel": os.environ.get("KEI_AGENT_CHANNEL", ""),
+        "thread_ts": os.environ.get("KEI_AGENT_THREAD_TS", ""),
         "created_at": time.time(),
         **payload,
     }
@@ -43,8 +43,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
     if not script.is_file():
         print(f"script が見つかりません: {script}", file=sys.stderr)
         return 2
-    if not os.environ.get("EZRA_THREAD_TS"):
-        print("EZRA_THREAD_TS がありません。Ezra から起動された claude でだけ使えます", file=sys.stderr)
+    if not os.environ.get("KEI_AGENT_THREAD_TS"):
+        print("KEI_AGENT_THREAD_TS がありません。Kei Agent から起動された claude でだけ使えます", file=sys.stderr)
         return 2
     request_id = _write_request({
         "action": "submit",
@@ -53,7 +53,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
         "args": args.script_args,
     })
     print(f"ジョブの投入を依頼しました（request_id={request_id}）。")
-    print("Ezra がこの回の作業のあとに pueue へ投入し、終わったらこのスレッドの会話を再開します。")
+    print("Kei Agent がこの回の作業のあとに pueue へ投入し、終わったらこのスレッドの会話を再開します。")
     return 0
 
 
@@ -79,7 +79,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="ezra_job")
+    parser = argparse.ArgumentParser(prog="kei_agent_job")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("submit", help="ジョブを投入する")

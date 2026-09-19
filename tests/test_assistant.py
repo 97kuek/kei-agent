@@ -5,14 +5,16 @@ from pathlib import Path
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_request
 
-from ezra import runner
-from ezra.assistant import Assistant, history_prompt, split_text
-from ezra.jobs import JobManager
+from kei_agent import runner
+from kei_agent.assistant import Assistant
+from kei_agent.auto_messages import history_prompt
+from kei_agent.jobs import JobManager
+from kei_agent.slack_text import split_text
 
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "research-ezra", "C5": "research-overview"})
+    slack = FakeSlack({"C1": "vlm", "C9": "research-agent", "C5": "research-overview"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     pueue = FakePueue()
@@ -50,8 +52,8 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert start["task_display_mode"] == "timeline"
     assert "結果です" not in slack.texts()  # 流して見せたので、もう一度投稿しない
     assert store.get_thread("C1", "10.1")["session_id"] == "sess-1"
-    log = (config.research_root / "vlm" / ".ezra" / "threads" / "10.1.md").read_text()
-    assert "## 依頼者" in log and "図を作って" in log and "## Ezra" in log and "結果です" in log
+    log = (config.research_root / "vlm" / ".kei-agent" / "threads" / "10.1.md").read_text()
+    assert "## 依頼者" in log and "図を作って" in log and "## Kei Agent" in log and "結果です" in log
 
 
 async def test_mention_from_other_user_is_ignored(env):
@@ -76,7 +78,7 @@ async def test_messages_that_should_not_trigger(env):
     assistant, slack, claude, _ = env
     # スレッドの外（メンションなし）
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "11.1", "text": "メモ"})
-    # Ezra が動いていないスレッド
+    # Kei Agent が動いていないスレッド
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "12.2", "thread_ts": "12.1", "text": "x"})
     # メンションつき（app_mention 側で処理する）
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "12.3", "thread_ts": "12.1", "text": "<@UBOT> x"})
@@ -105,7 +107,7 @@ async def test_missing_session_is_restored_from_thread_history(env, store):
 
     first, second = claude.calls
     assert first["session_id"] == "lost-session" and second["session_id"] is None
-    assert "依頼者: 条件Aで回して" in second["prompt"] and "Ezra: 条件Aの結果は 82% でした" in second["prompt"]
+    assert "依頼者: 条件Aで回して" in second["prompt"] and "Kei Agent: 条件Aの結果は 82% でした" in second["prompt"]
     assert "作業中" not in second["prompt"] and second["prompt"].count("Bも") == 1
     assert store.get_thread("C1", "10.1")["session_id"] == "sess-new"
     assert not any(t.startswith("⚠️") for t in slack.texts())
@@ -156,7 +158,7 @@ async def test_narration_goes_to_the_steps_not_the_answer(env):
 
 async def test_run_uses_domains_allowed_for_the_theme(env, store, monkeypatch):
     assistant, slack, claude, _ = env
-    from ezra import settings
+    from kei_agent import settings
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     seen = []
     original = runner.run_claude
@@ -196,7 +198,7 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
     await settle(assistant)
 
     backlog = (config.research_root / "_overview" / "backlog.md").read_text()
-    assert "#research-ezra" in backlog and "経過をもっと細かく" in backlog
+    assert "#research-agent" in backlog and "経過をもっと細かく" in backlog
     # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
     assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
     assert "https://example.slack.com/archives/C9/p201" in backlog
@@ -407,7 +409,7 @@ async def test_job_loop_notifies_once_while_failing(env, config, monkeypatch):
 async def test_crash_before_the_run_is_reported_to_the_thread(env, monkeypatch):
     """作業用ディレクトリを作れないときなどに、👀 がついたまま黙って終わらない。"""
     assistant, slack, claude, _ = env
-    from ezra import themes
+    from kei_agent import themes
 
     def boom(ws):
         raise RuntimeError("ディスクが一杯です")
@@ -468,7 +470,7 @@ async def test_falls_back_to_a_plain_post_when_the_new_slack_api_is_unavailable(
 async def test_publish_records_the_thread_even_without_a_session(env, config, store):
     """claude がセッションを作る前に落ちた日でも、そのスレッドへの返信に反応できるようにする。"""
     assistant, slack, claude, _ = env
-    from ezra import themes
+    from kei_agent import themes
 
     ws = themes.resolve(config, "research-overview")
     themes.ensure_workspace(ws)
@@ -481,7 +483,7 @@ async def test_publish_records_the_thread_even_without_a_session(env, config, st
 
 def test_message_text_reads_messages_posted_as_markdown():
     """流して見せた返事や markdown_text の投稿は、text が空で blocks に入る。"""
-    from ezra.assistant import message_text
+    from kei_agent.slack_text import message_text
 
     assert message_text({"text": "ふつうの投稿"}) == "ふつうの投稿"
     assert message_text({"text": "", "blocks": [{"type": "markdown", "text": "流した返事"}]}) == "流した返事"
@@ -491,7 +493,7 @@ def test_message_text_reads_messages_posted_as_markdown():
 
 def test_theme_runs_remembers_overlap():
     """outputs/ はテーマで共通なので、重なって動いたことを覚えておく。"""
-    from ezra.assistant import ThemeRuns
+    from kei_agent.assistant import ThemeRuns
 
     runs = ThemeRuns()
     runs.begin("vlm", "1.1")
@@ -545,7 +547,7 @@ def _press(el, user="UME", message_ts="99.1"):
 
 async def test_connect_request_becomes_buttons_and_resumes_when_allowed(env, store):
     assistant, slack, claude, _ = env
-    from ezra import settings
+    from kei_agent import settings
     claude.behaviors = [
         {"text": "Zenodo につながらなかった。\n🔒 接続: zenodo.org（CASTELLA の特徴量を落とすため）"},
         {"text": "落とせたよ"},
@@ -553,7 +555,7 @@ async def test_connect_request_becomes_buttons_and_resumes_when_allowed(env, sto
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
     await settle(assistant)
 
-    allow, post = _button_action(slack, "ezra_domain_allow")
+    allow, post = _button_action(slack, "kei_agent_domain_allow")
     assert post["thread_ts"] == "10.1" and "zenodo.org" in post["text"]
     assert slack.statuses()[-1] == "suspended"  # 返事待ちに見せる
 
@@ -569,12 +571,12 @@ async def test_connect_request_becomes_buttons_and_resumes_when_allowed(env, sto
 
 async def test_connect_request_denied_resumes_with_that_news(env, store):
     assistant, slack, claude, _ = env
-    from ezra import settings
+    from kei_agent import settings
     claude.behaviors = [{"text": "🔒 接続: zenodo.org（特徴量）"}, {"text": "別の入手先を探すね"}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
     await settle(assistant)
 
-    deny, _ = _button_action(slack, "ezra_domain_deny")
+    deny, _ = _button_action(slack, "kei_agent_domain_deny")
     await assistant.on_domain_action(_press(deny))
     await settle(assistant)
 
@@ -584,12 +586,12 @@ async def test_connect_request_denied_resumes_with_that_news(env, store):
 
 async def test_only_the_allowed_user_can_press(env, store):
     assistant, slack, claude, _ = env
-    from ezra import settings
+    from kei_agent import settings
     claude.behaviors = [{"text": "🔒 接続: zenodo.org（特徴量）"}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
     await settle(assistant)
 
-    allow, _ = _button_action(slack, "ezra_domain_allow")
+    allow, _ = _button_action(slack, "kei_agent_domain_allow")
     await assistant.on_domain_action(_press(allow, user="USOMEONE"))
     await settle(assistant)
     assert settings.theme_domains(store, "vlm") == [] and len(claude.calls) == 1
@@ -602,7 +604,7 @@ async def test_several_requests_resume_once_after_all_answered(env, store):
     await settle(assistant)
 
     buttons = [el for _, kw in slack.calls for b in kw.get("blocks") or [] for el in b.get("elements", [])
-               if el.get("action_id") == "ezra_domain_allow"]
+               if el.get("action_id") == "kei_agent_domain_allow"]
     assert len(buttons) == 2
 
     await assistant.on_domain_action(_press(buttons[0]))
@@ -637,7 +639,7 @@ async def test_domains_asked_through_the_bash_tool_also_become_buttons(env, monk
     monkeypatch.setattr(runner, "run_claude", asks_with_tool)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
     await settle(assistant)
-    allow, post = _button_action(slack, "ezra_domain_allow")
+    allow, post = _button_action(slack, "kei_agent_domain_allow")
     assert "huggingface.co" in post["text"] and "重みを落とす" in post["text"]
 
 
@@ -728,7 +730,7 @@ async def test_next_request_after_an_error_carries_the_stalled_request(env, stor
 
 async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
     assistant, slack, claude, _ = env
-    from ezra import ask
+    from kei_agent import ask
     ask.write_ask(config, "vlm", "条件ごとの精度を集計して")
 
     await assistant.handle_asks()
@@ -744,7 +746,7 @@ async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
 async def test_note_from_outside_is_only_recorded(env, config):
     """決まったことは、作業させずにスレッドに残すだけ。"""
     assistant, slack, claude, _ = env
-    from ezra import ask
+    from kei_agent import ask
     ask.write_ask(config, "vlm", "4条件の比較で進める", kind="note")
 
     await assistant.handle_asks()
@@ -756,7 +758,7 @@ async def test_note_from_outside_is_only_recorded(env, config):
 
 async def test_ask_for_an_unknown_theme_is_reported(env, config):
     assistant, slack, claude, _ = env
-    from ezra import ask
+    from kei_agent import ask
     ask.write_ask(config, "nothere", "何かして")
 
     await assistant.handle_asks()
@@ -795,7 +797,7 @@ async def test_short_finished_run_does_not_mention(env):
 
 
 async def test_long_finished_run_mentions(env, monkeypatch):
-    from ezra import assistant as mod
+    from kei_agent import assistant as mod
     assistant, slack, claude, _ = env
     monkeypatch.setattr(mod, "NOTIFY_AFTER_SECONDS", -1)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})

@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from ezra import guard, runner, themes
+from kei_agent import guard, runner, themes
 
 
 def test_settings_limit_theme_to_its_directory(config):
@@ -56,22 +56,22 @@ def test_env_strips_secrets_and_adds_thread(config):
         "SLACK_BOT_TOKEN": "xoxb-secret",
         "SLACK_APP_TOKEN": "xapp-secret",
         "NOTION_TOKEN": "ntn_secret",
-        "EZRA_ALLOWED_USER_ID": "UME",
+        "KEI_AGENT_ALLOWED_USER_ID": "UME",
         "CLAUDECODE": "1",
         "CLAUDE_CODE_SESSION_ID": "parent",
         "CLAUDE_CODE_OAUTH_TOKEN": "keep",
     }
     env = runner.build_env(config, base, "C1", "123.456")
     assert "SLACK_BOT_TOKEN" not in env and "SLACK_APP_TOKEN" not in env and "NOTION_TOKEN" not in env
-    assert "EZRA_ALLOWED_USER_ID" not in env
+    assert "KEI_AGENT_ALLOWED_USER_ID" not in env
     assert "CLAUDECODE" not in env and "CLAUDE_CODE_SESSION_ID" not in env
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"
-    assert env["EZRA_CHANNEL"] == "C1" and env["EZRA_THREAD_TS"] == "123.456"
-    assert env["EZRA_PLUGIN_DIR"].endswith("plugin")
+    assert env["KEI_AGENT_CHANNEL"] == "C1" and env["KEI_AGENT_THREAD_TS"] == "123.456"
+    assert env["KEI_AGENT_PLUGIN_DIR"].endswith("plugin")
 
 
 def test_apply_event_keeps_domains_claude_asked_for():
-    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Ezra がボタンにできるよう覚えておく。"""
+    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Kei Agent がボタンにできるよう覚えておく。"""
     result = runner.RunResult()
     runner.apply_event(result, {"type": "assistant", "message": {"content": [{
         "type": "tool_use", "name": "Bash",
@@ -124,7 +124,7 @@ def test_settings_deny_reading_secret_locations(config):
 
 
 def test_default_deny_read_covers_tokens_and_keys(tmp_path):
-    from ezra.config import load_config
+    from kei_agent.config import load_config
     paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
     assert any(p.endswith("/.ssh") for p in paths)
     assert any(p.endswith("/.aws") for p in paths)

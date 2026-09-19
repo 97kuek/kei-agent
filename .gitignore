@@ -7,3 +7,7 @@ __pycache__/
 
 # 構想資料（他の人の資料なので含めない）
 doctor-ai-concept.pdf
+
+# Slack のアイコン（似顔絵なので公開リポジトリには入れない。Slack の設定画面にだけ上げる）
+slack/icon.png
+/Kei Agent.png

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from ezra.config import REPO_ROOT, Config
-from ezra.store import Store
+from kei_agent.config import REPO_ROOT, Config
+from kei_agent.store import Store
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""App Home（Slack で Ezra を開いたときのタブ）に出す設定画面。
+"""App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
 置くのは、テーマごとに許可した接続先と、決まった時刻の処理の時刻だけ（docs/plan.md の11章）。
 基本の接続先など `config.toml` の柵は出さない。
@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-from ezra import settings
-from ezra.config import Config
-from ezra.store import Store
+from kei_agent import settings
+from kei_agent.config import Config
+from kei_agent.store import Store
 
-ADD_DOMAIN_CALLBACK = "ezra_add_domain"
+ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
 
 
 def _mrkdwn(text: str) -> dict:
@@ -27,10 +27,10 @@ def _button(text: str, action_id: str, value: str, style: str | None = None) -> 
 
 def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool) -> dict:
     if not is_owner:
-        return {"type": "home", "blocks": [_mrkdwn("Ezra の設定は、依頼者だけが変えられます。")]}
+        return {"type": "home", "blocks": [_mrkdwn("Kei Agent の設定は、依頼者だけが変えられます。")]}
 
     blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Ezra の設定"}},
+        {"type": "header", "text": {"type": "plain_text", "text": "Kei Agent の設定"}},
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             "ここで変えた内容は、再起動なしで次の作業から効きます。書き込み先や読ませない場所などは `config.toml` で管理します"}]},
         {"type": "divider"},
@@ -46,17 +46,17 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         for domain in allowed:
             blocks.append({
                 "type": "section", "text": {"type": "mrkdwn", "text": f"`{domain}`"},
-                "accessory": _button("外す", "ezra_home_remove_domain", f"{theme}\t{domain}", "danger"),
+                "accessory": _button("外す", "kei_agent_home_remove_domain", f"{theme}\t{domain}", "danger"),
             })
     if theme_names:
-        blocks.append({"type": "actions", "elements": [_button("接続先を足す", "ezra_home_add_domain", "add")]})
+        blocks.append({"type": "actions", "elements": [_button("接続先を足す", "kei_agent_home_add_domain", "add")]})
     else:
         blocks.append(_mrkdwn("研究テーマのチャンネルがまだありません"))
 
     blocks += [{"type": "divider"}, _mrkdwn("*決まった時刻の処理*")]
     for name in settings.SCHEDULE_NAMES:
         hhmm, enabled = settings.schedule_setting(config, store, name)
-        timepicker = {"type": "timepicker", "action_id": f"ezra_home_time:{name}",
+        timepicker = {"type": "timepicker", "action_id": f"kei_agent_home_time:{name}",
                       "placeholder": {"type": "plain_text", "text": "時刻"}}
         if hhmm:
             timepicker["initial_time"] = hhmm
@@ -66,7 +66,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
             "accessory": timepicker,
         })
         blocks.append({"type": "actions", "elements": [
-            _button("止める" if enabled else "動かす", f"ezra_home_toggle:{name}", name),
+            _button("止める" if enabled else "動かす", f"kei_agent_home_toggle:{name}", name),
         ]})
     return {"type": "home", "blocks": blocks}
 

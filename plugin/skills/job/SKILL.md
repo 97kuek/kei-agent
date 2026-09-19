@@ -1,11 +1,11 @@
 ---
 name: job
-description: 数分以上かかる実験や分析を、Ezra のジョブ（pueue）としてバックグラウンドで実行する。長い処理をその場で実行しそうになったとき、ジョブの状態を確認したいとき、取り消したいときに使う。
+description: 数分以上かかる実験や分析を、Kei Agent のジョブ（pueue）としてバックグラウンドで実行する。長い処理をその場で実行しそうになったとき、ジョブの状態を確認したいとき、取り消したいときに使う。
 ---
 
-# Ezra のジョブ
+# Kei Agent のジョブ
 
-数分以上かかる処理は、その場で実行せずにジョブにする。ジョブは Claude Code の外で走り、終わると Ezra がこのスレッドの会話を再開する。
+数分以上かかる処理は、その場で実行せずにジョブにする。ジョブは Claude Code の外で走り、終わると Kei Agent がこのスレッドの会話を再開する。
 
 ## 手順
 
@@ -16,7 +16,7 @@ description: 数分以上かかる実験や分析を、Ezra のジョブ（pueue
 2. 投入する:
 
    ```bash
-   python3 "$EZRA_PLUGIN_DIR/skills/job/scripts/ezra_job.py" submit --name "<短い名前>" scripts/sweep.py -- --arg1 value
+   python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" submit --name "<短い名前>" scripts/sweep.py -- --arg1 value
    ```
 
 3. 投入を依頼したこと、何を走らせたか、終わったら報告することを返答に書き、その回の作業を終える。終わるまで待たない
@@ -24,9 +24,9 @@ description: 数分以上かかる実験や分析を、Ezra のジョブ（pueue
 ## 状態の確認と取り消し
 
 ```bash
-python3 "$EZRA_PLUGIN_DIR/skills/job/scripts/ezra_job.py" status        # すべて
-python3 "$EZRA_PLUGIN_DIR/skills/job/scripts/ezra_job.py" status 12     # ジョブ12
-python3 "$EZRA_PLUGIN_DIR/skills/job/scripts/ezra_job.py" cancel 12
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" status        # すべて
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" status 12     # ジョブ12
+python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" cancel 12
 ```
 
 ## 制限

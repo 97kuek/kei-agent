@@ -1,7 +1,7 @@
-"""Slack の外（机の上の音声対話など）から Ezra に依頼を渡す口（docs/plan.md の13章）。
+"""Slack の外（机の上の音声対話など）から Kei Agent に依頼を渡す口（docs/plan.md の13章）。
 
 Slack のトークンを増やさないため、同じ Mac の中にファイルを置いて渡す。
-Ezra は数秒ごとにここを見て、チャンネルにスレッドを立ててから、いつもどおり作業する。
+Kei Agent は数秒ごとにここを見て、チャンネルにスレッドを立ててから、いつもどおり作業する。
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ import time
 import uuid
 from pathlib import Path
 
-from ezra.config import Config, load_config
+from kei_agent.config import Config, load_config
 
 ASK_DIR = "asks"
-# Ezra が置かれた依頼を拾うまでの間隔（秒）
+# Kei Agent が置かれた依頼を拾うまでの間隔（秒）
 POLL_SECONDS = 3.0
 # 依頼（Claude を動かす）と、記録だけ（決まったことを残す）
 KINDS = ("request", "note")
@@ -27,7 +27,7 @@ def ask_dir(config: Config) -> Path:
 
 
 def write_ask(config: Config, theme: str, text: str, kind: str = "request") -> Path:
-    """依頼（または記録）を1つ置く。Ezra が拾うとファイルは消える。"""
+    """依頼（または記録）を1つ置く。Kei Agent が拾うとファイルは消える。"""
     if kind not in KINDS:
         raise ValueError(f"kind は {' / '.join(KINDS)} のどれかにしてください: {kind}")
     directory = ask_dir(config)
@@ -54,8 +54,8 @@ def pending_asks(config: Config) -> list[tuple[Path, dict]]:
 
 
 def main() -> None:
-    """`ezra-ask --theme amr-query "〜して"`。声のレイヤからも、手でも使える。"""
-    parser = argparse.ArgumentParser(description="Slack の外から Ezra に依頼を渡す")
+    """`kei-agent-ask --theme amr-query "〜して"`。声のレイヤからも、手でも使える。"""
+    parser = argparse.ArgumentParser(description="Slack の外から Kei Agent に依頼を渡す")
     parser.add_argument("text", help="依頼の文（そのままスレッドに載る）")
     parser.add_argument("--theme", required=True, help="テーマ（Slack のチャンネル名）")
     parser.add_argument("--note", action="store_true", help="作業させず、決まったこととして記録だけする")

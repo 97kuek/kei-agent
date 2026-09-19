@@ -14,14 +14,16 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from ezra import maintenance, settings, themes
-from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text
-from ezra.config import Config
-from ezra.digest import DigestBuilder
-from ezra.notion import NotionError
-from ezra.notion_store import Note, Task, parse_slack_permalink, summarize
-from ezra.store import Store
-from ezra.themes import OVERVIEW_DIR
+from kei_agent import maintenance, settings, themes
+from kei_agent.assistant import Assistant
+from kei_agent.config import Config
+from kei_agent.digest import DigestBuilder
+from kei_agent.notion import NotionError
+from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
+from kei_agent.request import Request
+from kei_agent.slack_text import AWAITING_MARKER, clean_text
+from kei_agent.store import Store
+from kei_agent.themes import OVERVIEW_DIR
 
 log = logging.getLogger(__name__)
 
@@ -172,7 +174,7 @@ class Scheduler:
         theme = task.theme_names[0] if task.theme_names else None
         channel_name = theme
         if theme is None or channel_name not in ids:
-            reason = "テーマを設定してください" if theme is None else f"テーマのチャンネル #{theme} に Ezra がいません"
+            reason = "テーマを設定してください" if theme is None else f"テーマのチャンネル #{theme} に Kei Agent がいません"
             await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
             return {**info, "status": "確認待ち", "reason": reason}
 
@@ -228,16 +230,16 @@ class Scheduler:
         for cwd in themes.theme_dirs(self.config):
             name = cwd.name
             if name not in ids:
-                continue  # アーカイブしたテーマや、Ezra のいないテーマは見張らない
+                continue  # アーカイブしたテーマや、Kei Agent のいないテーマは見張らない
             keywords = search_keywords(cwd / "CLAUDE.md")
             if not keywords:
                 results[name] = {"status": "no_keywords"}
                 continue
             ws = themes.resolve(self.config, name)
             prompt = (
-                f"[Ezra の定期処理: 先行研究の新着 {day}]\n"
+                f"[Kei Agent の定期処理: 先行研究の新着 {day}]\n"
                 f"検索キーワード: {' / '.join(keywords)}\n\n"
-                f"ezra:literature skill で、キーワードごとに arXiv を `--sort date` で検索し、{since.isoformat()} 以降に"
+                f"kei-agent:literature skill で、キーワードごとに arXiv を `--sort date` で検索し、{since.isoformat()} 以降に"
                 "投稿された論文のうち、papers/ にまだ保存していないものを探してください。"
                 "テーマの CLAUDE.md の前提に照らして関係のある論文だけを papers/ に保存し、1本ずつ要点と関係を報告してください。\n"
                 f"関係のある新着が1本もなければ、返答は `{NO_NEW_PAPERS}` の1行だけにしてください。"
@@ -255,7 +257,7 @@ class Scheduler:
     # Daily と振り返り
 
     async def _write_digest(self, kind: str, day: str, since: float, ids: dict[str, str]) -> Path:
-        path = self.overview_dir / ".ezra" / "digest" / f"{day}-{kind}.md"
+        path = self.overview_dir / ".kei-agent" / "digest" / f"{day}-{kind}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         title = {"daily": f"Daily の材料 {day}", "review": f"振り返りの材料 {day}"}[kind]
         text = await DigestBuilder(self.config, self.store, self.assistant).build(since, time.time(), title, set(ids))
@@ -284,7 +286,7 @@ class Scheduler:
         digest = await self._write_digest("daily", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
-            f"[Ezra の定期処理: Daily {day}]\n"
+            f"[Kei Agent の定期処理: Daily {day}]\n"
             f"`{digest}` に前回の Daily からの材料があります。材料と、そこに書かれたスレッドのログや振り返りのファイル、"
             "Notion のノートと Task を読み、今日の議論の起点になる Daily を書いてください。\n\n"
             "次の順で、全体を1画面に収めてください。\n"
@@ -293,7 +295,7 @@ class Scheduler:
             "3. 先行研究の新着のうち重要なもの（なければ一言）。検索キーワードがないテーマがあれば、決めるよう促す\n"
             "4. 今日考えるとよい問い（2〜3個。前日の振り返りと考察のノートを踏まえる）\n"
             "5. 確認待ちの Task、期日が近い Task とマイルストーン、止まっているテーマ、返事待ちのスレッド\n\n"
-            "月曜なら、材料に書かれている研究時間の CSV から、人の時間と Ezra の稼働時間を重ねた"
+            "月曜なら、材料に書かれている研究時間の CSV から、人の時間と Kei Agent の稼働時間を重ねた"
             "折れ線グラフを作り、`outputs/` に保存してください（月曜以外は作らなくてよい）。\n\n"
             f"同じ内容を `daily/{day}.md` に保存してください。返答が Slack と Notion にそのまま載ります。"
         )
@@ -316,7 +318,7 @@ class Scheduler:
         review_path = self.overview_dir / "reviews" / f"{day}.md"
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
-            f"[Ezra の定期処理: 振り返りの材料 {day}]\n"
+            f"[Kei Agent の定期処理: 振り返りの材料 {day}]\n"
             f"`{digest}` に今日の材料があります。材料と、そこに書かれたスレッドのログを読み、"
             f"Codex App で振り返るための材料を `reviews/{day}.md` に書いてください。形式:\n\n"
             f"```markdown\n# 振り返り {day}\n\n## 今日やったこと\n（テーマごとに、何をして何が分かったか）\n\n"
@@ -384,9 +386,9 @@ class Scheduler:
 async def _run_once(name: str, record: bool) -> None:
     from slack_sdk.web.async_client import AsyncWebClient
 
-    from ezra.config import load_config
-    from ezra.jobs import JobManager, Pueue
-    from ezra.notion_store import load_notion
+    from kei_agent.config import load_config
+    from kei_agent.jobs import JobManager, Pueue
+    from kei_agent.notion_store import load_notion
 
     config = load_config()
     store = Store(config.db_path)
@@ -406,7 +408,7 @@ async def _run_once(name: str, record: bool) -> None:
 
 def main() -> None:
     """定期処理を今すぐ1回動かす（確認用）。"""
-    parser = argparse.ArgumentParser(prog="ezra-schedule")
+    parser = argparse.ArgumentParser(prog="kei-agent-schedule")
     parser.add_argument("name", choices=TASK_NAMES)
     parser.add_argument("--record", action="store_true", help="今日の分を実行済みとして記録する")
     args = parser.parse_args()

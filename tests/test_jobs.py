@@ -4,8 +4,8 @@ import os
 import pytest
 from fakes import FakePueue, write_request
 
-from ezra import themes
-from ezra.jobs import (
+from kei_agent import themes
+from kei_agent.jobs import (
     JobManager,
     JobRequestError,
     build_job_command,
@@ -57,12 +57,12 @@ def test_command_rejects_other_suffix(theme):
         build_job_command(theme.cwd, "run.rb", [], 1)
 
 
-def test_job_env_drops_secrets_and_ezras_own_venv(config):
-    """ジョブは研究の環境で動かす。uv run が足す Ezra の .venv/bin を持ち込まない。"""
+def test_job_env_drops_secrets_and_own_venv(config):
+    """ジョブは研究の環境で動かす。uv run が足す Kei Agent の .venv/bin を持ち込まない。"""
     venv = str(config.repo_root / ".venv" / "bin")
     env = job_env(
         {"PATH": f"{venv}:/bin", "HOME": "/h", "VIRTUAL_ENV": venv,
-         "SLACK_BOT_TOKEN": "x", "EZRA_ALLOWED_USER_ID": "U"},
+         "SLACK_BOT_TOKEN": "x", "KEI_AGENT_ALLOWED_USER_ID": "U"},
         config.repo_root,
     )
     assert env == {"PATH": "/bin", "HOME": "/h"}
@@ -113,8 +113,8 @@ async def test_submit_request_from_known_thread(config, store, theme):
     outcome, = handled
     job, error = outcome.job, outcome.error
     assert error is None and job.pueue_id == 0 and job.status == "queued"
-    assert pueue.added[0][2] == f"ezra-{job.id}"
-    state = json.loads((theme.cwd / ".ezra" / "jobs" / f"{job.id}.json").read_text())
+    assert pueue.added[0][2] == f"kei-agent-{job.id}"
+    state = json.loads((theme.cwd / ".kei-agent" / "jobs" / f"{job.id}.json").read_text())
     assert state["status"] == "queued" and state["log"] == f"logs/job-{job.id}.log"
 
     # 同じ依頼をもう一度置いても二重に投入しない
@@ -173,7 +173,7 @@ async def test_cancel_request_kills_running_job(config, store, theme):
 async def test_unreadable_request_is_reported(config, store, theme):
     """読めない依頼を黙って捨てると、Claude は「投入した」と思ったまま待ち続ける。"""
     manager = JobManager(config, store, FakePueue())
-    path = theme.cwd / ".ezra" / "requests" / "broken.json"
+    path = theme.cwd / ".kei-agent" / "requests" / "broken.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"action": "cancel", "request_id": "c1", "job_id": null, "channel": "C1", "thread_ts": "1.1"}')
 

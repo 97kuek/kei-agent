@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from ezra import ask
-from ezra_voice import bridge, journal, markers
-from ezra_voice.app import Session
-from ezra_voice.brain import Codex, today, wants_deep
+from kei_agent import ask
+from kei_agent_voice import bridge, journal, markers
+from kei_agent_voice.app import Session
+from kei_agent_voice.brain import Codex, today, wants_deep
 
 
 class FakeSpeaker:
@@ -47,7 +47,7 @@ class FakeCodex:
 
 
 def _turn(text="", failed=None, limit_reset=None):
-    from ezra_voice.brain import Turn
+    from kei_agent_voice.brain import Turn
     return Turn(text=text, failed=failed, limit_reset=limit_reset)
 
 
@@ -110,7 +110,7 @@ def test_new_conversation_forgets_the_session(session):
     assert codex.forgotten == 1
 
 
-def test_decision_is_recorded_in_slack_through_ezra(session, config):
+def test_decision_is_recorded_in_slack_through_kei_agent(session, config):
     s, codex, _ = session
     s.theme = "amr-query"
     codex.replies = [_turn("じゃあそれで進めよう。\n📌 決定: moments を正解として使う")]
@@ -166,7 +166,7 @@ def test_usage_limit_is_explained_with_the_reset_time(session):
     s, codex, _ = session
     codex.replies = [_turn(failed="You've hit your usage limit ... try again at 6:01 PM.", limit_reset="6:01 PM")]
     said = s.handle("どう思う？")
-    assert "上限" in said and "6:01 PM" in said and "Slack の Ezra" in said
+    assert "上限" in said and "6:01 PM" in said and "Slack の Kei Agent" in said
 
 
 # 終わったことの知らせ
@@ -260,8 +260,8 @@ def sys_executable() -> str:
 
 def test_journal_keeps_the_whole_conversation(config):
     journal.append(config, "2026-09-19", "依頼者", "こんにちは")
-    path = journal.append(config, "2026-09-19", "Ezra（声）", "やあ")
+    path = journal.append(config, "2026-09-19", "Kei Agent（声）", "やあ")
     text = path.read_text()
     assert path == config.research_root / "_overview" / "voice" / "2026-09-19.md"
-    assert "## 依頼者" in text and "## Ezra（声）" in text and "やあ" in text
+    assert "## 依頼者" in text and "## Kei Agent（声）" in text and "やあ" in text
     assert isinstance(path, Path)

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from ezra import maintenance, themes
-from ezra.app import setup_logging
+from kei_agent import maintenance, themes
+from kei_agent.app import setup_logging
 
 
 def age(path, days):
@@ -20,7 +20,7 @@ def age(path, days):
 def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
-    digest_dir = config.research_root / "_overview" / ".ezra" / "digest"
+    digest_dir = config.research_root / "_overview" / ".kei-agent" / "digest"
     digest_dir.mkdir(parents=True)
     (digest_dir / "old.md").write_text("x")
     (digest_dir / "new.md").write_text("x")
@@ -52,7 +52,7 @@ def test_dump_state_writes_sql_and_notion_ids(config, store):
     store.upsert_thread("C1", "1.1", "vlm", "sess")
     (config.state_dir / "notion.json").write_text(json.dumps({"home_page_id": "p"}))
     out = maintenance.dump_state(config)
-    assert "INSERT INTO \"threads\"" in (out / "ezra.sql").read_text()
+    assert "INSERT INTO \"threads\"" in (out / "kei-agent.sql").read_text()
     assert json.loads((out / "notion.json").read_text()) == {"home_page_id": "p"}
 
 
@@ -96,7 +96,7 @@ async def test_backup_commits_and_pushes(config, store, tmp_path):
     log = git(remote, "log", "--format=%s", "main")
     assert log.splitlines()[0] == "9/18 の研究データを保存する"
     files = git(remote, "ls-tree", "-r", "--name-only", "main")
-    assert "vlm/result.csv" in files and "_ezra_state/ezra.sql" in files
+    assert "vlm/result.csv" in files and "_kei_agent_state/kei-agent.sql" in files
 
     again = await maintenance.backup(config, "2026-09-18")
     assert again["committed"] is False
@@ -109,12 +109,12 @@ async def test_backup_requires_repository(config):
 
 
 def test_setup_logging_rotates_file(tmp_path):
-    path = tmp_path / "logs" / "ezra.log"
-    setup_logging({"EZRA_LOG_FILE": str(path)})
+    path = tmp_path / "logs" / "kei-agent.log"
+    setup_logging({"KEI_AGENT_LOG_FILE": str(path)})
     try:
         handler, = logging.getLogger().handlers
         assert isinstance(handler, RotatingFileHandler) and handler.maxBytes == 5 * 1024 * 1024
-        logging.getLogger("ezra").info("こんにちは")
+        logging.getLogger("kei_agent").info("こんにちは")
         handler.flush()
         assert "こんにちは" in path.read_text()
     finally:
@@ -123,7 +123,7 @@ def test_setup_logging_rotates_file(tmp_path):
 
 async def test_backup_untracks_a_file_that_grew_too_large(config, monkeypatch):
     """小さいうちにコミットしたファイルが育つと、exclude では止まらず push が通らなくなる。"""
-    from ezra import maintenance
+    from kei_agent import maintenance
 
     repo = config.research_root
     repo.mkdir(parents=True, exist_ok=True)
@@ -149,7 +149,7 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
     """端末のない launchd では、認証を聞かれると永久に止まり、定期処理ごと動かなくなる。"""
     import asyncio
 
-    from ezra import maintenance
+    from kei_agent import maintenance
 
     repo = config.research_root
     repo.mkdir(parents=True, exist_ok=True)
@@ -179,7 +179,7 @@ def test_cleanup_removes_old_voice_logs(config, tmp_path):
 
 def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path, monkeypatch):
     """取り込みや失敗で使い終わった worktree と、案を考えるときの一時ディレクトリを片付ける。"""
-    from ezra import improve
+    from kei_agent import improve
 
     store.start_improvement("C9", "20.1", "進行中", worktree=str(config.state_dir / "worktrees" / "improve-20-1"))
     leftovers = []
@@ -202,6 +202,6 @@ def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path,
                                   frozenset(Path(r["worktree"]).name for r in busy if r["worktree"]),
                                   frozenset(r["thread_ts"] for r in busy))
 
-    assert leftovers == [("improve-19-9", "ezra/improve-19-9")]
+    assert leftovers == [("improve-19-9", "kei-agent/improve-19-9")]
     assert removed["worktrees"] == 1
     assert not (scratch / "19.9").exists() and (scratch / "20.1").exists()

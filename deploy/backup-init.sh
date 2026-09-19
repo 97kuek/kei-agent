@@ -15,8 +15,8 @@ cd "$ROOT"
 
 if [[ ! -f .gitignore ]]; then
   cat > .gitignore <<'IGNORE'
-# Ezra が作る一時的なもの
-.ezra/requests/
+# Kei Agent が作る一時的なもの
+.kei-agent/requests/
 .claude/
 __pycache__/
 .venv/
@@ -30,12 +30,12 @@ git config --local --replace-all credential.https://github.com.helper ''
 git config --local --add credential.https://github.com.helper '!gh auth git-credential'
 
 if ! gh repo view "$OWNER/$NAME" >/dev/null 2>&1; then
-  gh repo create "$OWNER/$NAME" --private --description "Ezra の研究データのバックアップ（~/research）"
+  gh repo create "$OWNER/$NAME" --private --description "Kei Agent の研究データのバックアップ（~/research）"
 fi
 git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$OWNER/$NAME.git"
 
-# Ezra の状態を書き出してから、最初のコミットを作る
-(cd "$REPO" && uv run --frozen python -c 'from ezra.config import load_config; from ezra.maintenance import dump_state, exclude_large_files; c = load_config(); dump_state(c); exclude_large_files(c.research_root)')
+# Kei Agent の状態を書き出してから、最初のコミットを作る
+(cd "$REPO" && uv run --frozen python -c 'from kei_agent.config import load_config; from kei_agent.maintenance import dump_state, exclude_large_files; c = load_config(); dump_state(c); exclude_large_files(c.research_root)')
 git add -A
 git diff --cached --quiet || git commit -q -m "研究データの保存を始める"
 git push -q -u origin main

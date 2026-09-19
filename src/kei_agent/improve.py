@@ -1,6 +1,6 @@
-"""Slack から Ezra 自身を直す流れ（docs/plan.md の12章）。
+"""Slack から Kei Agent 自身を直す流れ（docs/plan.md の12章）。
 
-`#research-ezra` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
+`#research-agent` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
 main に取り込んで push し、作業がなくなってから自分を再起動する。
 柵（`guard.py`、`config.toml`、`deploy/`）に触れた差分は取り込まない。
 """
@@ -12,12 +12,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ezra import guard
-from ezra.config import Config
+from kei_agent import guard
+from kei_agent.config import Config
 
 log = logging.getLogger(__name__)
 
-# Claude が返答の最後に書く行。Ezra 本体は、依頼者の投稿で始まった回の返事にあるときだけ動く
+# Claude が返答の最後に書く行。Kei Agent 本体は、依頼者の投稿で始まった回の返事にあるときだけ動く
 START_MARKER = "🛠 着手"
 # 直したあと、コミットの件名として書いてもらう行
 SUBJECT_MARKER = "📝 件名:"
@@ -84,7 +84,7 @@ def worktree_root(config: Config) -> Path:
 def create_worktree(config: Config, thread_ts: str) -> tuple[Path, str, str]:
     """直すための作業場所を作る。(場所, ブランチ名, 元のコミット) を返す。"""
     repo = config.repo_root
-    branch = f"ezra/improve-{thread_ts.replace('.', '-')}"
+    branch = f"kei-agent/improve-{thread_ts.replace('.', '-')}"
     path = worktree_root(config) / branch.split("/")[-1]
     remove_worktree(config, path, branch)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,13 +188,13 @@ def read_rolled_back(config: Config) -> tuple[str, str] | None:
 
 
 FIX_PROMPT = """\
-[Ezra からの自動メッセージ] このスレッドで決まった直し方で、Ezra 自身のコードを直してください。
+[Kei Agent からの自動メッセージ] このスレッドで決まった直し方で、Kei Agent 自身のコードを直してください。
 
 - いまのディレクトリは、この作業のための git worktree です。ここの中だけを書き換えます
-- `src/ezra/guard.py`、`config.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
+- `src/kei_agent/guard.py`、`config.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
 - 直したら `uv run --frozen pytest -q` と `uvx ruff check src tests plugin` を通してください
 - テストのないところを直すときは、先に落ちるテストを書いてから直してください
-- コミットはしないでください（Ezra 本体がまとめてコミットします）
+- コミットはしないでください（Kei Agent 本体がまとめてコミットします）
 - 最後に、何をどう変えたかと、テストの結果を短くまとめてください
 - いちばん最後の行に `📝 件名: <コミットの件名を一行で>` と書いてください（何をしたかが分かる、50字くらいの日本語）
 
@@ -216,7 +216,7 @@ def mark_backlog_done(config: Config, request: str) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(lines):
         if line.startswith("- [ ]") and key and key in " ".join(line.split()):
-            lines[i] = line.replace("- [ ]", "- [x]", 1) + "（Ezra が直して取り込み済み）"
+            lines[i] = line.replace("- [ ]", "- [x]", 1) + "（Kei Agent が直して取り込み済み）"
             break
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -233,7 +233,7 @@ def subject_from(text: str, fallback: str) -> str:
 
 
 def commit_message(request: str, summary: str) -> str:
-    """Ezra 自身を直したときのコミットメッセージ。件名は Claude が書いた1行、本文は変えた内容の要約。"""
+    """Kei Agent 自身を直したときのコミットメッセージ。件名は Claude が書いた1行、本文は変えた内容の要約。"""
     body = [line for line in summary.strip().splitlines() if not line.strip().startswith(SUBJECT_MARKER)]
     text = "\n".join(body).strip()[:1500]
-    return f"{subject_from(summary, request)}\n\n{text}\n\n#research-ezra の要望から、Ezra 自身が直した。"
+    return f"{subject_from(summary, request)}\n\n{text}\n\n#research-agent の要望から、Kei Agent 自身が直した。"

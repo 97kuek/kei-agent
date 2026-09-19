@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620" role="img" aria-label="Ezra が自分を直す流れ">
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620" role="img" aria-label="Kei Agent が自分を直す流れ">
   <defs>
     <marker id="a" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
       <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/>
@@ -17,16 +17,16 @@
     </style>
   </defs>
   <rect width="1180" height="620" fill="#FFFFFF"/>
-  <text class="t" x="40" y="46" font-size="23" font-weight="600">Ezra が自分を直す流れ（#research-ezra）</text>
+  <text class="t" x="40" y="46" font-size="23" font-weight="600">Kei Agent が自分を直す流れ（#research-agent）</text>
   <text class="s" x="40" y="70">人が決めるのは「この直し方でいい？」と「このコードを取り込んでいい？」の2つだけ</text>
 
   <rect class="lane" x="40" y="96" width="1100" height="120" rx="14"/>
-  <text class="s" x="58" y="120">Slack のスレッド（依頼者と Ezra のやりとり）</text>
+  <text class="s" x="58" y="120">Slack のスレッド（依頼者と Kei Agent のやりとり）</text>
   <rect class="box" x="60" y="132" width="180" height="64" rx="10"/>
   <text class="t" x="150" y="158" font-size="13" font-weight="600" text-anchor="middle">要望を書く</text>
   <text class="s" x="150" y="178" text-anchor="middle">backlog.md にも記録</text>
   <rect class="box" x="290" y="132" width="180" height="64" rx="10"/>
-  <text class="t" x="380" y="158" font-size="13" font-weight="600" text-anchor="middle">Ezra が案を返す</text>
+  <text class="t" x="380" y="158" font-size="13" font-weight="600" text-anchor="middle">Kei Agent が案を返す</text>
   <text class="s" x="380" y="178" text-anchor="middle">コードは読むだけ</text>
   <rect class="box" x="520" y="132" width="180" height="64" rx="10"/>
   <text class="t" x="610" y="152" font-size="13" font-weight="600" text-anchor="middle">いいよ → 確認</text>
@@ -44,14 +44,14 @@
   <path class="edge" d="M 930 164 L 956 164"/>
 
   <rect class="lane" x="40" y="250" width="700" height="150" rx="14"/>
-  <text class="s" x="58" y="274">手元の worktree（動いている Ezra には触れない）</text>
+  <text class="s" x="58" y="274">手元の worktree（動いている Kei Agent には触れない）</text>
   <rect class="box" x="60" y="286" width="200" height="96" rx="10"/>
   <text class="t" x="160" y="312" font-size="13" font-weight="600" text-anchor="middle">Claude が直す</text>
   <text class="s" x="160" y="332" text-anchor="middle">落ちるテストを先に書く</text>
   <text class="s" x="160" y="350" text-anchor="middle">書けるのは worktree の中だけ</text>
   <text class="s" x="160" y="368" text-anchor="middle">通信先は PyPI など基本の接続先</text>
   <rect class="box" x="300" y="286" width="200" height="96" rx="10"/>
-  <text class="t" x="400" y="312" font-size="13" font-weight="600" text-anchor="middle">Ezra がまとめる</text>
+  <text class="t" x="400" y="312" font-size="13" font-weight="600" text-anchor="middle">Kei Agent がまとめる</text>
   <text class="s" x="400" y="332" text-anchor="middle">コミットして差分を作る</text>
   <text class="s" x="400" y="350" text-anchor="middle">柵・秘密情報・大きさを確認</text>
   <text class="s" x="400" y="368" text-anchor="middle">依存の変更は先頭に出す</text>

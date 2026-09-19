@@ -1,7 +1,7 @@
 """Slack（ボタンと App Home）から変える設定: テーマごとの接続先と、決まった時刻の処理の時刻。
 
 柵そのもの（書き込み先、読ませない場所、基本の接続先）は `config.toml` に残し、ここでは扱わない。
-保存先は Ezra の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
+保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
 許可を足せてしまう（docs/plan.md の11章）。
 """
 
@@ -11,9 +11,9 @@ import re
 import sqlite3
 import time
 
-from ezra.config import Config
-from ezra.guard import valid_domain
-from ezra.store import Store
+from kei_agent.config import Config
+from kei_agent.guard import valid_domain
+from kei_agent.store import Store
 
 # Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）
 CONNECT_MARKER = "🔒 接続:"

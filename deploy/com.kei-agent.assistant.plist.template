@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.ezra.assistant</string>
+  <string>com.kei-agent.assistant</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>

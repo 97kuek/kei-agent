@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from ezra.config import Config
-from ezra.themes import OVERVIEW_DIR
+from kei_agent.config import Config
+from kei_agent.themes import OVERVIEW_DIR
 
 VOICE_DIR = "voice"
 

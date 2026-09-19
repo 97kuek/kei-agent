@@ -1,11 +1,11 @@
-"""Notion の「研究ホーム」を作る（docs/notion-layout.md）。フェーズ3で Ezra が読み書きするときの接続も兼ねる。
+"""Notion の「研究ホーム」を作る（docs/notion-layout.md）。フェーズ3で Kei Agent が読み書きするときの接続も兼ねる。
 
 使い方:
     source ~/.config/zsh/local/research-assistant.zsh
-    uv run ezra-notion-setup <研究ホームのページID>
+    uv run kei-agent-notion-setup <研究ホームのページID>
 
 何度実行しても、すでにあるデータベース・ビュー・見出しは作り直さない。作ったものの ID は
-~/.local/state/ezra/notion.json に保存する。
+~/.local/state/kei-agent/notion.json に保存する。
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from ezra.config import load_config
+from kei_agent.config import load_config
 
 NOTION_VERSION = "2026-03-11"
 # Notion の上限はおよそ 3 リクエスト/秒。少し余裕をみて間隔をあける
@@ -132,7 +132,7 @@ THEMES = {
 
 TASKS = {
     "icon": "✅",
-    "description": "担当が Ezra で状態が「今夜やる」の Task は、フェーズ3から Ezra が 01:30 に実行する。",
+    "description": "担当が Kei Agent で状態が「今夜やる」の Task は、フェーズ3から Kei Agent が 01:30 に実行する。",
     "properties": {
         "タイトル": {"title": {}},
         "状態": {"status": {"options": [
@@ -142,7 +142,7 @@ TASKS = {
             {"name": "確認待ち", "color": "orange", "group": "In progress"},
             {"name": "完了", "color": "green", "group": "Complete"},
         ]}},
-        "担当": {"select": {"options": _options(("自分", "blue"), ("Ezra", "green"))}},
+        "担当": {"select": {"options": _options(("自分", "blue"), ("Kei Agent", "green"))}},
         "優先度": {"select": {"options": _options(("P0", "red"), ("P1", "orange"), ("P2", "gray"))}},
         "期日": {"date": {}},
         "Slack": {"url": {}},
@@ -155,7 +155,7 @@ TASKS = {
 NOTES = {
     "icon": "📝",
     "description": (
-        "計画: 目的 / 仮説 / 条件 / 判断の基準 / Ezra への依頼。"
+        "計画: 目的 / 仮説 / 条件 / 判断の基準 / Kei Agent への依頼。"
         "考察: 問い / 結果 / 解釈 / 次の一手。"
         "議論メモ: 相手 / 論点 / 決めたこと / 宿題。"
     ),
@@ -164,7 +164,7 @@ NOTES = {
         "種類": {"select": {"options": _options(
             ("計画", "blue"), ("考察", "purple"), ("Daily", "yellow"), ("振り返り", "orange"), ("議論メモ", "gray"))}},
         "日付": {"date": {}},
-        "書いた人": {"select": {"options": _options(("自分", "blue"), ("Ezra", "green"), ("Codex", "gray"))}},
+        "書いた人": {"select": {"options": _options(("自分", "blue"), ("Kei Agent", "green"), ("Codex", "gray"))}},
         "Slack": {"url": {}},
         "ファイル": {"rich_text": {}},
     },
@@ -187,7 +187,7 @@ MILESTONES = {
 # ノートのテンプレート。API ではテンプレートを作れないので、Notion の画面で空のテンプレートを作っておき、中身をここで書く
 NOTE_TEMPLATES = [
     ("計画", "## 目的\n\n## 仮説\n\n## 条件（何を変えて何を測るか）\n\n## 判断の基準（どうなったら仮説を支持するか）\n\n"
-             "## Ezra への依頼\n\nSlack に貼る依頼文。数分以上かかる処理はジョブにしてよい"),
+             "## Kei Agent への依頼\n\nSlack に貼る依頼文。数分以上かかる処理はジョブにしてよい"),
     ("考察", "## 問い\n\n## 結果（図や Slack のスレッドへのリンク）\n\n## 解釈\n\n## 次の一手"),
     ("議論メモ", "## 相手（Codex、指導教員など）\n\n## 論点\n\n## 決めたこと\n\n## 宿題"),
 ]
@@ -334,7 +334,7 @@ class Setup:
 
     def note_templates(self) -> None:
         """ノートのテンプレートに名前・種類・本文を書く。空のテンプレートが足りなければ知らせる。"""
-        from ezra.notion_store import markdown_to_blocks
+        from kei_agent.notion_store import markdown_to_blocks
 
         notes = self.state["databases"]["notes"]
         resp = self.notion.request("GET", f"/data_sources/{notes['data_source_id']}/templates")
@@ -374,7 +374,7 @@ class Setup:
             {"name": "ボード", "type": "board", "configuration": {"type": "board", "group_by": {
                 "type": "status", "property_id": p(tasks, "状態"), "group_by": "option", "sort": {"type": "manual"}}}},
             {"name": "今夜", "type": "table",
-             "filter": {"and": [_eq_select("担当", "Ezra"), _eq_status("状態", "今夜やる")]}},
+             "filter": {"and": [_eq_select("担当", "Kei Agent"), _eq_status("状態", "今夜やる")]}},
             {"name": "確認待ち", "type": "table", "filter": _eq_status("状態", "確認待ち")},
             {"name": "今週の自分", "type": "table",
              "filter": {"and": [_eq_select("担当", "自分"), {"property": "期日", "date": {"this_week": {}}}]}},
@@ -418,7 +418,7 @@ class Setup:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="ezra-notion-setup")
+    parser = argparse.ArgumentParser(prog="kei-agent-notion-setup")
     parser.add_argument("home_page_id", help="研究ホームのページID（URL の末尾32文字）")
     args = parser.parse_args()
     token = os.environ.get("NOTION_TOKEN")

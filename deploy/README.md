@@ -1,4 +1,4 @@
-# Ezra のセットアップ
+# Kei Agent のセットアップ
 
 `docs/plan.md` 第6章のステップ1（準備）とステップ10（常時起動）の手順。
 
@@ -7,26 +7,27 @@
 1. 個人用のワークスペースを作る
 2. チャンネルを作る。名前は `config.toml` の `[channels]` と合わせる
 
-   | 種類 | チャンネル名 | Ezra の動き |
+   | 種類 | チャンネル名 | Kei Agent の動き |
    |---|---|---|
    | 研究全体 | `#research-overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
-   | Ezra の改善 | `#research-ezra` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Ezra が自分のコードを直す（9章）。Ezra がうまく動かなかったときの知らせもここに届く |
-   | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Ezra を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
+   | Kei Agent の改善 | `#research-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
+   | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Kei Agent を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
 
-   Ezra を招待したチャンネルは、上の3つ以外すべて研究テーマとして扱う。個人用のチャンネルには Ezra を招待しない。
+   Kei Agent を招待したチャンネルは、上の3つ以外すべて研究テーマとして扱う。個人用のチャンネルには Kei Agent を招待しない。
 
 3. サイドバーは名前の順に並ぶので、`research-` のチャンネルはまとまる。朝に見る `#research-overview` にスターをつけると一番上に出る。サイドバーのカテゴリ（セクション）は Slack の有料プランでだけ使える
 
-4. テーマを終えたら、チャンネルをアーカイブする。Ezra は Daily の材料や論文の新着で、そのテーマを見なくなる。作業用ディレクトリはバックアップに残る
+4. テーマを終えたら、チャンネルをアーカイブする。Kei Agent は Daily の材料や論文の新着で、そのテーマを見なくなる。作業用ディレクトリはバックアップに残る
 
-## 2. Slack App「Ezra」
+## 2. Slack App「Kei Agent」
 
 1. <https://api.slack.com/apps> → **Create New App** → **From a manifest** → ワークスペースを選び、`slack/manifest.yaml` の中身を貼る
 2. **Install App** → ワークスペースにインストールし、**Bot User OAuth Token**（`xoxb-`）を控える
 3. **Basic Information** → **App-Level Tokens** → **Generate Token and Scopes**。scope に `connections:write` を付け、トークン（`xapp-`）を控える
-4. 自分のSlackユーザーIDを控える（Slack でプロフィール → ︙ → **メンバーIDをコピー**。`U` で始まる）
-5. **Agents** の **Agent experience** をオンにし、アプリを入れ直す（Install App → Reinstall）。作業中の表示（「Working...」）と、返事を流しながら見せる表示に使う。有効にしなくても Ezra は動き、その場合は結果をまとめて投稿する
+4. **Basic Information** → **Display Information** → **App icon** に `slack/icon.png` をアップロードする（アイコンはマニフェストでは変えられない。似顔絵なので Git には入れず、手元にだけ置いている）
+5. 自分のSlackユーザーIDを控える（Slack でプロフィール → ︙ → **メンバーIDをコピー**。`U` で始まる）
+6. **Agents** の **Agent experience** をオンにし、アプリを入れ直す（Install App → Reinstall）。作業中の表示（「Working...」）と、返事を流しながら見せる表示に使う。有効にしなくても Kei Agent は動き、その場合は結果をまとめて投稿する
 
    `slack/manifest.yaml` には `features.agent_view` と、設定画面に使う `features.app_home`・`settings.interactivity` が入っているので、**App Manifest** の画面に貼り直せば有効になる。コマンドで入れ替えるなら、**Settings → App Configuration Tokens** で作ったトークン（`xoxe-`）を使う。
 
@@ -47,8 +48,8 @@
 ```zsh
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
-export EZRA_ALLOWED_USER_ID="U..."
-# Notion のコネクト「Ezra」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）
+export KEI_AGENT_ALLOWED_USER_ID="U..."
+# Notion のコネクト「Kei Agent」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）
 export NOTION_TOKEN="ntn_..."
 # 任意: Toggl の API キーと宛先（研究時間の記録に使う。どれかがなければ人の時間は空欄になる）
 # キーは Toggl の設定 →「Togglアカウント」→「APIトークン」。ID は Toggl を開いたときの URL
@@ -56,8 +57,8 @@ export NOTION_TOKEN="ntn_..."
 export TOGGL_API_TOKEN="toggl_sk_..."
 export TOGGL_ORGANIZATION_ID="..."
 export TOGGL_WORKSPACE_ID="..."
-# 任意: Ezra が claude を動かすときのログイン。書かなければ、ふだんのログイン（キーチェーン）を使う。
-# `claude setup-token` で作ったトークンを入れると、手元の作業と別のアカウントで Ezra を動かせる
+# 任意: Kei Agent が claude を動かすときのログイン。書かなければ、ふだんのログイン（キーチェーン）を使う。
+# `claude setup-token` で作ったトークンを入れると、手元の作業と別のアカウントで Kei Agent を動かせる
 # （契約の上限を分けたいときに使う）
 # export CLAUDE_CODE_OAUTH_TOKEN="..."
 # 任意: Semantic Scholar の APIキー（なくても動くが、混雑時に 429 になりやすい）
@@ -71,14 +72,14 @@ export TOGGL_WORKSPACE_ID="..."
 ```zsh
 brew install pueue && brew services start pueue   # 済んでいれば不要
 uv sync
-uv run ezra
+uv run kei-agent
 ```
 
 確認すること（ステップ1〜3）:
 
-- ログに `Ezra を起動しました` が出て、Slack で Ezra がオンラインになる
-- テーマのチャンネルに Ezra を招待すると、`~/research/<チャンネル名>/` と `CLAUDE.md` ができる
-- `@Ezra このディレクトリの中身を教えて` にスレッドで返信が来る。メンションなしのメッセージには反応しない
+- ログに `Kei Agent を起動しました` が出て、Slack で Kei Agent がオンラインになる
+- テーマのチャンネルに Kei Agent を招待すると、`~/research/<チャンネル名>/` と `CLAUDE.md` ができる
+- `@Kei Agent このディレクトリの中身を教えて` にスレッドで返信が来る。メンションなしのメッセージには反応しない
 
 ## 5. 常時起動（launchd）
 
@@ -88,15 +89,15 @@ launchd から起動したプロセスは、macOS の保護フォルダ（`~/Doc
 ```zsh
 deploy/install.sh          # 登録して起動（ログイン時に起動し、落ちたら再起動する）
 deploy/install.sh remove   # 登録を外す
-tail -f ~/Library/Logs/ezra/ezra.log
-launchctl print gui/$(id -u)/com.ezra.assistant | grep -E 'state|last exit'
+tail -f ~/Library/Logs/kei-agent/kei-agent.log
+launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
 ```
 
 `claude` は、ふだんのログイン（キーチェーン）で動く。launchd からログイン情報を読めないときや、
-手元の作業と別のアカウント（別の契約の枠）で Ezra を動かしたいときは、`claude setup-token` で作った
+手元の作業と別のアカウント（別の契約の枠）で Kei Agent を動かしたいときは、`claude setup-token` で作った
 トークンを `CLAUDE_CODE_OAUTH_TOKEN` として秘密情報のファイルに足す。
 
-契約の上限に達したときは、Ezra がスレッドに「◯時◯分ごろに自動でやり直す」と書き、明けてから
+契約の上限に達したときは、Kei Agent がスレッドに「◯時◯分ごろに自動でやり直す」と書き、明けてから
 止まった依頼を自分でやり直す。決まった時刻の処理も、上限の間は始めず、明けてから取りこぼしとして動かす。
 
 ## 6. 決まった時刻の処理
@@ -115,77 +116,77 @@ sudo pmset repeat cancel   # やめるとき
 
 ```zsh
 source ~/.config/zsh/local/research-assistant.zsh
-uv run ezra-schedule daily        # night / literature / daily / review
+uv run kei-agent-schedule daily        # night / literature / daily / review
 ```
 
 テーマの先行研究を見張るには、テーマの `CLAUDE.md` の「## 検索キーワード」に、1行に1つ英語で書く。
 
 ## 7. Notion の研究ホーム
 
-1. Notion の開発者ツール → コネクション → 新規コネクト（アクセストークン方式、名前 `Ezra`）を作り、トークンを秘密情報のファイルの `NOTION_TOKEN` に書く
+1. Notion の開発者ツール → コネクション → 新規コネクト（アクセストークン方式、名前 `Kei Agent`）を作り、トークンを秘密情報のファイルの `NOTION_TOKEN` に書く
 2. Notion で空のページ「研究ホーム」を作り、コネクトの「コンテンツへのアクセス」にそのページを追加する
 3. 次を実行する（何度実行しても重複しない）
 
 ```zsh
 source ~/.config/zsh/local/research-assistant.zsh
-uv run ezra-notion-setup <研究ホームのページID>
+uv run kei-agent-notion-setup <研究ホームのページID>
 ```
 
 ## 8. バックアップとログ
 
-`~/research/` を非公開の GitHub リポジトリ（`research-data`）にし、毎晩 22:00 に Ezra がコミットして push する。
-Ezra の状態（SQLite の中身を SQL にしたものと、Notion の ID）も `~/research/_ezra_state/` に書き出して一緒に保存する。
+`~/research/` を非公開の GitHub リポジトリ（`research-data`）にし、毎晩 22:00 に Kei Agent がコミットして push する。
+Kei Agent の状態（SQLite の中身を SQL にしたものと、Notion の ID）も `~/research/_kei_agent_state/` に書き出して一緒に保存する。
 50MB を超えるファイルは GitHub に置けないので、自動でコミットから外す。
 
 ```zsh
 deploy/backup-init.sh              # 最初の1回だけ。非公開リポジトリを作って最初の push をする
-uv run ezra-schedule maintenance   # 今すぐ整理とバックアップを1回動かす
+uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップを1回動かす
 ```
 
-別の Mac に移すときは、`research-data` を `~/research` に clone し、`_ezra_state/ezra.sql` から状態を戻す（`sqlite3 ~/.local/state/ezra/ezra.db < ~/research/_ezra_state/ezra.sql`）。
+別の Mac に移すときは、`research-data` を `~/research` に clone し、`_kei_agent_state/kei-agent.sql` から状態を戻す（`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/research/_kei_agent_state/kei-agent.sql`）。
 
 同じ 22:00 に、古いファイルを整理する（日数は `config.toml` の `[maintenance]`）。
 
 | 整理するもの | 残す日数 |
 |---|---|
-| Daily と振り返りの材料（`_overview/.ezra/digest/`） | 30日 |
+| Daily と振り返りの材料（`_overview/.kei-agent/digest/`） | 30日 |
 | テーマのディレクトリで動かした Claude のセッションの記録（`~/.claude/projects/` のうち `~/research` の下に対応するものだけ） | 90日。消えたセッションのスレッドは、次に返信したときにスレッドの履歴から続きを始める |
-| Ezra が自分を直すのに使った worktree（`<state_dir>/worktrees/`）と、案を考えるときの一時ディレクトリ | 直している最中のもの以外は毎晩消す |
+| Kei Agent が自分を直すのに使った worktree（`<state_dir>/worktrees/`）と、案を考えるときの一時ディレクトリ | 直している最中のもの以外は毎晩消す |
 
-ログは Ezra 自身が `~/Library/Logs/ezra/ezra.log` に書き、5MB ごとに回して5世代だけ残す。
-`~/Library/Logs/ezra/launchd.log` には、起動に失敗したときの出力だけが残る。
+ログは Kei Agent 自身が `~/Library/Logs/kei-agent/kei-agent.log` に書き、5MB ごとに回して5世代だけ残す。
+`~/Library/Logs/kei-agent/launchd.log` には、起動に失敗したときの出力だけが残る。
 
-## 9. 机の上の音声対話（`ezra-voice`）
+## 9. 机の上の音声対話（`kei-agent-voice`）
 
-相談相手は Codex、作業は Slack の Ezra（Claude）。`docs/plan.md` の13章。
+相談相手は Codex、作業は Slack の Kei Agent（Claude）。`docs/plan.md` の13章。
 
 ```zsh
 # VOICEVOX アプリを立ち上げてから（立ち上げていなければ、声なしで文字だけ動く）
-uv run ezra-voice
+uv run kei-agent-voice
 ```
 
 - 喋る入口は、いまのところ Aqua Voice などで「ターミナルに入力する」形
 - Enter だけ押すと読み上げが止まる。「新しく話そう」で会話を切る。「じっくり考えて」を含めると、その回だけ深く考える
-- 決まったことは Slack に残り、依頼は読み上げの確認を経て Ezra に渡る（`<state_dir>/asks/`）
+- 決まったことは Slack に残り、依頼は読み上げの確認を経て Kei Agent に渡る（`<state_dir>/asks/`）
 - 声の全文は `~/research/_overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
-- 手でも渡せる: `uv run ezra-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
+- 手でも渡せる: `uv run kei-agent-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
 
-## 10. Ezra が自分を入れ替えるときの動き
+## 10. Kei Agent が自分を入れ替えるときの動き
 
-`#research-ezra` から Ezra が自分のコードを直すと（`docs/plan.md` の12章）、main に取り込んで push したあと、
+`#research-agent` から Kei Agent が自分のコードを直すと（`docs/plan.md` の12章）、main に取り込んで push したあと、
 動いている作業がなくなったところで自分で終了する。launchd の `KeepAlive` が新しい版で起動し直す。
 
 - 取り込むときに `<state_dir>/update-pending` を置き、新しい版が Slack につながったら消す
 - つながらないまま3回起動し直したら、`deploy/run.sh` が取り込んだ分を `git revert` して前の版で起動し、
-  `<state_dir>/update-rolled-back` を残す。Ezra はそれを見て Slack に知らせ、取り消しを push する
+  `<state_dir>/update-rolled-back` を残す。Kei Agent はそれを見て Slack に知らせ、取り消しを push する
 
 ## 状態の置き場所
 
 | もの | 場所 |
 |---|---|
-| 設定 | `config.toml`（`EZRA_CONFIG` で別のファイルを指定できる） |
-| スレッドとセッション、ジョブ、実行時間 | `~/.local/state/ezra/ezra.db` |
+| 設定 | `config.toml`（`KEI_AGENT_CONFIG` で別のファイルを指定できる） |
+| スレッドとセッション、ジョブ、実行時間 | `~/.local/state/kei-agent/kei-agent.db` |
 | テーマの作業用ディレクトリ | `~/research/` |
-| ジョブ | `pueue status --group ezra` |
-| ログ | `~/Library/Logs/ezra/ezra.log`（5MB ごとに回す）、起動の失敗は `launchd.log` |
+| ジョブ | `pueue status --group kei-agent` |
+| ログ | `~/Library/Logs/kei-agent/kei-agent.log`（5MB ごとに回す）、起動の失敗は `launchd.log` |
 | バックアップ | `~/research/.git` → GitHub の非公開リポジトリ `research-data` |

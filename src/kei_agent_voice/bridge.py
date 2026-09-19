@@ -1,4 +1,4 @@
-"""Ezra との橋渡し。依頼を渡し、終わったかどうかを Ezra の記録から見張る。
+"""Kei Agent との橋渡し。依頼を渡し、終わったかどうかを Kei Agent の記録から見張る。
 
 Slack のトークンは増やさない。同じ Mac の中のファイルと SQLite を読み書きするだけ。
 """
@@ -8,8 +8,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-from ezra import ask
-from ezra.config import Config
+from kei_agent import ask
+from kei_agent.config import Config
 
 
 @dataclass
@@ -33,7 +33,7 @@ def send_note(config: Config, theme: str, text: str) -> None:
 
 
 class Watcher:
-    """声から出した依頼が終わったかを、Ezra の記録（runs）から見張る。"""
+    """声から出した依頼が終わったかを、Kei Agent の記録（runs）から見張る。"""
 
     def __init__(self, config: Config, since: float):
         self.config = config

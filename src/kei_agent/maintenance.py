@@ -1,7 +1,7 @@
 """毎晩の保守: 古いファイルの整理と、研究データのバックアップ。
 
 バックアップは ~/research を Git のリポジトリとして扱い、変更をコミットして push する。
-Ezra の状態（SQLite と Notion の ID）は、SQL のテキストなどにして ~/research/_ezra_state/ に書き出してから含める。
+Kei Agent の状態（SQLite と Notion の ID）は、SQL のテキストなどにして ~/research/_kei_agent_state/ に書き出してから含める。
 準備は deploy/backup-init.sh で行う。
 """
 
@@ -17,15 +17,15 @@ import time
 from datetime import date
 from pathlib import Path
 
-from ezra.config import Config
-from ezra.store import Store
-from ezra.themes import OVERVIEW_DIR
+from kei_agent.config import Config
+from kei_agent.store import Store
+from kei_agent.themes import OVERVIEW_DIR
 
-STATE_DIR = "_ezra_state"
+STATE_DIR = "_kei_agent_state"
 # GitHub が受け付けない大きさ。これより大きいファイルはコミットしない
 MAX_FILE_BYTES = 50 * 1024 * 1024
-_EXCLUDE_BEGIN = "# ezra: 大きすぎるファイル（自動で書き換える）"
-_EXCLUDE_END = "# ezra: ここまで"
+_EXCLUDE_BEGIN = "# kei-agent: 大きすぎるファイル（自動で書き換える）"
+_EXCLUDE_END = "# kei-agent: ここまで"
 # git が終わらないときに諦めるまでの秒数（認証待ちで止まると、定期処理ごと止まる）
 GIT_TIMEOUT_SECONDS = 300
 
@@ -60,7 +60,7 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     m = config.maintenance
     root = config.research_root
 
-    digests = list((root / OVERVIEW_DIR / ".ezra" / "digest").glob("*.md"))
+    digests = list((root / OVERVIEW_DIR / ".kei-agent" / "digest").glob("*.md"))
     # 声の会話の全文（決まったことは Slack に残るので、控えは Daily の材料と同じ日数で消す）
     digests += list((root / OVERVIEW_DIR / "voice").glob("*.md"))
     removed_digests = remove_older_than(digests, now - m.digest_retention_days * 86400)
@@ -76,7 +76,7 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     removed_sessions = remove_older_than(sessions, now - m.session_retention_days * 86400)
 
     # スレッドのログ（Codex が経緯を読むためのもの）も、セッションと同じ日数で整理する
-    logs = [p for ws in workspaces for p in (ws / ".ezra" / "threads").glob("*.md")]
+    logs = [p for ws in workspaces for p in (ws / ".kei-agent" / "threads").glob("*.md")]
     removed_logs = remove_older_than(logs, now - m.thread_log_retention_days * 86400)
     removed_worktrees = remove_finished_worktrees(config, keep_worktrees, keep_scratch)
     return {"digests": removed_digests, "sessions": removed_sessions, "thread_logs": removed_logs,
@@ -85,11 +85,11 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
 
 def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
                               keep_scratch: frozenset[str]) -> int:
-    """Ezra 自身を直すのに使った worktree と一時ディレクトリのうち、もう使っていないものを片付ける。
+    """Kei Agent 自身を直すのに使った worktree と一時ディレクトリのうち、もう使っていないものを片付ける。
 
     いま使っているものの名前は、SQLite を持っている側（schedule.py）が渡す。
     """
-    from ezra import improve
+    from kei_agent import improve
 
     in_use, active = keep_worktrees, keep_scratch
     removed = 0
@@ -98,7 +98,7 @@ def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
         for path in sorted(p for p in root.iterdir() if p.is_dir()):
             if path.name in in_use:
                 continue
-            improve.remove_worktree(config, path, f"ezra/{path.name}")
+            improve.remove_worktree(config, path, f"kei-agent/{path.name}")
             shutil.rmtree(path, ignore_errors=True)
             removed += 1
     scratch = config.state_dir / "improve"
@@ -110,9 +110,9 @@ def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
 
 
 def dump_state(config: Config, store: Store | None = None) -> Path:
-    """Ezra の状態を、差分の読みやすい形で ~/research/_ezra_state/ に書き出す。
+    """Kei Agent の状態を、差分の読みやすい形で ~/research/_kei_agent_state/ に書き出す。
 
-    Ezra が動いている最中に読むので、いったんスナップショットを取ってから書き出す。
+    Kei Agent が動いている最中に読むので、いったんスナップショットを取ってから書き出す。
     直接 iterdump すると、ジョブの途中の状態が混ざる。
     """
     out = config.research_root / STATE_DIR
@@ -138,7 +138,7 @@ def dump_state(config: Config, store: Store | None = None) -> Path:
                 lines = "\n".join(src.iterdump())
             finally:
                 src.close()
-        (out / "ezra.sql").write_text(lines + "\n", encoding="utf-8")
+        (out / "kei-agent.sql").write_text(lines + "\n", encoding="utf-8")
     notion_state = config.state_dir / "notion.json"
     if notion_state.exists():
         shutil.copyfile(notion_state, out / "notion.json")

@@ -3,9 +3,9 @@ import asyncio
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from ezra import home, runner, settings, themes
-from ezra.assistant import Assistant
-from ezra.jobs import JobManager
+from kei_agent import home, runner, settings, themes
+from kei_agent.assistant import Assistant
+from kei_agent.jobs import JobManager
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ async def test_opening_home_publishes_it(env):
 async def test_remove_domain_from_home(env, store):
     assistant, slack = env
     settings.allow_domain(store, "vlm", "zenodo.org", "")
-    await assistant.on_home_action(_action("ezra_home_remove_domain", "vlm\tzenodo.org"))
+    await assistant.on_home_action(_action("kei_agent_home_remove_domain", "vlm\tzenodo.org"))
     assert settings.theme_domains(store, "vlm") == []
     assert "zenodo.org" not in _texts(_published(slack)["view"])
 
@@ -67,23 +67,23 @@ async def test_remove_domain_from_home(env, store):
 async def test_someone_else_cannot_change_settings(env, store):
     assistant, slack = env
     settings.allow_domain(store, "vlm", "zenodo.org", "")
-    await assistant.on_home_action(_action("ezra_home_remove_domain", "vlm\tzenodo.org", user="USOMEONE"))
+    await assistant.on_home_action(_action("kei_agent_home_remove_domain", "vlm\tzenodo.org", user="USOMEONE"))
     assert settings.theme_domains(store, "vlm") == ["zenodo.org"]
 
 
 async def test_change_time_and_toggle_from_home(env, config, store):
     assistant, slack = env
-    await assistant.on_home_action(_action("ezra_home_time:daily", selected_time="07:30"))
+    await assistant.on_home_action(_action("kei_agent_home_time:daily", selected_time="07:30"))
     assert settings.schedule_time(config, store, "daily") == "07:30"
-    await assistant.on_home_action(_action("ezra_home_toggle:daily", "daily"))
+    await assistant.on_home_action(_action("kei_agent_home_toggle:daily", "daily"))
     assert settings.schedule_time(config, store, "daily") == ""
-    await assistant.on_home_action(_action("ezra_home_toggle:daily", "daily"))
+    await assistant.on_home_action(_action("kei_agent_home_toggle:daily", "daily"))
     assert settings.schedule_time(config, store, "daily") == "07:30"
 
 
 async def test_add_domain_through_modal(env, store):
     assistant, slack = env
-    await assistant.on_home_action(_action("ezra_home_add_domain", "add"))
+    await assistant.on_home_action(_action("kei_agent_home_add_domain", "add"))
     opened, = [kw for name, kw in slack.calls if name == "views_open"]
     assert opened["view"]["callback_id"] == home.ADD_DOMAIN_CALLBACK
 

@@ -1,6 +1,6 @@
-"""Ezra の柵。sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定。
+"""Kei Agent の柵。sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定。
 
-このファイルと `config.toml`、`deploy/` は、Ezra 自身に直させない（docs/plan.md の12章）。
+このファイルと `config.toml`、`deploy/` は、Kei Agent 自身に直させない（docs/plan.md の12章）。
 ここに触れた差分は、中身を見る前に捨てる。
 """
 
@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ezra.config import Config
-    from ezra.themes import Workspace
+    from kei_agent.config import Config
+    from kei_agent.themes import Workspace
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
 DEFAULT_DENY_READ = (
-    "~/.config/zsh/local",   # Ezra の秘密情報（deploy/README.md）
+    "~/.config/zsh/local",   # Kei Agent の秘密情報（deploy/README.md）
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
@@ -29,11 +29,11 @@ DEFAULT_DENY_READ = (
 )
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV")
+STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV")
 KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 
-# Ezra 自身に直させないもの（リポジトリからの相対パス）
-PROTECTED_PATHS = ("src/ezra/guard.py", "config.toml", "deploy/")
+# Kei Agent 自身に直させないもの（リポジトリからの相対パス）
+PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.toml", "deploy/")
 # 依存するライブラリが変わる差分。取り込む前の確認で、いちばん上に出す
 DEPENDENCY_PATHS = ("pyproject.toml", "uv.lock")
 # 差分に入っていてはいけない文字列（秘密情報）
@@ -72,12 +72,12 @@ def _abs_rule(tool: str, path: Path) -> str:
 
 def read_root(config: Config, ws: Workspace) -> Path:
     """そのワークスペースで読んでよい範囲の根。"""
-    from ezra.themes import ChannelKind
+    from kei_agent.themes import ChannelKind
     assert ws.cwd is not None
     if ws.kind is ChannelKind.OVERVIEW:
         return config.research_root   # 各テーマを読むだけ。書き込みは _overview の中だけ
     if ws.kind is ChannelKind.IMPROVE:
-        return config.repo_root       # 案を考えるために Ezra のコードを読む。書き込みは作業用の一時ディレクトリだけ
+        return config.repo_root       # 案を考えるために Kei Agent のコードを読む。書き込みは作業用の一時ディレクトリだけ
     return ws.cwd                     # テーマと、自分を直すときの worktree
 
 
@@ -119,7 +119,7 @@ def strip_env(base: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in base.items() if k in KEPT_CLAUDE_ENV or not k.startswith(STRIPPED_ENV_PREFIXES)}
 
 
-# Ezra 自身の差分の確認（docs/plan.md の12章）
+# Kei Agent 自身の差分の確認（docs/plan.md の12章）
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout

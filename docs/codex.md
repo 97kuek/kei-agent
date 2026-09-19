@@ -1,6 +1,6 @@
 # Codex App 側の使い方
 
-`docs/plan.md` 第6章のステップ11。Codex App は「考える場所」で、読むだけにする。実行は Ezra だけが行う。
+`docs/plan.md` 第6章のステップ11。Codex App は「考える場所」で、読むだけにする。実行は Kei Agent だけが行う。
 
 ## 1. `~/research/` を開く
 
@@ -12,22 +12,22 @@ Codex App で `~/research/` をプロジェクトとして開く。これで次�
 | 図や集計結果 | `~/research/<theme>/outputs/` |
 | ジョブのログ | `~/research/<theme>/logs/job-<ID>.log` |
 | 文献調査の結果 | `~/research/<theme>/papers/` |
-| スレッドの経緯（依頼と Ezra の返答） | `~/research/<theme>/.ezra/threads/<thread_ts>.md` |
-| ジョブの状態 | `~/research/<theme>/.ezra/jobs/<ID>.json` |
+| スレッドの経緯（依頼と Kei Agent の返答） | `~/research/<theme>/.kei-agent/threads/<thread_ts>.md` |
+| ジョブの状態 | `~/research/<theme>/.kei-agent/jobs/<ID>.json` |
 | Daily | `~/research/_overview/daily/<日付>.md` |
 | 振り返りの材料 | `~/research/_overview/reviews/<日付>.md` |
 
 Codex に最初に伝えておくとよいこと（プロジェクトの指示として `~/research/AGENTS.md` に置いてもよい）:
 
 ```markdown
-- ここは研究の作業用ディレクトリ。実行は Slack Bot「Ezra」が行うので、ここではファイルを変更しない
-- 経緯は各テーマの `.ezra/threads/*.md`、結果は `outputs/`、前提は `CLAUDE.md` を読む
-- 追加の実験や調査が必要になったら、Ezra への依頼文を下のテンプレートで作る
+- ここは研究の作業用ディレクトリ。実行は Slack Bot「Kei Agent」が行うので、ここではファイルを変更しない
+- 経緯は各テーマの `.kei-agent/threads/*.md`、結果は `outputs/`、前提は `CLAUDE.md` を読む
+- 追加の実験や調査が必要になったら、Kei Agent への依頼文を下のテンプレートで作る
 ```
 
 ## 2. Slack のスレッドを読む（任意）
 
-`.ezra/threads/` で経緯は読めるので、必須ではない。Slack の画面上のやり取りも読ませたいときに使う。
+`.kei-agent/threads/` で経緯は読めるので、必須ではない。Slack の画面上のやり取りも読ませたいときに使う。
 
 - ChatGPT / Codex の Slack コネクタが使えるプランなら、それをつなぐ
 - Slack 公式の MCP サーバー（`https://mcp.slack.com/mcp`）は、2026年9月時点で Codex への組み込みが公式には提供されていない。使うときは、Slack と Codex の最新のドキュメントで対応状況を確認する
@@ -35,10 +35,10 @@ Codex に最初に伝えておくとよいこと（プロジェクトの指示�
 
 ## 3. 依頼文のテンプレート
 
-Codex で議論して決めた作業は、次の形で Ezra に送る。最初は Codex が作った文を自分で Slack に貼る。形が固まったら、Codex から直接投稿する運用に切り替える。
+Codex で議論して決めた作業は、次の形で Kei Agent に送る。最初は Codex が作った文を自分で Slack に貼る。形が固まったら、Codex から直接投稿する運用に切り替える。
 
 ```markdown
-@Ezra
+@Kei Agent
 ## やりたいこと
 （例: 条件Bでも counting の精度を測り、条件Aと比べる図を作る）
 
@@ -54,13 +54,13 @@ Codex で議論して決めた作業は、次の形で Ezra に送る。最初�
 
 ## 4. 振り返り（毎晩 21:00）
 
-Ezra が `#research-overview` に「振り返りの材料」を投稿し、`~/research/_overview/reviews/<日付>.md` と Notion の「ノート」（種類: 振り返り）に同じ内容と問いを書く。
+Kei Agent が `#research-overview` に「振り返りの材料」を投稿し、`~/research/_overview/reviews/<日付>.md` と Notion の「ノート」（種類: 振り返り）に同じ内容と問いを書く。
 
 1. Codex App でそのファイルを開き、音声チャットで振り返る
-2. 結論を、Notion の振り返りページの「Codex での振り返り」に書くか、Slack のスレッドに貼る（Ezra がファイルと Notion に追記する）
+2. 結論を、Notion の振り返りページの「Codex での振り返り」に書くか、Slack のスレッドに貼る（Kei Agent がファイルと Notion に追記する）
 3. 翌朝 08:00 の Daily に反映される
 
 ## 5. 音声での議論
 
 Codex App の音声チャット（**Start new voice chat**）で議論する。Plus 以上のプランが必要で、音声チャットは同時に1つまで。
-結論が出たら、「Ezra への依頼文をテンプレートで作って」と頼み、テキストで確認してから送る。
+結論が出たら、「Kei Agent への依頼文をテンプレートで作って」と頼み、テキストで確認してから送る。

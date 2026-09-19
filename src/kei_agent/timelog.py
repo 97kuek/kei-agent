@@ -1,8 +1,8 @@
 """研究時間の記録（フェーズ5）。
 
-人の時間は Toggl（2.0）で自分で測り、Ezra の稼働時間は `runs` テーブルから数える。
+人の時間は Toggl（2.0）で自分で測り、Kei Agent の稼働時間は `runs` テーブルから数える。
 その2つを日ごと・テーマごとに並べた CSV を `_overview/time/` に書き、
-グラフは Claude に作ってもらう（Ezra は材料を用意するところまで）。
+グラフは Claude に作ってもらう（Kei Agent は材料を用意するところまで）。
 
 Toggl の鍵（`toggl_sk_...`）は環境変数 `TOGGL_API_TOKEN` から、宛先の組織とワークスペースの ID は
 `TOGGL_ORGANIZATION_ID` と `TOGGL_WORKSPACE_ID` から読む。どれかがなければ人の時間は空欄になる。
@@ -22,9 +22,9 @@ from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from ezra.config import Config
-from ezra.store import Store
-from ezra.themes import OVERVIEW_DIR, theme_dirs
+from kei_agent.config import Config
+from kei_agent.store import Store
+from kei_agent.themes import OVERVIEW_DIR, theme_dirs
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def _day(timestamp: float) -> str:
 
 
 def assistant_seconds(store: Store, since: float, until: float) -> dict[tuple[str, str], float]:
-    """Ezra が動いていた秒数。(日付, テーマ) ごとに合計する。
+    """Kei Agent が動いていた秒数。(日付, テーマ) ごとに合計する。
 
     終わっていない実行（ended_at が空）は数えない。
     """
@@ -148,7 +148,7 @@ def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | No
     since = datetime.combine(monday, datetime.min.time()).timestamp()
     until = datetime.combine(sunday + timedelta(days=1), datetime.min.time()).timestamp()
 
-    ezra = assistant_seconds(store, since, until)
+    agent = assistant_seconds(store, since, until)
     human: dict[tuple[str, str], float] = {}
     if toggl is not None:
         try:
@@ -162,9 +162,9 @@ def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | No
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["日付", "テーマ", "人の時間（分）", "Ezra の稼働（分）"])
-        for key in sorted(set(ezra) | set(human)):
-            writer.writerow([key[0], key[1], round(human.get(key, 0) / 60, 1), round(ezra.get(key, 0) / 60, 1)])
+        writer.writerow(["日付", "テーマ", "人の時間（分）", "Kei Agent の稼働（分）"])
+        for key in sorted(set(agent) | set(human)):
+            writer.writerow([key[0], key[1], round(human.get(key, 0) / 60, 1), round(agent.get(key, 0) / 60, 1)])
     return path
 
 
@@ -172,14 +172,14 @@ def week_summary(path: Path) -> list[str]:
     """CSV から、Daily の材料に入れる短い要約を作る。"""
     if not path.exists():
         return ["- まだ記録がない"]
-    human = ezra = 0.0
+    human = agent = 0.0
     by_theme: dict[str, float] = defaultdict(float)
     with path.open(encoding="utf-8") as f:
         for row in csv.DictReader(f):
             human += float(row["人の時間（分）"])
-            ezra += float(row["Ezra の稼働（分）"])
+            agent += float(row["Kei Agent の稼働（分）"])
             by_theme[row["テーマ"]] += float(row["人の時間（分）"])
-    lines = [f"- 今週の合計: 人 {human / 60:.1f} 時間 / Ezra {ezra / 60:.1f} 時間", f"- 材料: `{path}`"]
+    lines = [f"- 今週の合計: 人 {human / 60:.1f} 時間 / Kei Agent {agent / 60:.1f} 時間", f"- 材料: `{path}`"]
     for theme, minutes in sorted(by_theme.items(), key=lambda kv: -kv[1]):
         if minutes:
             lines.append(f"  - {theme}: {minutes / 60:.1f} 時間")

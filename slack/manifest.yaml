@@ -1,11 +1,11 @@
-# Slack App「Ezra」のマニフェスト。https://api.slack.com/apps → Create New App → From a manifest で貼り付ける
+# Slack App「Kei Agent」のマニフェスト。https://api.slack.com/apps → Create New App → From a manifest で貼り付ける
 display_information:
-  name: Ezra
+  name: Kei Agent
   description: 研究室の助手。依頼された作業を進めて、経過と結果をスレッドに返す
   background_color: "#2c3e50"
 features:
   bot_user:
-    display_name: Ezra
+    display_name: Kei Agent
     always_online: true
   # AI アプリとして扱う。作業中のステータス（agents.sessions.setStatus）と、
   # 返事を流しながら見せる表示（chat.startStream）に必要

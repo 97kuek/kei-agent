@@ -1,4 +1,4 @@
-"""Ezra の起動: Slack Bolt（Socket Mode）の受け口と、ジョブの定期確認。"""
+"""Kei Agent の起動: Slack Bolt（Socket Mode）の受け口と、ジョブの定期確認。"""
 
 from __future__ import annotations
 
@@ -13,17 +13,17 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from ezra import home
-from ezra.assistant import Assistant
-from ezra.config import load_config
-from ezra.jobs import JobManager, Pueue
-from ezra.notion_store import load_notion
-from ezra.schedule import Scheduler
-from ezra.store import Store
+from kei_agent import home
+from kei_agent.assistant import Assistant
+from kei_agent.config import load_config
+from kei_agent.jobs import JobManager, Pueue
+from kei_agent.notion_store import load_notion
+from kei_agent.schedule import Scheduler
+from kei_agent.store import Store
 
-log = logging.getLogger("ezra")
+log = logging.getLogger("kei_agent")
 
-REQUIRED_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "EZRA_ALLOWED_USER_ID")
+REQUIRED_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "KEI_AGENT_ALLOWED_USER_ID")
 # Slack につながるのを待つ上限。超えたら落ちて、launchd に起動し直してもらう
 CONNECT_TIMEOUT_SECONDS = 120
 
@@ -86,8 +86,9 @@ async def serve() -> None:
             await guard(handler)(body)
         return wrapped
 
-    app.action(re.compile(r"^ezra_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
-    app.action(re.compile(r"^ezra_home_"))(acked(assistant.on_home_action))
+    app.action(re.compile(r"^kei_agent_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
+    app.action(re.compile(r"^kei_agent_home_"))(acked(assistant.on_home_action))
+    app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
 
     @app.view(home.ADD_DOMAIN_CALLBACK)
     async def add_domain(ack, body):
@@ -95,7 +96,7 @@ async def serve() -> None:
             errors = await assistant.on_add_domain(body)
         except Exception:
             log.exception("接続先を足せませんでした")
-            errors = {"domain": "足せませんでした。Ezra のログを見てください"}
+            errors = {"domain": "足せませんでした。Kei Agent のログを見てください"}
         if errors:
             await ack(response_action="errors", errors=errors)
         else:
@@ -104,7 +105,7 @@ async def serve() -> None:
     job_loop = asyncio.create_task(assistant.job_loop())
     ask_loop = asyncio.create_task(assistant.ask_loop())
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
-    log.info("Ezra を起動しました（bot user: %s, research_root: %s, Notion: %s）",
+    log.info("Kei Agent を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     try:
@@ -126,15 +127,15 @@ LOG_BACKUPS = 5
 
 
 def setup_logging(env: dict[str, str] | None = None) -> None:
-    """EZRA_LOG_FILE があれば、5MB ごとに回して5世代だけ残す。なければ標準エラーに出す。"""
+    """KEI_AGENT_LOG_FILE があれば、5MB ごとに回して5世代だけ残す。なければ標準エラーに出す。"""
     env = dict(os.environ) if env is None else env
     handlers: list[logging.Handler] = []
-    if env.get("EZRA_LOG_FILE"):
-        path = Path(env["EZRA_LOG_FILE"]).expanduser()
+    if env.get("KEI_AGENT_LOG_FILE"):
+        path = Path(env["KEI_AGENT_LOG_FILE"]).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(RotatingFileHandler(path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8"))
     logging.basicConfig(
-        level=env.get("EZRA_LOG_LEVEL", "INFO"),
+        level=env.get("KEI_AGENT_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers or None,
         force=True,

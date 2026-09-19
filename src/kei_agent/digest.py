@@ -6,12 +6,13 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from ezra import themes, timelog
-from ezra.assistant import Assistant, format_duration
-from ezra.config import Config
-from ezra.notion import NotionError
-from ezra.store import Store
-from ezra.themes import OVERVIEW_DIR
+from kei_agent import themes, timelog
+from kei_agent.assistant import Assistant
+from kei_agent.config import Config
+from kei_agent.notion import NotionError
+from kei_agent.slack_text import format_duration
+from kei_agent.store import Store
+from kei_agent.themes import OVERVIEW_DIR
 
 # 材料に入れるノートの本文の長さ
 NOTE_EXCERPT = 1500
@@ -35,7 +36,7 @@ class DigestBuilder:
         self.assistant = assistant
 
     async def build(self, since: float, now: float, title: str, active_channels: set[str]) -> str:
-        """active_channels は Ezra が参加しているチャンネル名。アーカイブしたテーマは材料に入れない。"""
+        """active_channels は Kei Agent が参加しているチャンネル名。アーカイブしたテーマは材料に入れない。"""
         lines = [f"# {title}", "", f"対象: {_ts(since)} 〜 {_ts(now)}", ""]
         lines += self._threads(since)
         lines += self._jobs(since)
@@ -56,7 +57,7 @@ class DigestBuilder:
                 ws = themes.resolve(self.config, r["channel_name"])
             except ValueError:
                 continue
-            log_path = ws.cwd / ".ezra" / "threads" / f"{r['thread_ts']}.md" if ws.cwd else None
+            log_path = ws.cwd / ".kei-agent" / "threads" / f"{r['thread_ts']}.md" if ws.cwd else None
             if log_path and log_path.exists():
                 lines.append(f"- #{r['channel_name']}（最後 {_ts(r['updated_at'])}）: `{log_path}`")
                 found = True
@@ -112,7 +113,7 @@ class DigestBuilder:
         return lines if rows else lines + ["- なし"]
 
     def _time(self, now: float) -> list[str]:
-        """研究時間（人は Toggl、Ezra は runs）。材料の CSV も書き出す。"""
+        """研究時間（人は Toggl、Kei Agent は runs）。材料の CSV も書き出す。"""
         lines = ["", "## 研究時間（今週）", ""]
         try:
             path = timelog.write_week(self.config, self.store, timelog.load_toggl(),

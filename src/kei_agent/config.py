@@ -10,7 +10,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from ezra.guard import DEFAULT_DENY_READ
+from kei_agent.guard import DEFAULT_DENY_READ
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,10 +20,10 @@ def _expand(path: str) -> Path:
 
 
 def path_without_venv(path: str, repo_root: Path) -> str:
-    """PATH から Ezra 自身の `.venv/bin` を外す。
+    """PATH から Kei Agent 自身の `.venv/bin` を外す。
 
     `uv run` が PATH の先頭に足すので、そのまま渡すと、テーマの中で `python3` と打ったときに
-    研究用ではなく Ezra の Python が当たってしまう。
+    研究用ではなく Kei Agent の Python が当たってしまう。
     """
     venv_bin = str(repo_root / ".venv" / "bin")
     return os.pathsep.join(p for p in path.split(os.pathsep) if p and p != venv_bin)
@@ -57,7 +57,7 @@ class MaintenanceConfig:
     digest_retention_days: int = 30
     # テーマのディレクトリで動かした Claude のセッションの記録を残す日数
     session_retention_days: int = 90
-    # スレッドのログ（.ezra/threads/*.md）を残す日数
+    # スレッドのログ（.kei-agent/threads/*.md）を残す日数
     thread_log_retention_days: int = 180
 
 
@@ -68,12 +68,14 @@ class Config:
     repo_root: Path
     allowed_user_id: str
     overview_channels: tuple[str, ...] = ("research-overview", "research-strategy")
-    improve_channels: tuple[str, ...] = ("research-ezra",)
+    improve_channels: tuple[str, ...] = ("research-agent",)
     max_concurrent_runs: int = 2
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
     job_parallel: int = 1
     model: str = ""
+    # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
+    handoff_after_turns: int = 8
     allowed_domains: tuple[str, ...] = ()
     allow_write: tuple[Path, ...] = ()
     deny_read: tuple[Path, ...] = ()
@@ -84,7 +86,7 @@ class Config:
 
     @property
     def db_path(self) -> Path:
-        return self.state_dir / "ezra.db"
+        return self.state_dir / "kei-agent.db"
 
     @property
     def plugin_dir(self) -> Path:
@@ -107,7 +109,7 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "research_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "model", "channels", "sandbox", "schedule", "maintenance",
+    "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule", "maintenance",
 }
 CHANNELS_KEYS = {"overview", "improve"}
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
@@ -131,7 +133,7 @@ def _section(cls, data: dict, name: str):
 
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
     env = dict(os.environ) if env is None else env
-    path = path or Path(env.get("EZRA_CONFIG", REPO_ROOT / "config.toml"))
+    path = path or Path(env.get("KEI_AGENT_CONFIG", REPO_ROOT / "config.toml"))
     data: dict = {}
     if path.exists():
         with path.open("rb") as f:
@@ -145,9 +147,9 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
-        state_dir=_expand(data.get("state_dir", "~/.local/state/ezra")),
+        state_dir=_expand(data.get("state_dir", "~/.local/state/kei-agent")),
         repo_root=REPO_ROOT,
-        allowed_user_id=env.get("EZRA_ALLOWED_USER_ID", ""),
+        allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
         max_concurrent_runs=int(data.get("max_concurrent_runs", 2)),
@@ -155,11 +157,12 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
         model=data.get("model", ""),
+        handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
         deny_read=tuple(_expand(p) for p in sandbox.get("deny_read", DEFAULT_DENY_READ)),
-        claude_bin=env.get("EZRA_CLAUDE_BIN", "claude"),
-        pueue_bin=env.get("EZRA_PUEUE_BIN", "pueue"),
+        claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),
+        pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),
         schedule=_section(ScheduleConfig, schedule, "schedule"),
         maintenance=_section(MaintenanceConfig, data.get("maintenance", {}), "maintenance"),
     )

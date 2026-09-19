@@ -1,6 +1,6 @@
-"""Ezra が動いている間に Notion の研究ホームを読み書きする（フェーズ3）。
+"""Kei Agent が動いている間に Notion の研究ホームを読み書きする（フェーズ3）。
 
-データベースの ID は、ezra-notion-setup が書いた ~/.local/state/ezra/notion.json から読む。
+データベースの ID は、kei-agent-notion-setup が書いた ~/.local/state/kei-agent/notion.json から読む。
 Claude（claude -p）には Notion を直接触らせず、ここで取ってきたものをファイルにして渡す。
 """
 
@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from ezra.config import Config
-from ezra.notion import Notion, NotionError
+from kei_agent.config import Config
+from kei_agent.notion import Notion, NotionError
 
 log = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ def summarize(text: str, limit: int = RESULT_LIMIT) -> str:
 class NotionStore:
     def __init__(self, notion: Notion, state_path: Path):
         if not state_path.exists():
-            raise NotionError(f"{state_path} がありません。ezra-notion-setup を先に実行してください")
+            raise NotionError(f"{state_path} がありません。kei-agent-notion-setup を先に実行してください")
         self.notion = notion
         try:
             self.state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -276,7 +276,7 @@ class NotionStore:
     def tonight_tasks(self, limit: int) -> list[Task]:
         rows = self._query("tasks", {
             "filter": {"and": [
-                {"property": "担当", "select": {"equals": "Ezra"}},
+                {"property": "担当", "select": {"equals": "Kei Agent"}},
                 {"property": "状態", "status": {"equals": "今夜やる"}},
             ]},
             "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
@@ -285,7 +285,7 @@ class NotionStore:
 
     def count_tonight_tasks(self) -> int:
         return len(self._query("tasks", {"filter": {"and": [
-            {"property": "担当", "select": {"equals": "Ezra"}},
+            {"property": "担当", "select": {"equals": "Kei Agent"}},
             {"property": "状態", "status": {"equals": "今夜やる"}},
         ]}}))
 
@@ -304,7 +304,7 @@ class NotionStore:
         properties = {
             "タイトル": {"title": _rich(title)},
             "状態": {"status": {"name": "今夜やる"}},
-            "担当": {"select": {"name": "Ezra"}},
+            "担当": {"select": {"name": "Kei Agent"}},
             "Slack": {"url": slack_url},
         }
         if theme_id:
@@ -364,7 +364,7 @@ class NotionStore:
             "タイトル": {"title": _rich(title)},
             "種類": {"select": {"name": kind}},
             "日付": {"date": {"start": day}},
-            "書いた人": {"select": {"name": "Ezra"}},
+            "書いた人": {"select": {"name": "Kei Agent"}},
         }
         if slack_url:
             properties["Slack"] = {"url": slack_url}
@@ -396,7 +396,7 @@ class NotionStore:
 
 
 def load_notion(config: Config, env: dict[str, str] | None = None) -> NotionStore | None:
-    """NOTION_TOKEN と ezra-notion-setup の状態がそろっていれば NotionStore を返す。"""
+    """NOTION_TOKEN と kei-agent-notion-setup の状態がそろっていれば NotionStore を返す。"""
     env = dict(os.environ) if env is None else env
     token = env.get("NOTION_TOKEN")
     if not token:

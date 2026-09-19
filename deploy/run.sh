@@ -1,5 +1,5 @@
 #!/bin/zsh
-# launchd から Ezra を起動する。launchd は ~/.zshrc を読まないので、ここで PATH と秘密情報を用意する。
+# launchd から Kei Agent を起動する。launchd は ~/.zshrc を読まないので、ここで PATH と秘密情報を用意する。
 set -eu
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -11,12 +11,12 @@ if [[ ! -r "$SECRETS" ]]; then
 fi
 source "$SECRETS"
 
-# ログは Ezra 自身が 5MB ごとに回す。launchd の標準出力には、起動に失敗したときの出力だけが残る
-export EZRA_LOG_FILE="$HOME/Library/Logs/ezra/ezra.log"
+# ログは Kei Agent 自身が 5MB ごとに回す。launchd の標準出力には、起動に失敗したときの出力だけが残る
+export KEI_AGENT_LOG_FILE="$HOME/Library/Logs/kei-agent/kei-agent.log"
 
 # launchd の出力は回らないので、起動のたびに大きすぎるものを捨てる
 # （設定を間違えると KeepAlive で 30 秒ごとに再起動し、同じエラーが積もり続ける）
-LAUNCHD_LOG="$HOME/Library/Logs/ezra/launchd.log"
+LAUNCHD_LOG="$HOME/Library/Logs/kei-agent/launchd.log"
 if [[ -f "$LAUNCHD_LOG" ]] && (( $(stat -f%z "$LAUNCHD_LOG") > 5242880 )); then
   : > "$LAUNCHD_LOG"
 fi
@@ -24,9 +24,9 @@ fi
 REPO="${0:A:h:h}"
 cd "$REPO"
 
-# Ezra が自分を入れ替えたあとの起動（src/ezra/improve.py）。
+# Kei Agent が自分を入れ替えたあとの起動（src/kei_agent/improve.py）。
 # 新しい版が Slack につながれば update-pending は消える。消えないまま起動を繰り返したら、前の版に戻す。
-STATE="${EZRA_STATE_DIR:-$HOME/.local/state/ezra}"
+STATE="${KEI_AGENT_STATE_DIR:-$HOME/.local/state/kei-agent}"
 PENDING="$STATE/update-pending"
 MAX_ATTEMPTS=3
 if [[ -f "$PENDING" ]]; then
@@ -43,4 +43,4 @@ if [[ -f "$PENDING" ]]; then
   fi
 fi
 
-exec uv run --frozen ezra
+exec uv run --frozen kei-agent

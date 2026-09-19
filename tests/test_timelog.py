@@ -2,7 +2,7 @@ import csv
 import time
 from datetime import UTC, date, datetime, timedelta
 
-from ezra import timelog
+from kei_agent import timelog
 
 
 def test_week_start():
@@ -106,7 +106,7 @@ def test_write_week_puts_both_columns_in_one_csv(config, store):
 
     rows = list(csv.DictReader(path.open(encoding="utf-8")))
     row = next(r for r in rows if r["テーマ"] == "amr-query")
-    assert row["人の時間（分）"] == "120.0" and row["Ezra の稼働（分）"] == "5.0"
+    assert row["人の時間（分）"] == "120.0" and row["Kei Agent の稼働（分）"] == "5.0"
     assert path.name == f"{monday.isoformat()}.csv"
 
 
