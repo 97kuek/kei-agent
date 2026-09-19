@@ -281,7 +281,8 @@ class ThreadUI:
     def _complete_task(self) -> list[dict]:
         if self.task is None:
             return []
-        done = self.task | {"status": "complete"}
+        # details は始めたときに送ってある。Slack は同じ id の details を足していくので、完了では送り直さない
+        done = {k: v for k, v in self.task.items() if k != "details"} | {"status": "complete"}
         self.task = None
         return [done]
 

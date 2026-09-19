@@ -147,6 +147,10 @@ async def test_narration_goes_to_the_steps_not_the_answer(env):
 
     assert slack.streamed() == ["了解したよ。CLAUDE.md に書いておいた。"]
     assert slack.tasks()[0]["details"] == "了解、進めるね。CLAUDE.md に書いておく。"
+    # 完了で details を送り直すと、Slack で同じ補足が2回並ぶ
+    started, done = slack.tasks()
+    assert started["status"] == "in_progress" and done["status"] == "complete"
+    assert "details" not in done
 
 
 async def test_run_uses_domains_allowed_for_the_theme(env, store, monkeypatch):
