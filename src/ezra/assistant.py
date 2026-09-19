@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiohttp
 
-from ezra import guard, home, improve, runner, settings, themes
+from ezra import ask, guard, home, improve, runner, settings, themes
 from ezra.config import Config
 from ezra.jobs import JobManager, log_tail
 from ezra.notion import NotionError
@@ -724,7 +724,8 @@ class Assistant:
             # --resume では会話を始めたときのシステムプロンプトが使われ続けるので、変わった決まりを本文で渡す
             prompt = rules_update_prompt(runner.system_prompt_text(self.config)) + prompt
 
-        who = {"job": "Ezra（ジョブ完了）", "domain": "Ezra（接続先の返事）"}.get(req.trigger, "依頼者")
+        who = {"job": "Ezra（ジョブ完了）", "domain": "Ezra（接続先の返事）",
+               "voice": "依頼者（声）"}.get(req.trigger, "依頼者")
         append_thread_log(ws.cwd, req.channel_name, req.thread_ts, who, req.text + (
             "\n\n" + "\n".join(f"- 添付: `{p}`" for p in saved) if saved else ""))
 
@@ -800,6 +801,46 @@ class Assistant:
                 await method(channel=req.channel, timestamp=req.message_ts, name=name)
             except Exception:
                 log.debug("リアクションを変えられません", exc_info=True)
+
+    # Slack の外からの依頼（声のレイヤなど。docs/plan.md の13章）
+
+    async def ask_loop(self) -> None:
+        """同じ Mac に置かれた依頼を、数秒ごとに拾う。"""
+        failing = False
+        while True:
+            try:
+                await self.handle_asks()
+                failing = False
+            except Exception as e:
+                log.exception("外からの依頼を拾えませんでした")
+                if not failing:
+                    await self.notify_trouble(f"外からの依頼を拾えません: {type(e).__name__}: {e}")
+                failing = True
+            await asyncio.sleep(ask.POLL_SECONDS)
+
+    async def handle_asks(self) -> None:
+        pending = ask.pending_asks(self.config)
+        if not pending:
+            return
+        ids = await self.channel_ids()
+        for path, payload in pending:
+            path.unlink(missing_ok=True)
+            theme = str(payload.get("theme") or "")
+            text = str(payload.get("text") or "").strip()
+            kind = payload.get("kind", "request")
+            channel = ids.get(theme)
+            if not channel or not text:
+                await self.notify_trouble(
+                    f"外からの依頼を渡せませんでした（テーマ: {theme or '不明'}）: {text[:100] or '（空）'}")
+                continue
+            header = "📌 声で決まったこと" if kind == "note" else "🎤 声からの依頼"
+            resp = await self.slack.chat_postMessage(channel=channel, text=f"{header}\n{text}")
+            if kind == "note":
+                continue
+            await self.submit(Request(
+                channel=channel, channel_name=theme, thread_ts=resp["ts"], message_ts=None,
+                text=text, trigger="voice",
+            ))
 
     # 契約の上限（Claude AI usage limit）
 

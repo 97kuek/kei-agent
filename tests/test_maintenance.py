@@ -163,6 +163,20 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
         await maintenance._git(repo, "push", "-q", timeout=0.3)
 
 
+def test_cleanup_removes_old_voice_logs(config, tmp_path):
+    """声の会話の控えも、Daily の材料と同じ日数で消す。"""
+    voice = config.research_root / "_overview" / "voice"
+    voice.mkdir(parents=True)
+    old, new = voice / "2026-01-01.md", voice / "2026-09-19.md"
+    for path in (old, new):
+        path.write_text("会話")
+    os.utime(old, (time.time() - 40 * 86400,) * 2)
+
+    removed = maintenance.cleanup(config, tmp_path / "projects")
+
+    assert removed["digests"] == 1 and not old.exists() and new.exists()
+
+
 def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path, monkeypatch):
     """取り込みや失敗で使い終わった worktree と、案を考えるときの一時ディレクトリを片付ける。"""
     from ezra import improve

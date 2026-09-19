@@ -17,6 +17,12 @@ dependencies = [
 ezra = "ezra.app:main"
 ezra-schedule = "ezra.schedule:main"
 ezra-notion-setup = "ezra.notion:main"
+ezra-ask = "ezra.ask:main"
+ezra-voice = "ezra_voice.app:main"
+
+[tool.uv.build-backend]
+# 机の上の音声対話（src/ezra_voice）は、Ezra 本体とは別のパッケージにしてある
+module-name = ["ezra", "ezra_voice"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]

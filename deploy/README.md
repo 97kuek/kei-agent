@@ -155,7 +155,22 @@ uv run ezra-schedule maintenance   # 今すぐ整理とバックアップを1回
 ログは Ezra 自身が `~/Library/Logs/ezra/ezra.log` に書き、5MB ごとに回して5世代だけ残す。
 `~/Library/Logs/ezra/launchd.log` には、起動に失敗したときの出力だけが残る。
 
-## 9. Ezra が自分を入れ替えるときの動き
+## 9. 机の上の音声対話（`ezra-voice`）
+
+相談相手は Codex、作業は Slack の Ezra（Claude）。`docs/plan.md` の13章。
+
+```zsh
+# VOICEVOX アプリを立ち上げてから（立ち上げていなければ、声なしで文字だけ動く）
+uv run ezra-voice
+```
+
+- 喋る入口は、いまのところ Aqua Voice などで「ターミナルに入力する」形
+- Enter だけ押すと読み上げが止まる。「新しく話そう」で会話を切る。「じっくり考えて」を含めると、その回だけ深く考える
+- 決まったことは Slack に残り、依頼は読み上げの確認を経て Ezra に渡る（`<state_dir>/asks/`）
+- 声の全文は `~/research/_overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
+- 手でも渡せる: `uv run ezra-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
+
+## 10. Ezra が自分を入れ替えるときの動き
 
 `#research-ezra` から Ezra が自分のコードを直すと（`docs/plan.md` の12章）、main に取り込んで push したあと、
 動いている作業がなくなったところで自分で終了する。launchd の `KeepAlive` が新しい版で起動し直す。

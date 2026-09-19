@@ -61,6 +61,8 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     root = config.research_root
 
     digests = list((root / OVERVIEW_DIR / ".ezra" / "digest").glob("*.md"))
+    # 声の会話の全文（決まったことは Slack に残るので、控えは Daily の材料と同じ日数で消す）
+    digests += list((root / OVERVIEW_DIR / "voice").glob("*.md"))
     removed_digests = remove_older_than(digests, now - m.digest_retention_days * 86400)
 
     # 消すのは ~/research の下のディレクトリに対応するセッションだけ。ほかのプロジェクトには触らない

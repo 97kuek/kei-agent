@@ -666,3 +666,46 @@ async def test_usage_limit_without_a_reset_time_waits_a_while(env, store):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
     assert time.time() + 60 < assistant.limited_until <= time.time() + assistant.LIMIT_FALLBACK_SECONDS + 5
+
+
+# Slack の外からの依頼（声のレイヤ。docs/plan.md の13章）
+
+async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
+    assistant, slack, claude, _ = env
+    from ezra import ask
+    ask.write_ask(config, "vlm", "条件ごとの精度を集計して")
+
+    await assistant.handle_asks()
+    await settle(assistant)
+
+    posted = [kw for name, kw in slack.calls if name == "chat_postMessage"]
+    assert "🎤 声からの依頼" in posted[0]["text"] and "条件ごとの精度" in posted[0]["text"]
+    assert claude.calls[0]["prompt"] == "条件ごとの精度を集計して"
+    assert claude.calls[0]["cwd"] == config.research_root / "vlm"
+    assert ask.pending_asks(config) == []      # 拾ったら消す
+
+
+async def test_note_from_outside_is_only_recorded(env, config):
+    """決まったことは、作業させずにスレッドに残すだけ。"""
+    assistant, slack, claude, _ = env
+    from ezra import ask
+    ask.write_ask(config, "vlm", "4条件の比較で進める", kind="note")
+
+    await assistant.handle_asks()
+    await settle(assistant)
+
+    assert "📌 声で決まったこと" in "\n".join(slack.texts())
+    assert claude.calls == []
+
+
+async def test_ask_for_an_unknown_theme_is_reported(env, config):
+    assistant, slack, claude, _ = env
+    from ezra import ask
+    ask.write_ask(config, "nothere", "何かして")
+
+    await assistant.handle_asks()
+    await settle(assistant)
+
+    assert claude.calls == []
+    assert "渡せませんでした" in "\n".join(slack.texts())
+    assert ask.pending_asks(config) == []

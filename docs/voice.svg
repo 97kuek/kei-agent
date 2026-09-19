@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="520" viewBox="0 0 1160 520" role="img" aria-label="机の上の音声対話">
+  <defs>
+    <marker id="a" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
+      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/>
+    </marker>
+    <marker id="acc" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
+      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#D97757"/>
+    </marker>
+    <style>
+      .t { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #1B1F24; }
+      .s { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #697683; font-size: 11.5px; }
+      .m { font-family: 'SFMono-Regular','SF Mono',Menlo,Consolas,monospace; fill: #55606C; font-size: 11px; }
+      .box { fill: #FFFFFF; stroke: #E2E5E9; stroke-width: 1.2; }
+      .lane { fill: #F6F7F9; stroke: #E2E5E9; stroke-width: 1.2; }
+      .edge { fill: none; stroke: #A6AEB8; stroke-width: 1.6; stroke-linecap: round; marker-end: url(#a); }
+      .out { fill: none; stroke: #D97757; stroke-width: 1.6; stroke-linecap: round; marker-end: url(#acc); }
+    </style>
+  </defs>
+  <rect width="1160" height="520" fill="#FFFFFF"/>
+  <text class="t" x="40" y="46" font-size="23" font-weight="600">机の上の音声対話（第0段階）</text>
+  <text class="s" x="40" y="70">相談は Codex（声）、作業は Claude（Slack）。人格はどちらも Ezra。決まったことと結果は Slack に残る</text>
+
+  <rect class="lane" x="40" y="96" width="700" height="190" rx="14"/>
+  <text class="s" x="58" y="120">声のやりとり（手元の Mac だけで完結）</text>
+  <rect class="box" x="60" y="134" width="150" height="70" rx="10"/>
+  <text class="t" x="135" y="166" font-size="13" font-weight="600" text-anchor="middle">喋る</text>
+  <text class="s" x="135" y="186" text-anchor="middle">Aqua Voice で入力</text>
+  <rect class="box" x="250" y="134" width="180" height="70" rx="10"/>
+  <text class="t" x="340" y="160" font-size="13" font-weight="600" text-anchor="middle">Codex（相談相手）</text>
+  <text class="s" x="340" y="180" text-anchor="middle">日ごとに1本の会話</text>
+  <text class="s" x="340" y="196" text-anchor="middle">「じっくり考えて」で長考</text>
+  <rect class="box" x="470" y="134" width="250" height="70" rx="10"/>
+  <text class="t" x="595" y="160" font-size="13" font-weight="600" text-anchor="middle">VOICEVOX で読み上げ</text>
+  <text class="s" x="595" y="180" text-anchor="middle">文ができた端から鳴らす</text>
+  <text class="s" x="595" y="196" text-anchor="middle">Enter で止める／少し速め</text>
+  <path class="edge" d="M 210 169 L 246 169"/>
+  <path class="edge" d="M 430 169 L 466 169"/>
+  <rect class="box" x="60" y="222" width="660" height="46" rx="10"/>
+  <text class="s" x="390" y="250" text-anchor="middle">全文の控えは <tspan class="m">~/research/_overview/voice/&lt;日付&gt;.md</tspan>（30日で消える。読み返さない前提）</text>
+
+  <rect class="lane" x="780" y="96" width="340" height="190" rx="14"/>
+  <text class="s" x="798" y="120">Slack に残るもの</text>
+  <rect class="box" x="800" y="134" width="300" height="60" rx="10"/>
+  <text class="m" x="950" y="158" text-anchor="middle">📌 決定:</text>
+  <text class="s" x="950" y="178" text-anchor="middle">決まったことを、そのままスレッドへ</text>
+  <rect class="box" x="800" y="208" width="300" height="60" rx="10"/>
+  <text class="m" x="950" y="232" text-anchor="middle">🛠 依頼:</text>
+  <text class="s" x="950" y="252" text-anchor="middle">読み上げて確認してから渡す</text>
+  <path class="out" d="M 720 160 L 796 160"/>
+  <path class="out" d="M 730 196 L 756 196 L 756 238 L 796 238"/>
+  <text class="s" x="628" y="284" text-anchor="middle">「amr-query に〜と頼むよ。いい？」</text>
+
+  <rect class="lane" x="40" y="320" width="1080" height="160" rx="14"/>
+  <text class="s" x="58" y="344">Ezra 本体（Claude 側）</text>
+  <rect class="box" x="60" y="358" width="220" height="96" rx="10"/>
+  <text class="t" x="170" y="390" font-size="13" font-weight="600" text-anchor="middle">依頼を受け取る</text>
+  <text class="m" x="170" y="412" text-anchor="middle">&lt;state_dir&gt;/asks/</text>
+  <text class="s" x="170" y="434" text-anchor="middle">数秒ごとに見る。鍵は増やさない</text>
+  <rect class="box" x="320" y="358" width="220" height="96" rx="10"/>
+  <text class="t" x="430" y="390" font-size="13" font-weight="600" text-anchor="middle">スレッドを立てて作業</text>
+  <text class="s" x="430" y="412" text-anchor="middle">いつもの Ezra（Claude）</text>
+  <text class="s" x="430" y="434" text-anchor="middle">結果も図も Slack に残る</text>
+  <rect class="box" x="580" y="358" width="240" height="96" rx="10"/>
+  <text class="t" x="700" y="390" font-size="13" font-weight="600" text-anchor="middle">終わりを見張る</text>
+  <text class="s" x="700" y="412" text-anchor="middle">声のレイヤが Ezra の記録を読む</text>
+  <text class="s" x="700" y="434" text-anchor="middle">「終わったよ」と一言だけ</text>
+  <rect class="box" x="860" y="358" width="240" height="96" rx="10"/>
+  <text class="t" x="980" y="390" font-size="13" font-weight="600" text-anchor="middle">上限に当たったら</text>
+  <text class="s" x="980" y="412" text-anchor="middle">Codex: 「◯時ごろに戻る」と言う</text>
+  <text class="s" x="980" y="434" text-anchor="middle">Claude 側（Slack）は動き続ける</text>
+  <path class="edge" d="M 280 406 L 316 406"/>
+  <path class="edge" d="M 540 406 L 576 406"/>
+  <path class="edge" d="M 950 272 L 950 308 L 170 308 L 170 354"/>
+  <path class="out" d="M 660 354 L 660 288 L 595 288 L 595 208"/>
+</svg>

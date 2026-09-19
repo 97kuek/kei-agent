@@ -102,6 +102,7 @@ async def serve() -> None:
             await ack()
 
     job_loop = asyncio.create_task(assistant.job_loop())
+    ask_loop = asyncio.create_task(assistant.ask_loop())
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
     log.info("Ezra を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
@@ -115,6 +116,7 @@ async def serve() -> None:
         await assistant.restart_requested.wait()
     finally:
         job_loop.cancel()
+        ask_loop.cancel()
         schedule_loop.cancel()
         await handler.close_async()
 

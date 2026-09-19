@@ -5,6 +5,7 @@
 ![Ezra の構成](docs/architecture.svg)
 
 自分で自分を直す流れは [docs/self-improve.svg](docs/self-improve.svg) にまとめている。
+机の上で声で相談する仕組み（相談は Codex、作業は Claude）は [docs/voice.svg](docs/voice.svg) にまとめている。
 
 ##　利用方法
 
@@ -18,6 +19,7 @@
 - Slack で Ezra を開いた「ホーム」タブで、テーマごとの接続先と、決まった時刻の処理の時刻・オンオフを変えられる（再起動は要らない）
 - 自分のメッセージに 🌙 をつけると、Notion に「今夜やる」の Task ができる。Notion で直接「今夜やる」にした Task も含めて、夜間（01:30）に実行し、結果を Slack と Notion に返す
 - 決まった時刻に、先行研究の新着（07:00、テーマのチャンネル）、Daily（08:00）、振り返りの材料（21:00）が届く（`#research-overview` と Notion のノート）
+- 机の上で声で相談できる（`uv run ezra-voice`）。相談相手は Codex、作業は Slack の Ezra（Claude）。決まったことと依頼は Slack に残り、作業が終わると声で一言知らせる
 - Ezra への要望は `#research-ezra` に `@Ezra` をつけて書く。案に同意すると Ezra が自分のコードを直し、差分を見せてから取り込み、GitHub に push して、作業が終わったタイミングで新しい版に入れ替わる
 - 返事待ちのまま24時間たったスレッドには、Ezra が一度だけ声をかける
 - Claude の契約の上限に達したときは、明ける時刻を伝えて、明けてから自動でやり直す（決まった時刻の処理も同じ）
@@ -59,6 +61,9 @@ uv run pytest
 | `src/ezra/notion_store.py` | Task とノートの読み書き（夜間の Task、Daily、振り返り） |
 | `src/ezra/maintenance.py` | 毎晩の保守（古いファイルの整理、研究データのバックアップ） |
 | `src/ezra/timelog.py` | 研究時間の記録（人は Toggl、Ezra は `runs`）と、週ごとの材料の書き出し |
+| `src/ezra/ask.py` | Slack の外（声のレイヤなど）から依頼を渡す口と `ezra-ask` |
+| `src/ezra_voice/` | 机の上の音声対話（Codex に相談し、VOICEVOX で読み上げ、Ezra に依頼を渡す） |
+| `prompts/voice.md` | 声で話すときの Ezra の決まり |
 | `src/ezra/guard.py` | 柵（sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定）。Ezra 自身に直させない |
 | `src/ezra/improve.py` | Slack から Ezra 自身を直す流れ（worktree、確認、取り込み、push、入れ替え） |
 | `src/ezra/settings.py` | Slack から変える設定（テーマごとの接続先、決まった時刻の処理の時刻） |
