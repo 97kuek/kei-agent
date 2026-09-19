@@ -21,9 +21,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 50021
-# 少し速めのほうが、待ち時間の不満が減る
-DEFAULT_SPEED = 1.15
-DEFAULT_SPEAKER = 3
+# 少し速めのほうが、待ち時間の不満が減る（聞き比べて 1.2 倍に決めた）
+DEFAULT_SPEED = 1.2
+# 四国めたん／ノーマル。はきはきして、暗くならない声（2026-09-19 に聞き比べて決めた）
+DEFAULT_SPEAKER = 2
 TIMEOUT_SECONDS = 30
 
 
