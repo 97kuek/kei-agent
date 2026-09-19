@@ -34,7 +34,10 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             "ここで変えた内容は、再起動なしで次の作業から効きます。書き込み先や読ませない場所などは `config.toml` で管理します"}]},
         {"type": "divider"},
-        _mrkdwn("*接続先*（テーマごと。チャンネルをアーカイブすると消えます）"),
+        _mrkdwn("*接続先*"),
+        # Slack の mrkdwn は、閉じる * の直後に全角の文字が続くと太字にならないので、説明は別の行にする
+        {"type": "context", "elements": [{"type": "mrkdwn", "text":
+            "テーマごとに許可した接続先です。チャンネルをアーカイブすると消えます"}]},
     ]
     domains = settings.all_theme_domains(store)
     for theme in theme_names:
