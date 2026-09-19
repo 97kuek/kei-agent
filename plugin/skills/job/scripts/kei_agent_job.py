@@ -46,11 +46,19 @@ def cmd_submit(args: argparse.Namespace) -> int:
     if not os.environ.get("KEI_AGENT_THREAD_TS"):
         print("KEI_AGENT_THREAD_TS がありません。Kei Agent から起動された claude でだけ使えます", file=sys.stderr)
         return 2
+    expects = []
+    for raw in args.expect or []:
+        path = Path(raw)
+        if path.is_absolute() or ".." in path.parts:
+            print(f"--expect はカレントディレクトリからの相対パスで指定してください: {raw}", file=sys.stderr)
+            return 2
+        expects.append(str(path))
     request_id = _write_request({
         "action": "submit",
         "name": args.name,
         "script": str(script),
         "args": args.script_args,
+        "expects": expects,
     })
     print(f"ジョブの投入を依頼しました（request_id={request_id}）。")
     print("Kei Agent がこの回の作業のあとに pueue へ投入し、終わったらこのスレッドの会話を再開します。")
@@ -84,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("submit", help="ジョブを投入する")
     p.add_argument("--name", required=True, help="ジョブの短い名前")
+    p.add_argument("--expect", action="append", metavar="PATH",
+                   help="このジョブでできるはずのファイル（複数回書ける）。終わったときに Kei Agent が有無を確かめる")
     p.add_argument("script", help="実行するスクリプト（.py / .sh）。カレントディレクトリからの相対パス")
     p.add_argument("script_args", nargs=argparse.REMAINDER, help="スクリプトに渡す引数（-- のあとに書く）")
     p.set_defaults(func=cmd_submit)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kei_agent.jobs import log_tail
+from kei_agent.jobs import log_tail, missing_outputs
 from kei_agent.slack_text import DONE_PREFIX, FAILED_PREFIX, PROGRESS_PREFIX, clean_text, format_duration, message_text
 from kei_agent.store import Job
 
@@ -15,11 +15,25 @@ def job_status_label(status: str) -> str:
     return _JOB_STATUS.get(status, status)
 
 
+def expected_files_note(job: Job) -> str:
+    """宣言された「できるはずのファイル」の照合結果。宣言がなければ空。"""
+    expected = job.expected_files
+    if not expected:
+        return ""
+    missing = missing_outputs(job)
+    if not missing:
+        return f"できるはずのファイルは、全部できていました（{'、'.join(expected)}）。"
+    return (f"できるはずのファイルのうち、{'、'.join(missing)} が無いか空でした"
+            f"（宣言: {'、'.join(expected)}）。終了コードは成功でも、中身は失敗しているかもしれません。")
+
+
 def job_resume_prompt(job: Job) -> str:
     elapsed = ""
     if job.started_at and job.finished_at:
         elapsed = f"（実行時間 {format_duration(job.finished_at - job.started_at)}）"
     detail = f"\n詳細: {job.detail}" if job.detail else ""
+    note = expected_files_note(job)
+    detail += f"\n{note}" if note else ""
     tail = log_tail(job)
     tail_block = f"\n\nログの末尾:\n```\n{tail}\n```" if tail else ""
     return (
@@ -43,9 +57,15 @@ def thread_history(messages: list[dict], bot_user_id: str, exclude_ts: str | Non
 
 
 def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None,
-                   stalled: str | None = None) -> str:
-    """セッションが失われたときや、直前の依頼がエラーで止まったときに、スレッドの履歴から文脈を復元するためのプロンプト。"""
+                   stalled: str | None = None, dropped: int = 0) -> str:
+    """セッションが失われたときや、直前の依頼がエラーで止まったときに、スレッドの履歴から文脈を復元するためのプロンプト。
+
+    dropped は、長すぎて載せられなかった古い投稿の数。黙って切ると、Claude は全部を見たつもりで答えてしまう。
+    """
     history = thread_history(messages, bot_user_id, exclude_ts)
+    if dropped:
+        history = (f"（古い投稿 {dropped} 件は長すぎるので省いた。ここに書かれていない経緯があるかもしれない。"
+                   "必要なら、テーマのディレクトリの `.kei-agent/threads/` にある記録を読む）\n\n" + history)
     if stalled:
         why = "直前の依頼はエラーや上限で止まり、会話に記録が残っていない可能性があるため"
         note = f"止まった依頼（まだ終わっていない）:\n{stalled}\n\n"

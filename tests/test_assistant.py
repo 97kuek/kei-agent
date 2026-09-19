@@ -112,6 +112,63 @@ async def test_missing_session_is_restored_from_thread_history(env, store):
     assert not any(t.startswith("⚠️") for t in slack.texts())
 
 
+async def test_long_thread_history_is_paged_and_says_what_it_dropped(env, store, monkeypatch):
+    """履歴が長いスレッドでは、新しいほうから読み、落とした分があることをプロンプトに書く。"""
+    from kei_agent import assistant as mod
+
+    assistant, slack, claude, _ = env
+    monkeypatch.setattr(mod, "HISTORY_PAGE", 2)
+    monkeypatch.setattr(mod, "HISTORY_MAX_MESSAGES", 4)
+    store.upsert_thread("C1", "10.1", "vlm", "lost-session")
+    pages = [
+        ([{"ts": "10.1", "user": "UME", "text": "いちばん古い話"},
+          {"ts": "10.2", "user": "UME", "text": "その次"}], "c1"),
+        ([{"ts": "10.3", "user": "UME", "text": "三つめ"},
+          {"ts": "10.4", "user": "UME", "text": "四つめ"}], "c2"),
+        ([{"ts": "10.5", "user": "UME", "text": "五つめ"},
+          {"ts": "10.6", "user": "UME", "text": "いちばん新しい話"}], ""),
+    ]
+    seen_cursors = []
+
+    async def replies(**kw):
+        seen_cursors.append(kw.get("cursor"))
+        messages, cursor = pages[len(seen_cursors) - 1]
+        return {"messages": messages, "response_metadata": {"next_cursor": cursor}}
+
+    monkeypatch.setattr(slack, "conversations_replies", replies)
+    claude.behaviors = [
+        {"is_error": True, "text": "", "errors": ["No conversation found with session ID: lost-session"]},
+        {"session_id": "sess-new"},
+    ]
+
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.7", "thread_ts": "10.1", "text": "続き"})
+    await settle(assistant)
+
+    assert seen_cursors == [None, "c1", "c2"]
+    prompt = claude.calls[1]["prompt"]
+    assert "いちばん新しい話" in prompt and "いちばん古い話" not in prompt
+    assert "古い投稿 2 件は長すぎるので省いた" in prompt
+
+
+async def test_job_without_its_expected_file_is_reported_as_unfinished(env, store, config):
+    """終了コードが成功でも、できるはずのファイルが無ければ、そう書いて返事待ちにする。"""
+    assistant, slack, claude, _ = env
+    cwd = config.research_root / "vlm"
+    cwd.mkdir(parents=True, exist_ok=True)
+    store.upsert_thread("C1", "10.1", "vlm", "sess-1")
+    job = store.add_job("r1", "C1", "10.1", str(cwd), "sweep", "scripts/sweep.py", status="queued",
+                        expects=["outputs/sweep.csv"])
+    store.update_job(job.id, status="succeeded", finished_at=time.time())
+
+    await assistant.poll_jobs()
+    await settle(assistant)
+
+    posted = [t for t in slack.texts() if t and t.startswith("🧪")]
+    assert "outputs/sweep.csv ができていない" in posted[0]
+    assert "無いか空" in claude.calls[0]["prompt"]
+    assert store.get_thread("C1", "10.1")["awaiting_since"] is not None
+
+
 async def test_new_outputs_are_uploaded(env, config):
     assistant, slack, claude, _ = env
     old = config.research_root / "vlm" / "outputs"

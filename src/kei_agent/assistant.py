@@ -30,7 +30,7 @@ from kei_agent.auto_messages import (
 )
 from kei_agent.config import Config
 from kei_agent.handoff import Handoff, strip_handoff
-from kei_agent.jobs import JobManager
+from kei_agent.jobs import JobManager, missing_outputs
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
@@ -61,8 +61,11 @@ log = logging.getLogger(__name__)
 
 # これ以上かかった作業が終わったら、依頼者に通知の別投稿を送る（短い依頼には送らない）
 NOTIFY_AFTER_SECONDS = 60
-# スレッドの履歴を読むときの上限
-HISTORY_LIMIT = 200
+# スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
+HISTORY_PAGE = 200
+HISTORY_MAX_MESSAGES = 600
+# 履歴を読むときのページ数の上限（とても長いスレッドで、いつまでも読み続けないように）
+HISTORY_MAX_PAGES = 20
 # スレッドのログに残すときの、依頼の出どころの呼び名
 WHO_BY_TRIGGER = {"job": "Kei Agent（ジョブ完了）", "domain": "Kei Agent（接続先の返事）", "voice": "依頼者（声）"}
 
@@ -185,12 +188,27 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             if not cursor:
                 return ids
 
-    async def thread_messages(self, channel: str, thread_ts: str) -> list[dict]:
-        resp = await self.slack.conversations_replies(channel=channel, ts=thread_ts, limit=HISTORY_LIMIT)
-        return resp.get("messages", [])
+    async def thread_messages(self, channel: str, thread_ts: str) -> tuple[list[dict], int]:
+        """スレッドの投稿を新しいほうから HISTORY_MAX_MESSAGES 件まで。載せきれず落とした件数も返す。"""
+        messages: list[dict] = []
+        dropped = 0
+        cursor = None
+        for _ in range(HISTORY_MAX_PAGES):
+            resp = await self.slack.conversations_replies(
+                channel=channel, ts=thread_ts, limit=HISTORY_PAGE, cursor=cursor)
+            messages += resp.get("messages", [])
+            if len(messages) > HISTORY_MAX_MESSAGES:
+                dropped += len(messages) - HISTORY_MAX_MESSAGES
+                messages = messages[-HISTORY_MAX_MESSAGES:]
+            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+        else:
+            log.warning("スレッド %s の履歴が長すぎるので、途中で読むのをやめました", thread_ts)
+        return messages, dropped
 
     async def fetch_message(self, channel: str, ts: str) -> dict | None:
-        resp = await self.slack.conversations_replies(channel=channel, ts=ts, inclusive=True, limit=HISTORY_LIMIT)
+        resp = await self.slack.conversations_replies(channel=channel, ts=ts, inclusive=True, limit=HISTORY_PAGE)
         return next((m for m in resp.get("messages", []) if m.get("ts") == ts), None)
 
     async def permalink(self, channel: str, ts: str) -> str:
@@ -536,8 +554,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         stalled = row["stalled_request"] if row else None
         if stalled:
             # 止まった回は claude 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
-            prompt = history_prompt(await self.thread_messages(req.channel, req.thread_ts), self.bot_user_id,
-                                    prompt, req.message_ts, stalled if stalled != req.text else None)
+            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
+            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts,
+                                    stalled if stalled != req.text else None, dropped=dropped)
             session_id = None
 
         on_activity, on_text = (ui.activity, ui.text) if ui is not None else (None, None)
@@ -549,8 +568,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
 
         result = await attempt(prompt, session_id)
         if result.session_missing:
-            messages = await self.thread_messages(req.channel, req.thread_ts)
-            result = await attempt(history_prompt(messages, self.bot_user_id, prompt, req.message_ts), None)
+            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
+            result = await attempt(
+                history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped), None)
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
             self.store.set_prompt_version(req.channel, req.thread_ts, version)
@@ -730,11 +750,13 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             if row is None:
                 continue
             req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
-            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ（{job_status_label(job.status)}）。"
-                                 "結果を見てみるね")
+            missing = missing_outputs(job)
+            note = f"。ただ {'、'.join(missing)} ができていない" if missing else ""
+            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ"
+                                 f"（{job_status_label(job.status)}{note}）。結果を見てみるね")
             await self.submit(replace(
                 req, text=job_resume_prompt(job), trigger="job",
-                outputs_since=job.submitted_at, awaiting_after=job.status != "succeeded",
+                outputs_since=job.submitted_at, awaiting_after=job.status != "succeeded" or bool(missing),
             ))
 
     async def job_loop(self) -> None:

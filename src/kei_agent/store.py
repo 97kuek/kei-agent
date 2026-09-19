@@ -130,6 +130,15 @@ class Job:
     started_at: float | None
     finished_at: float | None
     reported: int
+    # ジョブが作るはずのファイル（テーマのディレクトリからの相対パス）。JSON の配列
+    expects: str | None = None
+
+    @property
+    def expected_files(self) -> list[str]:
+        try:
+            return [str(p) for p in json.loads(self.expects or "[]")]
+        except json.JSONDecodeError:
+            return []
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Job:
@@ -150,6 +159,7 @@ class Job:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "log": f"logs/job-{self.id}.log",
+            "expects": self.expected_files,
         }
 
 
@@ -163,6 +173,8 @@ def _schedule_status(detail: str | None) -> str:
 
 # あとから足した列。既存のデータベースにも同じ形を用意する
 ADDED_COLUMNS = {
+    # ジョブが作るはずのファイル（JSON の配列）。終わったときに、あるかどうかを確かめる
+    "jobs": {"expects": "TEXT"},
     # Kei Agent の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
     "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0",
                 # この会話に渡した prompts/system.md の版（runner.system_prompt_version）
@@ -437,12 +449,14 @@ class Store:
     # jobs
 
     def add_job(self, request_id: str, channel: str, thread_ts: str, cwd: str, name: str, command: str,
-                status: str, detail: str | None = None) -> Job:
+                status: str, detail: str | None = None, expects: list[str] | None = None) -> Job:
         with self.conn:
             cur = self.conn.execute(
-                """INSERT INTO jobs (request_id, channel, thread_ts, cwd, name, command, status, detail, submitted_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (request_id, channel, thread_ts, cwd, name, command, status, detail, time.time()),
+                """INSERT INTO jobs (request_id, channel, thread_ts, cwd, name, command, status, detail,
+                                     submitted_at, expects)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (request_id, channel, thread_ts, cwd, name, command, status, detail, time.time(),
+                 json.dumps(expects or [], ensure_ascii=False)),
             )
         job = self.get_job(cur.lastrowid)
         assert job is not None  # 直前に入れた行

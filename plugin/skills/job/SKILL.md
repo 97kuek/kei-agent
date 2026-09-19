@@ -16,8 +16,12 @@ description: 数分以上かかる実験や分析を、Kei Agent のジョブ（
 2. 投入する:
 
    ```bash
-   python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" submit --name "<短い名前>" scripts/sweep.py -- --arg1 value
+   python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" submit --name "<短い名前>" \
+     --expect outputs/sweep.csv --expect outputs/sweep.png scripts/sweep.py -- --arg1 value
    ```
+
+   - `--expect` には、そのジョブでできるはずのファイルを書く（複数回書ける）。終わったときに Kei Agent が
+     有無と中身の空でないことを確かめて、できていなければ報告に添える。終了コードが 0 でも中身が空のことがあるため
 
 3. 投入を依頼したこと、何を走らせたか、終わったら報告することを返答に書き、その回の作業を終える。終わるまで待たない
 
@@ -36,6 +40,7 @@ python3 "$KEI_AGENT_PLUGIN_DIR/skills/job/scripts/kei_agent_job.py" cancel 12
 
 ## ジョブが終わって会話が再開されたとき
 
-1. `logs/job-<ID>.log` の末尾と `outputs/` を確認する
+1. `logs/job-<ID>.log` の末尾と `outputs/` を確認する。`--expect` の照合結果が自動メッセージに書いてあるので、
+   「できていない」と書かれていたら、成功と表示されていても失敗として扱う
 2. 失敗していたら原因を調べ、直せるなら直して再投入するか、判断が要るなら依頼者に聞く
 3. 成功していたら、集計して図を `outputs/` に保存し、結果を報告する

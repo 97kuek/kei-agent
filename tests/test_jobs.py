@@ -216,3 +216,44 @@ async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
 
     assert await manager.refresh() == []
     assert store.get_job(job.id).status == "queued"
+
+
+# できるはずのファイル（--expect）
+
+
+def test_parse_request_validates_expects():
+    base = {"action": "submit", "request_id": "r", "script": "scripts/sweep.py"}
+    assert parse_request({**base, "expects": ["outputs/a.csv"]}).expects == ["outputs/a.csv"]
+    assert parse_request(base).expects == []
+    for bad in (["/etc/passwd"], ["../x.csv"], [""], "outputs/a.csv", [1], ["a"] * 11):
+        with pytest.raises(JobRequestError):
+            parse_request({**base, "expects": bad})
+
+
+async def test_finished_job_reports_the_files_that_are_missing(config, store, theme):
+    """終了コードが成功でも、できるはずのファイルが無ければ、成功として扱わない。"""
+    from kei_agent.auto_messages import expected_files_note
+    from kei_agent.jobs import missing_outputs
+
+    store.upsert_thread("C1", "100.1", "vlm", None)
+    manager = JobManager(config, store, FakePueue())
+    write_request(theme.cwd, action="submit", request_id="r9", channel="C1", thread_ts="100.1",
+                  name="sweep", script="scripts/sweep.py", args=[],
+                  expects=["outputs/sweep.csv", "outputs/sweep.png"])
+    job = (await manager.process_requests(theme.cwd))[0].job
+
+    assert job.expected_files == ["outputs/sweep.csv", "outputs/sweep.png"]
+    state = json.loads((theme.cwd / ".kei-agent" / "jobs" / f"{job.id}.json").read_text())
+    assert state["expects"] == ["outputs/sweep.csv", "outputs/sweep.png"]
+
+    (theme.cwd / "outputs").mkdir(exist_ok=True)
+    (theme.cwd / "outputs" / "sweep.csv").write_text("a,b\n")
+    (theme.cwd / "outputs" / "sweep.png").write_text("")  # 中身が空のまま終わった
+
+    assert missing_outputs(job) == ["outputs/sweep.png"]
+    note = expected_files_note(job)
+    assert "outputs/sweep.png" in note and "無いか空" in note
+
+    (theme.cwd / "outputs" / "sweep.png").write_text("x")
+    assert missing_outputs(job) == []
+    assert "全部できていました" in expected_files_note(job)

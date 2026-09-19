@@ -12,7 +12,7 @@ import logging
 import os
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +29,8 @@ JOBS_DIR = Path(".kei-agent/jobs")
 LOG_TAIL_BYTES = 64 * 1024
 # 書きかけのまま残った依頼のファイルを消すまでの秒数
 TMP_LIFETIME_SECONDS = 3600
+# 1つのジョブで宣言できる「できるはずのファイル」の数
+MAX_EXPECTED_FILES = 10
 # ジョブに渡す環境変数。pueue は投入したプロセスの環境をそのまま保存するので、Slack のトークンなどを持ち込まない
 _JOB_ENV_KEYS = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL")
 
@@ -45,6 +47,8 @@ class SubmitRequest:
     name: str
     script: str
     args: list[str]
+    # ジョブが作るはずのファイル。終わったときに、本当にできたかを確かめる
+    expects: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,15 @@ def parse_request(data: dict) -> SubmitRequest | CancelRequest:
     args = data.get("args") or []
     if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
         raise JobRequestError("args は文字列のリストにしてください")
+    expects = data.get("expects") or []
+    if not isinstance(expects, list) or not all(isinstance(e, str) for e in expects):
+        raise JobRequestError("expects は文字列のリストにしてください")
+    if len(expects) > MAX_EXPECTED_FILES:
+        raise JobRequestError(f"expects は {MAX_EXPECTED_FILES} 個までにしてください")
+    for e in expects:
+        path = Path(e)
+        if not e or path.is_absolute() or ".." in path.parts:
+            raise JobRequestError(f"expects はテーマのディレクトリからの相対パスにしてください: {e or "（空）"}")
     return SubmitRequest(
         request_id=request_id,
         channel=str(data.get("channel") or ""),
@@ -84,6 +97,7 @@ def parse_request(data: dict) -> SubmitRequest | CancelRequest:
         name=str(data.get("name") or "job")[:80],
         script=str(data.get("script") or ""),
         args=args,
+        expects=[str(Path(e)) for e in expects],
     )
 
 
@@ -240,7 +254,8 @@ class JobManager:
             path.unlink(missing_ok=True)
 
     async def _submit(self, req: SubmitRequest, cwd: Path) -> Outcome:
-        job = self.store.add_job(req.request_id, req.channel, req.thread_ts, str(cwd), req.name, "", status="queued")
+        job = self.store.add_job(req.request_id, req.channel, req.thread_ts, str(cwd), req.name, "",
+                                 status="queued", expects=req.expects)
         try:
             self._check_thread(req, cwd)
             command = build_job_command(cwd, req.script, req.args, job.id)
@@ -297,6 +312,19 @@ class JobManager:
 
     def mark_reported(self, job: Job) -> None:
         self.store.update_job(job.id, reported=1)
+
+
+def missing_outputs(job: Job) -> list[str]:
+    """宣言された「できるはずのファイル」のうち、無いか空のもの。
+
+    pueue の終了コードは 0 でも、中身が空のまま終わっていることがある（9/19 のジョブ2）。
+    """
+    missing = []
+    for rel in job.expected_files:
+        path = Path(job.cwd) / rel
+        if not path.exists() or (path.is_file() and path.stat().st_size == 0):
+            missing.append(rel)
+    return missing
 
 
 def log_tail(job: Job, lines: int = 20) -> str:
