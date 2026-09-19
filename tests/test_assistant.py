@@ -41,6 +41,7 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert ("reactions_remove", {"channel": "C1", "timestamp": "10.1", "name": "eyes"}) in slack.calls
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
     assert slack.streamed() == ["結果です"]
+    assert "結果です" not in slack.texts()  # 手順のあとのまとめも、同じ返事の中に出す
     assert any(name == "chat_stopStream" for name, _ in slack.calls)
     # 道具を使うたびに、作業の手順を1行ずつ見せる
     assert [(c["title"], c["status"]) for c in slack.tasks()] == [("Bash: テスト", "in_progress"), ("Bash: テスト", "complete")]

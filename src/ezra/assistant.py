@@ -230,7 +230,7 @@ class ThreadUI:
         if self.narration:
             self.task["details"] = self.narration[:TASK_DETAILS_LIMIT]
             self.narration = ""
-        await self._stream(chunks=chunks + [self.task])
+        await self._stream(chunks + [self.task])
 
     async def text(self, chunk: str) -> None:
         """Claude が書いた文章。最後のまとめは finish() で本文にするので、ここでは次の手順の補足として取っておく。"""
@@ -244,9 +244,9 @@ class ThreadUI:
         """
         chunks = self._complete_task()
         if chunks:
-            await self._stream(chunks=chunks)
+            await self._stream(chunks)
         for piece in split_text(answer) if answer.strip() else []:
-            await self._stream(markdown_text=piece)
+            await self._stream([{"type": "markdown_text", "text": piece}])
         streamed = False
         if self.stream_ts is not None:
             try:
@@ -268,10 +268,12 @@ class ThreadUI:
         self.task = None
         return [done]
 
-    async def _stream(self, markdown_text: str | None = None, chunks: list[dict] | None = None) -> None:
+    async def _stream(self, chunks: list[dict]) -> None:
+        # 始めたときと違う形（chunks と markdown_text 引数）を混ぜると streaming_mode_mismatch で断られるので、
+        # 本文も含めて全部 chunks で送る
         if not self.stream_ok:
             return
-        content = {"markdown_text": markdown_text} if markdown_text else {"chunks": chunks}
+        content = {"chunks": chunks}
         try:
             if self.stream_ts is None:
                 resp = await self.slack.chat_startStream(

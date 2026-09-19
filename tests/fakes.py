@@ -46,6 +46,7 @@ class FakeSlack:
         self.channels = channels
         self.calls: list[tuple[str, dict]] = []
         self.replies: list[dict] = []
+        self.stream_modes: dict[str, str] = {}
         self._ts = 1000
 
     def _next_ts(self) -> str:
@@ -77,9 +78,16 @@ class FakeSlack:
 
     async def chat_startStream(self, **kw):
         self.calls.append(("chat_startStream", kw))
-        return {"ts": self._next_ts()}
+        ts = self._next_ts()
+        self.stream_modes[ts] = "chunks" if kw.get("chunks") else "markdown_text"
+        return {"ts": ts}
 
     async def chat_appendStream(self, **kw):
+        # 実物と同じく、始めたときと違う形（chunks と markdown_text）を混ぜると断る
+        mode = "chunks" if kw.get("chunks") else "markdown_text"
+        if self.stream_modes.get(kw["ts"], mode) != mode:
+            from slack_sdk.errors import SlackApiError
+            raise SlackApiError("streaming_mode_mismatch", {"ok": False, "error": "streaming_mode_mismatch"})
         self.calls.append(("chat_appendStream", kw))
         return {}
 
@@ -97,8 +105,13 @@ class FakeSlack:
 
     def streamed(self) -> list[str]:
         """流して見せた文章。start と append を順につないだもの。"""
-        return [kw["markdown_text"] for name, kw in self.calls
-                if name in ("chat_startStream", "chat_appendStream", "chat_stopStream") and kw.get("markdown_text")]
+        texts = []
+        for name, kw in self.calls:
+            if name in ("chat_startStream", "chat_appendStream", "chat_stopStream"):
+                if kw.get("markdown_text"):
+                    texts.append(kw["markdown_text"])
+                texts += [c["text"] for c in kw.get("chunks") or [] if c["type"] == "markdown_text"]
+        return texts
 
     async def reactions_add(self, **kw):
         self.calls.append(("reactions_add", kw))
