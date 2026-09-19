@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ezra.notion import NotionError
+from ezra.notion import Notion, NotionError
 from ezra.notion_store import (
     NotionStore,
     blocks_to_markdown,
@@ -52,6 +52,9 @@ class RecordingNotion:
         self.calls.append((method, path, body))
         return self.responses.pop(0) if self.responses else {"results": [], "has_more": False}
 
+    def paginate(self, method, path, body=None):
+        return Notion.paginate(self, method, path, body)
+
     def children(self, block_id):
         return []
 
@@ -99,3 +102,61 @@ def test_load_notion_needs_token_and_state(config, tmp_path):
 def test_store_requires_setup(tmp_path):
     with pytest.raises(NotionError):
         NotionStore(RecordingNotion([]), tmp_path / "missing.json")
+
+
+def test_missing_property_is_reported_as_a_notion_error(state):
+    """Notion の画面でプロパティ名を変えると、素の KeyError で黙って止まっていた。"""
+    notion = RecordingNotion([
+        {"results": [{"id": "t1", "url": "u", "properties": {"タイトル": {"title": []}}}], "has_more": False},
+    ])
+    with pytest.raises(NotionError, match="状態"):
+        NotionStore(notion, state).tonight_tasks(5)
+
+
+def test_pagination_stops_when_the_cursor_is_empty():
+    """has_more が立ったまま next_cursor が空だと、同じページを取り続けてしまう。"""
+    notion = RecordingNotion([{"results": [{"id": "a"}], "has_more": True, "next_cursor": None}])
+    assert Notion.paginate(notion, "POST", "/x", {}) == [{"id": "a"}]
+
+
+def test_summarize_keeps_numbers_at_the_start_of_a_line():
+    assert summarize("0.85 に改善\n2023年のデータ") == "0.85 に改善 / 2023年のデータ"
+    assert summarize("- 箇条書き\n1. 番号つき\n## 見出し") == "箇条書き / 番号つき / 見出し"
+
+
+def test_blocks_to_markdown_reads_nested_blocks():
+    """トグルや入れ子の箇条書きの中身が、Daily の材料から落ちないようにする。"""
+    blocks = [{"id": "b1", "type": "toggle", "has_children": True,
+               "toggle": {"rich_text": [{"plain_text": "考察"}]}}]
+    inner = [{"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "中身"}]}}]
+    assert blocks_to_markdown(blocks, lambda _id: inner) == "- 考察\n  中身"
+    assert blocks_to_markdown(blocks) == "- 考察"
+
+
+def test_request_waits_and_retries_when_notion_is_busy(monkeypatch):
+    from ezra import notion as notion_module
+
+    notion = Notion("ntn_x")
+    calls = []
+
+    def send(method, path, body):
+        calls.append(path)
+        if len(calls) < 3:
+            raise notion_module._Retryable("429 rate limited", 0)
+        return {"ok": True}
+
+    monkeypatch.setattr(notion, "_send", send)
+    monkeypatch.setattr(notion_module.time, "sleep", lambda _s: None)
+    assert notion.request("GET", "/x") == {"ok": True}
+    assert len(calls) == 3
+
+
+def test_request_gives_up_after_retrying(monkeypatch):
+    from ezra import notion as notion_module
+
+    notion = Notion("ntn_x")
+    monkeypatch.setattr(notion, "_send", lambda *a: (_ for _ in ()).throw(
+        notion_module._Retryable("503 unavailable", 0)))
+    monkeypatch.setattr(notion_module.time, "sleep", lambda _s: None)
+    with pytest.raises(NotionError, match="503"):
+        notion.request("GET", "/x")

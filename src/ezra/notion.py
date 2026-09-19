@@ -14,13 +14,21 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 from ezra.config import load_config
 
 NOTION_VERSION = "2026-03-11"
+# Notion の上限はおよそ 3 リクエスト/秒。少し余裕をみて間隔をあける
+MIN_INTERVAL_SECONDS = 0.34
+# 429 や 5xx で待って試す回数
+MAX_RETRIES = 3
+# ページをたどる回数の上限（次のカーソルが返り続けても止まる）
+MAX_PAGES = 200
 
 
 class NotionError(RuntimeError):
@@ -30,8 +38,24 @@ class NotionError(RuntimeError):
 class Notion:
     def __init__(self, token: str):
         self.token = token
+        self._last_request = 0.0
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
+        """Notion を1回呼ぶ。混んでいるとき（429）と一時的な失敗（5xx）は、待ってから試し直す。"""
+        for attempt in range(MAX_RETRIES + 1):
+            wait = MIN_INTERVAL_SECONDS - (time.monotonic() - self._last_request)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request = time.monotonic()
+            try:
+                return self._send(method, path, body)
+            except _Retryable as e:
+                if attempt == MAX_RETRIES:
+                    raise NotionError(f"{method} {path}: {e}") from None
+                time.sleep(e.retry_after if e.retry_after is not None else 2 ** attempt)
+        raise AssertionError("到達しない")
+
+    def _send(self, method: str, path: str, body: dict | None) -> dict:
         req = urllib.request.Request(
             "https://api.notion.com/v1" + path,
             method=method,
@@ -47,19 +71,44 @@ class Notion:
                 return json.load(resp)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
+            if e.code == 429 or e.code >= 500:
+                raise _Retryable(f"{e.code} {detail}", _retry_after(e)) from None
             raise NotionError(f"{method} {path}: {e.code} {detail}") from None
         except (urllib.error.URLError, TimeoutError) as e:
             raise NotionError(f"{method} {path}: {e}") from None
 
-    def children(self, block_id: str) -> list[dict]:
-        results, cursor = [], None
-        while True:
-            query = f"?page_size=100" + (f"&start_cursor={cursor}" if cursor else "")
-            resp = self.request("GET", f"/blocks/{block_id}/children{query}")
-            results += resp["results"]
-            if not resp.get("has_more"):
+    def paginate(self, method: str, path: str, body: dict | None = None) -> list[dict]:
+        """`has_more` をたどって全部集める。GET はクエリ、POST は本文にカーソルを入れる。"""
+        results: list[dict] = []
+        cursor: str | None = None
+        for _ in range(MAX_PAGES):
+            if method == "GET":
+                query = {"page_size": 100} | ({"start_cursor": cursor} if cursor else {})
+                resp = self.request("GET", f"{path}?{urllib.parse.urlencode(query)}")
+            else:
+                resp = self.request(method, path, (body or {}) | ({"start_cursor": cursor} if cursor else {}))
+            results += resp.get("results") or []
+            cursor = resp.get("next_cursor")
+            # next_cursor が空のまま has_more が立つと、同じページを取り続けてしまう
+            if not resp.get("has_more") or not cursor:
                 return results
-            cursor = resp["next_cursor"]
+        raise NotionError(f"{method} {path}: ページが多すぎます（{MAX_PAGES} ページで打ち切り）")
+
+    def children(self, block_id: str) -> list[dict]:
+        return self.paginate("GET", f"/blocks/{block_id}/children")
+
+
+class _Retryable(RuntimeError):
+    def __init__(self, message: str, retry_after: float | None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after(error: urllib.error.HTTPError) -> float | None:
+    try:
+        return float(error.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        return None
 
 
 # レイアウトの定義
@@ -153,12 +202,22 @@ def _eq_status(prop: str, value: str) -> dict:
     return {"property": prop, "status": {"equals": value}}
 
 
+def _read_state(path: Path) -> dict:
+    """作ったものの ID の控え。壊れていたら、作り直せるように空から始める。"""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise NotionError(f"{path} を読めません（消すと作り直します）: {e}") from None
+
+
 class Setup:
     def __init__(self, notion: Notion, home_page_id: str, state_path: Path):
         self.notion = notion
         self.home = home_page_id
         self.state_path = state_path
-        self.state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        self.state = _read_state(state_path)
         self.state["home_page_id"] = home_page_id
         self.log: list[str] = []
 
@@ -356,25 +415,6 @@ class Setup:
         ])
         self.note_templates()
         self.save()
-
-    def add_theme(self, name: str, purpose: str, slack_url: str, directory: str) -> None:
-        themes = self.state["databases"]["themes"]
-        found = self.notion.request("POST", f"/data_sources/{themes['data_source_id']}/query", {
-            "filter": {"property": "名前", "title": {"equals": name}},
-        })
-        if found["results"]:
-            return
-        self.notion.request("POST", "/pages", {
-            "parent": {"type": "data_source_id", "data_source_id": themes["data_source_id"]},
-            "properties": {
-                "名前": {"title": [{"text": {"content": name}}]},
-                "状態": {"select": {"name": "進行中"}},
-                "目的": {"rich_text": [{"text": {"content": purpose}}]},
-                "Slack": {"url": slack_url},
-                "ディレクトリ": {"rich_text": [{"text": {"content": directory}}]},
-            },
-        })
-        self.log.append(f"テーマを登録: {name}")
 
 
 def main() -> None:

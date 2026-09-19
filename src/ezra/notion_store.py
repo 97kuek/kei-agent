@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,10 @@ log = logging.getLogger(__name__)
 TEXT_LIMIT = 2000
 # 1回のリクエストで足せるブロックの上限
 BLOCKS_PER_REQUEST = 100
+# 1つの段落に入れられる rich_text の要素数
+RICH_TEXT_ITEMS = 100
+# 入れ子のブロックをたどる深さ
+MAX_BLOCK_DEPTH = 3
 RESULT_LIMIT = 300
 
 _PERMALINK = re.compile(r"/archives/(?P<channel>[A-Z0-9]+)/p(?P<ts>\d{10})(?P<frac>\d{6})")
@@ -80,7 +85,7 @@ def _rich(text: str) -> list[dict]:
             if annotations:
                 item["annotations"] = annotations
             parts.append(item)
-    return parts
+    return parts[:RICH_TEXT_ITEMS]
 
 
 def _block(kind: str, text: str, **extra) -> dict:
@@ -128,11 +133,27 @@ def markdown_to_blocks(markdown: str) -> list[dict]:
     return blocks
 
 
+def _prop(props: dict, name: str) -> dict:
+    """ページのプロパティを1つ取り出す。
+
+    Notion の画面でプロパティの名前を変えると、ここで気づける。素の KeyError だと
+    NotionError ではないので、夜間の処理が Slack に何も出さないまま止まってしまう。
+    """
+    try:
+        return props[name]
+    except KeyError:
+        raise NotionError(
+            f"Notion のプロパティ「{name}」が見つかりません。docs/notion-layout.md と照らして直してください"
+        ) from None
+
+
 def _plain(rich_text: list[dict]) -> str:
     return "".join(t.get("plain_text") or t.get("text", {}).get("content", "") for t in rich_text)
 
 
-def blocks_to_markdown(blocks: list[dict]) -> str:
+def blocks_to_markdown(blocks: list[dict], children: Callable[[str], list[dict]] | None = None,
+                       depth: int = 0) -> str:
+    """ブロックを Markdown にする。`children` を渡すと、トグルや入れ子の箇条書きの中も読む。"""
     lines = []
     number = 0
     for b in blocks:
@@ -154,14 +175,26 @@ def blocks_to_markdown(blocks: list[dict]) -> str:
             lines.append(f"```\n{text}\n```")
         elif kind == "divider":
             lines.append("---")
+        elif kind == "toggle":
+            lines.append(f"- {text}")
         elif text:
             lines.append(text)
+        if children and b.get("has_children") and depth < MAX_BLOCK_DEPTH:
+            inner = blocks_to_markdown(children(b["id"]), children, depth + 1)
+            lines += [f"  {line}" for line in inner.splitlines()]
     return "\n".join(lines)
+
+
+def _strip_marks(line: str) -> str:
+    """行頭の箇条書き・見出し・引用の印だけを外す。`0.85 に改善` の数字は残す。"""
+    line = re.sub(r"^\s*#{1,6}\s+", "", line)
+    line = re.sub(r"^\s*>\s?", "", line)
+    return re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line)
 
 
 def summarize(text: str, limit: int = RESULT_LIMIT) -> str:
     """Task の「結果」欄に入れる要約。見出しや空行を飛ばし、最初の数行を使う。"""
-    lines = [re.sub(r"^[#>\-*\d.)\s]+", "", l).replace("**", "").replace("`", "").strip() for l in text.splitlines()]
+    lines = [_strip_marks(line).replace("**", "").replace("`", "").strip() for line in text.splitlines()]
     joined = " / ".join(l for l in lines if l)
     return joined if len(joined) <= limit else joined[: limit - 1] + "…"
 
@@ -171,23 +204,18 @@ class NotionStore:
         if not state_path.exists():
             raise NotionError(f"{state_path} がありません。ezra-notion-setup を先に実行してください")
         self.notion = notion
-        self.state = json.loads(state_path.read_text(encoding="utf-8"))
+        try:
+            self.state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise NotionError(f"{state_path} を読めません: {e}") from None
         self._theme_names: dict[str, str] = {}
 
     def _db(self, key: str) -> dict:
         return self.state["databases"][key]
 
     def _query(self, key: str, body: dict) -> list[dict]:
-        results, cursor = [], None
-        while True:
-            payload = {**body, "page_size": 100}
-            if cursor:
-                payload["start_cursor"] = cursor
-            resp = self.notion.request("POST", f"/data_sources/{self._db(key)['data_source_id']}/query", payload)
-            results += resp["results"]
-            if not resp.get("has_more"):
-                return results
-            cursor = resp["next_cursor"]
+        path = f"/data_sources/{self._db(key)['data_source_id']}/query"
+        return self.notion.paginate("POST", path, {**body, "page_size": 100})
 
     def _create_page(self, key: str, properties: dict, markdown: str = "") -> dict:
         blocks = markdown_to_blocks(markdown)
@@ -204,7 +232,7 @@ class NotionStore:
             self.notion.request("PATCH", f"/blocks/{block_id}/children", {"children": blocks[i:i + BLOCKS_PER_REQUEST]})
 
     def page_markdown(self, page_id: str) -> str:
-        return blocks_to_markdown(self.notion.children(page_id))
+        return blocks_to_markdown(self.notion.children(page_id), self.notion.children)
 
     # テーマ
 
@@ -215,7 +243,7 @@ class NotionStore:
     def theme_name(self, page_id: str) -> str:
         if page_id not in self._theme_names:
             page = self.notion.request("GET", f"/pages/{page_id}")
-            self._theme_names[page_id] = _plain(page["properties"]["名前"]["title"])
+            self._theme_names[page_id] = _plain(_prop(page["properties"], "名前")["title"])
         return self._theme_names[page_id]
 
     def ensure_theme(self, name: str, slack_url: str, directory: str) -> bool:
@@ -234,13 +262,13 @@ class NotionStore:
 
     def _task(self, page: dict) -> Task:
         props = page["properties"]
-        title = _plain(props["タイトル"]["title"])
-        status = (props["状態"].get("status") or {}).get("name", "")
-        assignee = (props["担当"].get("select") or {}).get("name")
-        priority = (props["優先度"].get("select") or {}).get("name")
-        due = (props["期日"].get("date") or {}).get("start")
-        theme_ids = [r["id"] for r in props["テーマ"].get("relation", [])]
-        task = Task(page["id"], title, status, assignee, priority, due, props["Slack"].get("url"),
+        title = _plain(_prop(props, "タイトル")["title"])
+        status = (_prop(props, "状態").get("status") or {}).get("name", "")
+        assignee = (_prop(props, "担当").get("select") or {}).get("name")
+        priority = (_prop(props, "優先度").get("select") or {}).get("name")
+        due = (_prop(props, "期日").get("date") or {}).get("start")
+        theme_ids = [r["id"] for r in _prop(props, "テーマ").get("relation") or []]
+        task = Task(page["id"], title, status, assignee, priority, due, _prop(props, "Slack").get("url"),
                     theme_ids, page.get("url"))
         task.theme_names = [self.theme_name(t) for t in theme_ids]
         return task
@@ -321,9 +349,9 @@ class NotionStore:
     def _note(self, page: dict, with_body: bool) -> Note:
         props = page["properties"]
         note = Note(
-            page["id"], _plain(props["タイトル"]["title"]),
-            (props["種類"].get("select") or {}).get("name"),
-            (props["日付"].get("date") or {}).get("start"),
+            page["id"], _plain(_prop(props, "タイトル")["title"]),
+            (_prop(props, "種類").get("select") or {}).get("name"),
+            (_prop(props, "日付").get("date") or {}).get("start"),
             page.get("url"),
         )
         if with_body:
@@ -362,8 +390,8 @@ class NotionStore:
             "filter": {"property": "期日", "date": {"on_or_after": today.isoformat()}},
             "sorts": [{"property": "期日", "direction": "ascending"}],
         })
-        return [{"name": _plain(r["properties"]["名前"]["title"]),
-                 "due": (r["properties"]["期日"].get("date") or {}).get("start"),
+        return [{"name": _plain(_prop(r["properties"], "名前")["title"]),
+                 "due": (_prop(r["properties"], "期日").get("date") or {}).get("start"),
                  "url": r.get("url")} for r in rows[:limit]]
 
 
