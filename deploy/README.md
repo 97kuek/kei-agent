@@ -50,8 +50,12 @@ export SLACK_APP_TOKEN="xapp-..."
 export EZRA_ALLOWED_USER_ID="U..."
 # Notion のコネクト「Ezra」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）
 export NOTION_TOKEN="ntn_..."
-# 任意: Toggl Track の APIトークン（研究時間の記録に使う。なければ人の時間は空欄になる）
-export TOGGL_API_TOKEN="..."
+# 任意: Toggl の API キーと宛先（研究時間の記録に使う。どれかがなければ人の時間は空欄になる）
+# キーは Toggl の設定 →「Togglアカウント」→「APIトークン」。ID は Toggl を開いたときの URL
+# （focus.toggl.com/<組織>/workspaces/<ワークスペース>/）から写す
+export TOGGL_API_TOKEN="toggl_sk_..."
+export TOGGL_ORGANIZATION_ID="..."
+export TOGGL_WORKSPACE_ID="..."
 # 任意: Semantic Scholar の APIキー（なくても動くが、混雑時に 429 になりやすい）
 # export S2_API_KEY="..."
 ```
