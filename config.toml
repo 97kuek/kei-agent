@@ -55,6 +55,12 @@ allowed_domains = [
   "api.semanticscholar.org",
   "pypi.org",
   "files.pythonhosted.org",
+  # #amr-query: CASTELLA の配布特徴量（Zenodo）と正解データ（GitHub）
+  "zenodo.org",
+  "github.com",
+  "codeload.github.com",
+  "raw.githubusercontent.com",
+  "objects.githubusercontent.com",
 ]
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
 allow_write = ["~/.cache/uv"]
