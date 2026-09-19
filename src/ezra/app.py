@@ -32,6 +32,8 @@ async def serve() -> None:
     config = load_config()
     config.research_root.mkdir(parents=True, exist_ok=True)
     store = Store(config.db_path)
+    for name, day in store.mark_interrupted_schedules():
+        log.warning("前回の %s（%s）は途中で終わっていました。時間内ならやり直します", name, day)
     pueue = Pueue(config)
     await pueue.ensure_group()
 
@@ -46,6 +48,7 @@ async def serve() -> None:
         bot_user_id=auth["user_id"],
         notion=load_notion(config),
         team_url=auth.get("url", ""),
+        team_id=auth.get("team_id", ""),
     )
 
     @app.event("app_mention")

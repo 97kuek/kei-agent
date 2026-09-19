@@ -17,6 +17,7 @@ def config(tmp_path: Path) -> Config:
         allowed_user_id="UME",
         allowed_domains=("export.arxiv.org",),
         allow_write=(tmp_path / "cache",),
+        deny_read=(tmp_path / "secrets",),
     )
 
 

@@ -26,6 +26,7 @@
 2. **Install App** → ワークスペースにインストールし、**Bot User OAuth Token**（`xoxb-`）を控える
 3. **Basic Information** → **App-Level Tokens** → **Generate Token and Scopes**。scope に `connections:write` を付け、トークン（`xapp-`）を控える
 4. 自分のSlackユーザーIDを控える（Slack でプロフィール → ︙ → **メンバーIDをコピー**。`U` で始まる）
+5. **Agents & AI Apps** を有効にする。作業中のステータス（Bot の名前のところと入力欄の下に出る）と、返事を流しながら見せる表示に使う。有効にしなくても Ezra は動き、その場合は結果をまとめて投稿する
 
 ## 3. 秘密情報
 

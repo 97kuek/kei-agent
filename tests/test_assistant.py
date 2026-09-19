@@ -35,10 +35,11 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert call["prompt"] == "図を作って" and call["session_id"] is None and call["thread_ts"] == "10.1"
     assert (config.research_root / "vlm" / "CLAUDE.md").exists()
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "eyes"}) in slack.calls
-    assert slack.texts()[0].startswith("⏳")
-    assert slack.posted()[-1] == {"channel": "C1", "thread_ts": "10.1", "markdown_text": "結果です"}
-    updates = [kw["text"] for name, kw in slack.calls if name == "chat_update"]
-    assert updates[-1].startswith("✅")
+    # いま何をしているかはステータスで見せ、返事は流しながら見せる
+    assert slack.statuses()[0] == "作業を始めます" and slack.statuses()[-1] == ""
+    assert slack.streamed() == ["結果です"]
+    assert any(name == "chat_stopStream" for name, _ in slack.calls)
+    assert "結果です" not in slack.texts()  # 流して見せたので、もう一度投稿しない
     assert store.get_thread("C1", "10.1")["session_id"] == "sess-1"
     log = (config.research_root / "vlm" / ".ezra" / "threads" / "10.1.md").read_text()
     assert "## 依頼者" in log and "図を作って" in log and "## Ezra" in log and "結果です" in log
@@ -165,8 +166,8 @@ async def test_upload_failure_does_not_hide_result(env, config, monkeypatch):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図"})
     await settle(assistant)
 
+    assert slack.streamed() == ["結果です"]
     texts = slack.texts()
-    assert "結果です" in texts
     assert texts[-1].startswith("⚠️ `outputs/` のファイルを添付できませんでした")
     assert not any("内部エラー" in t for t in texts)
 
@@ -181,7 +182,7 @@ async def test_same_thread_requests_run_one_at_a_time(env, monkeypatch):
     gates = [asyncio.Event() for _ in range(3)]
     state = {"running": 0, "peak": 0, "calls": 0}
 
-    async def gated(config, ws, prompt, session_id, channel, thread_ts, on_activity=None):
+    async def gated(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
         i = state["calls"]
         state["calls"] += 1
         state["running"] += 1
@@ -268,7 +269,7 @@ async def test_job_submitted_during_run_then_resumed_when_finished(env, config, 
     assert resumed["session_id"] == "sess-1" and resumed["thread_ts"] == "10.1"
     assert "ジョブ 1「sweep」が終わりました" in resumed["prompt"] and "10分0秒" in resumed["prompt"]
     assert "🧪 ジョブ 1「sweep」が終わりました（成功）。結果を確認します" in slack.texts()
-    assert slack.texts()[-1] == "集計しました"
+    assert slack.streamed()[-1] == "集計しました"
     upload, = [kw for name, kw in slack.calls if name == "files_upload_v2"]
     assert [f["filename"] for f in upload["file_uploads"]] == ["result.csv"]
 
@@ -331,3 +332,38 @@ async def test_job_loop_notifies_once_while_failing(env, config, monkeypatch):
         await assistant.job_loop()
     notices = [t for t in slack.texts() if "pueue" in t]
     assert len(notices) == 1 and slack.posted()[-1]["channel"] == "C9"
+
+
+async def test_crash_before_the_run_is_reported_to_the_thread(env, monkeypatch):
+    """作業用ディレクトリを作れないときなどに、👀 がついたまま黙って終わらない。"""
+    assistant, slack, claude, _ = env
+    from ezra import themes
+
+    def boom(ws):
+        raise RuntimeError("ディスクが一杯です")
+
+    monkeypatch.setattr(themes, "ensure_workspace", boom)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    texts = slack.texts()
+    assert any("依頼の処理が落ちました" in t and "ディスクが一杯です" in t for t in texts)
+    assert claude.calls == []
+
+
+async def test_falls_back_to_a_plain_post_when_the_new_slack_api_is_unavailable(env, monkeypatch):
+    """ステータスと流し見せが使えないワークスペースでは、今までどおり投稿する。"""
+    assistant, slack, claude, _ = env
+    from slack_sdk.errors import SlackApiError
+
+    async def unavailable(**kw):
+        raise SlackApiError("method_not_supported_for_channel_type", {"ok": False})
+
+    monkeypatch.setattr(slack, "agents_sessions_setStatus", unavailable, raising=False)
+    monkeypatch.setattr(slack, "chat_startStream", unavailable, raising=False)
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert slack.posted()[-1] == {"channel": "C1", "thread_ts": "10.1", "markdown_text": "結果です"}
+    assert slack.streamed() == []

@@ -17,6 +17,20 @@ def _expand(path: str) -> Path:
     return Path(os.path.expanduser(path)).resolve()
 
 
+# sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
+# 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
+DEFAULT_DENY_READ = (
+    "~/.config/zsh/local",   # Ezra の秘密情報（deploy/README.md）
+    "~/.ssh",
+    "~/.aws",
+    "~/.claude",             # Claude Code の認証情報
+    "~/.config/gh",          # バックアップ先への push 権限
+    "~/.netrc",
+    "~/.git-credentials",
+    "~/.config/git/credentials",
+)
+
+
 @dataclass(frozen=True)
 class ScheduleConfig:
     enabled: bool = True
@@ -60,6 +74,7 @@ class Config:
     model: str = ""
     allowed_domains: tuple[str, ...] = ()
     allow_write: tuple[Path, ...] = ()
+    deny_read: tuple[Path, ...] = ()
     claude_bin: str = "claude"
     pueue_bin: str = "pueue"
     schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
@@ -93,7 +108,7 @@ TOP_LEVEL_KEYS = {
     "job_poll_seconds", "job_parallel", "model", "channels", "sandbox", "schedule", "maintenance",
 }
 CHANNELS_KEYS = {"overview", "improve"}
-SANDBOX_KEYS = {"allowed_domains", "allow_write"}
+SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
 
 
 def _check_keys(data: dict, known: set[str], where: str) -> None:
@@ -140,6 +155,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         model=data.get("model", ""),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
+        deny_read=tuple(_expand(p) for p in sandbox.get("deny_read", DEFAULT_DENY_READ)),
         claude_bin=env.get("EZRA_CLAUDE_BIN", "claude"),
         pueue_bin=env.get("EZRA_PUEUE_BIN", "pueue"),
         schedule=_section(ScheduleConfig, schedule, "schedule"),

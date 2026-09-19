@@ -1,4 +1,10 @@
+import asyncio
 import json
+import os
+import time
+from dataclasses import replace
+
+import pytest
 
 from ezra import runner, themes
 
@@ -83,3 +89,53 @@ def test_missing_session_detected():
 def test_describe_tool_truncates():
     text = runner.describe_tool("WebSearch", {"query": "あ" * 200})
     assert text.startswith("Web検索: ") and text.endswith("…") and len(text) < 100
+
+
+def test_settings_deny_reading_secret_locations(config):
+    """sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞いでおく。"""
+    ws = themes.resolve(config, "vlm")
+    filesystem = runner.build_settings(config, ws)["sandbox"]["filesystem"]
+    assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
+    assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
+
+
+def test_default_deny_read_covers_tokens_and_keys(tmp_path):
+    from ezra.config import load_config
+    paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
+    assert any(p.endswith("/.ssh") for p in paths)
+    assert any(p.endswith("/.aws") for p in paths)
+    assert any(p.endswith("/.claude") for p in paths)
+    assert any("zsh/local" in p for p in paths)
+
+
+async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(config, tmp_path, monkeypatch):
+    """claude が終わっても、Bash が残したプロセスが出力を握っていることがある。そこで固まらない。
+
+    直す前は stderr の EOF を待ち続けて、スレッドの順番待ちと並行枠を握ったままになっていた。
+    """
+    fake = tmp_path / "fake-claude.sh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "cat > /dev/null\n"
+        "sleep 60 &\n"
+        "echo $! > left-over.pid\n"
+        'printf \'{"type":"result","subtype":"success","session_id":"s1","result":"ok","is_error":false}\\n\'\n'
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
+    config = replace(config, claude_bin=str(fake))
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+
+    result = await asyncio.wait_for(runner.run_claude(config, ws, "hi", None, "C1", "1.1"), timeout=10)
+
+    assert result.text == "ok" and not result.is_error and not result.timed_out
+    pid = int((ws.cwd / "left-over.pid").read_text())
+    for _ in range(50):  # 残ったプロセスも片づける
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail(f"claude が残したプロセス {pid} が生きています")

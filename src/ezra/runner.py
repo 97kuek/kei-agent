@@ -10,8 +10,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from contextlib import suppress
+
 from ezra.config import Config
 from ezra.themes import ChannelKind, Workspace
+
+# claude が終わったあと、プロセスが消えるのを待つ秒数
+EXIT_GRACE_SECONDS = 5
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
 _STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_")
@@ -36,7 +41,11 @@ def build_settings(config: Config, ws: Workspace) -> dict:
                 "allowedDomains": list(config.allowed_domains),
                 "strictAllowlist": True,
             },
-            "filesystem": {"allowWrite": [str(p) for p in config.allow_write]},
+            "filesystem": {
+                "allowWrite": [str(p) for p in config.allow_write],
+                # sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞ぐ
+                "denyRead": [str(p) for p in config.deny_read],
+            },
         },
         "permissions": {
             "allow": [
@@ -149,9 +158,14 @@ def apply_event(result: RunResult, event: dict) -> str | None:
 
 
 def _kill_group(pid: int) -> None:
+    """claude とその中で動いている Bash を、プロセスグループごと止める。
+
+    start_new_session=True で起動しているので、グループIDは claude の pid と同じ。
+    claude 本体を回収したあとでも、残った子プロセスを止められるよう getpgid は使わない。
+    """
     try:
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
-    except ProcessLookupError:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
         pass
 
 
@@ -163,6 +177,7 @@ async def run_claude(
     channel: str,
     thread_ts: str,
     on_activity: Callable[[str], Awaitable[None]] | None = None,
+    on_text: Callable[[str], Awaitable[None]] | None = None,
 ) -> RunResult:
     assert ws.cwd is not None
     proc = await asyncio.create_subprocess_exec(
@@ -187,21 +202,47 @@ async def run_claude(
                 event = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            if on_text and event.get("type") == "assistant":
+                for block in event.get("message", {}).get("content", []):
+                    if block.get("type") == "text" and (block.get("text") or "").strip():
+                        await on_text(block["text"])
             activity = apply_event(result, event)
             if activity and on_activity:
                 await on_activity(activity)
+            if event.get("type") == "result":
+                # claude の最後のイベント。ここで読むのをやめる。
+                # Bash が残したプロセスが出力を握っていると、EOF はいつまでも来ない
+                return
 
     stderr_task = asyncio.create_task(proc.stderr.read())
     try:
         await asyncio.wait_for(read_stdout(), timeout=config.run_timeout_minutes * 60)
-        await proc.wait()
     except TimeoutError:
-        _kill_group(proc.pid)
-        await proc.wait()
         result.timed_out = True
         result.is_error = True
-    stderr = (await stderr_task).decode("utf-8", "replace").strip()
+    except ValueError:
+        # stream-json の1行が limit を超えた
+        result.is_error = True
+        result.errors.append("claude の出力が大きすぎて読めませんでした")
+    finally:
+        if not result.timed_out:
+            # claude がセッションを保存して終わるのを、少しだけ待つ
+            with suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
+        # 正常に終わっていれば空振りする。Bash が残したプロセスがいれば、ここでまとめて止める
+        _kill_group(proc.pid)
+        stderr = await _drain(stderr_task)
+        with suppress(TimeoutError):
+            await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
     if proc.returncode and not result.text and not result.errors and stderr:
         result.is_error = True
         result.errors.append(stderr[-2000:])
     return result
+
+
+async def _drain(task: asyncio.Task) -> str:
+    """stderr を待つ。子プロセスが握ったままでも、待ち続けない。"""
+    try:
+        return (await asyncio.wait_for(task, timeout=EXIT_GRACE_SECONDS)).decode("utf-8", "replace").strip()
+    except (TimeoutError, asyncio.CancelledError, ValueError):
+        return ""

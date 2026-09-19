@@ -69,6 +69,32 @@ class FakeSlack:
         self.calls.append(("chat_update", kw))
         return {}
 
+    # AI アプリ向けの表示
+
+    async def agents_sessions_setStatus(self, **kw):
+        self.calls.append(("agents_sessions_setStatus", kw))
+        return {}
+
+    async def chat_startStream(self, **kw):
+        self.calls.append(("chat_startStream", kw))
+        return {"ts": self._next_ts()}
+
+    async def chat_appendStream(self, **kw):
+        self.calls.append(("chat_appendStream", kw))
+        return {}
+
+    async def chat_stopStream(self, **kw):
+        self.calls.append(("chat_stopStream", kw))
+        return {}
+
+    def statuses(self) -> list[str]:
+        return [kw["status"] for name, kw in self.calls if name == "agents_sessions_setStatus"]
+
+    def streamed(self) -> list[str]:
+        """流して見せた文章。start と append を順につないだもの。"""
+        return [kw["markdown_text"] for name, kw in self.calls
+                if name in ("chat_startStream", "chat_appendStream") and kw.get("markdown_text")]
+
     async def reactions_add(self, **kw):
         self.calls.append(("reactions_add", kw))
 
@@ -93,7 +119,7 @@ class FakeClaude:
         self.calls = []
         self.behaviors = []
 
-    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None):
+    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id, "thread_ts": thread_ts})
         behavior = self.behaviors.pop(0) if self.behaviors else {}
         if on_activity:
@@ -106,6 +132,8 @@ class FakeClaude:
             is_error=behavior.get("is_error", False),
             errors=behavior.get("errors", []),
         )
+        if on_text and result.text:
+            await on_text(result.text)
         return result
 
 

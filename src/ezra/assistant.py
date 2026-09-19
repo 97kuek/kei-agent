@@ -29,7 +29,9 @@ log = logging.getLogger(__name__)
 PROGRESS_PREFIX = "⏳"
 DONE_PREFIX = "✅"
 FAILED_PREFIX = "⚠️"
-PROGRESS_INTERVAL_SECONDS = 3.0
+STATUS_INTERVAL_SECONDS = 3.0
+# ステータスに順ぐりに出す言葉（Slack が選んで表示する）
+LOADING_MESSAGES = ("考えています…", "調べています…", "手を動かしています…")
 MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 SLACK_TEXT_LIMIT = 11000
@@ -156,56 +158,91 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     )
 
 
-class Progress:
-    """経過用メッセージを、間隔をあけて書き換える。"""
+class ThreadUI:
+    """作業中の見せ方。Slack の AI アプリ向けの API を使う。
 
-    def __init__(self, slack, channel: str, thread_ts: str):
+    - `agents.sessions.setStatus`: Bot の名前のところと、入力欄の下に、いま何をしているかを出す
+    - `chat.startStream` / `appendStream` / `stopStream`: 返事を書きながら流して見せる
+
+    どちらもワークスペースや App の設定によっては使えないので、失敗したら黙って
+    今までどおりの投稿に戻す（1回目だけログに残す）。
+    """
+
+    def __init__(self, slack, channel: str, thread_ts: str, team_id: str = "", user_id: str = ""):
         self.slack = slack
         self.channel = channel
         self.thread_ts = thread_ts
-        self.ts: str | None = None
-        self.started = time.monotonic()
-        self.activities: list[str] = []
-        self.last_update = 0.0
-
-    def _text(self, header: str) -> str:
-        recent = self.activities[-5:]
-        body = "\n".join(f"• {a}" for a in recent)
-        more = f"（ほか {len(self.activities) - len(recent)} 件）\n" if len(self.activities) > len(recent) else ""
-        return f"{header}\n{more}{body}".rstrip()
+        self.team_id = team_id
+        self.user_id = user_id
+        self.status_ok = True
+        self.stream_ok = True
+        self.stream_ts: str | None = None
+        self.last_status = 0.0
 
     async def start(self) -> None:
-        resp = await self.slack.chat_postMessage(
-            channel=self.channel, thread_ts=self.thread_ts, text=f"{PROGRESS_PREFIX} 作業を始めます"
-        )
-        self.ts = resp["ts"]
+        await self._status("作業を始めます", LOADING_MESSAGES)
 
-    async def add(self, activity: str) -> None:
-        self.activities.append(activity)
-        if time.monotonic() - self.last_update >= PROGRESS_INTERVAL_SECONDS:
-            await self._update(f"{PROGRESS_PREFIX} 作業中（{format_duration(time.monotonic() - self.started)}）")
+    async def activity(self, activity: str) -> None:
+        """ツールを呼ぶたびに呼ばれる。出しすぎないよう間隔をあける。"""
+        if time.monotonic() - self.last_status >= STATUS_INTERVAL_SECONDS:
+            await self._status(activity)
 
-    async def finish(self, ok: bool) -> None:
-        prefix, word = (DONE_PREFIX, "作業しました") if ok else (FAILED_PREFIX, "作業が止まりました")
-        await self._update(f"{prefix} {format_duration(time.monotonic() - self.started)} {word}")
-
-    async def _update(self, header: str) -> None:
-        if self.ts is None:
+    async def text(self, chunk: str) -> None:
+        """Claude が書いた文章を、そのままスレッドに流す。"""
+        if not self.stream_ok or not chunk.strip():
             return
-        self.last_update = time.monotonic()
         try:
-            await self.slack.chat_update(channel=self.channel, ts=self.ts, text=self._text(header))
-        except Exception:  # 経過の更新に失敗しても作業は続ける
-            log.exception("経過メッセージを更新できません")
+            if self.stream_ts is None:
+                resp = await self.slack.chat_startStream(
+                    channel=self.channel,
+                    thread_ts=self.thread_ts,
+                    recipient_team_id=self.team_id or None,
+                    recipient_user_id=self.user_id or None,
+                    markdown_text=chunk,
+                )
+                self.stream_ts = resp["ts"]
+            else:
+                await self.slack.chat_appendStream(channel=self.channel, ts=self.stream_ts, markdown_text=chunk)
+        except Exception:
+            log.warning("返事を流して見せられないので、まとめて投稿します", exc_info=True)
+            self.stream_ok = False
+
+    async def finish(self) -> bool:
+        """ステータスを消す。流して見せられていれば True（結果をもう一度投稿しない）。"""
+        streamed = False
+        if self.stream_ts is not None:
+            try:
+                await self.slack.chat_stopStream(channel=self.channel, ts=self.stream_ts)
+                streamed = self.stream_ok
+            except Exception:
+                log.warning("流して見せた返事を終われません", exc_info=True)
+        await self._status("")
+        return streamed
+
+    async def _status(self, status: str, loading_messages: tuple[str, ...] = ()) -> None:
+        if not self.status_ok:
+            return
+        self.last_status = time.monotonic()
+        params = {"channel_id": self.channel, "thread_ts": self.thread_ts, "status": status[:100]}
+        if loading_messages:
+            params["loading_messages"] = list(loading_messages)
+        try:
+            await self.slack.agents_sessions_setStatus(**params)
+        except Exception:
+            # 「Agents & AI Apps」が有効でないワークスペースでは使えない
+            log.info("スレッドのステータスを出せません", exc_info=True)
+            self.status_ok = False
 
 
 class Assistant:
     def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str,
-                 notion: NotionStore | None = None, team_url: str = ""):
+                 notion: NotionStore | None = None, team_url: str = "", team_id: str = ""):
         self.config = config
         self.notion = notion
         # チャンネルへのリンクを作るのに使う（例: https://example.slack.com/）
         self.team_url = team_url
+        # 返事を流して見せるときに要る（chat.startStream）
+        self.team_id = team_id
         self.store = store
         self.slack = slack
         self.jobs = jobs
@@ -432,9 +469,21 @@ class Assistant:
                 await self.slack.reactions_add(channel=req.channel, timestamp=req.message_ts, name="eyes")
             except Exception:
                 log.debug("リアクションをつけられません", exc_info=True)
-        task = asyncio.create_task(self.process(req))
+        task = asyncio.create_task(self._process_and_report(req))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+
+    async def _process_and_report(self, req: Request) -> None:
+        """process() が落ちても、👀 がついたまま黙って終わらないようにする。"""
+        try:
+            await self.process(req)
+        except Exception as e:
+            log.exception("依頼の処理が落ちました")
+            try:
+                await self.post(req, f"{FAILED_PREFIX} 依頼の処理が落ちました: `{type(e).__name__}: {e}`")
+            except Exception:
+                log.exception("落ちたことをスレッドに伝えられません")
+            await self.notify_trouble(f"#{req.channel_name} の依頼の処理が落ちました: {type(e).__name__}: {e}")
 
     async def process(self, req: Request) -> runner.RunResult | None:
         try:
@@ -474,19 +523,19 @@ class Assistant:
         append_thread_log(ws.cwd, req.channel_name, req.thread_ts, who, req.text + (
             "\n\n" + "\n".join(f"- 添付: `{p}`" for p in saved) if saved else ""))
 
-        progress = Progress(self.slack, req.channel, req.thread_ts)
-        await progress.start()
+        ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
+        await ui.start()
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
 
         result = await runner.run_claude(
-            self.config, ws, prompt, session_id, req.channel, req.thread_ts, progress.add
+            self.config, ws, prompt, session_id, req.channel, req.thread_ts, ui.activity, ui.text
         )
         if result.session_missing:
             replies = await self.slack.conversations_replies(channel=req.channel, ts=req.thread_ts, limit=200)
             prompt = history_prompt(replies.get("messages", []), self.bot_user_id, prompt, req.message_ts)
             result = await runner.run_claude(
-                self.config, ws, prompt, None, req.channel, req.thread_ts, progress.add
+                self.config, ws, prompt, None, req.channel, req.thread_ts, ui.activity, ui.text
             )
 
         self.store.end_run(run_id, result.is_error, result.cost_usd)
@@ -495,12 +544,13 @@ class Assistant:
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
-        await progress.finish(ok=not result.is_error)
+        streamed = await ui.finish()
 
         if result.text:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Ezra", result.text)
-            for chunk in split_text(result.text):
-                await self.post(req, chunk, markdown=True)
+            if not streamed:  # 流して見せられなかったときだけ、まとめて投稿する
+                for chunk in split_text(result.text):
+                    await self.post(req, chunk, markdown=True)
         if result.is_error:
             reason = "上限時間を超えたので止めました" if result.timed_out else "; ".join(result.errors)[:1500]
             await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {reason or '原因不明'}")

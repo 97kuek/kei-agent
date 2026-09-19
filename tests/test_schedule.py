@@ -380,3 +380,16 @@ async def test_nudge_failure_is_not_retried_every_minute(env, store, monkeypatch
     await scheduler.nudge_stale_threads()
     await scheduler.nudge_stale_threads()
     assert len(calls) == 1
+
+
+def test_interrupted_schedule_runs_again(store):
+    """途中で Ezra が止まると「実行中」の記録が残る。そのままだと、その日は二度と動かない。"""
+    store.record_schedule("daily", "2026-09-19", {"status": "running"})
+    assert store.schedule_ran("daily", "2026-09-19")
+
+    assert store.mark_interrupted_schedules() == [("daily", "2026-09-19")]
+    assert not store.schedule_ran("daily", "2026-09-19")
+
+    store.record_schedule("daily", "2026-09-19", {"status": "posted"})
+    assert store.mark_interrupted_schedules() == []
+    assert store.schedule_ran("daily", "2026-09-19")

@@ -58,3 +58,6 @@ allowed_domains = [
 ]
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
 allow_write = ["~/.cache/uv"]
+# sandbox の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
+# 秘密情報や鍵の置き場所を塞ぐ。書かなければ src/ezra/config.py の DEFAULT_DENY_READ を使う
+# deny_read = ["~/.config/zsh/local", "~/.ssh", "~/.aws", "~/.claude", "~/.config/gh"]

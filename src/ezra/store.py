@@ -95,6 +95,14 @@ class Job:
         }
 
 
+def _schedule_status(detail: str | None) -> str:
+    """schedule_runs の detail に入っている status。読めなければ空文字。"""
+    try:
+        return str((json.loads(detail or "{}") or {}).get("status", ""))
+    except json.JSONDecodeError:
+        return ""
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,9 +199,28 @@ class Store:
     # schedule
 
     def schedule_ran(self, name: str, day: str) -> bool:
-        return self.conn.execute(
-            "SELECT 1 FROM schedule_runs WHERE name = ? AND day = ?", (name, day)
-        ).fetchone() is not None
+        """その日の分を実行済みか。途中で中断したものは、まだ実行していないものとして扱う。"""
+        row = self.conn.execute(
+            "SELECT detail FROM schedule_runs WHERE name = ? AND day = ?", (name, day)
+        ).fetchone()
+        if row is None:
+            return False
+        return _schedule_status(row["detail"]) != "interrupted"
+
+    def mark_interrupted_schedules(self) -> list[tuple[str, str]]:
+        """前回の起動で「実行中」のまま終わった定期処理を「中断」にする。起動時に1回呼ぶ。
+
+        これをしないと、記録が残っているせいで、その日の分が二度と実行されない。
+        """
+        rows = self.conn.execute("SELECT name, day, detail FROM schedule_runs").fetchall()
+        stuck = [(r["name"], r["day"]) for r in rows if _schedule_status(r["detail"]) == "running"]
+        with self.conn:
+            for name, day in stuck:
+                self.conn.execute(
+                    "UPDATE schedule_runs SET detail = ? WHERE name = ? AND day = ?",
+                    (json.dumps({"status": "interrupted"}, ensure_ascii=False), name, day),
+                )
+        return stuck
 
     def record_schedule(self, name: str, day: str, detail: dict | None = None) -> None:
         with self.conn:
