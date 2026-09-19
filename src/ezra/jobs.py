@@ -308,4 +308,7 @@ def log_tail(job: Job, lines: int = 20) -> str:
         f.seek(0, os.SEEK_END)
         f.seek(max(0, f.tell() - LOG_TAIL_BYTES))
         tail = f.read()
-    return "\n".join(tail.decode("utf-8", "replace").splitlines()[-lines:])
+    # curl などの進捗表示は \r で同じ行を上書きするだけなので、上書きの最終状態だけ残す
+    text = tail.decode("utf-8", "replace")
+    collapsed = "\n".join(segment.split("\r")[-1] for segment in text.split("\n"))
+    return "\n".join(collapsed.splitlines()[-lines:])

@@ -11,6 +11,7 @@ from ezra.jobs import (
     build_job_command,
     interpret_pueue_status,
     job_env,
+    log_tail,
     parse_request,
 )
 
@@ -181,6 +182,29 @@ async def test_unreadable_request_is_reported(config, store, theme):
     assert outcome.error and "読めませんでした" in outcome.error
     assert (outcome.channel, outcome.thread_ts) == ("C1", "1.1")
     assert not path.exists()  # 残すと毎分同じ失敗を繰り返す
+
+
+# log_tail
+
+def test_log_tail_collapses_carriage_return_progress_lines(store, theme):
+    """curl の進捗表示は \r で同じ行を上書きするだけなので、末尾には最終状態の1行だけ残したい。"""
+    job = store.add_job("r5", "C1", "100.1", str(theme.cwd), "sweep", "", status="queued")
+    log_dir = theme.cwd / "logs"
+    log_dir.mkdir(exist_ok=True)
+    progress = "\r".join(f"{p}%" for p in range(0, 101, 10))
+    (log_dir / f"job-{job.id}.log").write_text(
+        f"start\n{progress}\ndone downloading\nTraceback (most recent call last):\nValueError: boom\n"
+    )
+
+    tail = log_tail(job, lines=10)
+
+    assert tail.splitlines() == [
+        "start",
+        "100%",
+        "done downloading",
+        "Traceback (most recent call last):",
+        "ValueError: boom",
+    ]
 
 
 async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
