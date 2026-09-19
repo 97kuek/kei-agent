@@ -137,7 +137,9 @@ def _schedule_status(detail: str | None) -> str:
 # あとから足した列。既存のデータベースにも同じ形を用意する
 ADDED_COLUMNS = {
     # Ezra の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
-    "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0"},
+    "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0",
+                # この会話に渡した prompts/system.md の版（runner.system_prompt_version）
+                "prompt_version": "TEXT"},
 }
 
 
@@ -188,6 +190,11 @@ class Store:
                      updated_at = excluded.updated_at""",
                 (channel, thread_ts, channel_name, session_id, now, now),
             )
+
+    def set_prompt_version(self, channel: str, thread_ts: str, version: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE threads SET prompt_version = ? WHERE channel = ? AND thread_ts = ?",
+                              (version, channel, thread_ts))
 
     def clear_session(self, channel: str, thread_ts: str) -> None:
         with self.conn:

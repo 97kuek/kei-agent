@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import signal
@@ -62,6 +63,16 @@ def build_settings(config: Config, ws: Workspace) -> dict:
     }
 
 
+def system_prompt_text(config: Config) -> str:
+    path = config.system_prompt_path
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def system_prompt_version(config: Config) -> str:
+    """prompts/system.md の版。--resume では会話を始めたときの版が使われ続けるので、変わったかを見るのに使う。"""
+    return hashlib.sha256(system_prompt_text(config).encode("utf-8")).hexdigest()[:12]
+
+
 def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
     cmd = [
         config.claude_bin,
@@ -75,7 +86,8 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
         "--plugin-dir", str(config.plugin_dir),
     ]
     if config.system_prompt_path.exists():
-        cmd += ["--append-system-prompt", config.system_prompt_path.read_text(encoding="utf-8")]
+        # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
+        cmd += ["--append-system-prompt", system_prompt_text(config)]
     if config.model:
         cmd += ["--model", config.model]
     if session_id:
@@ -128,6 +140,9 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     activities: list[str] = field(default_factory=list)
     timed_out: bool = False
+    # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
+    # Ezra が依頼者に [許可する] [断る] を聞く（docs/plan.md の11章）
+    requested_domains: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def session_missing(self) -> bool:
@@ -144,8 +159,14 @@ def apply_event(result: RunResult, event: dict) -> str | None:
         activity = None
         for block in event.get("message", {}).get("content", []):
             if block.get("type") == "tool_use":
-                activity = describe_tool(block.get("name", ""), block.get("input") or {})
+                tool_input = block.get("input") or {}
+                activity = describe_tool(block.get("name", ""), tool_input)
                 result.activities.append(activity)
+                known = {d for d, _ in result.requested_domains}
+                for domain in tool_input.get("allowed_domains") or []:
+                    if isinstance(domain, str) and domain not in known:
+                        known.add(domain)
+                        result.requested_domains.append((domain, str(tool_input.get("description") or "")))
         return activity
     if etype == "result":
         result.session_id = event.get("session_id") or result.session_id

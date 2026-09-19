@@ -64,6 +64,18 @@ def test_env_strips_secrets_and_adds_thread(config):
     assert env["EZRA_PLUGIN_DIR"].endswith("plugin")
 
 
+def test_apply_event_keeps_domains_claude_asked_for():
+    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Ezra がボタンにできるよう覚えておく。"""
+    result = runner.RunResult()
+    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
+        "type": "tool_use", "name": "Bash",
+        "input": {"command": "curl -I https://huggingface.co/x", "description": "重みのサイズを見る",
+                  "allowed_domains": ["huggingface.co", "cdn-lfs.huggingface.co"]}}]}})
+    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
+        "type": "tool_use", "name": "Bash", "input": {"command": "ls", "allowed_domains": ["huggingface.co"]}}]}})
+    assert result.requested_domains == [("huggingface.co", "重みのサイズを見る"), ("cdn-lfs.huggingface.co", "重みのサイズを見る")]
+
+
 def test_apply_events():
     result = runner.RunResult()
     assert runner.apply_event(result, {"type": "system", "subtype": "init", "session_id": "s1"}) is None

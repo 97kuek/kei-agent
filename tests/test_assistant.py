@@ -199,6 +199,7 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
 async def test_thread_broadcast_reply_continues_thread(env, store):
     assistant, slack, claude, _ = env
     store.upsert_thread("C1", "10.1", "vlm", "s")
+    store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",
                                 "subtype": "thread_broadcast", "text": "チャンネルにも送った返信"})
     await settle(assistant)
@@ -354,6 +355,7 @@ async def test_same_thread_runs_one_at_a_time(env, monkeypatch):
 
     monkeypatch.setattr(runner, "run_claude", slow)
     assistant.store.upsert_thread("C1", "10.1", "vlm", "s")
+    assistant.store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "a"})
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "b"})
     await settle(assistant)
@@ -587,3 +589,43 @@ async def test_connect_request_for_an_allowed_domain_asks_nothing(env, store):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 探して"})
     await settle(assistant)
     assert not any(kw.get("blocks") for _, kw in slack.calls if "blocks" in kw and kw.get("text", "").startswith("🔒"))
+
+
+async def test_domains_asked_through_the_bash_tool_also_become_buttons(env, monkeypatch):
+    """Claude が 🔒 の行を書かず、Bash の allowed_domains で頼んだときも、ボタンを出す。"""
+    assistant, slack, claude, _ = env
+    original = runner.run_claude
+
+    async def asks_with_tool(config, ws, *args, **kwargs):
+        result = await original(config, ws, *args, **kwargs)
+        result.requested_domains = [("huggingface.co", "重みを落とす")]
+        return result
+
+    monkeypatch.setattr(runner, "run_claude", asks_with_tool)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
+    await settle(assistant)
+    allow, post = _button_action(slack, "ezra_domain_allow")
+    assert "huggingface.co" in post["text"] and "重みを落とす" in post["text"]
+
+
+async def test_updated_rules_are_passed_to_a_resumed_session_once(env, monkeypatch):
+    """--resume では、会話を始めたときのシステムプロンプトが使われ続ける。
+    決まりを変えたら、次の依頼のときに1回だけ本文として渡す。"""
+    assistant, slack, claude, _ = env
+    version = {"v": "v1"}
+    monkeypatch.setattr(runner, "system_prompt_version", lambda config: version["v"])
+    monkeypatch.setattr(runner, "system_prompt_text", lambda config: "新しい決まり")
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 始めて"})
+    await settle(assistant)
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "続き"})
+    await settle(assistant)
+    assert "新しい決まり" not in claude.calls[0]["prompt"] and "新しい決まり" not in claude.calls[1]["prompt"]
+
+    version["v"] = "v2"
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "もう一度"})
+    await settle(assistant)
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.4", "thread_ts": "10.1", "text": "さらに"})
+    await settle(assistant)
+    assert "新しい決まり" in claude.calls[2]["prompt"] and claude.calls[2]["prompt"].endswith("もう一度")
+    assert "新しい決まり" not in claude.calls[3]["prompt"]

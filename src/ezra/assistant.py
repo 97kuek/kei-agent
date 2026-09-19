@@ -177,6 +177,13 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     )
 
 
+def rules_update_prompt(rules: str) -> str:
+    """会話の途中で prompts/system.md が変わったときに、依頼の前に付ける文。"""
+    return ("[Ezra からの自動メッセージ] Ezra としての振る舞いの決まりが更新されました。"
+            "この会話を始めたときの決まりより、こちらを優先してください。\n\n"
+            f"<rules>\n{rules.strip()}\n</rules>\n\n---\n\n")
+
+
 def domain_resume_prompt(decisions) -> str:
     """接続先の申し出に依頼者が答えたあと、会話を再開するときに渡す文。"""
     lines = ["[Ezra からの自動メッセージ] 接続先の申し出に、依頼者が答えました。"]
@@ -688,6 +695,10 @@ class Assistant:
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
         session_id = row["session_id"] if row else None
+        version = runner.system_prompt_version(self.config)
+        if session_id and row["prompt_version"] != version:
+            # --resume では会話を始めたときのシステムプロンプトが使われ続けるので、変わった決まりを本文で渡す
+            prompt = rules_update_prompt(runner.system_prompt_text(self.config)) + prompt
 
         who = {"job": "Ezra（ジョブ完了）", "domain": "Ezra（接続先の返事）"}.get(req.trigger, "依頼者")
         append_thread_log(ws.cwd, req.channel_name, req.thread_ts, who, req.text + (
@@ -712,7 +723,8 @@ class Assistant:
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
-        connect = self.new_connect_requests(ws, result.text)
+            self.store.set_prompt_version(req.channel, req.thread_ts, version)
+        connect = self.new_connect_requests(ws, result.text, result.requested_domains)
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
@@ -759,12 +771,21 @@ class Assistant:
 
     # 接続先の申し出（docs/plan.md の11章）
 
-    def new_connect_requests(self, ws: Workspace, text: str) -> list[tuple[str, str]]:
-        """返答の `🔒 接続:` のうち、まだ許可していないもの。テーマ以外では受け付けない。"""
+    def new_connect_requests(self, ws: Workspace, text: str,
+                             from_tools: list[tuple[str, str]] = ()) -> list[tuple[str, str]]:
+        """返答の `🔒 接続:` と、Bash の allowed_domains で頼まれたもののうち、まだ許可していないもの。
+
+        テーマ以外では受け付けない。ボタンで許可できるのは、ぴったりのドメイン名だけ。
+        """
         if ws.kind is not ChannelKind.THEME:
             return []
         allowed = set(self.config.allowed_domains) | set(ws.allowed_domains)
-        return [(d, reason) for d, reason in settings.parse_connect_requests(text) if d not in allowed]
+        found: dict[str, str] = {}
+        for domain, reason in [*settings.parse_connect_requests(text), *from_tools]:
+            domain = domain.strip().lower()
+            if settings.valid_domain(domain) and domain not in allowed and domain not in found:
+                found[domain] = reason
+        return list(found.items())
 
     async def ask_for_domains(self, req: Request, ws: Workspace, requests: list[tuple[str, str]]) -> None:
         for domain, reason in requests:
