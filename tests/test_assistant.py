@@ -656,7 +656,8 @@ async def test_usage_limit_is_retried_after_it_resets(env, store, monkeypatch):
 
     await assistant.retry_deferred(now=reset + 120)
     await settle(assistant)
-    assert claude.calls[1]["prompt"] == "図を作って" and "やり直したよ" in slack.streamed()
+    assert claude.calls[1]["prompt"].endswith("続きの依頼:\n図を作って") and "やり直したよ" in slack.streamed()
+    assert "上限が明けたので" not in "\n".join(slack.texts())
     assert store.due_deferred("request", reset + 200) == []       # 二度はやり直さない
 
 
@@ -666,6 +667,30 @@ async def test_usage_limit_without_a_reset_time_waits_a_while(env, store):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
     assert time.time() + 60 < assistant.limited_until <= time.time() + assistant.LIMIT_FALLBACK_SECONDS + 5
+
+
+async def test_next_request_after_an_error_carries_the_stalled_request(env, store):
+    assistant, slack, claude, _ = env
+    slack.replies = [
+        {"ts": "10.1", "user": "UME", "text": "<@UBOT> 図を作って"},
+        {"ts": "10.5", "user": "UME", "text": "続けて"},
+    ]
+    claude.behaviors = [{"is_error": True, "text": "", "errors": ["boom"], "session_id": "s1"},
+                        {"session_id": "s2"}, {"session_id": "s3"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.5", "thread_ts": "10.1", "text": "続けて"})
+    await settle(assistant)
+
+    second = claude.calls[1]
+    assert second["session_id"] is None
+    assert "止まった依頼" in second["prompt"] and "図を作って" in second["prompt"]
+    assert second["prompt"].endswith("続きの依頼:\n続けて")
+    assert store.get_thread("C1", "10.1")["stalled_request"] is None    # 成功したので忘れる
+
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.6", "thread_ts": "10.1", "text": "次"})
+    await settle(assistant)
+    assert claude.calls[2]["session_id"] == "s2" and claude.calls[2]["prompt"] == "次"
 
 
 # Slack の外からの依頼（声のレイヤ。docs/plan.md の13章）

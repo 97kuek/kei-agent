@@ -162,8 +162,9 @@ def message_text(message: dict) -> str:
     return "\n".join(parts)
 
 
-def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None) -> str:
-    """セッションが失われたときに、スレッドの履歴から文脈を復元するためのプロンプト。"""
+def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None,
+                   stalled: str | None = None) -> str:
+    """セッションが失われたときや、直前の依頼がエラーで止まったときに、スレッドの履歴から文脈を復元するためのプロンプト。"""
     lines = []
     for m in messages:
         text = message_text(m)
@@ -172,10 +173,16 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
         who = "Ezra" if m.get("user") == bot_user_id or m.get("bot_id") else "依頼者"
         lines.append(f"{who}: {clean_text(text)}")
     history = "\n\n".join(lines)
+    if stalled:
+        why = "直前の依頼はエラーや上限で止まり、会話に記録が残っていない可能性があるため"
+        note = f"止まった依頼（まだ終わっていない）:\n{stalled}\n\n"
+    else:
+        why = "以前の会話セッションが見つからないため"
+        note = ""
     return (
-        "[Ezra からの自動メッセージ] このスレッドの以前の会話セッションが見つからないため、"
+        f"[Ezra からの自動メッセージ] このスレッドの{why}、"
         "Slack のスレッドの履歴から文脈を復元します。\n\n"
-        f"<thread_history>\n{history}\n</thread_history>\n\n"
+        f"<thread_history>\n{history}\n</thread_history>\n\n{note}"
         f"続きの依頼:\n{new_text}"
     )
 
@@ -735,6 +742,13 @@ class Assistant:
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
 
+        stalled = row["stalled_request"] if row else None
+        if stalled:
+            # 止まった回は claude 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
+            replies = await self.slack.conversations_replies(channel=req.channel, ts=req.thread_ts, limit=200)
+            prompt = history_prompt(replies.get("messages", []), self.bot_user_id, prompt, req.message_ts,
+                                    stalled if stalled != req.text else None)
+            session_id = None
         with self.claude_running():
             result = await runner.run_claude(
                 self.config, ws, prompt, session_id, req.channel, req.thread_ts, ui.activity, ui.text
@@ -748,6 +762,7 @@ class Assistant:
                 )
 
         self.store.end_run(run_id, result.is_error, result.cost_usd)
+        self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
             self.store.set_prompt_version(req.channel, req.thread_ts, version)
@@ -775,17 +790,19 @@ class Assistant:
             await self.post(req, f"{FAILED_PREFIX} エラーで止まっちゃった: {reason or '原因不明'}")
 
         overlapped = self.theme_runs.end(req.channel_name, req.thread_ts)
+        notes = []
         try:
             new_files = changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since)
             await self.upload_outputs(req, ws.cwd, new_files)
             if new_files and overlapped:
                 # 時刻では自分の図と隣の図を区別できないので、混ざりうることを黙って隠さない
-                await self.post(req, f"{FAILED_PREFIX} このテーマで別のスレッドも動いていたので、"
-                                     "別のスレッドの図が混ざっているかもしれない。")
+                notes.append("このテーマで別のスレッドも動いていたので、別のスレッドの図が混ざっているかもしれない。")
         except Exception as e:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")
-            await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できなかったよ: `{type(e).__name__}: {e}`")
+            notes.append(f"`outputs/` のファイルを添付できなかったよ: `{type(e).__name__}: {e}`")
+        if notes:
+            await self.post(req, f"{FAILED_PREFIX} " + " ".join(notes))
         await self.mark_answered(req, result.is_error)
         await self.ask_for_domains(req, ws, connect)
         await self.handle_job_requests(ws.cwd)
@@ -875,8 +892,6 @@ class Assistant:
         now = time.time() if now is None else now
         for deferred_id, payload in self.store.due_deferred("request", now):
             self.store.finish_deferred(deferred_id)
-            await self.post(Request(payload["channel"], payload["channel_name"], payload["thread_ts"], None, ""),
-                            "上限が明けたので、さっきの続きをやり直すね。")
             await self.submit(Request(
                 channel=payload["channel"], channel_name=payload["channel_name"],
                 thread_ts=payload["thread_ts"], message_ts=payload["message_ts"], text=payload["text"],
