@@ -12,14 +12,14 @@ from pathlib import Path
 
 from contextlib import suppress
 
-from ezra.config import Config
+from ezra.config import Config, path_without_venv
 from ezra.themes import ChannelKind, Workspace
 
 # claude が終わったあと、プロセスが消えるのを待つ秒数
 EXIT_GRACE_SECONDS = 5
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-_STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_")
+_STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV")
 _KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 
 
@@ -89,6 +89,7 @@ def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str
         k: v for k, v in base.items()
         if k in _KEPT_CLAUDE_ENV or not k.startswith(_STRIPPED_ENV_PREFIXES)
     }
+    env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["EZRA_CHANNEL"] = channel
     env["EZRA_THREAD_TS"] = thread_ts
     env["EZRA_PLUGIN_DIR"] = str(config.plugin_dir)

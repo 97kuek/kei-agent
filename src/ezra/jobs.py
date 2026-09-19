@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ezra import themes
-from ezra.config import Config
+from ezra.config import Config, path_without_venv
 from ezra.store import Job, Store, dumps
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 PUEUE_GROUP = "ezra"
 REQUESTS_DIR = Path(".ezra/requests")
 JOBS_DIR = Path(".ezra/jobs")
+# ジョブのログの末尾を読むとき、読み込む最大の大きさ
+LOG_TAIL_BYTES = 64 * 1024
 # ジョブに渡す環境変数。pueue は投入したプロセスの環境をそのまま保存するので、Slack のトークンなどを持ち込まない
 _JOB_ENV_KEYS = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL")
 
@@ -44,6 +46,15 @@ class SubmitRequest:
 
 
 @dataclass(frozen=True)
+class Outcome:
+    """依頼を1件処理した結果。スレッドに知らせるために返す。"""
+    channel: str
+    thread_ts: str
+    job: Job | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class CancelRequest:
     request_id: str
     job_id: int
@@ -55,7 +66,10 @@ def parse_request(data: dict) -> SubmitRequest | CancelRequest:
     if not request_id:
         raise JobRequestError("request_id がありません")
     if action == "cancel":
-        return CancelRequest(request_id, int(data["job_id"]))
+        try:
+            return CancelRequest(request_id, int(data["job_id"]))
+        except (KeyError, TypeError, ValueError):
+            raise JobRequestError("cancel には数字の job_id が要ります") from None
     if action != "submit":
         raise JobRequestError(f"不明な action: {action!r}")
     args = data.get("args") or []
@@ -96,9 +110,9 @@ def build_job_command(cwd: Path, script: str, args: list[str], job_id: int) -> s
     return f"mkdir -p logs && exec {quoted} > {log_path} 2>&1"
 
 
-def job_env(base: dict[str, str]) -> dict[str, str]:
+def job_env(base: dict[str, str], repo_root: Path) -> dict[str, str]:
     env = {k: base[k] for k in _JOB_ENV_KEYS if k in base}
-    env["PATH"] = base.get("PATH", "/usr/bin:/bin")
+    env["PATH"] = path_without_venv(base.get("PATH", "/usr/bin:/bin"), repo_root)
     return env
 
 
@@ -135,6 +149,7 @@ class Pueue:
     def __init__(self, config: Config):
         self.bin = config.pueue_bin
         self.parallel = config.job_parallel
+        self.repo_root = config.repo_root
 
     async def _run(self, *args: str, env: dict[str, str] | None = None) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -156,7 +171,7 @@ class Pueue:
         out = await self._run(
             "add", "--group", PUEUE_GROUP, "--working-directory", str(cwd),
             "--label", label, "--print-task-id", "--", command,
-            env=job_env(dict(os.environ)),
+            env=job_env(dict(os.environ), self.repo_root),
         )
         return int(out.strip())
 
@@ -182,30 +197,43 @@ class JobManager:
         jobs_dir.mkdir(parents=True, exist_ok=True)
         (jobs_dir / f"{job.id}.json").write_text(dumps(job.to_state()), encoding="utf-8")
 
-    async def process_requests(self, cwd: Path) -> list[tuple[Job, str | None]]:
-        """テーマのディレクトリに置かれた依頼を処理する。(ジョブ, 却下の理由) のリストを返す。"""
+    async def process_requests(self, cwd: Path) -> list[Outcome]:
+        """テーマのディレクトリに置かれた依頼を処理する。知らせることがある分だけ返す。"""
         requests_dir = cwd / REQUESTS_DIR
         if not requests_dir.is_dir():
             return []
-        handled: list[tuple[Job, str | None]] = []
+        outcomes = []
         for path in sorted(requests_dir.glob("*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                req = parse_request(data)
-            except (OSError, json.JSONDecodeError, JobRequestError, KeyError, ValueError) as e:
-                log.warning("ジョブの依頼を読めません %s: %s", path, e)
-                path.unlink(missing_ok=True)
-                continue
-            try:
-                if isinstance(req, CancelRequest):
-                    await self._cancel(req, cwd)
-                elif not self.store.has_request(req.request_id):
-                    handled.append(await self._submit(req, cwd))
-            finally:
-                path.unlink(missing_ok=True)
-        return handled
+            outcome = await self._handle_request(path, cwd)
+            if outcome is not None:
+                outcomes.append(outcome)
+        return outcomes
 
-    async def _submit(self, req: SubmitRequest, cwd: Path) -> tuple[Job, str | None]:
+    async def _handle_request(self, path: Path, cwd: Path) -> Outcome | None:
+        """依頼を1件処理して、ファイルを消す。どの道を通っても消すことで、同じ失敗を繰り返さない。"""
+        data: dict = {}
+        try:
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                data = raw if isinstance(raw, dict) else {}
+                req = parse_request(raw if isinstance(raw, dict) else {})
+            except (OSError, json.JSONDecodeError, JobRequestError, TypeError, ValueError) as e:
+                # 読めない依頼を黙って捨てると、Claude は「投入した」と思ったまま待ち続ける
+                log.warning("ジョブの依頼を読めません %s: %s", path, e)
+                return Outcome(
+                    str(data.get("channel") or ""), str(data.get("thread_ts") or ""),
+                    error=f"ジョブの依頼（`{path.name}`）を読めませんでした: {e}",
+                )
+            if isinstance(req, CancelRequest):
+                await self._cancel(req, cwd)
+                return None
+            if self.store.has_request(req.request_id):
+                return None
+            return await self._submit(req, cwd)
+        finally:
+            path.unlink(missing_ok=True)
+
+    async def _submit(self, req: SubmitRequest, cwd: Path) -> Outcome:
         job = self.store.add_job(req.request_id, req.channel, req.thread_ts, str(cwd), req.name, "", status="queued")
         try:
             self._check_thread(req, cwd)
@@ -213,16 +241,16 @@ class JobManager:
         except JobRequestError as e:
             job = self.store.update_job(job.id, status="rejected", detail=str(e), reported=1)
             self._write_state(job)
-            return job, str(e)
+            return Outcome(req.channel, req.thread_ts, job, str(e))
         try:
             task_id = await self.pueue.add(cwd, command, label=f"ezra-{job.id}")
         except RuntimeError as e:
             job = self.store.update_job(job.id, status="rejected", detail=f"pueue に投入できませんでした: {e}", reported=1)
             self._write_state(job)
-            return job, job.detail
+            return Outcome(req.channel, req.thread_ts, job, job.detail)
         job = self.store.update_job(job.id, command=f"{req.script} {' '.join(req.args)}".strip(), pueue_id=task_id)
         self._write_state(job)
-        return job, None
+        return Outcome(req.channel, req.thread_ts, job)
 
     def _check_thread(self, req: SubmitRequest, cwd: Path) -> None:
         """依頼に書かれたスレッドが、このテーマのディレクトリで動いているスレッドかを確かめる。"""
@@ -250,11 +278,15 @@ class JobManager:
                     status, extra = "failed", {"detail": "pueue にタスクが見つかりません", "finished_at": time.time()}
                 else:
                     status, extra = interpret_pueue_status(task)
-                if status != job.status or extra.get("started_at") != job.started_at:
+                if status != job.status or extra.get("started_at", job.started_at) != job.started_at:
                     job = self.store.update_job(job.id, status=status, **extra)
                     self._write_state(job)
                     if status in ("succeeded", "failed", "cancelled") and task is not None:
-                        await self.pueue.remove(job.pueue_id)
+                        try:
+                            await self.pueue.remove(job.pueue_id)
+                        except RuntimeError:
+                            # 片づけに失敗しても、ジョブの状態はもう確定している
+                            log.warning("pueue のタスク %s を片づけられません", job.pueue_id, exc_info=True)
         return self.store.unreported_finished_jobs()
 
     def mark_reported(self, job: Job) -> None:
@@ -262,7 +294,12 @@ class JobManager:
 
 
 def log_tail(job: Job, lines: int = 20) -> str:
+    """ジョブのログの末尾。長く running するジョブのログは GB になりうるので、全部は読まない。"""
     path = Path(job.cwd) / "logs" / f"job-{job.id}.log"
     if not path.exists():
         return ""
-    return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - LOG_TAIL_BYTES))
+        tail = f.read()
+    return "\n".join(tail.decode("utf-8", "replace").splitlines()[-lines:])

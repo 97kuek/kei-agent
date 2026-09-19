@@ -642,14 +642,18 @@ class Assistant:
     # ジョブ
 
     async def handle_job_requests(self, cwd: Path) -> None:
-        for job, error in await self.jobs.process_requests(cwd):
-            req = Request(job.channel, "", job.thread_ts, None, "")
-            if error:
-                # 依頼元のスレッドが確かめられないときは、どこにも投稿しない
-                if job.channel and job.thread_ts and not error.startswith("依頼元"):
-                    await self.post(req, f"{FAILED_PREFIX} ジョブ「{job.name}」を投入できませんでした: {error}")
+        for o in await self.jobs.process_requests(cwd):
+            # 依頼のチャンネルとスレッドは Claude が書いたものなので、知っているスレッドのときだけ投稿する
+            known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
+            req = Request(o.channel, "", o.thread_ts, None, "")
+            if o.error:
+                text = (f"ジョブ「{o.job.name}」を投入できませんでした: {o.error}") if o.job else o.error
+                if known:
+                    await self.post(req, f"{FAILED_PREFIX} {text}")
+                else:
+                    await self.notify_trouble(f"`{cwd}` のジョブの依頼: {text}")
                 continue
-            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」を投入しました: `{job.command}`")
+            await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入しました: `{o.job.command}`")
 
     async def poll_jobs(self) -> None:
         """テーマのディレクトリに残った依頼を処理し、終わったジョブを報告する。"""

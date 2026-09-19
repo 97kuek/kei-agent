@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 SCHEMA = """
@@ -270,7 +270,10 @@ class Store:
         return self.get_job(job_id)
 
     def active_jobs(self) -> list[Job]:
-        rows = self.conn.execute("SELECT * FROM jobs WHERE status IN ('queued', 'running')").fetchall()
+        # pueue に投入し終える前の行を混ぜない（pueue_id がまだ空のうちに見ると、失敗と誤判定する）
+        rows = self.conn.execute(
+            "SELECT * FROM jobs WHERE status IN ('queued', 'running') AND pueue_id IS NOT NULL"
+        ).fetchall()
         return [Job(**dict(r)) for r in rows]
 
     def unreported_finished_jobs(self) -> list[Job]:

@@ -17,6 +17,16 @@ def _expand(path: str) -> Path:
     return Path(os.path.expanduser(path)).resolve()
 
 
+def path_without_venv(path: str, repo_root: Path) -> str:
+    """PATH から Ezra 自身の `.venv/bin` を外す。
+
+    `uv run` が PATH の先頭に足すので、そのまま渡すと、テーマの中で `python3` と打ったときに
+    研究用ではなく Ezra の Python が当たってしまう。
+    """
+    venv_bin = str(repo_root / ".venv" / "bin")
+    return os.pathsep.join(p for p in path.split(os.pathsep) if p and p != venv_bin)
+
+
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
 DEFAULT_DENY_READ = (

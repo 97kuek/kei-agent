@@ -56,9 +56,24 @@ def test_command_rejects_other_suffix(theme):
         build_job_command(theme.cwd, "run.rb", [], 1)
 
 
-def test_job_env_drops_secrets():
-    env = job_env({"PATH": "/bin", "HOME": "/h", "SLACK_BOT_TOKEN": "x", "EZRA_ALLOWED_USER_ID": "U"})
+def test_job_env_drops_secrets_and_ezras_own_venv(config):
+    """ジョブは研究の環境で動かす。uv run が足す Ezra の .venv/bin を持ち込まない。"""
+    venv = str(config.repo_root / ".venv" / "bin")
+    env = job_env(
+        {"PATH": f"{venv}:/bin", "HOME": "/h", "VIRTUAL_ENV": venv,
+         "SLACK_BOT_TOKEN": "x", "EZRA_ALLOWED_USER_ID": "U"},
+        config.repo_root,
+    )
     assert env == {"PATH": "/bin", "HOME": "/h"}
+
+
+def test_parse_request_rejects_a_cancel_without_a_number():
+    """job_id が数字でない依頼でも、ジョブの仕組みごと壊れないようにする。"""
+    for bad in (None, "abc", [1], {}):
+        with pytest.raises(JobRequestError):
+            parse_request({"action": "cancel", "request_id": "r", "job_id": bad})
+    with pytest.raises(JobRequestError):
+        parse_request({"action": "cancel", "request_id": "r"})
 
 
 def test_parse_request_validates_args():
@@ -94,7 +109,8 @@ async def test_submit_request_from_known_thread(config, store, theme):
     handled = await manager.process_requests(theme.cwd)
 
     assert not path.exists()
-    (job, error), = handled
+    outcome, = handled
+    job, error = outcome.job, outcome.error
     assert error is None and job.pueue_id == 0 and job.status == "queued"
     assert pueue.added[0][2] == f"ezra-{job.id}"
     state = json.loads((theme.cwd / ".ezra" / "jobs" / f"{job.id}.json").read_text())
@@ -114,9 +130,9 @@ async def test_submit_rejects_thread_of_another_theme(config, store, theme):
     write_request(theme.cwd, action="submit", request_id="r2", channel="C2", thread_ts="200.1",
                   name="x", script="scripts/sweep.py", args=[])
 
-    (job, error), = await manager.process_requests(theme.cwd)
+    outcome, = await manager.process_requests(theme.cwd)
 
-    assert error and job.status == "rejected" and pueue.added == []
+    assert outcome.error and outcome.job.status == "rejected" and pueue.added == []
 
 
 async def test_refresh_reports_finished_job_once(config, store, theme):
@@ -125,7 +141,7 @@ async def test_refresh_reports_finished_job_once(config, store, theme):
     manager = JobManager(config, store, pueue)
     write_request(theme.cwd, action="submit", request_id="r3", channel="C1", thread_ts="100.1",
                   name="sweep", script="scripts/sweep.py", args=[])
-    (job, _), = await manager.process_requests(theme.cwd)
+    job = (await manager.process_requests(theme.cwd))[0].job
 
     assert await manager.refresh() == []
 
@@ -145,9 +161,34 @@ async def test_cancel_request_kills_running_job(config, store, theme):
     manager = JobManager(config, store, pueue)
     write_request(theme.cwd, action="submit", request_id="r4", channel="C1", thread_ts="100.1",
                   name="sweep", script="scripts/sweep.py", args=[])
-    (job, _), = await manager.process_requests(theme.cwd)
+    job = (await manager.process_requests(theme.cwd))[0].job
 
     write_request(theme.cwd, action="cancel", request_id="c1", job_id=job.id)
     await manager.process_requests(theme.cwd)
 
     assert pueue.killed == [job.pueue_id]
+
+
+async def test_unreadable_request_is_reported(config, store, theme):
+    """読めない依頼を黙って捨てると、Claude は「投入した」と思ったまま待ち続ける。"""
+    manager = JobManager(config, store, FakePueue())
+    path = theme.cwd / ".ezra" / "requests" / "broken.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"action": "cancel", "request_id": "c1", "job_id": null, "channel": "C1", "thread_ts": "1.1"}')
+
+    outcome, = await manager.process_requests(theme.cwd)
+
+    assert outcome.error and "読めませんでした" in outcome.error
+    assert (outcome.channel, outcome.thread_ts) == ("C1", "1.1")
+    assert not path.exists()  # 残すと毎分同じ失敗を繰り返す
+
+
+async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
+    """pueue に投入し終える前に状態を見に行っても、動いているジョブを失敗と決めつけない。"""
+    store.upsert_thread("C1", "100.1", "vlm", None)
+    manager = JobManager(config, store, FakePueue())
+    job = store.add_job("r9", "C1", "100.1", str(theme.cwd), "sweep", "", status="queued")
+    assert job.pueue_id is None
+
+    assert await manager.refresh() == []
+    assert store.get_job(job.id).status == "queued"
