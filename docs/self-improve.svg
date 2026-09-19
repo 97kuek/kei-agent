@@ -1,103 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620" role="img" aria-label="Kei Agent が自分を直す流れ">
-  <defs>
-    <marker id="a" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
-      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/>
-    </marker>
-    <marker id="stop" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
-      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#D97757"/>
-    </marker>
-    <style>
-      .t { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #1B1F24; }
-      .s { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #697683; font-size: 11.5px; }
-      .m { font-family: 'SFMono-Regular','SF Mono',Menlo,Consolas,monospace; fill: #55606C; font-size: 11px; }
-      .box { fill: #FFFFFF; stroke: #E2E5E9; stroke-width: 1.2; }
-      .lane { fill: #F6F7F9; stroke: #E2E5E9; stroke-width: 1.2; }
-      .edge { fill: none; stroke: #A6AEB8; stroke-width: 1.6; stroke-linecap: round; marker-end: url(#a); }
-      .guard { fill: none; stroke: #D97757; stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 5 5; marker-end: url(#stop); }
-    </style>
-  </defs>
-  <rect width="1180" height="620" fill="#FFFFFF"/>
-  <text class="t" x="40" y="46" font-size="23" font-weight="600">Kei Agent が自分を直す流れ（#research-agent）</text>
-  <text class="s" x="40" y="70">人が決めるのは「この直し方でいい？」と「このコードを取り込んでいい？」の2つだけ</text>
-
-  <rect class="lane" x="40" y="96" width="1100" height="120" rx="14"/>
-  <text class="s" x="58" y="120">Slack のスレッド（依頼者と Kei Agent のやりとり）</text>
-  <rect class="box" x="60" y="132" width="180" height="64" rx="10"/>
-  <text class="t" x="150" y="158" font-size="13" font-weight="600" text-anchor="middle">要望を書く</text>
-  <text class="s" x="150" y="178" text-anchor="middle">backlog.md にも記録</text>
-  <rect class="box" x="290" y="132" width="180" height="64" rx="10"/>
-  <text class="t" x="380" y="158" font-size="13" font-weight="600" text-anchor="middle">Kei Agent が案を返す</text>
-  <text class="s" x="380" y="178" text-anchor="middle">コードは読むだけ</text>
-  <rect class="box" x="520" y="132" width="180" height="64" rx="10"/>
-  <text class="t" x="610" y="152" font-size="13" font-weight="600" text-anchor="middle">いいよ → 確認</text>
-  <text class="s" x="610" y="172" text-anchor="middle">「これで進めていい？」</text>
-  <text class="s" x="610" y="188" text-anchor="middle">もう一度いいよ</text>
-  <rect class="box" x="750" y="132" width="180" height="64" rx="10"/>
-  <text class="m" x="840" y="156" text-anchor="middle">🛠 着手</text>
-  <text class="s" x="840" y="176" text-anchor="middle">依頼者の投稿の回だけ有効</text>
-  <rect class="box" x="960" y="132" width="160" height="64" rx="10"/>
-  <text class="t" x="1040" y="152" font-size="13" font-weight="600" text-anchor="middle">差分を見て</text>
-  <text class="m" x="1040" y="174" text-anchor="middle">📦 取り込み</text>
-  <path class="edge" d="M 240 164 L 286 164"/>
-  <path class="edge" d="M 470 164 L 516 164"/>
-  <path class="edge" d="M 700 164 L 746 164"/>
-  <path class="edge" d="M 930 164 L 956 164"/>
-
-  <rect class="lane" x="40" y="250" width="700" height="150" rx="14"/>
-  <text class="s" x="58" y="274">手元の worktree（動いている Kei Agent には触れない）</text>
-  <rect class="box" x="60" y="286" width="200" height="96" rx="10"/>
-  <text class="t" x="160" y="312" font-size="13" font-weight="600" text-anchor="middle">Claude が直す</text>
-  <text class="s" x="160" y="332" text-anchor="middle">落ちるテストを先に書く</text>
-  <text class="s" x="160" y="350" text-anchor="middle">書けるのは worktree の中だけ</text>
-  <text class="s" x="160" y="368" text-anchor="middle">通信先は PyPI など基本の接続先</text>
-  <rect class="box" x="300" y="286" width="200" height="96" rx="10"/>
-  <text class="t" x="400" y="312" font-size="13" font-weight="600" text-anchor="middle">Kei Agent がまとめる</text>
-  <text class="s" x="400" y="332" text-anchor="middle">コミットして差分を作る</text>
-  <text class="s" x="400" y="350" text-anchor="middle">柵・秘密情報・大きさを確認</text>
-  <text class="s" x="400" y="368" text-anchor="middle">依存の変更は先頭に出す</text>
-  <rect class="box" x="540" y="286" width="180" height="96" rx="10"/>
-  <text class="t" x="630" y="322" font-size="13" font-weight="600" text-anchor="middle">取り込む前に</text>
-  <text class="s" x="630" y="342" text-anchor="middle">テストと ruff を</text>
-  <text class="s" x="630" y="360" text-anchor="middle">sandbox の外で回す</text>
-  <path class="edge" d="M 840 200 L 840 230 L 170 230 L 170 282"/>
-  <path class="edge" d="M 260 334 L 296 334"/>
-  <path class="edge" d="M 500 334 L 536 334"/>
-  <path class="edge" d="M 400 386 L 400 420 L 1040 420 L 1040 200"/>
-  <text class="s" x="700" y="414" text-anchor="middle">変えた内容と change.diff をスレッドに出して「取り込んでいい？」</text>
-
-  <rect class="lane" x="790" y="250" width="350" height="150" rx="14"/>
-  <text class="s" x="808" y="274">取り込んだあと</text>
-  <rect class="box" x="810" y="286" width="140" height="96" rx="10"/>
-  <text class="t" x="880" y="318" font-size="13" font-weight="600" text-anchor="middle">main に入れて</text>
-  <text class="t" x="880" y="338" font-size="13" font-weight="600" text-anchor="middle">GitHub に push</text>
-  <text class="s" x="880" y="360" text-anchor="middle">早送りのみ</text>
-  <rect class="box" x="980" y="286" width="140" height="96" rx="10"/>
-  <text class="t" x="1050" y="318" font-size="13" font-weight="600" text-anchor="middle">作業が終わったら</text>
-  <text class="t" x="1050" y="338" font-size="13" font-weight="600" text-anchor="middle">自分で入れ替わる</text>
-  <text class="s" x="1050" y="360" text-anchor="middle">launchd が起動し直す</text>
-  <path class="edge" d="M 950 334 L 976 334"/>
-  <path class="edge" d="M 720 334 L 806 334"/>
-
-  <rect class="lane" x="40" y="440" width="1100" height="150" rx="14"/>
-  <text class="s" x="58" y="464">止まる・戻すところ</text>
-  <rect class="box" x="60" y="478" width="250" height="92" rx="10"/>
-  <text class="t" x="185" y="504" font-size="13" font-weight="600" text-anchor="middle">柵に触れた差分</text>
-  <text class="m" x="185" y="526" text-anchor="middle">guard.py / config.toml / deploy/</text>
-  <text class="s" x="185" y="548" text-anchor="middle">中身を見る前に捨てる</text>
-  <rect class="box" x="340" y="478" width="250" height="92" rx="10"/>
-  <text class="t" x="465" y="504" font-size="13" font-weight="600" text-anchor="middle">手元に書きかけがある</text>
-  <text class="s" x="465" y="526" text-anchor="middle">コミットしていない変更があれば</text>
-  <text class="s" x="465" y="546" text-anchor="middle">取り込まずに知らせる</text>
-  <rect class="box" x="620" y="478" width="250" height="92" rx="10"/>
-  <text class="t" x="745" y="504" font-size="13" font-weight="600" text-anchor="middle">main が先に進んだ</text>
-  <text class="s" x="745" y="526" text-anchor="middle">worktree で乗せ直して</text>
-  <text class="s" x="745" y="546" text-anchor="middle">もう一度聞く</text>
-  <rect class="box" x="900" y="478" width="220" height="92" rx="10"/>
-  <text class="t" x="1010" y="504" font-size="13" font-weight="600" text-anchor="middle">新しい版が起動しない</text>
-  <text class="s" x="1010" y="526" text-anchor="middle">3回で run.sh が revert し</text>
-  <text class="s" x="1010" y="546" text-anchor="middle">前の版に戻して知らせる</text>
-  <path class="guard" d="M 360 386 L 360 440 L 185 440 L 185 474"/>
-  <path class="guard" d="M 600 386 L 600 440 L 465 440 L 465 474"/>
-  <path class="guard" d="M 660 386 L 660 440 L 745 440 L 745 474"/>
-  <path class="guard" d="M 1080 386 L 1080 440 L 1010 440 L 1010 474"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="470" viewBox="0 0 1180 470" role="img" aria-label="Kei Agent が自分を直す流れ"><defs><marker id="head" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/></marker><marker id="acc" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#D97757"/></marker></defs><rect width="1180" height="470" fill="#FFFFFF"/>
+<text x="44" y="50" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="23" font-weight="600" fill="#1B1F24" text-anchor="start">Kei Agent が自分を直す流れ</text>
+<text x="44" y="74" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#697683" text-anchor="start">人が決めるのは「いいよ」の2回だけ（#research-agent）</text>
+<rect x="36" y="96" width="1108" height="214" rx="18" fill="#F6F7F9" stroke="#E2E5E9" stroke-width="1.2"/><text x="54" y="118" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11.5" font-weight="400" fill="#697683" text-anchor="start">Slack のスレッド</text>
+<rect x="64.0" y="165.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(127.0 182.0) scale(0.01059)"><g clip-rule="evenodd" fill-rule="evenodd"> <path d="m897.4 0c-135.3.1-244.8 109.9-244.7 245.2-.1 135.3 109.5 245.1 244.8 245.2h244.8v-245.1c.1-135.3-109.5-245.1-244.9-245.3.1 0 .1 0 0 0m0 654h-652.6c-135.3.1-244.9 109.9-244.8 245.2-.2 135.3 109.4 245.1 244.7 245.3h652.7c135.3-.1 244.9-109.9 244.8-245.2.1-135.4-109.5-245.2-244.8-245.3z" fill="#36c5f0" /> <path d="m2447.6 899.2c.1-135.3-109.5-245.1-244.8-245.2-135.3.1-244.9 109.9-244.8 245.2v245.3h244.8c135.3-.1 244.9-109.9 244.8-245.3zm-652.7 0v-654c.1-135.2-109.4-245-244.7-245.2-135.3.1-244.9 109.9-244.8 245.2v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.3z" fill="#2eb67d" /> <path d="m1550.1 2452.5c135.3-.1 244.9-109.9 244.8-245.2.1-135.3-109.5-245.1-244.8-245.2h-244.8v245.2c-.1 135.2 109.5 245 244.8 245.2zm0-654.1h652.7c135.3-.1 244.9-109.9 244.8-245.2.2-135.3-109.4-245.1-244.7-245.3h-652.7c-135.3.1-244.9 109.9-244.8 245.2-.1 135.4 109.4 245.2 244.7 245.3z" fill="#ecb22e" /> <path d="m0 1553.2c-.1 135.3 109.5 245.1 244.8 245.2 135.3-.1 244.9-109.9 244.8-245.2v-245.2h-244.8c-135.3.1-244.9 109.9-244.8 245.2zm652.7 0v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.2v-653.9c.2-135.3-109.4-245.1-244.7-245.3-135.4 0-244.9 109.8-244.8 245.1 0 0 0 .1 0 0" fill="#e01e5a" /> </g></g><text x="140" y="227.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">要望</text><text x="140" y="245.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">backlog.md にも残る</text>
+<rect x="254.0" y="165.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(317.0 182.0) scale(1.0833)" fill="none" stroke="#D97757" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9.5" r="5.5"/><path d="M9.5 17.5h5M10.5 20.5h3"/></g><text x="330" y="227.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">案</text><text x="330" y="245.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">コードは読むだけ</text>
+<rect x="444.0" y="165.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#D97757" stroke-width="1.2"/><g transform="translate(507.0 182.0) scale(1.0833)" fill="none" stroke="#2EB67D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 12.5l3.2 3.2L16.8 9"/></g><text x="520" y="227.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">いいよ ×2</text><text x="520" y="245.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">人が決める</text>
+<rect x="634.0" y="165.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(697.0 182.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5l3.2-.9 9.6-9.6-2.3-2.3-9.6 9.6z"/><path d="M14.4 5.3l2.3-2.3 4.3 4.3-2.3 2.3z"/></g><text x="710" y="227.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">直す</text><text x="710" y="245.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">worktree の中だけ</text>
+<rect x="824.0" y="165.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(887.0 182.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3" width="13" height="18" rx="2"/><path d="M9 8.5h6M9 12.5h6M9 16.5h4"/></g><text x="900" y="227.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">差分を見せる</text><text x="900" y="245.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">テストと ruff は通した</text>
+<path d="M 216 215 L 254 215" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 406 215 L 444 215" fill="none" stroke="#D97757" stroke-width="1.6" stroke-linecap="round" marker-end="url(#acc)"/>
+<path d="M 596 215 L 634 215" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 786 215 L 824 215" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 900 265 L 900 332 L 330 332" fill="none" stroke="#D97757" stroke-width="1.6" stroke-linejoin="round"/>
+<path d="M 330 332 L 330 340" fill="none" stroke="#D97757" stroke-width="1.6" stroke-linecap="round" marker-end="url(#acc)"/>
+<rect x="254.0" y="340.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#D97757" stroke-width="1.2"/><g transform="translate(317.0 357.0) scale(1.0833)" fill="none" stroke="#2EB67D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 12.5l3.2 3.2L16.8 9"/></g><text x="330" y="402.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">いいよ</text><text x="330" y="420.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">取り込んでいい？</text>
+<rect x="484.0" y="340.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(547.0 357.0) scale(1.08336)"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></g><text x="560" y="402.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">取り込み</text><text x="560" y="420.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">main に入れて push</text>
+<rect x="714.0" y="340.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(777.0 357.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20.5 3.5V8h-4.5"/></g><text x="790" y="402.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">入れ替え</text><text x="790" y="420.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">作業が終わってから</text>
+<path d="M 406 390 L 484 390" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 636 390 L 714 390" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<rect x="954" y="340" width="176" height="100" rx="14" fill="#FFFFFF" stroke="#D97757" stroke-width="1.2" stroke-dasharray="5 4"/>
+<g transform="translate(1029.0 357.0) scale(1.0833)" fill="none" stroke="#E8B04B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5H2.5z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r="0.9" fill="#E8B04B"/></g>
+<text x="1042" y="402" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">止まるとき</text>
+<text x="1042" y="420" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">柵・書きかけ・main 更新</text>
 </svg>

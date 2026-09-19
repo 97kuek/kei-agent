@@ -1,75 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="520" viewBox="0 0 1160 520" role="img" aria-label="机の上の音声対話">
-  <defs>
-    <marker id="a" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
-      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/>
-    </marker>
-    <marker id="acc" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse">
-      <path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#D97757"/>
-    </marker>
-    <style>
-      .t { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #1B1F24; }
-      .s { font-family: 'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif; fill: #697683; font-size: 11.5px; }
-      .m { font-family: 'SFMono-Regular','SF Mono',Menlo,Consolas,monospace; fill: #55606C; font-size: 11px; }
-      .box { fill: #FFFFFF; stroke: #E2E5E9; stroke-width: 1.2; }
-      .lane { fill: #F6F7F9; stroke: #E2E5E9; stroke-width: 1.2; }
-      .edge { fill: none; stroke: #A6AEB8; stroke-width: 1.6; stroke-linecap: round; marker-end: url(#a); }
-      .out { fill: none; stroke: #D97757; stroke-width: 1.6; stroke-linecap: round; marker-end: url(#acc); }
-    </style>
-  </defs>
-  <rect width="1160" height="520" fill="#FFFFFF"/>
-  <text class="t" x="40" y="46" font-size="23" font-weight="600">机の上の音声対話（第0段階）</text>
-  <text class="s" x="40" y="70">相談は Codex（声）、作業は Claude（Slack）。人格はどちらも Kei Agent。決まったことと結果は Slack に残る</text>
-
-  <rect class="lane" x="40" y="96" width="700" height="190" rx="14"/>
-  <text class="s" x="58" y="120">声のやりとり（手元の Mac だけで完結）</text>
-  <rect class="box" x="60" y="134" width="150" height="70" rx="10"/>
-  <text class="t" x="135" y="166" font-size="13" font-weight="600" text-anchor="middle">喋る</text>
-  <text class="s" x="135" y="186" text-anchor="middle">Aqua Voice で入力</text>
-  <rect class="box" x="250" y="134" width="180" height="70" rx="10"/>
-  <text class="t" x="340" y="160" font-size="13" font-weight="600" text-anchor="middle">Codex（相談相手）</text>
-  <text class="s" x="340" y="180" text-anchor="middle">日ごとに1本の会話</text>
-  <text class="s" x="340" y="196" text-anchor="middle">「じっくり考えて」で長考</text>
-  <rect class="box" x="470" y="134" width="250" height="70" rx="10"/>
-  <text class="t" x="595" y="160" font-size="13" font-weight="600" text-anchor="middle">VOICEVOX で読み上げ</text>
-  <text class="s" x="595" y="180" text-anchor="middle">文ができた端から鳴らす</text>
-  <text class="s" x="595" y="196" text-anchor="middle">Enter で止める／少し速め</text>
-  <path class="edge" d="M 210 169 L 246 169"/>
-  <path class="edge" d="M 430 169 L 466 169"/>
-  <rect class="box" x="60" y="222" width="660" height="46" rx="10"/>
-  <text class="s" x="390" y="250" text-anchor="middle">全文の控えは <tspan class="m">~/research/_overview/voice/&lt;日付&gt;.md</tspan>（30日で消える。読み返さない前提）</text>
-
-  <rect class="lane" x="780" y="96" width="340" height="190" rx="14"/>
-  <text class="s" x="798" y="120">Slack に残るもの</text>
-  <rect class="box" x="800" y="134" width="300" height="60" rx="10"/>
-  <text class="m" x="950" y="158" text-anchor="middle">📌 決定:</text>
-  <text class="s" x="950" y="178" text-anchor="middle">決まったことを、そのままスレッドへ</text>
-  <rect class="box" x="800" y="208" width="300" height="60" rx="10"/>
-  <text class="m" x="950" y="232" text-anchor="middle">🛠 依頼:</text>
-  <text class="s" x="950" y="252" text-anchor="middle">読み上げて確認してから渡す</text>
-  <path class="out" d="M 720 160 L 796 160"/>
-  <path class="out" d="M 730 196 L 756 196 L 756 238 L 796 238"/>
-  <text class="s" x="628" y="284" text-anchor="middle">「amr-query に〜と頼むよ。いい？」</text>
-
-  <rect class="lane" x="40" y="320" width="1080" height="160" rx="14"/>
-  <text class="s" x="58" y="344">Kei Agent 本体（Claude 側）</text>
-  <rect class="box" x="60" y="358" width="220" height="96" rx="10"/>
-  <text class="t" x="170" y="390" font-size="13" font-weight="600" text-anchor="middle">依頼を受け取る</text>
-  <text class="m" x="170" y="412" text-anchor="middle">&lt;state_dir&gt;/asks/</text>
-  <text class="s" x="170" y="434" text-anchor="middle">数秒ごとに見る。鍵は増やさない</text>
-  <rect class="box" x="320" y="358" width="220" height="96" rx="10"/>
-  <text class="t" x="430" y="390" font-size="13" font-weight="600" text-anchor="middle">スレッドを立てて作業</text>
-  <text class="s" x="430" y="412" text-anchor="middle">いつもの Kei Agent（Claude）</text>
-  <text class="s" x="430" y="434" text-anchor="middle">結果も図も Slack に残る</text>
-  <rect class="box" x="580" y="358" width="240" height="96" rx="10"/>
-  <text class="t" x="700" y="390" font-size="13" font-weight="600" text-anchor="middle">終わりを見張る</text>
-  <text class="s" x="700" y="412" text-anchor="middle">声のレイヤが Kei Agent の記録を読む</text>
-  <text class="s" x="700" y="434" text-anchor="middle">「終わったよ」と一言だけ</text>
-  <rect class="box" x="860" y="358" width="240" height="96" rx="10"/>
-  <text class="t" x="980" y="390" font-size="13" font-weight="600" text-anchor="middle">上限に当たったら</text>
-  <text class="s" x="980" y="412" text-anchor="middle">Codex: 「◯時ごろに戻る」と言う</text>
-  <text class="s" x="980" y="434" text-anchor="middle">Claude 側（Slack）は動き続ける</text>
-  <path class="edge" d="M 280 406 L 316 406"/>
-  <path class="edge" d="M 540 406 L 576 406"/>
-  <path class="edge" d="M 950 272 L 950 308 L 170 308 L 170 354"/>
-  <path class="out" d="M 660 354 L 660 288 L 595 288 L 595 208"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="430" viewBox="0 0 1080 430" role="img" aria-label="机の上の音声対話"><defs><marker id="head" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#A6AEB8"/></marker><marker id="acc" viewBox="0 0 8 6.4" refX="7.4" refY="3.2" markerWidth="7" markerHeight="5.6" orient="auto-start-reverse"><path d="M 0 0 L 8 3.2 L 0 6.4 z" fill="#D97757"/></marker></defs><rect width="1080" height="430" fill="#FFFFFF"/>
+<text x="44" y="50" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="23" font-weight="600" fill="#1B1F24" text-anchor="start">机の上の音声対話</text>
+<text x="44" y="74" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#697683" text-anchor="start">相談は Codex（声）、作業は Claude（Slack）。いまは第0段階のまま</text>
+<rect x="36" y="96" width="660" height="154" rx="18" fill="#F6F7F9" stroke="#E2E5E9" stroke-width="1.2"/><text x="54" y="118" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11.5" font-weight="400" fill="#697683" text-anchor="start">手元の Mac だけで完結</text>
+<rect x="74.0" y="140.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(137.0 157.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.5"/></g><text x="150" y="202.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">喋る</text><text x="150" y="220.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">Aqua Voice</text>
+<rect x="294.0" y="140.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(357.0 157.0) scale(0.09997)"><path d="M239.184 106.203a64.716 64.716 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.716 64.716 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.665 64.665 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.767 64.767 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483Zm-97.56 136.338a48.397 48.397 0 0 1-31.105-11.255l1.535-.87 51.67-29.825a8.595 8.595 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601Zm-104.466-44.61a48.345 48.345 0 0 1-5.781-32.589l1.534.921 51.722 29.826a8.339 8.339 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803ZM23.549 85.38a48.499 48.499 0 0 1 25.58-21.333v61.39a8.288 8.288 0 0 0 4.195 7.316l62.874 36.272-21.845 12.636a.819.819 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405v.256Zm179.466 41.695-63.08-36.63L161.73 77.86a.819.819 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.544 8.544 0 0 0-4.4-7.213Zm21.742-32.69-1.535-.922-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.716.716 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391v.205ZM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87-51.67 29.825a8.595 8.595 0 0 0-4.246 7.367l-.051 72.697Zm11.868-25.58 28.138-16.217 28.188 16.218v32.434l-28.086 16.218-28.188-16.218-.052-32.434Z"/></g><text x="370" y="202.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">Codex</text><text x="370" y="220.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">日ごとに1本</text>
+<rect x="514.0" y="140.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(577.0 157.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12.5 5v14L7.5 14.5H4z"/><path d="M16 9a4.5 4.5 0 0 1 0 6"/><path d="M18.8 6.5a8 8 0 0 1 0 11"/></g><text x="590" y="202.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">読み上げ</text><text x="590" y="220.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">VOICEVOX</text>
+<rect x="794.0" y="140.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(857.0 157.0) scale(1.0833)" fill="none" stroke="#55606C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8 8.5h8M8 12.5h8M8 16.5h5"/></g><text x="870" y="202.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">控え</text><text x="870" y="220.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">30日で消える</text>
+<path d="M 226 190 L 294 190" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 446 190 L 514 190" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 666 190 L 794 190" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#head)"/>
+<rect x="294.0" y="300.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#D97757" stroke-width="1.2"/><g transform="translate(357.0 317.0) scale(0.01059)"><g clip-rule="evenodd" fill-rule="evenodd"> <path d="m897.4 0c-135.3.1-244.8 109.9-244.7 245.2-.1 135.3 109.5 245.1 244.8 245.2h244.8v-245.1c.1-135.3-109.5-245.1-244.9-245.3.1 0 .1 0 0 0m0 654h-652.6c-135.3.1-244.9 109.9-244.8 245.2-.2 135.3 109.4 245.1 244.7 245.3h652.7c135.3-.1 244.9-109.9 244.8-245.2.1-135.4-109.5-245.2-244.8-245.3z" fill="#36c5f0" /> <path d="m2447.6 899.2c.1-135.3-109.5-245.1-244.8-245.2-135.3.1-244.9 109.9-244.8 245.2v245.3h244.8c135.3-.1 244.9-109.9 244.8-245.3zm-652.7 0v-654c.1-135.2-109.4-245-244.7-245.2-135.3.1-244.9 109.9-244.8 245.2v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.3z" fill="#2eb67d" /> <path d="m1550.1 2452.5c135.3-.1 244.9-109.9 244.8-245.2.1-135.3-109.5-245.1-244.8-245.2h-244.8v245.2c-.1 135.2 109.5 245 244.8 245.2zm0-654.1h652.7c135.3-.1 244.9-109.9 244.8-245.2.2-135.3-109.4-245.1-244.7-245.3h-652.7c-135.3.1-244.9 109.9-244.8 245.2-.1 135.4 109.4 245.2 244.7 245.3z" fill="#ecb22e" /> <path d="m0 1553.2c-.1 135.3 109.5 245.1 244.8 245.2 135.3-.1 244.9-109.9 244.8-245.2v-245.2h-244.8c-135.3.1-244.9 109.9-244.8 245.2zm652.7 0v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.2v-653.9c.2-135.3-109.4-245.1-244.7-245.3-135.4 0-244.9 109.8-244.8 245.1 0 0 0 .1 0 0" fill="#e01e5a" /> </g></g><text x="370" y="362.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">決定・依頼</text><text x="370" y="380.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">決めた話と依頼だけ</text>
+<rect x="544.0" y="300.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(607.0 317.0) scale(0.81250)"><path fill="url(#python-a)" d="M31.885 16c-8.124 0-7.617 3.523-7.617 3.523l.01 3.65h7.752v1.095H21.197S16 23.678 16 31.876c0 8.196 4.537 7.906 4.537 7.906h2.708v-3.804s-.146-4.537 4.465-4.537h7.688s4.32.07 4.32-4.175v-7.019S40.374 16 31.885 16zm-4.275 2.454a1.394 1.394 0 1 1 0 2.79 1.393 1.393 0 0 1-1.395-1.395c0-.771.624-1.395 1.395-1.395z"/><path fill="url(#python-b)" d="M32.115 47.833c8.124 0 7.617-3.523 7.617-3.523l-.01-3.65H31.97v-1.095h10.832S48 40.155 48 31.958c0-8.197-4.537-7.906-4.537-7.906h-2.708v3.803s.146 4.537-4.465 4.537h-7.688s-4.32-.07-4.32 4.175v7.019s-.656 4.247 7.833 4.247zm4.275-2.454a1.393 1.393 0 0 1-1.395-1.395 1.394 1.394 0 1 1 1.395 1.395z"/><defs><linearGradient id="python-a" x1="19.075" x2="34.898" y1="18.782" y2="34.658" gradientUnits="userSpaceOnUse"><stop stop-color="#387EB8"/><stop offset="1" stop-color="#366994"/></linearGradient><linearGradient id="python-b" x1="28.809" x2="45.803" y1="28.882" y2="45.163" gradientUnits="userSpaceOnUse"><stop stop-color="#FFE052"/><stop offset="1" stop-color="#FFC331"/></linearGradient></defs></g><text x="620" y="362.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">作業</text><text x="620" y="380.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">いつもの Kei Agent</text>
+<rect x="794.0" y="300.0" width="152" height="100" rx="14" fill="#FFFFFF" stroke="#E2E5E9" stroke-width="1.2"/><g transform="translate(857.0 317.0) scale(1.0833)" fill="none" stroke="#D97757" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6v4l-1.8 3h15.6L18 13V9a6 6 0 0 0-6-6z"/><path d="M9.8 19a2.2 2.2 0 0 0 4.4 0"/></g><text x="870" y="362.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600" fill="#1B1F24" text-anchor="middle">終わったよ</text><text x="870" y="380.0" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">声で一言</text>
+<path d="M 370 240 L 370 300" fill="none" stroke="#D97757" stroke-width="1.6" stroke-linecap="round" marker-end="url(#acc)"/>
+<path d="M 446 350 L 544 350" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<path d="M 696 350 L 794 350" fill="none" stroke="#A6AEB8" stroke-width="1.6" stroke-linecap="round" marker-end="url(#head)"/>
+<text x="150" y="342" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="600" fill="#1B1F24" text-anchor="middle">渡す前に</text>
+<text x="150" y="362" font-family="'Hiragino Sans','Noto Sans JP','Yu Gothic','Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#697683" text-anchor="middle">読み上げて確認</text>
 </svg>
