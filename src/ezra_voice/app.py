@@ -144,6 +144,8 @@ def main() -> None:
             try:
                 line = input(PROMPT)
             except EOFError:
+                # 入力が尽きたら、言いかけのことを言い終えてから終わる
+                speaker.wait()
                 break
             if line.strip():
                 print(THINKING)
