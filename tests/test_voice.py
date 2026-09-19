@@ -265,3 +265,19 @@ def test_journal_keeps_the_whole_conversation(config):
     assert path == config.research_root / "_overview" / "voice" / "2026-09-19.md"
     assert "## 依頼者" in text and "## Kei Agent（声）" in text and "やあ" in text
     assert isinstance(path, Path)
+
+
+def test_reply_is_printed_when_voicevox_is_down(session, capsys):
+    """声が出せないときは、返事を画面に出す。出さないと、どこにも残らない。"""
+    s, _, speaker = session
+    speaker.enabled = False
+    s.say_reply("うん、それで進めよう。\n📌 決定: A でいく")
+    assert "Kei> うん、それで進めよう。" in capsys.readouterr().out
+    assert speaker.said == []
+
+
+def test_reply_is_spoken_when_voicevox_is_up(session, capsys):
+    s, _, speaker = session
+    s.say_reply("うん、それで進めよう。")
+    assert speaker.said == ["うん、それで進めよう。"]
+    assert capsys.readouterr().out == ""

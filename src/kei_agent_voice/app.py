@@ -107,8 +107,16 @@ class Session:
     # 声に出す
 
     def say_reply(self, chunk: str) -> None:
-        """Codex の返事が届いたら、目印の行を外して読み上げる。"""
-        for sentence in markers.sentences(markers.parse(chunk).spoken):
+        """Codex の返事が届いたら、目印の行を外して読み上げる。
+
+        VOICEVOX が立ち上がっていないときは、声が出ないぶん画面に出す（返事が消えてしまわないように）。
+        """
+        spoken = markers.parse(chunk).spoken
+        if not self.speaker.enabled:
+            if spoken.strip():
+                print(f"Kei> {spoken.strip()}")
+            return
+        for sentence in markers.sentences(spoken):
             self.speaker.say(sentence)
 
     def say(self, text: str) -> None:
