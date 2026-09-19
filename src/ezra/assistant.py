@@ -45,6 +45,8 @@ TASK_DETAILS_LIMIT = 300
 FAILED_REACTION = "warning"
 # Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
 AWAITING_MARKER = "❓ 確認:"
+# これ以上かかった作業が終わったら、依頼者に通知の別投稿を送る（短い依頼には送らない）
+NOTIFY_AFTER_SECONDS = 60
 
 
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
@@ -756,6 +758,7 @@ class Assistant:
         append_thread_log(ws.cwd, req.channel_name, req.thread_ts, who, req.text + (
             "\n\n" + "\n".join(f"- 添付: `{p}`" for p in saved) if saved else ""))
 
+        started = time.monotonic()
         ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
         await ui.start()
         self.theme_runs.begin(req.channel_name, req.thread_ts)
@@ -826,9 +829,22 @@ class Assistant:
         await self.mark_answered(req, result.is_error)
         await self.ask_for_domains(req, ws, connect)
         await self.handle_job_requests(ws.cwd)
-        if any(j.channel == req.channel and j.thread_ts == req.thread_ts for j in self.store.active_jobs()):
+        waiting_for_job = any(j.channel == req.channel and j.thread_ts == req.thread_ts
+                              for j in self.store.active_jobs())
+        if awaiting:
+            await self.notify_owner(req, "返事がほしいよ")
+        elif not waiting_for_job and time.monotonic() - started >= NOTIFY_AFTER_SECONDS:
+            await self.notify_owner(req, "終わったよ")
+        if waiting_for_job:
             await ui.keep_working()
         return result
+
+    async def notify_owner(self, req: Request, text: str) -> None:
+        """スレッド内の投稿は通知が来ないので、依頼者へのメンション付きの短い投稿を足す。"""
+        try:
+            await self.post(req, f"<@{self.config.allowed_user_id}> {text}")
+        except Exception:
+            log.warning("依頼者への通知を投稿できません", exc_info=True)
 
     async def mark_answered(self, req: Request, failed: bool) -> None:
         """答えた依頼の 👀 を外し、✅（止まったときは ⚠️）をつける。どの依頼に答えたかが一目で分かる。"""

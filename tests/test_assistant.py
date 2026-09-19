@@ -131,7 +131,8 @@ async def test_error_result_is_reported(env):
     claude.behaviors = [{"is_error": True, "text": "", "errors": ["rate limited"]}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
-    assert slack.texts()[-1] == "⚠️ エラーで止まっちゃった: rate limited"
+    assert "⚠️ エラーで止まっちゃった: rate limited" in slack.texts()
+    assert slack.texts()[-1] == "<@UME> 返事がほしいよ"
     # 止まったときは ✅ ではなく ⚠️ をつける
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) not in slack.calls
@@ -764,3 +765,39 @@ async def test_ask_for_an_unknown_theme_is_reported(env, config):
     assert claude.calls == []
     assert "渡せませんでした" in "\n".join(slack.texts())
     assert ask.pending_asks(config) == []
+
+
+def _mentions(slack):
+    return [t for t in slack.texts() if t.startswith("<@UME>")]
+
+
+async def test_owner_is_mentioned_when_waiting_for_an_answer(env):
+    assistant, slack, claude, _ = env
+    claude.behaviors = [{"text": "途中まで進めた\n❓ 確認: Bも含める？"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 進めて"})
+    await settle(assistant)
+    assert len(_mentions(slack)) == 1
+
+
+async def test_owner_is_mentioned_when_connect_buttons_are_shown(env):
+    assistant, slack, claude, _ = env
+    claude.behaviors = [{"text": "つながらない\n🔒 接続: zenodo.org（特徴量のため）"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
+    await settle(assistant)
+    assert len(_mentions(slack)) == 1
+
+
+async def test_short_finished_run_does_not_mention(env):
+    assistant, slack, claude, _ = env
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> こんにちは"})
+    await settle(assistant)
+    assert _mentions(slack) == []
+
+
+async def test_long_finished_run_mentions(env, monkeypatch):
+    from ezra import assistant as mod
+    assistant, slack, claude, _ = env
+    monkeypatch.setattr(mod, "NOTIFY_AFTER_SECONDS", -1)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
+    await settle(assistant)
+    assert len(_mentions(slack)) == 1 and "終わった" in _mentions(slack)[0]

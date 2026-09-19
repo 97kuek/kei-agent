@@ -373,7 +373,7 @@ class Scheduler:
             req = Request(row["channel"], row["channel_name"], row["thread_ts"], None, "")
             try:
                 await self.assistant.post(
-                    req, f"⏰ 返事待ちのまま{hours}時間たちました。続けるときは、このスレッドに返信してください。"
+                    req, f"<@{self.config.allowed_user_id}> ⏰ 返事待ちのまま{hours}時間たちました。続けるときは、このスレッドに返信してください。"
                 )
             except Exception:
                 # アーカイブしたチャンネルなどに投稿できなくても、毎分やり直さない
