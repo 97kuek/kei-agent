@@ -90,10 +90,15 @@ class FakeSlack:
     def statuses(self) -> list[str]:
         return [kw["status"] for name, kw in self.calls if name == "agents_sessions_setStatus"]
 
+    def tasks(self) -> list[dict]:
+        """流して見せた返事の中の、作業の手順（task_update）。"""
+        return [c for name, kw in self.calls if name in ("chat_startStream", "chat_appendStream", "chat_stopStream")
+                for c in kw.get("chunks") or [] if c["type"] == "task_update"]
+
     def streamed(self) -> list[str]:
         """流して見せた文章。start と append を順につないだもの。"""
         return [kw["markdown_text"] for name, kw in self.calls
-                if name in ("chat_startStream", "chat_appendStream") and kw.get("markdown_text")]
+                if name in ("chat_startStream", "chat_appendStream", "chat_stopStream") and kw.get("markdown_text")]
 
     async def reactions_add(self, **kw):
         self.calls.append(("reactions_add", kw))
@@ -125,8 +130,12 @@ class FakeClaude:
     async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id, "thread_ts": thread_ts})
         behavior = self.behaviors.pop(0) if self.behaviors else {}
-        if on_activity:
-            await on_activity("Bash: テスト")
+        # 途中の独り言と道具の呼び出し。実物の claude と同じく、独り言は道具の直前に来る
+        for kind, value in behavior.get("steps", [("tool", "Bash: テスト")]):
+            if kind == "text" and on_text:
+                await on_text(value)
+            elif kind == "tool" and on_activity:
+                await on_activity(value)
         if "side_effect" in behavior:
             behavior["side_effect"](ws.cwd)
         result = runner.RunResult(

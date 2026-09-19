@@ -37,6 +37,9 @@ SLACK_TEXT_LIMIT = 11000
 NIGHT_REACTION = "crescent_moon"
 DONE_REACTION = "white_check_mark"
 SEEN_REACTION = "eyes"
+# 作業の手順（task_update）の見出しと補足の長さ
+TASK_TITLE_LIMIT = 150
+TASK_DETAILS_LIMIT = 300
 FAILED_REACTION = "warning"
 # Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
 AWAITING_MARKER = "❓ 確認:"
@@ -179,7 +182,11 @@ class ThreadUI:
 
     - `agents.sessions.setStatus`: スレッドの状態を切り替える。processing（作業中。Slack が「Working...」を出す）、
       active（次の依頼待ち）、suspended（依頼者の返事待ち）のどれか。自由な文章は出せない
-    - `chat.startStream` / `appendStream` / `stopStream`: 返事を書きながら流して見せる
+    - `chat.startStream` / `appendStream` / `stopStream`: 返事を流して見せる。道具を使うたびに作業の手順
+      （task_update）を1行ずつ足し、最後にまとめを本文として出す
+
+    途中で Claude が書いた独り言は、本文には出さず、次の手順の補足にする。本文に流すと、
+    最後のまとめと同じ話が2回並ぶ。
 
     どちらもワークスペースや App の設定によっては使えないので、失敗したら黙って
     今までどおりの投稿に戻す（1回目だけログに残す）。
@@ -194,17 +201,64 @@ class ThreadUI:
         self.status_ok = True
         self.stream_ok = True
         self.stream_ts: str | None = None
+        self.task: dict | None = None  # いま実行中の手順
+        self.task_count = 0
+        self.narration = ""  # 次の手順に添える独り言
 
     async def start(self) -> None:
         await self._status("processing")
 
     async def activity(self, activity: str) -> None:
-        """ツールを呼ぶたびに呼ばれる。agents.sessions.setStatus は文章を出せないので、いまは何もしない。"""
+        """道具を呼ぶたびに呼ばれる。前の手順を完了にし、新しい手順を実行中として足す。"""
+        chunks = self._complete_task()
+        self.task_count += 1
+        self.task = {"type": "task_update", "id": f"step-{self.task_count}",
+                     "title": activity[:TASK_TITLE_LIMIT], "status": "in_progress"}
+        if self.narration:
+            self.task["details"] = self.narration[:TASK_DETAILS_LIMIT]
+            self.narration = ""
+        await self._stream(chunks=chunks + [self.task])
 
     async def text(self, chunk: str) -> None:
-        """Claude が書いた文章を、そのままスレッドに流す。"""
-        if not self.stream_ok or not chunk.strip():
+        """Claude が書いた文章。最後のまとめは finish() で本文にするので、ここでは次の手順の補足として取っておく。"""
+        if chunk.strip():
+            self.narration = chunk.strip()
+
+    async def finish(self, answer: str, awaiting: bool = False) -> bool:
+        """手順を閉じてまとめを本文に出し、スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。
+
+        流して見せられていれば True（結果をもう一度投稿しない）。
+        """
+        chunks = self._complete_task()
+        if chunks:
+            await self._stream(chunks=chunks)
+        for piece in split_text(answer) if answer.strip() else []:
+            await self._stream(markdown_text=piece)
+        streamed = False
+        if self.stream_ts is not None:
+            try:
+                await self.slack.chat_stopStream(channel=self.channel, ts=self.stream_ts)
+                streamed = self.stream_ok and bool(answer.strip())
+            except Exception:
+                log.warning("流して見せた返事を終われません", exc_info=True)
+        await self._status("suspended" if awaiting else "active")
+        return streamed
+
+    async def keep_working(self) -> None:
+        """ジョブが走っている間は、返事を終えたあとも作業中に見せておく。"""
+        await self._status("processing")
+
+    def _complete_task(self) -> list[dict]:
+        if self.task is None:
+            return []
+        done = self.task | {"status": "complete"}
+        self.task = None
+        return [done]
+
+    async def _stream(self, markdown_text: str | None = None, chunks: list[dict] | None = None) -> None:
+        if not self.stream_ok:
             return
+        content = {"markdown_text": markdown_text} if markdown_text else {"chunks": chunks}
         try:
             if self.stream_ts is None:
                 resp = await self.slack.chat_startStream(
@@ -212,26 +266,15 @@ class ThreadUI:
                     thread_ts=self.thread_ts,
                     recipient_team_id=self.team_id or None,
                     recipient_user_id=self.user_id or None,
-                    markdown_text=chunk,
+                    task_display_mode="timeline",
+                    **content,
                 )
                 self.stream_ts = resp["ts"]
             else:
-                await self.slack.chat_appendStream(channel=self.channel, ts=self.stream_ts, markdown_text=chunk)
+                await self.slack.chat_appendStream(channel=self.channel, ts=self.stream_ts, **content)
         except Exception:
             log.warning("返事を流して見せられないので、まとめて投稿します", exc_info=True)
             self.stream_ok = False
-
-    async def finish(self, awaiting: bool = False) -> bool:
-        """スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。流して見せられていれば True（結果をもう一度投稿しない）。"""
-        streamed = False
-        if self.stream_ts is not None:
-            try:
-                await self.slack.chat_stopStream(channel=self.channel, ts=self.stream_ts)
-                streamed = self.stream_ok
-            except Exception:
-                log.warning("流して見せた返事を終われません", exc_info=True)
-        await self._status("suspended" if awaiting else "active")
-        return streamed
 
     async def _status(self, status: str) -> None:
         if not self.status_ok:
@@ -594,7 +637,7 @@ class Assistant:
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
-        streamed = await ui.finish(awaiting and not result.is_error)
+        streamed = await ui.finish(result.text, awaiting and not result.is_error)
 
         if result.text:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Ezra", result.text)
@@ -619,6 +662,8 @@ class Assistant:
             await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できませんでした: `{type(e).__name__}: {e}`")
         await self.mark_answered(req, result.is_error)
         await self.handle_job_requests(ws.cwd)
+        if any(j.channel == req.channel and j.thread_ts == req.thread_ts for j in self.store.active_jobs()):
+            await ui.keep_working()
         return result
 
     async def mark_answered(self, req: Request, failed: bool) -> None:
