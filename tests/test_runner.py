@@ -44,6 +44,12 @@ def test_command_resumes_session_and_ignores_user_settings(config):
     assert "--resume" not in runner.build_command(config, ws, None)
 
 
+def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
+    """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
+    text = runner.system_prompt_text(config)
+    assert "自動で" in text and "続き" in text and "止まる" in text
+
+
 def test_env_strips_secrets_and_adds_thread(config):
     base = {
         "PATH": "/bin",
