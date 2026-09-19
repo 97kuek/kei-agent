@@ -252,6 +252,35 @@ class ThreadUI:
             self.status_ok = False
 
 
+class ThemeRuns:
+    """同じテーマで、同時に動いているスレッドを覚えておく。
+
+    `outputs/` はテーマで共通なので、2つのスレッドが同時に動くと、隣が作った図を
+    自分のスレッドに添付してしまう。時刻では自分の図と隣の図を区別できないため、
+    「重なっていた」ことだけを覚えておき、結果に一言添える。
+    """
+
+    def __init__(self):
+        self.running: dict[str, set[str]] = defaultdict(set)
+        self.overlapped: set[tuple[str, str]] = set()
+
+    def begin(self, theme: str, thread_ts: str) -> None:
+        peers = self.running[theme]
+        for peer in peers:
+            self.overlapped.add((theme, peer))
+            self.overlapped.add((theme, thread_ts))
+        peers.add(thread_ts)
+
+    def end(self, theme: str, thread_ts: str) -> bool:
+        """終わったことを記録し、重なっていたなら True を返す。"""
+        self.running[theme].discard(thread_ts)
+        if not self.running[theme]:
+            self.running.pop(theme, None)
+        overlapped = (theme, thread_ts) in self.overlapped
+        self.overlapped.discard((theme, thread_ts))
+        return overlapped
+
+
 class Assistant:
     def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str,
                  notion: NotionStore | None = None, team_url: str = "", team_id: str = ""):
@@ -271,6 +300,8 @@ class Assistant:
         self.channel_names: dict[str, str] = {}
         # この起動で Notion に登録済みのテーマ（招待の取りこぼしを、使うときに埋める）
         self.registered_themes: set[str] = set()
+        # 同じテーマで重なって動いたかを覚えておく（outputs/ が共通なので図が混ざる）
+        self.theme_runs = ThemeRuns()
         self.tasks: set[asyncio.Task] = set()
 
     # Slack の出来事
@@ -551,6 +582,7 @@ class Assistant:
 
         ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
         await ui.start()
+        self.theme_runs.begin(req.channel_name, req.thread_ts)
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
 
@@ -581,8 +613,14 @@ class Assistant:
             reason = "上限時間を超えたので止めました" if result.timed_out else "; ".join(result.errors)[:1500]
             await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {reason or '原因不明'}")
 
+        overlapped = self.theme_runs.end(req.channel_name, req.thread_ts)
         try:
-            await self.upload_outputs(req, ws.cwd, changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since))
+            new_files = changed_files(before, snapshot_outputs(ws.cwd), req.outputs_since)
+            await self.upload_outputs(req, ws.cwd, new_files)
+            if new_files and overlapped:
+                # 時刻では自分の図と隣の図を区別できないので、混ざりうることを黙って隠さない
+                await self.post(req, f"{FAILED_PREFIX} このテーマで別のスレッドも動いていたので、"
+                                     "別のスレッドの図が混ざっているかもしれません。")
         except Exception as e:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")

@@ -6,7 +6,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from ezra import themes
+from ezra import themes, timelog
 from ezra.assistant import Assistant, format_duration
 from ezra.config import Config
 from ezra.notion import NotionError
@@ -43,6 +43,7 @@ class DigestBuilder:
         lines += self._literature(since)
         lines += self._stalled(now, active_channels)
         lines += self._waiting(active_channels)
+        lines += self._time(now)
         lines += self._yesterday_review(now)
         lines += ["", *await self._notion(since, now)]
         return "\n".join(lines) + "\n"
@@ -109,6 +110,16 @@ class DigestBuilder:
         rows = [r for r in self.store.threads_awaiting() if r["channel_name"] in active_channels]
         lines += [f"- #{r['channel_name']}（{_ts(r['awaiting_since'])} から）" for r in rows]
         return lines if rows else lines + ["- なし"]
+
+    def _time(self, now: float) -> list[str]:
+        """研究時間（人は Toggl、Ezra は runs）。材料の CSV も書き出す。"""
+        lines = ["", "## 研究時間（今週）", ""]
+        try:
+            path = timelog.write_week(self.config, self.store, timelog.load_toggl(),
+                                      datetime.fromtimestamp(now).date())
+            return lines + timelog.week_summary(path)
+        except OSError as e:
+            return lines + [f"- 材料を書けなかった: {e}"]
 
     def _yesterday_review(self, now: float) -> list[str]:
         yesterday = (datetime.fromtimestamp(now).date() - timedelta(days=1)).isoformat()

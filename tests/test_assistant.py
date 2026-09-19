@@ -391,3 +391,40 @@ def test_message_text_reads_messages_posted_as_markdown():
     assert message_text({"text": "", "blocks": [{"type": "markdown", "text": "流した返事"}]}) == "流した返事"
     assert message_text({"blocks": [{"type": "rich_text", "elements": [
         {"elements": [{"type": "text", "text": "書き込み"}]}]}]}) == "書き込み"
+
+
+def test_theme_runs_remembers_overlap():
+    """outputs/ はテーマで共通なので、重なって動いたことを覚えておく。"""
+    from ezra.assistant import ThemeRuns
+
+    runs = ThemeRuns()
+    runs.begin("vlm", "1.1")
+    assert runs.end("vlm", "1.1") is False  # 1つだけなら混ざらない
+
+    runs.begin("vlm", "2.1")
+    runs.begin("vlm", "2.2")  # 重なった
+    assert runs.end("vlm", "2.2") is True
+    assert runs.end("vlm", "2.1") is True
+    assert runs.running == {} and runs.overlapped == set()
+
+    runs.begin("vlm", "3.1")
+    runs.begin("other", "3.2")  # テーマが違えば混ざらない
+    assert runs.end("vlm", "3.1") is False and runs.end("other", "3.2") is False
+
+
+async def test_overlapping_threads_are_warned_when_files_are_attached(env, config, monkeypatch):
+    """別のスレッドの図が混ざりうることを、黙って隠さない。"""
+    assistant, slack, claude, _ = env
+
+    def make_figure(cwd):
+        (cwd / "outputs").mkdir(exist_ok=True)
+        (cwd / "outputs" / "plot.png").write_bytes(b"x")
+
+    claude.behaviors = [{"side_effect": make_figure}]
+    # 先に別のスレッドが動いている状態にする
+    assistant.theme_runs.begin("vlm", "99.1")
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert any("別のスレッドの図が混ざっているかもしれません" in t for t in slack.texts())

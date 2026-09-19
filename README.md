@@ -52,6 +52,7 @@ uv run pytest
 | `src/ezra/notion.py` | Notion の API の接続と、研究ホームを作るコマンド |
 | `src/ezra/notion_store.py` | Task とノートの読み書き（夜間の Task、Daily、振り返り） |
 | `src/ezra/maintenance.py` | 毎晩の保守（古いファイルの整理、研究データのバックアップ） |
+| `src/ezra/timelog.py` | 研究時間の記録（人は Toggl、Ezra は `runs`）と、週ごとの材料の書き出し |
 | `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間） |
 | `plugin/` | `claude -p` に読み込ませる skill（`ezra:job`、`ezra:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |

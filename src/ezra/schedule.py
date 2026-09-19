@@ -274,6 +274,8 @@ class Scheduler:
             "3. 先行研究の新着のうち重要なもの（なければ一言）。検索キーワードがないテーマがあれば、決めるよう促す\n"
             "4. 今日考えるとよい問い（2〜3個。前日の振り返りと考察のノートを踏まえる）\n"
             "5. 確認待ちの Task、期日が近い Task とマイルストーン、止まっているテーマ、返事待ちのスレッド\n\n"
+            "月曜なら、材料に書かれている研究時間の CSV から、人の時間と Ezra の稼働時間を重ねた"
+            "折れ線グラフを作り、`outputs/` に保存してください（月曜以外は作らなくてよい）。\n\n"
             f"同じ内容を `daily/{day}.md` に保存してください。返答が Slack と Notion にそのまま載ります。"
         )
         result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "daily")
