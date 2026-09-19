@@ -333,7 +333,7 @@ async def test_maintenance_reports_backup_failure(env, config):
     scheduler, assistant, slack, claude = env
     config.research_root.mkdir(parents=True, exist_ok=True)  # Git のリポジトリではない
     detail = await scheduler.run_maintenance("2026-09-18")
-    assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0}
+    assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0, "thread_logs": 0}
     assert slack.posted()[-1]["channel"] == "C9" and "バックアップに失敗" in slack.posted()[-1]["text"]
 
 

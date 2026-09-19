@@ -12,11 +12,13 @@ import os
 import re
 import shutil
 import sqlite3
+import tempfile
 import time
 from datetime import date
 from pathlib import Path
 
 from ezra.config import Config
+from ezra.store import Store
 from ezra.themes import OVERVIEW_DIR
 
 STATE_DIR = "_ezra_state"
@@ -24,6 +26,8 @@ STATE_DIR = "_ezra_state"
 MAX_FILE_BYTES = 50 * 1024 * 1024
 _EXCLUDE_BEGIN = "# ezra: 大きすぎるファイル（自動で書き換える）"
 _EXCLUDE_END = "# ezra: ここまで"
+# git が終わらないときに諦めるまでの秒数（認証待ちで止まると、定期処理ごと止まる）
+GIT_TIMEOUT_SECONDS = 300
 
 
 def claude_project_dir_name(path: Path) -> str:
@@ -67,19 +71,42 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None) -> 
         if project.is_dir():
             sessions += list(project.glob("*.jsonl"))
     removed_sessions = remove_older_than(sessions, now - m.session_retention_days * 86400)
-    return {"digests": removed_digests, "sessions": removed_sessions}
+
+    # スレッドのログ（Codex が経緯を読むためのもの）も、セッションと同じ日数で整理する
+    logs = [p for ws in workspaces for p in (ws / ".ezra" / "threads").glob("*.md")]
+    removed_logs = remove_older_than(logs, now - m.thread_log_retention_days * 86400)
+    return {"digests": removed_digests, "sessions": removed_sessions, "thread_logs": removed_logs}
 
 
-def dump_state(config: Config) -> Path:
-    """Ezra の状態を、差分の読みやすい形で ~/research/_ezra_state/ に書き出す。"""
+def dump_state(config: Config, store: Store | None = None) -> Path:
+    """Ezra の状態を、差分の読みやすい形で ~/research/_ezra_state/ に書き出す。
+
+    Ezra が動いている最中に読むので、いったんスナップショットを取ってから書き出す。
+    直接 iterdump すると、ジョブの途中の状態が混ざる。
+    """
     out = config.research_root / STATE_DIR
     out.mkdir(parents=True, exist_ok=True)
     if config.db_path.exists():
-        src = sqlite3.connect(config.db_path)
-        try:
-            lines = "\n".join(src.iterdump())
-        finally:
-            src.close()
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "snapshot.db"
+            if store is not None:
+                store.snapshot(copy)
+            else:
+                # WAL を使っているので、ファイルをコピーするだけでは中身がそろわない
+                reader = sqlite3.connect(config.db_path)
+                try:
+                    dest = sqlite3.connect(copy)
+                    try:
+                        reader.backup(dest)
+                    finally:
+                        dest.close()
+                finally:
+                    reader.close()
+            src = sqlite3.connect(copy)
+            try:
+                lines = "\n".join(src.iterdump())
+            finally:
+                src.close()
         (out / "ezra.sql").write_text(lines + "\n", encoding="utf-8")
     notion_state = config.state_dir / "notion.json"
     if notion_state.exists():
@@ -103,24 +130,37 @@ def exclude_large_files(repo: Path, limit: int = MAX_FILE_BYTES) -> list[str]:
     return large
 
 
-async def _git(repo: Path, *args: str) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "git", *args, cwd=repo, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-    )
-    out, _ = await proc.communicate()
-    return proc.returncode, out.decode("utf-8", "replace").strip()
-
-
 class BackupError(RuntimeError):
     pass
 
 
-async def backup(config: Config, day: str | None = None) -> dict:
+async def _git(repo: Path, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> tuple[int, str]:
+    """git を1回動かす。認証を聞かれても、端末がないので待たずに失敗させる。"""
+    proc = await asyncio.create_subprocess_exec(
+        "git", *args, cwd=repo, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "",
+             "GIT_CONFIG_PARAMETERS": "'credential.interactive=never'"},
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise BackupError(f"git {' '.join(args)} が {int(timeout)} 秒で終わりませんでした") from None
+    return proc.returncode, out.decode("utf-8", "replace").strip()
+
+
+async def backup(config: Config, day: str | None = None, store: Store | None = None) -> dict:
     repo = config.research_root
     if not (repo / ".git").is_dir():
         raise BackupError(f"{repo} が Git のリポジトリではありません（deploy/backup-init.sh を実行してください）")
-    await asyncio.to_thread(dump_state, config)
+    await asyncio.to_thread(dump_state, config, store)
     large = await asyncio.to_thread(exclude_large_files, repo)
+
+    for path in large:
+        # .git/info/exclude は「まだ追跡していない」ファイルにしか効かない。
+        # 小さいうちにコミットしたファイルが育った場合は、追跡から外さないと push が通らない
+        await _git(repo, "rm", "--cached", "-q", "--ignore-unmatch", "--", path)
 
     code, out = await _git(repo, "add", "-A")
     if code:

@@ -67,6 +67,8 @@ class MaintenanceConfig:
     digest_retention_days: int = 30
     # テーマのディレクトリで動かした Claude のセッションの記録を残す日数
     session_retention_days: int = 90
+    # スレッドのログ（.ezra/threads/*.md）を残す日数
+    thread_log_retention_days: int = 180
 
 
 @dataclass(frozen=True)

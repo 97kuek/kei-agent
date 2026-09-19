@@ -333,7 +333,7 @@ class Scheduler:
         detail["removed"] = await asyncio.to_thread(maintenance.cleanup, self.config, maintenance.claude_projects_dir())
         if self.config.maintenance.backup:
             try:
-                detail["backup"] = await maintenance.backup(self.config, day)
+                detail["backup"] = await maintenance.backup(self.config, day, self.store)
             except maintenance.BackupError as e:
                 await self.assistant.notify_trouble(f"研究データのバックアップに失敗しました: {e}")
                 detail = {**detail, "status": "error", "error": str(e)}

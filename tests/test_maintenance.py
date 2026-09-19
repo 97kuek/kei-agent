@@ -36,7 +36,7 @@ def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
 
     removed = maintenance.cleanup(config, projects)
 
-    assert removed == {"digests": 1, "sessions": 1}
+    assert removed == {"digests": 1, "sessions": 1, "thread_logs": 0}
     assert not (digest_dir / "old.md").exists() and (digest_dir / "new.md").exists()
     assert not (theme_project / "old.jsonl").exists() and (theme_project / "new.jsonl").exists()
     assert (other_project / "old.jsonl").exists()  # ほかのプロジェクトには触らない
@@ -118,3 +118,45 @@ def test_setup_logging_rotates_file(tmp_path):
         assert "こんにちは" in path.read_text()
     finally:
         logging.basicConfig(force=True, handlers=[logging.NullHandler()])
+
+
+async def test_backup_untracks_a_file_that_grew_too_large(config, monkeypatch):
+    """小さいうちにコミットしたファイルが育つと、exclude では止まらず push が通らなくなる。"""
+    from ezra import maintenance
+
+    repo = config.research_root
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir(exist_ok=True)
+    calls = []
+
+    async def fake_git(_repo, *args, **kw):
+        calls.append(args)
+        return (1 if args[:2] == ("diff", "--cached") else 0), ""
+
+    monkeypatch.setattr(maintenance, "_git", fake_git)
+    monkeypatch.setattr(maintenance, "dump_state", lambda *a: repo)
+    monkeypatch.setattr(maintenance, "exclude_large_files", lambda _repo: ["outputs/model.pt"])
+
+    result = await maintenance.backup(config, "2026-09-19")
+
+    untrack = ("rm", "--cached", "-q", "--ignore-unmatch", "--", "outputs/model.pt")
+    assert untrack in calls and calls.index(untrack) < calls.index(("add", "-A"))
+    assert result["skipped_large_files"] == ["outputs/model.pt"]
+
+
+async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
+    """端末のない launchd では、認証を聞かれると永久に止まり、定期処理ごと動かなくなる。"""
+    import asyncio
+
+    from ezra import maintenance
+
+    repo = config.research_root
+    repo.mkdir(parents=True, exist_ok=True)
+    real = asyncio.create_subprocess_exec
+
+    async def never_finishes(_program, *_args, **kw):
+        return await real("sleep", "5", **{k: v for k, v in kw.items() if k in ("cwd", "stdout", "stderr", "env")})
+
+    monkeypatch.setattr(maintenance.asyncio, "create_subprocess_exec", never_finishes)
+    with pytest.raises(maintenance.BackupError, match="終わりませんでした"):
+        await maintenance._git(repo, "push", "-q", timeout=0.3)

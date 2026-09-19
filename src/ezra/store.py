@@ -79,6 +79,12 @@ class Job:
     finished_at: float | None
     reported: int
 
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Job:
+        """jobs の行を Job にする。知らない列は無視する（列を足しても壊れない）。"""
+        names = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in dict(row).items() if k in names})
+
     def to_state(self) -> dict:
         """テーマのディレクトリに書き出す、Claude から見えるジョブの状態。"""
         return {
@@ -103,22 +109,40 @@ def _schedule_status(detail: str | None) -> str:
         return ""
 
 
+# あとから足した列。既存のデータベースにも同じ形を用意する
+ADDED_COLUMNS = {
+    # Ezra の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
+    "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0"},
+}
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
+        # バックアップが別のコネクションから読むので、読み書きがぶつからないようにする
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
         self._migrate()
 
     def _migrate(self) -> None:
-        columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(threads)")}
         with self.conn:
-            if "awaiting_since" not in columns:
-                # Ezra の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
-                self.conn.execute("ALTER TABLE threads ADD COLUMN awaiting_since REAL")
-            if "nudged" not in columns:
-                self.conn.execute("ALTER TABLE threads ADD COLUMN nudged INTEGER NOT NULL DEFAULT 0")
+            for table, columns in ADDED_COLUMNS.items():
+                have = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+                for name, kind in columns.items():
+                    if name not in have:
+                        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+    def snapshot(self, path: Path) -> None:
+        """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。"""
+        dest = sqlite3.connect(path)
+        try:
+            self.conn.backup(dest)
+        finally:
+            dest.close()
 
     # threads
 
@@ -242,7 +266,7 @@ class Store:
         rows = self.conn.execute(
             "SELECT * FROM jobs WHERE finished_at >= ? ORDER BY finished_at", (since,)
         ).fetchall()
-        return [Job(**dict(r)) for r in rows]
+        return [Job.from_row(r) for r in rows]
 
     # jobs
 
@@ -254,33 +278,42 @@ class Store:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (request_id, channel, thread_ts, cwd, name, command, status, detail, time.time()),
             )
-        return self.get_job(cur.lastrowid)
+        job = self.get_job(cur.lastrowid)
+        assert job is not None  # 直前に入れた行
+        return job
 
     def has_request(self, request_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM jobs WHERE request_id = ?", (request_id,)).fetchone() is not None
 
     def get_job(self, job_id: int) -> Job | None:
         row = self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        return Job(**dict(row)) if row else None
+        return Job.from_row(row) if row else None
 
-    def update_job(self, job_id: int, **fields) -> Job:
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self.conn:
-            self.conn.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*fields.values(), job_id))
-        return self.get_job(job_id)
+    def update_job(self, job_id: int, **values) -> Job:
+        """jobs の列を書き換える。列名は SQL に埋めるので、Job にある名前だけを許す。"""
+        unknown = sorted(set(values) - {f.name for f in fields(Job)})
+        if unknown:
+            raise ValueError(f"jobs にない列です: {', '.join(unknown)}")
+        if values:
+            cols = ", ".join(f"{k} = ?" for k in values)
+            with self.conn:
+                self.conn.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*values.values(), job_id))
+        job = self.get_job(job_id)
+        assert job is not None
+        return job
 
     def active_jobs(self) -> list[Job]:
         # pueue に投入し終える前の行を混ぜない（pueue_id がまだ空のうちに見ると、失敗と誤判定する）
         rows = self.conn.execute(
             "SELECT * FROM jobs WHERE status IN ('queued', 'running') AND pueue_id IS NOT NULL"
         ).fetchall()
-        return [Job(**dict(r)) for r in rows]
+        return [Job.from_row(r) for r in rows]
 
     def unreported_finished_jobs(self) -> list[Job]:
         rows = self.conn.execute(
             "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed', 'cancelled') AND reported = 0"
         ).fetchall()
-        return [Job(**dict(r)) for r in rows]
+        return [Job.from_row(r) for r in rows]
 
     # runs
 
