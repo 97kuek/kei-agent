@@ -115,6 +115,8 @@ async def serve() -> None:
         await assistant.announce_update()
         # 前の版で動いていて、入れ替えや強制終了で止まった依頼をやり直す
         await assistant.resume_interrupted()
+        # Notion の項目がずれていると、Daily や夜間の Task が黙って止まるので、起動時に確かめる
+        await assistant.check_notion_schema()
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()
     finally:

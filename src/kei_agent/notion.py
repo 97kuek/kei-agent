@@ -194,6 +194,47 @@ NOTE_TEMPLATES = [
 _BLANK_TEMPLATE_NAMES = {"", "New page", "新規ページ", "Untitled", "無題"}
 
 
+# 状態のファイル（notion.json）のキーと、上の定義の対応。設定のずれを見つけるのに使う
+SPECS = {"themes": THEMES, "tasks": TASKS, "notes": NOTES, "milestones": MILESTONES}
+
+
+def _option_names(config: dict) -> set[str]:
+    return {o["name"] for o in config.get("options", [])}
+
+
+def schema_problems(notion: Notion, state: dict) -> list[str]:
+    """Notion 側の項目が、Kei Agent が使う形からずれていないか見る。困るところを並べて返す。
+
+    Notion の画面で選択肢の名前を変えると、絞り込みが 400 で落ちて、Daily や夜間の Task が黙って止まる。
+    """
+    problems = []
+    for key, spec in SPECS.items():
+        db = (state.get("databases") or {}).get(key)
+        if db is None:
+            problems.append(f"{key}: notion.json にありません（kei-agent-notion-setup を実行してください）")
+            continue
+        try:
+            live = notion.request("GET", f"/data_sources/{db['data_source_id']}")["properties"]
+        except NotionError as e:
+            problems.append(f"{key}: 読めません（{e}）")
+            continue
+        for name, want in spec["properties"].items():
+            kind = next(iter(want))
+            have = live.get(name)
+            if have is None:
+                problems.append(f"{key}: 項目「{name}」がありません")
+            elif have.get("type") != kind:
+                problems.append(f"{key}: 項目「{name}」の種類が {have.get('type')} になっています（{kind} のはず）")
+            elif kind in ("select", "status"):
+                missing = _option_names(want[kind]) - _option_names(have.get(kind, {}))
+                if missing:
+                    problems.append(f"{key}: 項目「{name}」に選択肢 {'、'.join(sorted(missing))} がありません")
+        for name in spec.get("relations", {}):
+            if name not in live:
+                problems.append(f"{key}: 項目「{name}」（リレーション）がありません")
+    return problems
+
+
 def _eq_select(prop: str, value: str) -> dict:
     return {"property": prop, "select": {"equals": value}}
 

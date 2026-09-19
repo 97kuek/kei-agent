@@ -315,6 +315,21 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             return
         settings.drop_theme(self.store, await self.channel_name(channel))
 
+    async def check_notion_schema(self) -> list[str]:
+        """Notion の項目のずれを起動時に見て、あれば知らせる。黙って定期処理が止まるのを防ぐ。"""
+        if self.notion is None:
+            return []
+        try:
+            problems = await asyncio.to_thread(self.notion.schema_problems)
+        except Exception as e:
+            await self.notify_trouble(f"Notion の設定を確かめられませんでした: {type(e).__name__}: {e}")
+            return []
+        if problems:
+            await self.notify_trouble(
+                "Notion の設定が Kei Agent の使う形とずれています。直すまで、Daily や夜間の Task が止まります。\n"
+                + "\n".join(f"• {p}" for p in problems))
+        return problems
+
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return

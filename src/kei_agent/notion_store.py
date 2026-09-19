@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import Config
-from kei_agent.notion import Notion, NotionError
+from kei_agent.notion import Notion, NotionError, schema_problems
 
 log = logging.getLogger(__name__)
 
@@ -209,6 +209,10 @@ class NotionStore:
         except (OSError, json.JSONDecodeError) as e:
             raise NotionError(f"{state_path} を読めません: {e}") from None
         self._theme_names: dict[str, str] = {}
+
+    def schema_problems(self) -> list[str]:
+        """Notion の項目が Kei Agent の使う形からずれていないか見る（起動時の確認）。"""
+        return schema_problems(self.notion, self.state)
 
     def _db(self, key: str) -> dict:
         return self.state["databases"][key]

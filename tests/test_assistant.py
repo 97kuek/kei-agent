@@ -45,12 +45,10 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert ("reactions_remove", {"channel": "C1", "timestamp": "10.1", "name": "eyes"}) in slack.calls
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
     assert slack.streamed() == ["結果です"]
-    assert "結果です" not in slack.texts()  # 手順のあとのまとめも、同じ返事の中に出す
     assert any(name == "chat_stopStream" for name, _ in slack.calls)
-    # 道具を使うたびに、作業の手順を1行ずつ見せる
-    assert [(c["title"], c["status"]) for c in slack.tasks()] == [("Bash: テスト", "in_progress"), ("Bash: テスト", "complete")]
-    start, = [kw for name, kw in slack.calls if name == "chat_startStream"]
-    assert start["task_display_mode"] == "timeline"
+    # 経過は入力欄の下の1行だけに出し、返事には手順を並べない（長い作業でもスクロールが要らない）
+    assert slack.tasks() == []
+    assert slack.thinking() == ["考え中…", "Bash: テスト", "結果です"]
     assert "結果です" not in slack.texts()  # 流して見せたので、もう一度投稿しない
     assert store.get_thread("C1", "10.1")["session_id"] == "sess-1"
     log = (config.research_root / "vlm" / ".kei-agent" / "threads" / "10.1.md").read_text()
@@ -141,8 +139,8 @@ async def test_error_result_is_reported(env):
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) not in slack.calls
 
 
-async def test_narration_goes_to_the_steps_not_the_answer(env):
-    """途中の独り言は手順の補足にし、本文は最後のまとめだけにする。同じ話が2回並ばない。"""
+async def test_narration_goes_to_the_status_not_the_answer(env):
+    """途中の独り言は入力欄の下だけに出し、本文は最後のまとめにする。同じ話が2回並ばない。"""
     assistant, slack, claude, _ = env
     claude.behaviors = [{"steps": [("text", "了解、進めるね。CLAUDE.md に書いておく。"), ("tool", "Edit: CLAUDE.md")],
                          "text": "了解したよ。CLAUDE.md に書いておいた。"}]
@@ -150,11 +148,10 @@ async def test_narration_goes_to_the_steps_not_the_answer(env):
     await settle(assistant)
 
     assert slack.streamed() == ["了解したよ。CLAUDE.md に書いておいた。"]
-    assert slack.tasks()[0]["details"] == "了解、進めるね。CLAUDE.md に書いておく。"
-    # 完了で details を送り直すと、Slack で同じ補足が2回並ぶ
-    started, done = slack.tasks()
-    assert started["status"] == "in_progress" and done["status"] == "complete"
-    assert "details" not in done
+    # 独り言 → 道具 → まとめ。まとめは投稿すると Slack が消すので、残るのは返事の本文だけ
+    assert slack.thinking() == ["考え中…", "了解、進めるね。CLAUDE.md に書いておく。", "Edit: CLAUDE.md",
+                                "了解したよ。CLAUDE.md に書いておいた。"]
+    assert slack.tasks() == []
 
 
 async def test_run_uses_domains_allowed_for_the_theme(env, store, monkeypatch):
