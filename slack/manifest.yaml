@@ -11,6 +11,11 @@ features:
   # 返事を流しながら見せる表示（chat.startStream）に必要
   agent_view:
     agent_description: 研究の作業を進めて、経過と結果をスレッドに返す
+  # 設定画面（テーマごとの接続先と、決まった時刻の処理）。docs/plan.md の11章
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
 oauth_config:
   scopes:
     bot:
@@ -24,6 +29,7 @@ oauth_config:
       - files:write
       - reactions:read
       - reactions:write
+      - assistant:write
 settings:
   event_subscriptions:
     bot_events:
@@ -35,8 +41,12 @@ settings:
       - group_rename
       - reaction_added
       - reaction_removed
+      - channel_archive
+      - group_archive
+      - app_home_opened
+  # 接続先の申し出のボタンと、App Home の設定画面に使う
   interactivity:
-    is_enabled: false
+    is_enabled: true
   org_deploy_enabled: false
   socket_mode_enabled: true
   token_rotation_enabled: false

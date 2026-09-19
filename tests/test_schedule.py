@@ -72,6 +72,24 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
 
 
+async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
+    """App Home で変えた時刻は、再起動なしで次の tick から効く。止めた処理は動かさない。"""
+    scheduler, *_ = env
+    from ezra import settings
+    ran = []
+
+    async def fake_run(name, day, record=True):
+        ran.append(name)
+        scheduler.store.record_schedule(name, day, {"status": "done"})
+        return {}
+
+    monkeypatch.setattr(scheduler, "run_task", fake_run)
+    settings.set_schedule(scheduler.store, "daily", "07:30", True)
+    settings.set_schedule(scheduler.store, "literature", "07:00", False)
+    await scheduler.tick(datetime.fromisoformat("2026-09-18 07:35"))
+    assert "daily" in ran and "literature" not in ran
+
+
 # 🌙 の夜間 Task
 
 MOON = {"reaction": "crescent_moon", "user": "UME", "item_user": "UME",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
+from ezra import home
 from ezra.assistant import Assistant
 from ezra.config import load_config
 from ezra.jobs import JobManager, Pueue
@@ -69,8 +71,33 @@ async def serve() -> None:
         ("group_rename", assistant.on_channel_rename),
         ("reaction_added", assistant.on_reaction_added),
         ("reaction_removed", assistant.on_reaction_removed),
+        ("channel_archive", assistant.on_channel_archive),
+        ("group_archive", assistant.on_channel_archive),
+        ("app_home_opened", assistant.on_home_opened),
     ):
         app.event(name)(guard(handler))
+
+    # ボタンと App Home（docs/plan.md の11章）。Slack は3秒以内の ack を待つので、先に返してから処理する
+    def acked(handler):
+        async def wrapped(ack, body):
+            await ack()
+            await guard(handler)(body)
+        return wrapped
+
+    app.action(re.compile(r"^ezra_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
+    app.action(re.compile(r"^ezra_home_"))(acked(assistant.on_home_action))
+
+    @app.view(home.ADD_DOMAIN_CALLBACK)
+    async def add_domain(ack, body):
+        try:
+            errors = await assistant.on_add_domain(body)
+        except Exception:
+            log.exception("接続先を足せませんでした")
+            errors = {"domain": "足せませんでした。Ezra のログを見てください"}
+        if errors:
+            await ack(response_action="errors", errors=errors)
+        else:
+            await ack()
 
     job_loop = asyncio.create_task(assistant.job_loop())
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())

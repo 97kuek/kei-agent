@@ -56,6 +56,8 @@ class Workspace:
     kind: ChannelKind
     # claude -p を動かすディレクトリ。IMPROVE では None
     cwd: Path | None
+    # config.toml の基本の接続先に足して、このテーマで許可した接続先（Slack で許可したもの。settings.py）
+    allowed_domains: tuple[str, ...] = ()
 
 
 # Slack のチャンネル名は日本語も使えるので、パスとして危ない形だけを弾く

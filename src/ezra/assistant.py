@@ -9,13 +9,13 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
 import aiohttp
 
-from ezra import runner, themes
+from ezra import home, runner, settings, themes
 from ezra.config import Config
 from ezra.jobs import JobManager, log_tail
 from ezra.notion import NotionError
@@ -175,6 +175,19 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
         f"<thread_history>\n{history}\n</thread_history>\n\n"
         f"続きの依頼:\n{new_text}"
     )
+
+
+def domain_resume_prompt(decisions) -> str:
+    """接続先の申し出に依頼者が答えたあと、会話を再開するときに渡す文。"""
+    lines = ["[Ezra からの自動メッセージ] 接続先の申し出に、依頼者が答えました。"]
+    for d in decisions:
+        if d["status"] == "allowed":
+            lines.append(f"- `{d['domain']}`: 許可されました。次のコマンドからつながります")
+        else:
+            lines.append(f"- `{d['domain']}`: 断られました。このテーマでは使えません")
+    lines.append("止まっていた作業を続けてください。断られたものがあれば、別の入手先を探すか、"
+                 "ここで止めてどうするかを報告してください。")
+    return "\n".join(lines)
 
 
 class ThreadUI:
@@ -418,6 +431,67 @@ class Assistant:
         if channel:
             self.channel_names.pop(channel, None)
 
+    async def on_channel_archive(self, event: dict) -> None:
+        """テーマのチャンネルをアーカイブしたら、そのテーマで許可した接続先を消す。"""
+        channel = event.get("channel")
+        if not channel:
+            return
+        name = await self.channel_name(channel)
+        settings.drop_theme(self.store, name)
+
+    # App Home（設定画面。docs/plan.md の11章）
+
+    def _theme_names(self) -> list[str]:
+        return [p.name for p in themes.theme_dirs(self.config)]
+
+    async def publish_home(self, user_id: str) -> None:
+        view = home.build_home(self.config, self.store, self._theme_names(),
+                               is_owner=user_id == self.config.allowed_user_id)
+        await self.slack.views_publish(user_id=user_id, view=view)
+
+    async def on_home_opened(self, event: dict) -> None:
+        if event.get("tab", "home") == "home" and event.get("user"):
+            await self.publish_home(event["user"])
+
+    async def on_home_action(self, body: dict) -> None:
+        """App Home のボタンと時刻の選択。変えられるのは依頼者だけ。"""
+        user = body.get("user", {}).get("id")
+        if user != self.config.allowed_user_id:
+            return
+        action = (body.get("actions") or [{}])[0]
+        action_id = action.get("action_id", "")
+        kind, _, name = action_id.partition(":")
+        if kind == "ezra_home_remove_domain":
+            theme, _, domain = action.get("value", "").partition("\t")
+            settings.remove_domain(self.store, theme, domain)
+        elif kind == "ezra_home_add_domain":
+            await self.slack.views_open(trigger_id=body.get("trigger_id"),
+                                        view=home.build_add_domain_modal(self._theme_names()))
+            return
+        elif kind == "ezra_home_time" and name in settings.SCHEDULE_NAMES:
+            _, enabled = settings.schedule_setting(self.config, self.store, name)
+            settings.set_schedule(self.store, name, action.get("selected_time", ""), enabled)
+        elif kind == "ezra_home_toggle" and name in settings.SCHEDULE_NAMES:
+            hhmm, enabled = settings.schedule_setting(self.config, self.store, name)
+            settings.set_schedule(self.store, name, hhmm, not enabled)
+        else:
+            return
+        await self.publish_home(user)
+
+    async def on_add_domain(self, body: dict) -> dict | None:
+        """「接続先を足す」の送信。入力がおかしければ、欄ごとの説明を返す（モーダルに出す）。"""
+        user = body.get("user", {}).get("id")
+        if user != self.config.allowed_user_id:
+            return {"domain": "依頼者だけが変えられます"}
+        theme, domain = home.read_add_domain(body.get("view", {}))
+        if theme not in self._theme_names():
+            return {"theme": "テーマを選んでください"}
+        if not settings.valid_domain(domain, allow_wildcard=True):
+            return {"domain": "zenodo.org や *.example.com のように、ドメイン名だけを書いてください"}
+        settings.allow_domain(self.store, theme, domain, "App Home から追加")
+        await self.publish_home(user)
+        return None
+
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return
@@ -584,6 +658,8 @@ class Assistant:
             await self.record_backlog(req)
             return None
         themes.ensure_workspace(ws)
+        if ws.kind is ChannelKind.THEME:
+            ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
         if ws.kind is ChannelKind.THEME and ws.channel_name not in self.registered_themes:
             # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
             self.registered_themes.add(ws.channel_name)
@@ -611,7 +687,7 @@ class Assistant:
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
         session_id = row["session_id"] if row else None
 
-        who = "Ezra（ジョブ完了）" if req.trigger == "job" else "依頼者"
+        who = {"job": "Ezra（ジョブ完了）", "domain": "Ezra（接続先の返事）"}.get(req.trigger, "依頼者")
         append_thread_log(ws.cwd, req.channel_name, req.thread_ts, who, req.text + (
             "\n\n" + "\n".join(f"- 添付: `{p}`" for p in saved) if saved else ""))
 
@@ -634,7 +710,8 @@ class Assistant:
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if result.session_id:
             self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
-        awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
+        connect = self.new_connect_requests(ws, result.text)
+        awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
         streamed = await ui.finish(result.text, awaiting and not result.is_error)
@@ -661,6 +738,7 @@ class Assistant:
             log.exception("outputs/ のファイルを添付できません")
             await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できませんでした: `{type(e).__name__}: {e}`")
         await self.mark_answered(req, result.is_error)
+        await self.ask_for_domains(req, ws, connect)
         await self.handle_job_requests(ws.cwd)
         if any(j.channel == req.channel and j.thread_ts == req.thread_ts for j in self.store.active_jobs()):
             await ui.keep_working()
@@ -676,6 +754,66 @@ class Assistant:
                 await method(channel=req.channel, timestamp=req.message_ts, name=name)
             except Exception:
                 log.debug("リアクションを変えられません", exc_info=True)
+
+    # 接続先の申し出（docs/plan.md の11章）
+
+    def new_connect_requests(self, ws: Workspace, text: str) -> list[tuple[str, str]]:
+        """返答の `🔒 接続:` のうち、まだ許可していないもの。テーマ以外では受け付けない。"""
+        if ws.kind is not ChannelKind.THEME:
+            return []
+        allowed = set(self.config.allowed_domains) | set(ws.allowed_domains)
+        return [(d, reason) for d, reason in settings.parse_connect_requests(text) if d not in allowed]
+
+    async def ask_for_domains(self, req: Request, ws: Workspace, requests: list[tuple[str, str]]) -> None:
+        for domain, reason in requests:
+            req_id = settings.add_request(self.store, req.channel, req.thread_ts, ws.channel_name, domain, reason)
+            text = f"🔒 `{domain}` につなぎたいそうです" + (f"。理由: {reason}" if reason else "")
+            await self.slack.chat_postMessage(
+                channel=req.channel, thread_ts=req.thread_ts, text=text,
+                blocks=[
+                    {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+                    {"type": "context", "elements": [{"type": "mrkdwn", "text":
+                        f"許可すると、#{ws.channel_name} の作業でだけつながります（チャンネルをアーカイブすると消えます）"}]},
+                    {"type": "actions", "elements": [
+                        {"type": "button", "action_id": "ezra_domain_allow", "style": "primary",
+                         "text": {"type": "plain_text", "text": "許可する"}, "value": str(req_id)},
+                        {"type": "button", "action_id": "ezra_domain_deny",
+                         "text": {"type": "plain_text", "text": "断る"}, "value": str(req_id)},
+                    ]},
+                ],
+            )
+
+    async def on_domain_action(self, body: dict) -> None:
+        """[許可する] [断る] が押された。押せるのは依頼者だけ。"""
+        if body.get("user", {}).get("id") != self.config.allowed_user_id:
+            return
+        action = (body.get("actions") or [{}])[0]
+        allowed = action.get("action_id") == "ezra_domain_allow"
+        try:
+            req_id = int(action.get("value", ""))
+        except ValueError:
+            return
+        if not settings.resolve_request(self.store, req_id, "allowed" if allowed else "denied"):
+            return  # もう決まっている（2度押し）
+        row = settings.get_request(self.store, req_id)
+        if allowed:
+            settings.allow_domain(self.store, row["theme"], row["domain"], row["reason"] or "")
+        done = f"🔒 `{row['domain']}` への接続を" + ("許可しました" if allowed else "断りました")
+        container = body.get("container", {})
+        try:
+            await self.slack.chat_update(
+                channel=container.get("channel_id") or row["channel"], ts=container.get("message_ts"),
+                text=done, blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": done}}])
+        except Exception:
+            log.warning("接続先の申し出のメッセージを書き換えられません", exc_info=True)
+        if settings.pending_requests(self.store, row["channel"], row["thread_ts"]):
+            return  # ほかの申し出に答えてから、まとめて再開する
+        decisions = settings.take_decisions(self.store, row["channel"], row["thread_ts"])
+        if decisions:
+            await self.submit(Request(
+                channel=row["channel"], channel_name=row["theme"], thread_ts=row["thread_ts"],
+                message_ts=None, text=domain_resume_prompt(decisions), trigger="domain",
+            ))
 
     async def sync_review_conclusion(self, req: Request) -> None:
         """振り返りのスレッドに貼られた結論を、Notion の振り返りページにも追記する。"""

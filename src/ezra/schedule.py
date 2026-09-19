@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from ezra import maintenance, themes
+from ezra import maintenance, settings, themes
 from ezra.assistant import AWAITING_MARKER, Assistant, Request, clean_text
 from ezra.config import Config
 from ezra.digest import DigestBuilder
@@ -26,7 +26,7 @@ from ezra.themes import OVERVIEW_DIR
 log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
-TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")
+TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
@@ -93,11 +93,8 @@ class Scheduler:
             return
         for name in TASK_NAMES:
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
-            if name == "maintenance":
-                maint = self.config.maintenance
-                hhmm = maint.time if maint.enabled else ""
-            else:
-                hhmm = getattr(sched, name)
+            # Slack（App Home）で変えた時刻を毎回読み直す。止めている処理は空文字
+            hhmm = settings.schedule_time(self.config, self.store, name)
             day = due_day(now, hhmm, catch_up)
             if day is None or self.store.schedule_ran(name, day):
                 continue

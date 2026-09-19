@@ -19,6 +19,13 @@ def test_settings_limit_theme_to_its_directory(config):
     assert settings["sandbox"]["network"]["allowedDomains"] == ["export.arxiv.org"]
 
 
+def test_settings_add_domains_allowed_for_the_theme(config):
+    """Slack で許可した接続先は、基本の接続先に足して使う。"""
+    ws = replace(themes.resolve(config, "vlm"), allowed_domains=("zenodo.org",))
+    domains = runner.build_settings(config, ws)["sandbox"]["network"]["allowedDomains"]
+    assert domains == ["export.arxiv.org", "zenodo.org"]
+
+
 def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
     ws = themes.resolve(config, "research-overview")
     allow = runner.build_settings(config, ws)["permissions"]["allow"]

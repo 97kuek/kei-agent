@@ -106,6 +106,14 @@ class FakeSlack:
     async def reactions_remove(self, **kw):
         self.calls.append(("reactions_remove", kw))
 
+    async def views_publish(self, **kw):
+        self.calls.append(("views_publish", kw))
+        return {}
+
+    async def views_open(self, **kw):
+        self.calls.append(("views_open", kw))
+        return {}
+
     async def files_upload_v2(self, **kw):
         self.calls.append(("files_upload_v2", kw))
 

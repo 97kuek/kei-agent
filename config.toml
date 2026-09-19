@@ -55,13 +55,8 @@ allowed_domains = [
   "api.semanticscholar.org",
   "pypi.org",
   "files.pythonhosted.org",
-  # #amr-query: CASTELLA の配布特徴量（Zenodo）と正解データ（GitHub）
-  "zenodo.org",
-  "github.com",
-  "codeload.github.com",
-  "raw.githubusercontent.com",
-  "objects.githubusercontent.com",
 ]
+# テーマごとに要る接続先は、ここには書かず Slack で許可する（App Home か、Ezra が聞いてくるボタン）
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
 allow_write = ["~/.cache/uv"]
 # sandbox の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、

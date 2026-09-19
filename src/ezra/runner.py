@@ -37,7 +37,7 @@ def build_settings(config: Config, ws: Workspace) -> dict:
             "autoAllowBashIfSandboxed": True,
             "allowUnsandboxedCommands": False,
             "network": {
-                "allowedDomains": list(config.allowed_domains),
+                "allowedDomains": list(dict.fromkeys(config.allowed_domains + ws.allowed_domains)),
                 "strictAllowlist": True,
             },
             "filesystem": {

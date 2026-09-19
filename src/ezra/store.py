@@ -59,6 +59,31 @@ CREATE TABLE IF NOT EXISTS runs (
     is_error INTEGER,
     cost_usd REAL
 );
+-- Slack から変える設定（settings.py）
+CREATE TABLE IF NOT EXISTS theme_domains (
+    theme TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    reason TEXT,
+    added_at REAL NOT NULL,
+    PRIMARY KEY (theme, domain)
+);
+CREATE TABLE IF NOT EXISTS domain_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    theme TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    reason TEXT,
+    status TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    resolved_at REAL,
+    -- 決めた内容を Claude に伝えて作業を再開したか
+    resumed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 

@@ -28,7 +28,7 @@
 4. 自分のSlackユーザーIDを控える（Slack でプロフィール → ︙ → **メンバーIDをコピー**。`U` で始まる）
 5. **Agents** の **Agent experience** をオンにし、アプリを入れ直す（Install App → Reinstall）。作業中の表示（「Working...」）と、返事を流しながら見せる表示に使う。有効にしなくても Ezra は動き、その場合は結果をまとめて投稿する
 
-   `slack/manifest.yaml` には `features.agent_view` が入っているので、**App Manifest** の画面に貼り直せば有効になる。コマンドで入れ替えるなら、**Settings → App Configuration Tokens** で作ったトークン（`xoxe-`）を使う。
+   `slack/manifest.yaml` には `features.agent_view` と、設定画面に使う `features.app_home`・`settings.interactivity` が入っているので、**App Manifest** の画面に貼り直せば有効になる。コマンドで入れ替えるなら、**Settings → App Configuration Tokens** で作ったトークン（`xoxe-`）を使う。
 
    ```zsh
    TOKEN="xoxe-..." APP_ID="A..."   # App ID は api.slack.com/apps のアプリの Basic Information にある
