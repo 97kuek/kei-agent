@@ -76,6 +76,10 @@ class FakeSlack:
         self.calls.append(("agents_sessions_setStatus", kw))
         return {}
 
+    async def assistant_threads_setStatus(self, **kw):
+        self.calls.append(("assistant_threads_setStatus", kw))
+        return {}
+
     async def chat_startStream(self, **kw):
         self.calls.append(("chat_startStream", kw))
         ts = self._next_ts()
@@ -97,6 +101,10 @@ class FakeSlack:
 
     def statuses(self) -> list[str]:
         return [kw["status"] for name, kw in self.calls if name == "agents_sessions_setStatus"]
+
+    def thinking(self) -> list[str]:
+        """「〇〇が入力中」の欄に出した文言。"""
+        return [kw["status"] for name, kw in self.calls if name == "assistant_threads_setStatus"]
 
     def tasks(self) -> list[dict]:
         """流して見せた返事の中の、作業の手順（task_update）。"""

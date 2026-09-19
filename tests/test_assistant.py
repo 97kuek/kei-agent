@@ -420,6 +420,32 @@ async def test_crash_before_the_run_is_reported_to_the_thread(env, monkeypatch):
     assert claude.calls == []
 
 
+async def test_shows_thinking_text_while_working(env):
+    """作業中は、Slack の状態欄に「考え中…」を出す。"""
+    assistant, slack, claude, _ = env
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert slack.thinking()[0] == "考え中…"
+
+
+async def test_keeps_working_when_the_thinking_text_api_is_unavailable(env, monkeypatch):
+    """文言を指定する API が断られても、状態の切り替えと返事は今までどおり。"""
+    assistant, slack, claude, _ = env
+    from slack_sdk.errors import SlackApiError
+
+    async def unavailable(**kw):
+        raise SlackApiError("missing_scope", {"ok": False})
+
+    monkeypatch.setattr(slack, "assistant_threads_setStatus", unavailable, raising=False)
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert slack.statuses() == ["processing", "active"]
+
+
 async def test_falls_back_to_a_plain_post_when_the_new_slack_api_is_unavailable(env, monkeypatch):
     """ステータスと流し見せが使えないワークスペースでは、今までどおり投稿する。"""
     assistant, slack, claude, _ = env

@@ -207,11 +207,16 @@ def domain_resume_prompt(decisions) -> str:
     return "\n".join(lines)
 
 
+THINKING_TEXT = "考え中…"
+
+
 class ThreadUI:
     """作業中の見せ方。Slack の AI アプリ（Agent）向けの API を使う。
 
     - `agents.sessions.setStatus`: スレッドの状態を切り替える。processing（作業中。Slack が「Working...」を出す）、
       active（次の依頼待ち）、suspended（依頼者の返事待ち）のどれか。自由な文章は出せない
+    - `assistant.threads.setStatus`: 状態欄の文言を自分で決める。作業中は「考え中…」を出す
+      （返事を投稿すると Slack が自分で消す）
     - `chat.startStream` / `appendStream` / `stopStream`: 返事を流して見せる。道具を使うたびに作業の手順
       （task_update）を1行ずつ足し、最後にまとめを本文として出す
 
@@ -229,6 +234,7 @@ class ThreadUI:
         self.team_id = team_id
         self.user_id = user_id
         self.status_ok = True
+        self.thinking_ok = True
         self.stream_ok = True
         self.stream_ts: str | None = None
         self.task: dict | None = None  # いま実行中の手順
@@ -309,7 +315,20 @@ class ThreadUI:
             log.warning("返事を流して見せられないので、まとめて投稿します", exc_info=True)
             self.stream_ok = False
 
+    async def _thinking(self) -> None:
+        if not self.thinking_ok:
+            return
+        try:
+            await self.slack.assistant_threads_setStatus(
+                channel_id=self.channel, thread_ts=self.thread_ts, status=THINKING_TEXT)
+        except Exception:
+            # scope（assistant:write）がないと使えない。そのときは Slack 任せの表示のまま
+            log.info("状態欄の文言を出せません", exc_info=True)
+            self.thinking_ok = False
+
     async def _status(self, status: str) -> None:
+        if status == "processing":
+            await self._thinking()
         if not self.status_ok:
             return
         try:
