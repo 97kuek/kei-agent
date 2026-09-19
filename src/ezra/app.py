@@ -24,6 +24,8 @@ from ezra.store import Store
 log = logging.getLogger("ezra")
 
 REQUIRED_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "EZRA_ALLOWED_USER_ID")
+# Slack につながるのを待つ上限。超えたら落ちて、launchd に起動し直してもらう
+CONNECT_TIMEOUT_SECONDS = 120
 
 
 async def serve() -> None:
@@ -103,11 +105,18 @@ async def serve() -> None:
     schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
     log.info("Ezra を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
+    handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     try:
-        await AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start_async()
+        # つながらないまま止まると、入れ替えに失敗しても誰も気づけない。時間を切って落ちる
+        await asyncio.wait_for(handler.connect_async(), CONNECT_TIMEOUT_SECONDS)
+        # 自分を入れ替えたあとの起動なら、その結果をスレッドに知らせる（improve.py）
+        await assistant.announce_update()
+        # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
+        await assistant.restart_requested.wait()
     finally:
         job_loop.cancel()
         schedule_loop.cancel()
+        await handler.close_async()
 
 
 LOG_MAX_BYTES = 5 * 1024 * 1024

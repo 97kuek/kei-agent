@@ -10,58 +10,13 @@ import signal
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from ezra import guard
 from ezra.config import Config, path_without_venv
-from ezra.themes import ChannelKind, Workspace
+from ezra.themes import Workspace
 
 # claude が終わったあと、プロセスが消えるのを待つ秒数
 EXIT_GRACE_SECONDS = 5
-
-# claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-_STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "EZRA_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV")
-_KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
-
-
-def _abs_rule(tool: str, path: Path) -> str:
-    # 権限ルールで絶対パスを書くときは // で始める
-    return f"{tool}(/{path}/**)"
-
-
-def build_settings(config: Config, ws: Workspace) -> dict:
-    assert ws.cwd is not None
-    read_root = config.research_root if ws.kind is ChannelKind.OVERVIEW else ws.cwd
-    return {
-        "sandbox": {
-            "enabled": True,
-            "failIfUnavailable": True,
-            "autoAllowBashIfSandboxed": True,
-            "allowUnsandboxedCommands": False,
-            "network": {
-                "allowedDomains": list(dict.fromkeys(config.allowed_domains + ws.allowed_domains)),
-                "strictAllowlist": True,
-            },
-            "filesystem": {
-                "allowWrite": [str(p) for p in config.allow_write],
-                # sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞ぐ
-                "denyRead": [str(p) for p in config.deny_read],
-            },
-        },
-        "permissions": {
-            "allow": [
-                _abs_rule("Read", read_root),
-                _abs_rule("Edit", ws.cwd),
-                "Glob",
-                "Grep",
-                "Bash",
-                "WebSearch",
-                "WebFetch",
-                "Skill",
-                "TodoWrite",
-            ],
-        },
-    }
-
 
 def system_prompt_text(config: Config) -> str:
     path = config.system_prompt_path
@@ -81,7 +36,7 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
         "--verbose",
         # ユーザー設定（フックやプラグイン、広い許可ルール）を持ち込まない
         "--setting-sources", "",
-        "--settings", json.dumps(build_settings(config, ws), ensure_ascii=False),
+        "--settings", json.dumps(guard.build_settings(config, ws), ensure_ascii=False),
         "--permission-mode", "dontAsk",
         "--plugin-dir", str(config.plugin_dir),
     ]
@@ -96,10 +51,7 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
 
 
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str) -> dict[str, str]:
-    env = {
-        k: v for k, v in base.items()
-        if k in _KEPT_CLAUDE_ENV or not k.startswith(_STRIPPED_ENV_PREFIXES)
-    }
+    env = guard.strip_env(base)
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["EZRA_CHANNEL"] = channel
     env["EZRA_THREAD_TS"] = thread_ts

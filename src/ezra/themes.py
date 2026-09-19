@@ -48,6 +48,8 @@ class ChannelKind(Enum):
     THEME = "theme"
     OVERVIEW = "overview"
     IMPROVE = "improve"
+    # Ezra 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
+    SELF_FIX = "self_fix"
 
 
 @dataclass(frozen=True)

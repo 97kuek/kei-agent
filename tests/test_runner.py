@@ -5,12 +5,12 @@ from dataclasses import replace
 
 import pytest
 
-from ezra import runner, themes
+from ezra import guard, runner, themes
 
 
 def test_settings_limit_theme_to_its_directory(config):
     ws = themes.resolve(config, "vlm")
-    settings = runner.build_settings(config, ws)
+    settings = guard.build_settings(config, ws)
     allow = settings["permissions"]["allow"]
     assert f"Read(/{ws.cwd}/**)" in allow
     assert f"Edit(/{ws.cwd}/**)" in allow
@@ -22,13 +22,13 @@ def test_settings_limit_theme_to_its_directory(config):
 def test_settings_add_domains_allowed_for_the_theme(config):
     """Slack で許可した接続先は、基本の接続先に足して使う。"""
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("zenodo.org",))
-    domains = runner.build_settings(config, ws)["sandbox"]["network"]["allowedDomains"]
+    domains = guard.build_settings(config, ws)["sandbox"]["network"]["allowedDomains"]
     assert domains == ["export.arxiv.org", "zenodo.org"]
 
 
 def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
     ws = themes.resolve(config, "research-overview")
-    allow = runner.build_settings(config, ws)["permissions"]["allow"]
+    allow = guard.build_settings(config, ws)["permissions"]["allow"]
     assert f"Read(/{config.research_root}/**)" in allow
     assert f"Edit(/{config.research_root / '_overview'}/**)" in allow
     assert f"Edit(/{config.research_root}/**)" not in allow
@@ -112,7 +112,7 @@ def test_describe_tool_truncates():
 def test_settings_deny_reading_secret_locations(config):
     """sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞いでおく。"""
     ws = themes.resolve(config, "vlm")
-    filesystem = runner.build_settings(config, ws)["sandbox"]["filesystem"]
+    filesystem = guard.build_settings(config, ws)["sandbox"]["filesystem"]
     assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
     assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
 

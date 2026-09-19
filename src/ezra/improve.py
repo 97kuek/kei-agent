@@ -1,0 +1,198 @@
+"""Slack から Ezra 自身を直す流れ（docs/plan.md の12章）。
+
+`#research-ezra` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
+main に取り込んで push し、作業がなくなってから自分を再起動する。
+柵（`guard.py`、`config.toml`、`deploy/`）に触れた差分は取り込まない。
+"""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+from ezra import guard
+from ezra.config import Config
+
+log = logging.getLogger(__name__)
+
+# Claude が返答の最後に書く行。Ezra 本体は、依頼者の投稿で始まった回の返事にあるときだけ動く
+START_MARKER = "🛠 着手"
+MERGE_MARKER = "📦 取り込み"
+
+# 取り込んだあとに残すファイル。新しい版が Slack につながったら消す
+PENDING_NAME = "update-pending"
+# deploy/run.sh が、起動できずに戻したときに残すファイル
+ROLLED_BACK_NAME = "update-rolled-back"
+# 起動し直しても Slack につながらないときに、run.sh が戻すまでの回数
+MAX_START_ATTEMPTS = 3
+
+
+def wants(text: str, marker: str) -> bool:
+    return any(line.strip().startswith(marker) for line in text.splitlines())
+
+
+@dataclass
+class CommandResult:
+    ok: bool
+    output: str
+
+
+def git(repo: Path, *args: str, check: bool = True) -> CommandResult:
+    proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {(proc.stderr or proc.stdout).strip()[:500]}")
+    return CommandResult(proc.returncode == 0, (proc.stdout + proc.stderr).strip())
+
+
+def head(repo: Path, ref: str = "HEAD") -> str:
+    return git(repo, "rev-parse", ref).output
+
+
+def repo_dirty(repo: Path) -> bool:
+    """コミットしていない変更があるか（追跡していないファイルは数えない）。"""
+    return bool(git(repo, "status", "--porcelain", "--untracked-files=no").output)
+
+
+def worktree_root(config: Config) -> Path:
+    return config.state_dir / "worktrees"
+
+
+def create_worktree(config: Config, thread_ts: str) -> tuple[Path, str, str]:
+    """直すための作業場所を作る。(場所, ブランチ名, 元のコミット) を返す。"""
+    repo = config.repo_root
+    branch = f"ezra/improve-{thread_ts.replace('.', '-')}"
+    path = worktree_root(config) / branch.split("/")[-1]
+    remove_worktree(config, path, branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    base = head(repo)
+    git(repo, "worktree", "add", "-b", branch, str(path), base)
+    return path, branch, base
+
+
+def remove_worktree(config: Config, path: Path, branch: str) -> None:
+    repo = config.repo_root
+    git(repo, "worktree", "remove", "--force", str(path), check=False)
+    git(repo, "worktree", "prune", check=False)
+    git(repo, "branch", "-D", branch, check=False)
+
+
+def commit_all(worktree: Path, message: str) -> str | None:
+    """worktree の変更をまとめてコミットする。変更がなければ None。"""
+    git(worktree, "add", "-A")
+    if not git(worktree, "status", "--porcelain").output:
+        return None
+    git(worktree, "commit", "-q", "-m", message)
+    return head(worktree)
+
+
+def catch_up_with_main(worktree: Path) -> CommandResult:
+    """main が先に進んでいたら、その上に乗せ直す。"""
+    result = git(worktree, "rebase", "main", check=False)
+    if not result.ok:
+        git(worktree, "rebase", "--abort", check=False)
+    return result
+
+
+def run_checks(worktree: Path) -> CommandResult:
+    """テストと ruff。依頼者が差分を見て「いいよ」と言ったあとに、sandbox の外で動かす。"""
+    outputs = []
+    for args in (["uv", "run", "--frozen", "pytest", "-q"], ["uvx", "ruff", "check", "src", "tests", "plugin"]):
+        proc = subprocess.run(args, cwd=worktree, capture_output=True, text=True, timeout=1800)
+        tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
+        outputs.append(f"$ {' '.join(args)}\n{tail}")
+        if proc.returncode != 0:
+            return CommandResult(False, "\n\n".join(outputs))
+    return CommandResult(True, "\n\n".join(outputs))
+
+
+def merge_and_push(config: Config, branch: str) -> str:
+    """main に早送りで取り込み、GitHub に push する。取り込んだコミットを返す。"""
+    repo = config.repo_root
+    git(repo, "merge", "--ff-only", branch)
+    git(repo, "push", "origin", "main")
+    return head(repo)
+
+
+def diff_text(repo: Path, base: str, ref: str) -> str:
+    return git(repo, "diff", f"{base}..{ref}").output
+
+
+def review_summary(config: Config, worktree: Path, base: str, summary: str, checks: str) -> str:
+    """取り込む前に見せる文。依存ライブラリの変更は、いちばん上に出す。"""
+    files = guard.changed_files(worktree, base, "HEAD")
+    lines = []
+    deps = guard.touches_dependencies(files)
+    if deps:
+        lines.append(f"⚠️ 依存するライブラリが変わる（{', '.join(deps)}）。中身を確かめてね")
+    lines.append(summary.strip())
+    lines.append("")
+    lines.append("*変えたファイル*")
+    lines += [f"• `{f}`" for f in files] or ["• なし"]
+    if checks:
+        lines += ["", "*Claude が sandbox の中で回した確認*", checks.strip()]
+    lines += ["", "取り込んでいい？（柵のファイルに触れていないことは確認済み。テストは取り込む前にもう一度回す）"]
+    return "\n".join(lines)
+
+
+def pending_path(config: Config) -> Path:
+    return config.state_dir / PENDING_NAME
+
+
+def rolled_back_path(config: Config) -> Path:
+    return config.state_dir / ROLLED_BACK_NAME
+
+
+def mark_pending(config: Config, previous: str, thread_ts: str) -> None:
+    """再起動の前に残す。新しい版が Slack につながったら消す。残り続けたら run.sh が前の版に戻す。"""
+    pending_path(config).write_text(f"{previous}\n0\n{thread_ts}\n", encoding="utf-8")
+
+
+def read_pending(config: Config) -> tuple[str, str] | None:
+    path = pending_path(config)
+    if not path.exists():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return (lines[0] if lines else "", lines[2] if len(lines) > 2 else "")
+
+
+def read_rolled_back(config: Config) -> tuple[str, str] | None:
+    path = rolled_back_path(config)
+    if not path.exists():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return (lines[0] if lines else "", lines[2] if len(lines) > 2 else "")
+
+
+FIX_PROMPT = """\
+[Ezra からの自動メッセージ] このスレッドで決まった直し方で、Ezra 自身のコードを直してください。
+
+- いまのディレクトリは、この作業のための git worktree です。ここの中だけを書き換えます
+- `src/ezra/guard.py`、`config.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
+- 直したら `uv run --frozen pytest -q` と `uvx ruff check src tests plugin` を通してください
+- テストのないところを直すときは、先に落ちるテストを書いてから直してください
+- コミットはしないでください（Ezra 本体がまとめてコミットします）
+- 最後に、何をどう変えたかと、テストの結果を短くまとめてください
+
+これまでのやりとり:
+"""
+
+
+def push_revert(config: Config) -> None:
+    """run.sh が戻した取り消しを GitHub にも送る。"""
+    git(config.repo_root, "push", "origin", "main", check=False)
+
+
+def mark_backlog_done(config: Config, request: str) -> None:
+    """取り込めた要望に、`backlog.md` で印をつける。"""
+    path = config.backlog_path
+    if not path.exists():
+        return
+    key = " ".join(request.split())[:40]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("- [ ]") and key and key in " ".join(line.split()):
+            lines[i] = line.replace("- [ ]", "- [x]", 1) + "（Ezra が直して取り込み済み）"
+            break
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

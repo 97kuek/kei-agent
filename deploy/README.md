@@ -11,7 +11,7 @@
    |---|---|---|
    | 研究全体 | `#research-overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
-   | Ezra の改善 | `#research-ezra` | 要望を `~/research/_overview/backlog.md` に記録するだけ。Ezra がうまく動かなかったときの知らせもここに届く |
+   | Ezra の改善 | `#research-ezra` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Ezra が自分のコードを直す（9章）。Ezra がうまく動かなかったときの知らせもここに届く |
    | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Ezra を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
 
    Ezra を招待したチャンネルは、上の3つ以外すべて研究テーマとして扱う。個人用のチャンネルには Ezra を招待しない。
@@ -145,6 +145,15 @@ uv run ezra-schedule maintenance   # 今すぐ整理とバックアップを1回
 
 ログは Ezra 自身が `~/Library/Logs/ezra/ezra.log` に書き、5MB ごとに回して5世代だけ残す。
 `~/Library/Logs/ezra/launchd.log` には、起動に失敗したときの出力だけが残る。
+
+## 9. Ezra が自分を入れ替えるときの動き
+
+`#research-ezra` から Ezra が自分のコードを直すと（`docs/plan.md` の12章）、main に取り込んで push したあと、
+動いている作業がなくなったところで自分で終了する。launchd の `KeepAlive` が新しい版で起動し直す。
+
+- 取り込むときに `<state_dir>/update-pending` を置き、新しい版が Slack につながったら消す
+- つながらないまま3回起動し直したら、`deploy/run.sh` が取り込んだ分を `git revert` して前の版で起動し、
+  `<state_dir>/update-rolled-back` を残す。Ezra はそれを見て Slack に知らせ、取り消しを push する
 
 ## 状態の置き場所
 

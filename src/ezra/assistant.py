@@ -9,13 +9,14 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
 import aiohttp
 
-from ezra import home, runner, settings, themes
+from ezra import guard, home, improve, runner, settings, themes
 from ezra.config import Config
 from ezra.jobs import JobManager, log_tail
 from ezra.notion import NotionError
@@ -175,6 +176,13 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
         f"<thread_history>\n{history}\n</thread_history>\n\n"
         f"続きの依頼:\n{new_text}"
     )
+
+
+def self_fix_commit_message(request: str, summary: str) -> str:
+    """Ezra 自身を直したときのコミットメッセージ。件名は要望、本文は変えた内容の要約。"""
+    subject = " ".join(request.split())[:60] or "Ezra の改善"
+    body = "\n".join(line for line in summary.strip().splitlines() if line.strip())[:1500]
+    return f"{subject}\n\n{body}\n\n#research-ezra の要望から、Ezra 自身が直した。"
 
 
 def rules_update_prompt(rules: str) -> str:
@@ -360,11 +368,30 @@ class Assistant:
         # 同じテーマで重なって動いたかを覚えておく（outputs/ が共通なので図が混ざる）
         self.theme_runs = ThemeRuns()
         self.tasks: set[asyncio.Task] = set()
+        # いま claude が動いている数と、1つも動いていないことを知らせる合図。
+        # 自分を入れ替えるときに、作業が終わるのを待つのに使う
+        self.running = 0
+        self.idle = asyncio.Event()
+        self.idle.set()
+        # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
+        self.restart_requested = asyncio.Event()
+
+    @contextmanager
+    def claude_running(self):
+        """claude が動いている間を数える。0 になったら idle の合図を立てる。"""
+        self.running += 1
+        self.idle.clear()
+        try:
+            yield
+        finally:
+            self.running -= 1
+            if self.running == 0:
+                self.idle.set()
 
     # Slack の出来事
 
     def is_allowed(self, user: str | None) -> bool:
-        return bool(self.config.allowed_user_id) and user == self.config.allowed_user_id
+        return guard.is_owner(self.config, user)
 
     async def channel_name(self, channel: str) -> str:
         if channel not in self.channel_names:
@@ -455,7 +482,7 @@ class Assistant:
 
     async def publish_home(self, user_id: str) -> None:
         view = home.build_home(self.config, self.store, self._theme_names(),
-                               is_owner=user_id == self.config.allowed_user_id)
+                               is_owner=guard.is_owner(self.config, user_id))
         await self.slack.views_publish(user_id=user_id, view=view)
 
     async def on_home_opened(self, event: dict) -> None:
@@ -465,7 +492,7 @@ class Assistant:
     async def on_home_action(self, body: dict) -> None:
         """App Home のボタンと時刻の選択。変えられるのは依頼者だけ。"""
         user = body.get("user", {}).get("id")
-        if user != self.config.allowed_user_id:
+        if not guard.is_owner(self.config, user):
             return
         action = (body.get("actions") or [{}])[0]
         action_id = action.get("action_id", "")
@@ -490,7 +517,7 @@ class Assistant:
     async def on_add_domain(self, body: dict) -> dict | None:
         """「接続先を足す」の送信。入力がおかしければ、欄ごとの説明を返す（モーダルに出す）。"""
         user = body.get("user", {}).get("id")
-        if user != self.config.allowed_user_id:
+        if not guard.is_owner(self.config, user):
             return {"domain": "依頼者だけが変えられます"}
         theme, domain = home.read_add_domain(body.get("view", {}))
         if theme not in self._theme_names():
@@ -601,7 +628,8 @@ class Assistant:
         themes.ensure_workspace(ws)
         async with self.semaphore:
             run_id = self.store.start_run("", "", channel_name, trigger)
-            result = await runner.run_claude(self.config, ws, prompt, None, "", "")
+            with self.claude_running():
+                result = await runner.run_claude(self.config, ws, prompt, None, "", "")
             self.store.end_run(run_id, result.is_error, result.cost_usd)
         return result
 
@@ -664,8 +692,7 @@ class Assistant:
             await self.post(req, f"{FAILED_PREFIX} {e}")
             return None
         if ws.kind is ChannelKind.IMPROVE:
-            await self.record_backlog(req)
-            return None
+            return await self.improve(req, ws)
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
             ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
@@ -710,15 +737,17 @@ class Assistant:
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
 
-        result = await runner.run_claude(
-            self.config, ws, prompt, session_id, req.channel, req.thread_ts, ui.activity, ui.text
-        )
+        with self.claude_running():
+            result = await runner.run_claude(
+                self.config, ws, prompt, session_id, req.channel, req.thread_ts, ui.activity, ui.text
+            )
         if result.session_missing:
             replies = await self.slack.conversations_replies(channel=req.channel, ts=req.thread_ts, limit=200)
             prompt = history_prompt(replies.get("messages", []), self.bot_user_id, prompt, req.message_ts)
-            result = await runner.run_claude(
-                self.config, ws, prompt, None, req.channel, req.thread_ts, ui.activity, ui.text
-            )
+            with self.claude_running():
+                result = await runner.run_claude(
+                    self.config, ws, prompt, None, req.channel, req.thread_ts, ui.activity, ui.text
+                )
 
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if result.session_id:
@@ -769,6 +798,163 @@ class Assistant:
             except Exception:
                 log.debug("リアクションを変えられません", exc_info=True)
 
+    # Ezra 自身を直す（docs/plan.md の12章）
+
+    async def improve(self, req: Request, ws: Workspace) -> runner.RunResult | None:
+        """#research-ezra のやりとり。案を考えるときはコードを読むだけで、書き込めるのは一時ディレクトリだけ。"""
+        if req.trigger == "message" and req.message_ts == req.thread_ts:
+            await self.record_backlog(req)
+        scratch = self.config.state_dir / "improve" / req.thread_ts
+        scratch.mkdir(parents=True, exist_ok=True)
+        ws = replace(ws, cwd=scratch)
+        async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
+            result = await self.run(req, ws)
+        # 「着手」「取り込み」は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。
+        # ジョブの完了や接続の許可で自動で再開した回の返事では動かない
+        if req.trigger != "message":
+            return result
+        if improve.wants(result.text, improve.START_MARKER):
+            await self.start_self_fix(req)
+        elif improve.wants(result.text, improve.MERGE_MARKER):
+            await self.merge_self_fix(req)
+        return result
+
+    async def start_self_fix(self, req: Request) -> None:
+        """合意した案で、worktree を作って直し始める。直すのは1つずつ。"""
+        others = [r for r in self.store.improvements_in("working", "review", "restarting")
+                  if r["thread_ts"] != req.thread_ts]
+        if others:
+            await self.post(req, f"{FAILED_PREFIX} 先に進んでいる直しがあるので、それを取り込んでから着手するね。")
+            return
+        row = self.store.improvement(req.channel, req.thread_ts)
+        if row is not None and row["status"] in ("working", "review", "restarting"):
+            return
+        worktree, branch, base = await asyncio.to_thread(improve.create_worktree, self.config, req.thread_ts)
+        self.store.start_improvement(req.channel, req.thread_ts, req.text,
+                                     branch=branch, worktree=str(worktree), base_commit=base)
+        await self.post(req, f"🛠 直し始めるね（`{branch}`、`{base[:7]}` から）。"
+                             "テストが通るまでやって、変えた内容をここに出す。")
+        task = asyncio.create_task(self._self_fix(req, worktree, branch, base))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def _self_fix(self, req: Request, worktree: Path, branch: str, base: str) -> None:
+        ws = Workspace(req.channel_name, ChannelKind.SELF_FIX, worktree)
+        replies = await self.slack.conversations_replies(channel=req.channel, ts=req.thread_ts, limit=200)
+        prompt = improve.FIX_PROMPT + history_prompt(replies.get("messages", []), self.bot_user_id, "", None)
+        ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
+        await ui.start()
+        with self.claude_running():
+            result = await runner.run_claude(self.config, ws, prompt, None, req.channel, req.thread_ts,
+                                             ui.activity, ui.text)
+        await ui.finish(result.text, awaiting=True)
+        if result.is_error:
+            self.store.update_improvement(req.channel, req.thread_ts, status="failed",
+                                          detail="; ".join(result.errors)[:500])
+            await self.post(req, f"{FAILED_PREFIX} 直している途中で止まったよ: {'; '.join(result.errors)[:500]}")
+            return
+        commit = await asyncio.to_thread(improve.commit_all, worktree, self_fix_commit_message(req.text, result.text))
+        if commit is None:
+            self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="変更なし")
+            await self.post(req, f"{FAILED_PREFIX} 変わったファイルがなかったよ。")
+            return
+        problems = await asyncio.to_thread(guard.check_change, worktree, base, "HEAD")
+        if problems:
+            self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="; ".join(problems))
+            await self.post(req, f"{FAILED_PREFIX} この差分は取り込めないよ:\n" + "\n".join(f"• {p}" for p in problems))
+            return
+        self.store.update_improvement(req.channel, req.thread_ts, status="review")
+        await self.upload_diff(req, worktree, base)
+        await self.post(req, improve.review_summary(self.config, worktree, base, result.text, ""), markdown=True)
+
+    async def upload_diff(self, req: Request, worktree: Path, base: str) -> None:
+        diff = await asyncio.to_thread(improve.diff_text, worktree, base, "HEAD")
+        try:
+            await self.slack.files_upload_v2(
+                channel=req.channel, thread_ts=req.thread_ts,
+                file_uploads=[{"filename": "change.diff", "title": "change.diff", "content": diff[:900_000]}])
+        except Exception:
+            log.warning("差分を添付できません", exc_info=True)
+
+    async def merge_self_fix(self, req: Request) -> None:
+        """依頼者が「いいよ」と言った差分を、テストを回してから main に取り込み、push する。"""
+        row = self.store.improvement(req.channel, req.thread_ts)
+        if row is None or row["status"] != "review":
+            await self.post(req, f"{FAILED_PREFIX} 取り込めるものが見つからないよ。")
+            return
+        worktree, branch, base = Path(row["worktree"]), row["branch"], row["base_commit"]
+        if await asyncio.to_thread(improve.repo_dirty, self.config.repo_root):
+            await self.post(req, f"{FAILED_PREFIX} 手元のリポジトリにコミットしていない変更があるよ。"
+                                 "先にコミットしてから、もう一度「いいよ」と言って。")
+            return
+        if await asyncio.to_thread(improve.head, self.config.repo_root) != base:
+            caught = await asyncio.to_thread(improve.catch_up_with_main, worktree)
+            if not caught.ok:
+                self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail=caught.output[:500])
+                await self.post(req, f"{FAILED_PREFIX} main に合わせ直せなかったよ:\n```\n{caught.output[:1000]}\n```")
+                return
+            base = await asyncio.to_thread(improve.head, self.config.repo_root)
+            self.store.update_improvement(req.channel, req.thread_ts, base_commit=base)
+            await self.upload_diff(req, worktree, base)
+            await self.post(req, "main が先に進んでいたので、その上に乗せ直したよ。差分を見て、もう一度「いいよ」と言って。")
+            return
+        checks = await asyncio.to_thread(improve.run_checks, worktree)
+        if not checks.ok:
+            self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="確認が通らない")
+            await self.post(req, f"{FAILED_PREFIX} 取り込む前の確認が通らなかったよ:\n```\n{checks.output[:2000]}\n```")
+            return
+        problems = await asyncio.to_thread(guard.check_change, worktree, base, "HEAD")
+        if problems:
+            self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="; ".join(problems))
+            await self.post(req, f"{FAILED_PREFIX} この差分は取り込めないよ:\n" + "\n".join(f"• {p}" for p in problems))
+            return
+        merged = await asyncio.to_thread(improve.merge_and_push, self.config, branch)
+        improve.mark_pending(self.config, base, req.thread_ts)
+        self.store.update_improvement(req.channel, req.thread_ts, status="restarting", merge_commit=merged)
+        await asyncio.to_thread(improve.remove_worktree, self.config, worktree, branch)
+        await self.post(req, f"📦 取り込んで GitHub に push したよ（`{merged[:7]}`）。"
+                             "動いている作業が終わったら、新しい版で起動し直す。")
+        self.request_restart()
+
+    def request_restart(self) -> None:
+        """動いている claude の作業がなくなったら終了する（launchd が新しい版で起動し直す）。"""
+        async def wait_then_restart() -> None:
+            await self.idle.wait()
+            log.info("新しい版で起動し直すため、終了します")
+            self.restart_requested.set()
+
+        task = asyncio.create_task(wait_then_restart())
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def announce_update(self) -> None:
+        """起動したときに、取り込みの結果をスレッドに知らせる。"""
+        rolled = improve.read_rolled_back(self.config)
+        if rolled is not None:
+            previous, thread_ts = rolled
+            row = self.store.improvement_by_thread(thread_ts) if thread_ts else None
+            if row is not None:
+                req = Request(row["channel"], await self.channel_name(row["channel"]), thread_ts, None, "")
+                await self.post(req, f"{FAILED_PREFIX} 新しい版で起動できなかったので、`{previous[:7]}` に戻したよ。"
+                                     "取り消しの内容は GitHub にも送った。ログを見て、直し方を考え直そう。")
+                self.store.update_improvement(row["channel"], thread_ts, status="failed", detail="起動できなかった")
+            await asyncio.to_thread(improve.push_revert, self.config)
+            improve.rolled_back_path(self.config).unlink(missing_ok=True)
+            return
+        pending = improve.read_pending(self.config)
+        if pending is None:
+            return
+        previous, thread_ts = pending
+        improve.pending_path(self.config).unlink(missing_ok=True)
+        row = self.store.improvement_by_thread(thread_ts) if thread_ts else None
+        if row is None:
+            return
+        req = Request(row["channel"], await self.channel_name(row["channel"]), thread_ts, None, "")
+        self.store.update_improvement(row["channel"], thread_ts, status="done")
+        await self.post(req, f"✅ 新しい版で起動したよ（`{(row['merge_commit'] or '')[:7]}`）。"
+                             f"うまくいかなければ `{previous[:7]}` に戻せる。")
+        await asyncio.to_thread(improve.mark_backlog_done, self.config, row["request"])
+
     # 接続先の申し出（docs/plan.md の11章）
 
     def new_connect_requests(self, ws: Workspace, text: str,
@@ -808,7 +994,7 @@ class Assistant:
 
     async def on_domain_action(self, body: dict) -> None:
         """[許可する] [断る] が押された。押せるのは依頼者だけ。"""
-        if body.get("user", {}).get("id") != self.config.allowed_user_id:
+        if not guard.is_owner(self.config, body.get("user", {}).get("id")):
             return
         action = (body.get("actions") or [{}])[0]
         allowed = action.get("action_id") == "ezra_domain_allow"

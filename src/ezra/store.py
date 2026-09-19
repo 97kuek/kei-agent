@@ -59,6 +59,23 @@ CREATE TABLE IF NOT EXISTS runs (
     is_error INTEGER,
     cost_usd REAL
 );
+-- Ezra 自身を直す流れ（improve.py）
+CREATE TABLE IF NOT EXISTS improvements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel TEXT NOT NULL,
+    thread_ts TEXT NOT NULL UNIQUE,
+    request TEXT NOT NULL,
+    -- planning（案を出している） / working（直している） / review（取り込み待ち）
+    -- / restarting（取り込んで再起動待ち） / done / failed
+    status TEXT NOT NULL,
+    branch TEXT,
+    worktree TEXT,
+    base_commit TEXT,
+    merge_commit TEXT,
+    detail TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
 -- Slack から変える設定（settings.py）
 CREATE TABLE IF NOT EXISTS theme_domains (
     theme TEXT NOT NULL,
@@ -190,6 +207,41 @@ class Store:
                      updated_at = excluded.updated_at""",
                 (channel, thread_ts, channel_name, session_id, now, now),
             )
+
+    # Ezra 自身を直す流れ（improve.py）
+
+    def improvement(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM improvements WHERE channel = ? AND thread_ts = ?", (channel, thread_ts)).fetchone()
+
+    def improvement_by_thread(self, thread_ts: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM improvements WHERE thread_ts = ?", (thread_ts,)).fetchone()
+
+    def improvements_in(self, *statuses: str) -> list[sqlite3.Row]:
+        marks = ", ".join("?" * len(statuses))
+        return self.conn.execute(
+            f"SELECT * FROM improvements WHERE status IN ({marks}) ORDER BY id", statuses).fetchall()
+
+    def start_improvement(self, channel: str, thread_ts: str, request: str, **values) -> sqlite3.Row:
+        now = time.time()
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO improvements (channel, thread_ts, request, status, created_at, updated_at)
+                   VALUES (?, ?, ?, 'working', ?, ?)
+                   ON CONFLICT (thread_ts) DO UPDATE SET status = 'working', updated_at = excluded.updated_at""",
+                (channel, thread_ts, request, now, now),
+            )
+        return self.update_improvement(channel, thread_ts, **values)
+
+    def update_improvement(self, channel: str, thread_ts: str, **values) -> sqlite3.Row:
+        if values:
+            sets = ", ".join(f"{k} = ?" for k in values)
+            with self.conn:
+                self.conn.execute(
+                    f"UPDATE improvements SET {sets}, updated_at = ? WHERE channel = ? AND thread_ts = ?",
+                    (*values.values(), time.time(), channel, thread_ts),
+                )
+        return self.improvement(channel, thread_ts)
 
     def set_prompt_version(self, channel: str, thread_ts: str, version: str) -> None:
         with self.conn:

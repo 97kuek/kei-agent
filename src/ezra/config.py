@@ -10,6 +10,8 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from ezra.guard import DEFAULT_DENY_READ
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -27,18 +29,6 @@ def path_without_venv(path: str, repo_root: Path) -> str:
     return os.pathsep.join(p for p in path.split(os.pathsep) if p and p != venv_bin)
 
 
-# sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
-# 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
-DEFAULT_DENY_READ = (
-    "~/.config/zsh/local",   # Ezra の秘密情報（deploy/README.md）
-    "~/.ssh",
-    "~/.aws",
-    "~/.claude",             # Claude Code の認証情報
-    "~/.config/gh",          # バックアップ先への push 権限
-    "~/.netrc",
-    "~/.git-credentials",
-    "~/.config/git/credentials",
-)
 
 
 @dataclass(frozen=True)

@@ -12,6 +12,7 @@ import sqlite3
 import time
 
 from ezra.config import Config
+from ezra.guard import valid_domain
 from ezra.store import Store
 
 # Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）
@@ -26,18 +27,8 @@ SCHEDULE_LABELS = {
     "maintenance": "毎晩の保守とバックアップ",
 }
 
-_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_DOMAIN = re.compile(rf"^(?:{_LABEL}\.)+[a-z][a-z0-9-]{{0,61}}[a-z0-9]$")
 _REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[）)])?\s*$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-
-
-def valid_domain(domain: str, allow_wildcard: bool = False) -> bool:
-    """ぴったりのドメイン名か。allow_wildcard なら先頭の `*.` だけ許す（App Home から自分で足すとき）。"""
-    domain = domain.strip().lower()
-    if allow_wildcard and domain.startswith("*."):
-        domain = domain[2:]
-    return bool(_DOMAIN.match(domain))
 
 
 # テーマごとの接続先

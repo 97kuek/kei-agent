@@ -191,8 +191,9 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
 
     backlog = (config.research_root / "_overview" / "backlog.md").read_text()
     assert "#research-ezra" in backlog and "経過をもっと細かく" in backlog
+    # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
+    assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
     assert "https://example.slack.com/archives/C9/p201" in backlog
-    assert claude.calls == []
     assert slack.texts()[-1] == f"要望を `{config.research_root / '_overview' / 'backlog.md'}` に記録しました。"
 
 
