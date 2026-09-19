@@ -92,13 +92,13 @@ def test_apply_events():
             {"type": "tool_use", "name": "Bash", "input": {"command": "ls", "description": "一覧を見る"}},
         ]},
     })
-    assert activity == "Bash: 一覧を見る"
+    assert activity == "実行している: 一覧を見る"
     runner.apply_event(result, {
         "type": "result", "subtype": "success", "session_id": "s1", "result": "完了",
         "is_error": False, "total_cost_usd": 0.1, "duration_ms": 1000,
     })
     assert (result.session_id, result.text, result.is_error, result.cost_usd) == ("s1", "完了", False, 0.1)
-    assert result.activities == ["Bash: 一覧を見る"]
+    assert result.activities == ["実行している: 一覧を見る"]
 
 
 def test_missing_session_detected():
@@ -112,7 +112,7 @@ def test_missing_session_detected():
 
 def test_describe_tool_truncates():
     text = runner.describe_tool("WebSearch", {"query": "あ" * 200})
-    assert text.startswith("Web検索: ") and text.endswith("…") and len(text) < 100
+    assert text.startswith("Web で検索している: ") and text.endswith("…") and len(text) < 100
 
 
 def test_settings_deny_reading_secret_locations(config):
@@ -184,3 +184,8 @@ def test_a_normal_error_is_not_a_usage_limit():
     result = runner.RunResult()
     runner.apply_event(result, {"type": "result", "is_error": True, "result": "rate limited by the tool"})
     assert result.limit_reset_at is None
+
+
+def test_describe_tool_uses_plain_japanese():
+    assert runner.describe_tool("Read", {"file_path": "a.py"}) == "読んでいる: a.py"
+    assert runner.describe_tool("Grep", {"pattern": "x"}) == "調べている: x"

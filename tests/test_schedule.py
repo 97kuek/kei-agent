@@ -106,7 +106,7 @@ async def test_moon_reaction_creates_notion_task_and_removal_cancels(env):
     assert (task.title, task.status, task.theme_names) == ("条件Cも回して", "今夜やる", ["vlm"])
     assert task.slack_url == "https://example.slack.com/archives/C1/p1789636798229039"
     assert "> 試行は3回" in assistant.notion.bodies[task.id]
-    assert slack.texts()[-1].startswith("🌙 今夜の Task にしました")
+    assert slack.texts()[-1].startswith("🌙 今夜の Task にしたよ")
 
     await assistant.on_reaction_removed(MOON)
     assert task.status == "未着手"
@@ -129,7 +129,7 @@ async def test_moon_reaction_reports_notion_failure(env):
     assistant.notion.fail = True
     await assistant.on_reaction_added(MOON)
     posted = slack.posted()
-    assert posted[0]["text"] == "⚠️ Notion に Task を作れませんでした"
+    assert posted[0]["text"] == "⚠️ Notion に Task を作れなかったよ"
     assert posted[1]["channel"] == "C9" and "503" in posted[1]["text"]
 
 

@@ -304,3 +304,8 @@ async def test_start_needs_a_second_yes(env):
     claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}, {"text": "直した", "side_effect": edits_code()}]
     await second_yes(assistant)
     assert assistant.store.improvement("C9", "20.1")["status"] == "review"
+
+
+def test_strip_markers_removes_only_marker_lines():
+    text = "直したよ。\n:memo: 件名: x\n🛠 着手\n📦 取り込み"
+    assert improve.strip_markers(text) == "直したよ。\n:memo: 件名: x"

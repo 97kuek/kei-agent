@@ -131,7 +131,7 @@ async def test_error_result_is_reported(env):
     claude.behaviors = [{"is_error": True, "text": "", "errors": ["rate limited"]}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
-    assert slack.texts()[-1] == "⚠️ エラーで止まりました: rate limited"
+    assert slack.texts()[-1] == "⚠️ エラーで止まっちゃった: rate limited"
     # 止まったときは ✅ ではなく ⚠️ をつける
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) not in slack.calls
@@ -195,7 +195,7 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
     # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
     assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
     assert "https://example.slack.com/archives/C9/p201" in backlog
-    assert slack.texts()[-1] == f"要望を `{config.research_root / '_overview' / 'backlog.md'}` に記録しました。"
+    assert slack.texts()[-1] == f"要望を `{config.research_root / '_overview' / 'backlog.md'}` に記録したよ。"
 
 
 async def test_thread_broadcast_reply_continues_thread(env, store):
@@ -229,7 +229,7 @@ async def test_upload_failure_does_not_hide_result(env, config, monkeypatch):
 
     assert slack.streamed() == ["結果です"]
     texts = slack.texts()
-    assert texts[-1].startswith("⚠️ `outputs/` のファイルを添付できませんでした")
+    assert texts[-1].startswith("⚠️ `outputs/` のファイルを添付できなかったよ")
     assert not any("内部エラー" in t for t in texts)
 
 
@@ -314,7 +314,7 @@ async def test_job_submitted_during_run_then_resumed_when_finished(env, config, 
     await settle(assistant)
 
     assert len(pueue.added) == 1
-    assert "🧪 ジョブ 1「sweep」を投入しました: `scripts/sweep.py --n 50`" in slack.texts()
+    assert "🧪 ジョブ 1「sweep」を投入したよ: `scripts/sweep.py --n 50`" in slack.texts()
     # ジョブが走っている間は、スレッドを作業中のままにしておく
     assert slack.statuses()[-1] == "processing"
 
@@ -331,7 +331,7 @@ async def test_job_submitted_during_run_then_resumed_when_finished(env, config, 
     resumed = claude.calls[1]
     assert resumed["session_id"] == "sess-1" and resumed["thread_ts"] == "10.1"
     assert "ジョブ 1「sweep」が終わりました" in resumed["prompt"] and "10分0秒" in resumed["prompt"]
-    assert "🧪 ジョブ 1「sweep」が終わりました（成功）。結果を確認します" in slack.texts()
+    assert "🧪 ジョブ 1「sweep」が終わったよ（成功）。結果を見てみるね" in slack.texts()
     assert slack.streamed()[-1] == "集計しました"
     assert slack.statuses()[-1] == "active"  # 報告し終えたら、次の依頼待ちに戻す
     upload, = [kw for name, kw in slack.calls if name == "files_upload_v2"]
@@ -492,7 +492,7 @@ async def test_overlapping_threads_are_warned_when_files_are_attached(env, confi
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
     await settle(assistant)
 
-    assert any("別のスレッドの図が混ざっているかもしれません" in t for t in slack.texts())
+    assert any("別のスレッドの図が混ざっているかもしれない" in t for t in slack.texts())
 
 
 # 接続先の申し出（🔒 接続:）
@@ -647,7 +647,7 @@ async def test_usage_limit_is_retried_after_it_resets(env, store, monkeypatch):
 
     texts = "\n".join(slack.texts())
     assert "上限" in texts and "やり直す" in texts
-    assert "エラーで止まりました" not in texts        # ふつうのエラーとしては出さない
+    assert "エラーで止まっちゃった" not in texts        # ふつうのエラーとしては出さない
     assert assistant.limited_until > time.time()
     assert store.due_deferred("request", time.time()) == []      # まだ明けていない
 

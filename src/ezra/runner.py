@@ -73,19 +73,25 @@ def describe_tool(name: str, tool_input: dict) -> str:
         return s if len(s) <= n else s[: n - 1] + "…"
 
     if name == "Bash":
-        return "Bash: " + short(tool_input.get("description") or tool_input.get("command", ""))
-    if name in ("Read", "Write", "Edit", "NotebookEdit"):
-        return f"{name}: {short(tool_input.get('file_path', ''))}"
-    if name in ("Glob", "Grep"):
-        return f"{name}: {short(tool_input.get('pattern', ''))}"
+        return "実行している: " + short(tool_input.get("description") or tool_input.get("command", ""))
+    if name == "Read":
+        return f"読んでいる: {short(tool_input.get('file_path', ''))}"
+    if name in ("Write", "NotebookEdit"):
+        return f"書いている: {short(tool_input.get('file_path', ''))}"
+    if name == "Edit":
+        return f"直している: {short(tool_input.get('file_path', ''))}"
+    if name == "Glob":
+        return f"探している: {short(tool_input.get('pattern', ''))}"
+    if name == "Grep":
+        return f"調べている: {short(tool_input.get('pattern', ''))}"
     if name == "WebSearch":
-        return "Web検索: " + short(tool_input.get("query", ""))
+        return "Web で検索している: " + short(tool_input.get("query", ""))
     if name == "WebFetch":
-        return "Webページ取得: " + short(tool_input.get("url", ""))
+        return "Web ページを読んでいる: " + short(tool_input.get("url", ""))
     if name == "Skill":
-        return "skill: " + short(tool_input.get("skill", ""))
+        return "skill を使っている: " + short(tool_input.get("skill", ""))
     if name == "TodoWrite":
-        return "作業計画を更新"
+        return "作業の進め方を整理している"
     return name
 
 

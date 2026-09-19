@@ -577,10 +577,10 @@ class Assistant:
         try:
             task = await asyncio.to_thread(self.notion.create_night_task, title, name, link, body)
         except NotionError as e:
-            await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れませんでした")
+            await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れなかったよ")
             await self.notify_trouble(f"🌙 の Task を Notion に作れませんでした: {e}")
             return
-        await self.post(req, f"🌙 今夜の Task にしました: <{task.url}|{task.title}>")
+        await self.post(req, f"🌙 今夜の Task にしたよ: <{task.url}|{task.title}>")
 
     async def on_reaction_removed(self, event: dict) -> None:
         item = event.get("item") or {}
@@ -644,7 +644,7 @@ class Assistant:
             for chunk in split_text(result.text):
                 await self.post(req, chunk, markdown=True)
         if result.is_error:
-            await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {'; '.join(result.errors)[:1500] or '原因不明'}")
+            await self.post(req, f"{FAILED_PREFIX} エラーで止まっちゃった: {'; '.join(result.errors)[:1500] or '原因不明'}")
         if footer:
             await self.post(req, footer)
         return thread_ts
@@ -705,7 +705,7 @@ class Assistant:
                 return await self.run(req, ws)
             except Exception as e:
                 log.exception("依頼の処理に失敗しました")
-                await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まりました: `{type(e).__name__}: {e}`")
+                await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
                 return None
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
@@ -761,16 +761,18 @@ class Assistant:
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
-        streamed = await ui.finish(result.text, awaiting and not result.is_error)
+        # 着手・取り込みの合図は、検出に使うだけで Slack には出さない（result.text は残す）
+        shown = improve.strip_markers(result.text) if ws.kind is ChannelKind.IMPROVE else result.text
+        streamed = await ui.finish(shown, awaiting and not result.is_error)
 
-        if result.text:
-            append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Ezra", result.text)
+        if shown:
+            append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Ezra", shown)
             if not streamed:  # 流して見せられなかったときだけ、まとめて投稿する
-                for chunk in split_text(result.text):
+                for chunk in split_text(shown):
                     await self.post(req, chunk, markdown=True)
         if result.is_error:
             reason = "上限時間を超えたので止めました" if result.timed_out else "; ".join(result.errors)[:1500]
-            await self.post(req, f"{FAILED_PREFIX} エラーで止まりました: {reason or '原因不明'}")
+            await self.post(req, f"{FAILED_PREFIX} エラーで止まっちゃった: {reason or '原因不明'}")
 
         overlapped = self.theme_runs.end(req.channel_name, req.thread_ts)
         try:
@@ -779,11 +781,11 @@ class Assistant:
             if new_files and overlapped:
                 # 時刻では自分の図と隣の図を区別できないので、混ざりうることを黙って隠さない
                 await self.post(req, f"{FAILED_PREFIX} このテーマで別のスレッドも動いていたので、"
-                                     "別のスレッドの図が混ざっているかもしれません。")
+                                     "別のスレッドの図が混ざっているかもしれない。")
         except Exception as e:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")
-            await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できませんでした: `{type(e).__name__}: {e}`")
+            await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できなかったよ: `{type(e).__name__}: {e}`")
         await self.mark_answered(req, result.is_error)
         await self.ask_for_domains(req, ws, connect)
         await self.handle_job_requests(ws.cwd)
@@ -935,6 +937,7 @@ class Assistant:
         prompt = improve.FIX_PROMPT + history_prompt(replies.get("messages", []), self.bot_user_id, "", None)
         ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
         await ui.start()
+        await ui.activity("改善中…")
         with self.claude_running():
             result = await runner.run_claude(self.config, ws, prompt, None, req.channel, req.thread_ts,
                                              ui.activity, ui.text)
@@ -990,7 +993,13 @@ class Assistant:
             await self.upload_diff(req, worktree, base)
             await self.post(req, "main が先に進んでいたので、その上に乗せ直したよ。差分を見て、もう一度「いいよ」と言って。")
             return
-        checks = await asyncio.to_thread(improve.run_checks, worktree)
+        ui = ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
+        await ui.start()
+        await ui.activity("取り込み中…")
+        try:
+            checks = await asyncio.to_thread(improve.run_checks, worktree)
+        finally:
+            await ui.finish("")
         if not checks.ok:
             self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="確認が通らない")
             await self.post(req, f"{FAILED_PREFIX} 取り込む前の確認が通らなかったよ:\n```\n{checks.output[:2000]}\n```")
@@ -1195,7 +1204,7 @@ class Assistant:
         body = req.text.replace("\n", "\n  ")
         with path.open("a", encoding="utf-8") as f:
             f.write(f"\n- [ ] {stamp} {body} {link}\n")
-        await self.post(req, f"要望を `{path}` に記録しました。")
+        await self.post(req, f"要望を `{path}` に記録したよ。")
 
     # ジョブ
 
@@ -1205,13 +1214,13 @@ class Assistant:
             known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
             req = Request(o.channel, "", o.thread_ts, None, "")
             if o.error:
-                text = (f"ジョブ「{o.job.name}」を投入できませんでした: {o.error}") if o.job else o.error
+                text = (f"ジョブ「{o.job.name}」を投入できなかったよ: {o.error}") if o.job else o.error
                 if known:
                     await self.post(req, f"{FAILED_PREFIX} {text}")
                 else:
                     await self.notify_trouble(f"`{cwd}` のジョブの依頼: {text}")
                 continue
-            await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入しました: `{o.job.command}`")
+            await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入したよ: `{o.job.command}`")
 
     async def poll_jobs(self) -> None:
         """テーマのディレクトリに残った依頼を処理し、終わったジョブを報告する。"""
@@ -1226,7 +1235,7 @@ class Assistant:
                 continue
             req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
             status = {"succeeded": "成功", "failed": "失敗", "cancelled": "取り消し"}.get(job.status, job.status)
-            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わりました（{status}）。結果を確認します")
+            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ（{status}）。結果を見てみるね")
             await self.submit(Request(
                 channel=job.channel,
                 channel_name=row["channel_name"],

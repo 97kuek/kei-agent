@@ -39,6 +39,13 @@ def wants(text: str, marker: str) -> bool:
     return any(line.strip().startswith(marker) for line in text.splitlines())
 
 
+def strip_markers(text: str) -> str:
+    """合図の行（着手・取り込み）を、Slack に出す本文から取り除く。"""
+    kept = [line for line in text.splitlines()
+            if not line.strip().startswith((START_MARKER, MERGE_MARKER))]
+    return "\n".join(kept).rstrip()
+
+
 def owner_replies(messages: list[dict], bot_user_id: str, thread_ts: str, current_ts: str | None = None) -> int:
     """スレッドで依頼者が返事した回数（最初の依頼は数えない）。いま届いた返事も数える。"""
     seen = {m.get("ts") for m in messages
