@@ -864,6 +864,13 @@ class Assistant:
 
     async def start_self_fix(self, req: Request) -> None:
         """合意した案で、worktree を作って直し始める。直すのは1つずつ。"""
+        replies = await self.slack.conversations_replies(channel=req.channel, ts=req.thread_ts, limit=200)
+        answered = improve.owner_replies(replies.get("messages", []), self.bot_user_id,
+                                         req.thread_ts, req.message_ts)
+        if answered < improve.REPLIES_BEFORE_START:
+            # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回をもらってから動く
+            await self.post(req, "念のため確認させて。この直し方で進めていい？")
+            return
         others = [r for r in self.store.improvements_in("working", "review", "restarting")
                   if r["thread_ts"] != req.thread_ts]
         if others:

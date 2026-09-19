@@ -150,6 +150,7 @@ uv run ezra-schedule maintenance   # 今すぐ整理とバックアップを1回
 |---|---|
 | Daily と振り返りの材料（`_overview/.ezra/digest/`） | 30日 |
 | テーマのディレクトリで動かした Claude のセッションの記録（`~/.claude/projects/` のうち `~/research` の下に対応するものだけ） | 90日。消えたセッションのスレッドは、次に返信したときにスレッドの履歴から続きを始める |
+| Ezra が自分を直すのに使った worktree（`<state_dir>/worktrees/`）と、案を考えるときの一時ディレクトリ | 直している最中のもの以外は毎晩消す |
 
 ログは Ezra 自身が `~/Library/Logs/ezra/ezra.log` に書き、5MB ごとに回して5世代だけ残す。
 `~/Library/Logs/ezra/launchd.log` には、起動に失敗したときの出力だけが残る。

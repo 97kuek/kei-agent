@@ -53,8 +53,9 @@ def remove_older_than(paths: list[Path], cutoff: float) -> int:
     return removed
 
 
-def cleanup(config: Config, claude_projects: Path, now: float | None = None) -> dict:
-    """Daily の材料と、テーマのディレクトリで動かした Claude のセッションの記録のうち、古いものを消す。"""
+def cleanup(config: Config, claude_projects: Path, now: float | None = None,
+            keep_worktrees: frozenset[str] = frozenset(), keep_scratch: frozenset[str] = frozenset()) -> dict:
+    """Daily の材料、Claude のセッションの記録、使い終わった worktree のうち、古いものを消す。"""
     now = time.time() if now is None else now
     m = config.maintenance
     root = config.research_root
@@ -75,7 +76,35 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None) -> 
     # スレッドのログ（Codex が経緯を読むためのもの）も、セッションと同じ日数で整理する
     logs = [p for ws in workspaces for p in (ws / ".ezra" / "threads").glob("*.md")]
     removed_logs = remove_older_than(logs, now - m.thread_log_retention_days * 86400)
-    return {"digests": removed_digests, "sessions": removed_sessions, "thread_logs": removed_logs}
+    removed_worktrees = remove_finished_worktrees(config, keep_worktrees, keep_scratch)
+    return {"digests": removed_digests, "sessions": removed_sessions, "thread_logs": removed_logs,
+            "worktrees": removed_worktrees}
+
+
+def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
+                              keep_scratch: frozenset[str]) -> int:
+    """Ezra 自身を直すのに使った worktree と一時ディレクトリのうち、もう使っていないものを片付ける。
+
+    いま使っているものの名前は、SQLite を持っている側（schedule.py）が渡す。
+    """
+    from ezra import improve
+
+    in_use, active = keep_worktrees, keep_scratch
+    removed = 0
+    root = improve.worktree_root(config)
+    if root.is_dir():
+        for path in sorted(p for p in root.iterdir() if p.is_dir()):
+            if path.name in in_use:
+                continue
+            improve.remove_worktree(config, path, f"ezra/{path.name}")
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    scratch = config.state_dir / "improve"
+    if scratch.is_dir():
+        for path in sorted(p for p in scratch.iterdir() if p.is_dir()):
+            if path.name not in active:
+                shutil.rmtree(path, ignore_errors=True)
+    return removed
 
 
 def dump_state(config: Config, store: Store | None = None) -> Path:

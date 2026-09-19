@@ -31,8 +31,21 @@ ROLLED_BACK_NAME = "update-rolled-back"
 MAX_START_ATTEMPTS = 3
 
 
+# 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回。これを数えてから着手する
+REPLIES_BEFORE_START = 2
+
+
 def wants(text: str, marker: str) -> bool:
     return any(line.strip().startswith(marker) for line in text.splitlines())
+
+
+def owner_replies(messages: list[dict], bot_user_id: str, thread_ts: str, current_ts: str | None = None) -> int:
+    """スレッドで依頼者が返事した回数（最初の依頼は数えない）。いま届いた返事も数える。"""
+    seen = {m.get("ts") for m in messages
+            if m.get("ts") != thread_ts and not m.get("bot_id") and m.get("user") != bot_user_id}
+    if current_ts and current_ts != thread_ts:
+        seen.add(current_ts)
+    return len(seen)
 
 
 @dataclass

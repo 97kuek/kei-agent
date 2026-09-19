@@ -350,7 +350,13 @@ class Scheduler:
 
     async def run_maintenance(self, day: str) -> dict:
         detail: dict = {"status": "done"}
-        detail["removed"] = await asyncio.to_thread(maintenance.cleanup, self.config, maintenance.claude_projects_dir())
+        # いま直している最中の worktree と一時ディレクトリは残す（SQLite は別スレッドから触れない）
+        busy = self.store.improvements_in("working", "review", "restarting")
+        keep_worktrees = frozenset(Path(r["worktree"]).name for r in busy if r["worktree"])
+        keep_scratch = frozenset(r["thread_ts"] for r in busy)
+        detail["removed"] = await asyncio.to_thread(
+            maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None,
+            keep_worktrees, keep_scratch)
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)

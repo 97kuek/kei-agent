@@ -4,6 +4,8 @@
 
 ![Ezra の構成](docs/architecture.svg)
 
+自分で自分を直す流れは [docs/self-improve.svg](docs/self-improve.svg) にまとめている。
+
 ##　利用方法
 
 - 研究テーマごとにチャンネルを作り、Ezra を招待する（`#vlm-counting` なら `~/research/vlm-counting/` と Notion のテーマができる）
@@ -57,7 +59,11 @@ uv run pytest
 | `src/ezra/notion_store.py` | Task とノートの読み書き（夜間の Task、Daily、振り返り） |
 | `src/ezra/maintenance.py` | 毎晩の保守（古いファイルの整理、研究データのバックアップ） |
 | `src/ezra/timelog.py` | 研究時間の記録（人は Toggl、Ezra は `runs`）と、週ごとの材料の書き出し |
-| `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間） |
+| `src/ezra/guard.py` | 柵（sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定）。Ezra 自身に直させない |
+| `src/ezra/improve.py` | Slack から Ezra 自身を直す流れ（worktree、確認、取り込み、push、入れ替え） |
+| `src/ezra/settings.py` | Slack から変える設定（テーマごとの接続先、決まった時刻の処理の時刻） |
+| `src/ezra/home.py` | App Home（Slack で Ezra を開いたときの設定画面） |
+| `src/ezra/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間、接続先、改善） |
 | `plugin/` | `claude -p` に読み込ませる skill（`ezra:job`、`ezra:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |
 

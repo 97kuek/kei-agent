@@ -58,6 +58,24 @@ def edits_code(text="y = 2\n"):
     return side_effect
 
 
+async def agreed(assistant, slack, claude, request="直して"):
+    """依頼 → 案 →「いいよ」→「これで進めていい？」まで進めたスレッドにする。"""
+    claude.behaviors = [{"text": "こう直すつもり"}, {"text": "これで進めていい？"}]
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": f"<@UBOT> {request}"})
+    await settle(assistant)
+    slack.replies = [{"user": "UME", "ts": "20.1", "text": request},
+                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"}]
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.3", "thread_ts": "20.1", "text": "いいよ"})
+    await settle(assistant)
+    slack.replies += [{"user": "UME", "ts": "20.3", "text": "いいよ"},
+                      {"user": "UBOT", "bot_id": "B1", "ts": "20.4", "text": "これで進めていい？"}]
+
+
+async def second_yes(assistant, ts="20.5"):
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": ts, "thread_ts": "20.1", "text": "いいよ"})
+    await settle(assistant)
+
+
 # 差分の確認（柵）
 
 def test_check_change_rejects_protected_paths(repo):
@@ -117,16 +135,16 @@ async def test_improve_channel_records_backlog_and_plans_without_writing_code(en
 
 async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
     claude.behaviors = [
-        {"text": "こう直すつもり\n🛠 着手"},
+        {"text": "じゃあやるね\n🛠 着手"},
         {"text": "直したよ。テストは通った\n📝 件名: app.py の値を直す", "side_effect": edits_code()},
     ]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
-    await settle(assistant)
+    await second_yes(assistant)
 
     row = assistant.store.improvement("C9", "20.1")
     assert row["status"] == "review" and row["branch"] == "ezra/improve-20-1"
-    assert claude.calls[1]["cwd"] == Path(row["worktree"])
+    assert claude.calls[-1]["cwd"] == Path(row["worktree"])   # 最後の回が worktree での直し
     assert git(Path(row["worktree"]), "log", "-1", "--format=%s") == "app.py の値を直す"
     texts = "\n".join(slack.texts())
     assert "直し始めるね" in texts and "取り込んでいい？" in texts and "`src/app.py`" in texts
@@ -137,6 +155,7 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
 async def test_start_marker_from_an_automatic_run_is_ignored(env):
     """ジョブの完了などで自動で再開した回の返事に着手の行があっても、動かない。"""
     assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}]
     from ezra.assistant import Request
     await assistant.submit(Request("C9", "research-ezra", "20.1", None, "ジョブが終わった", trigger="job"))
@@ -146,10 +165,16 @@ async def test_start_marker_from_an_automatic_run_is_ignored(env):
 
 async def test_only_one_improvement_at_a_time(env):
     assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude, "1つめ")
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()}, {"text": "🛠 着手"}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 1つめ"})
-    await settle(assistant)
+    await second_yes(assistant)
+    claude.behaviors = [{"text": "案だよ"}, {"text": "🛠 着手"}]
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "21.1", "text": "<@UBOT> 2つめ"})
+    await settle(assistant)
+    slack.replies = [{"user": "UME", "ts": "21.1", "text": "2つめ"},
+                     {"user": "UME", "ts": "21.2", "text": "いいよ"},
+                     {"user": "UBOT", "bot_id": "B1", "ts": "21.3", "text": "これで進めていい？"}]
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "21.4", "thread_ts": "21.1", "text": "いいよ"})
     await settle(assistant)
     assert assistant.store.improvement("C9", "21.1") is None
     assert "先に進んでいる直しがある" in "\n".join(slack.texts())
@@ -159,9 +184,9 @@ async def test_only_one_improvement_at_a_time(env):
 
 async def prepared(env, monkeypatch):
     assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": edits_code()}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
-    await settle(assistant)
+    await second_yes(assistant)
     monkeypatch.setattr(improve, "run_checks", lambda worktree: improve.CommandResult(True, "テストは通った"))
     claude.behaviors = [{"text": "じゃあ入れるね\n📦 取り込み"}]
     return assistant, slack, claude, cfg
@@ -224,9 +249,9 @@ async def test_protected_change_is_not_offered_for_review(env):
     def touches_guard(cwd: Path):
         (cwd / "config.toml").write_text("research_root = \"/tmp\"\n")
 
+    await agreed(assistant, slack, claude, "柵を変えて")
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": touches_guard}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 柵を変えて"})
-    await settle(assistant)
+    await second_yes(assistant)
 
     assert assistant.store.improvement("C9", "20.1")["status"] == "failed"
     assert "柵のファイルに触れています" in "\n".join(slack.texts())
@@ -258,3 +283,24 @@ async def test_announce_after_a_rollback(env, monkeypatch):
     assert assistant.store.improvement("C9", "20.1")["status"] == "failed"
     assert not improve.rolled_back_path(cfg).exists()
     assert "起動できなかったので" in "\n".join(slack.texts())
+
+
+async def test_start_needs_a_second_yes(env):
+    """案への「いいよ」だけでは着手しない。「これで進めていい？」にもう一度答えてから。"""
+    assistant, slack, claude, cfg = env
+    claude.behaviors = [{"text": "こう直すつもり"}, {"text": "じゃあやるね\n🛠 着手"}]
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
+    await settle(assistant)
+    slack.replies = [{"user": "UME", "ts": "20.1", "text": "直して"},
+                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"}]
+
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.3", "thread_ts": "20.1", "text": "いいよ"})
+    await settle(assistant)
+    assert assistant.store.improvement("C9", "20.1") is None      # 1回目では着手しない
+    assert "この直し方で進めていい？" in "\n".join(slack.texts())
+
+    slack.replies += [{"user": "UME", "ts": "20.3", "text": "いいよ"},
+                      {"user": "UBOT", "bot_id": "B1", "ts": "20.4", "text": "これで進めていい？"}]
+    claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}, {"text": "直した", "side_effect": edits_code()}]
+    await second_yes(assistant)
+    assert assistant.store.improvement("C9", "20.1")["status"] == "review"

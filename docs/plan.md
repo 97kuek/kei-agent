@@ -113,7 +113,11 @@ Codex側は読むだけにし、実行はBotだけが行う。
 | `reporter` | 経過用メッセージの書き換え、結果の返信、ファイルの添付 |
 | `jobs` | `pueue` を包んだ `submit / status / cancel` と、毎分の状態確認 |
 | `skills/` | 文献調査（arXiv / Semantic Scholar）、ジョブの投入、結果の報告の約束事 |
-| `deploy/` | `launchd` の plist と、起動用のシェルスクリプト |
+| `guard` | 柵。sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定（Ezra 自身に直させない） |
+| `settings` / `home` | Slack から変える設定（テーマごとの接続先、決まった時刻の処理）と、App Home の画面 |
+| `improve` | Slack から Ezra 自身を直す流れ（worktree、確認、取り込み、push、入れ替え）。12章 |
+| `timelog` | 研究時間の記録（人は Toggl、Ezra は `runs`）。10章 |
+| `deploy/` | `launchd` の plist と、起動用のシェルスクリプト（入れ替えに失敗したときの巻き戻しもここ） |
 
 Botが1回動いた時間は、フェーズ1のうちから `sessions` に記録しておく。フェーズ5の「Assistantの稼働時間」にそのまま使える。
 
@@ -159,8 +163,8 @@ Botが1回動いた時間は、フェーズ1のうちから `sessions` に記録
 | 2 | 決まった時刻の処理（07:00 先行研究、08:00 Daily、21:00 振り返り、01:30 夜間のTask、停滞時の声かけ） |
 | 3 | Notionをつなぐ（計画・考察・Task）。Notionの形は、フェーズ1〜2で手で使いながら決める |
 | 4 | Mac miniなどの専用機への移行（夜間の作業にはMacが常に動いている必要がある） |
-| 5 | 研究時間の記録とグラフ（人の時間と、Assistantの稼働時間） |
-| 6 | Ezra の改善のチャンネルから、Ezra が自分のコードを直す（12章） |
+| 5 | 研究時間の記録とグラフ（人の時間と、Assistantの稼働時間）。2026-09-19 実装（10章） |
+| 6 | Ezra の改善のチャンネルから、Ezra が自分のコードを直す。2026-09-19 実装（12章） |
 | 7 | 研究室Slackの参照（管理者の許可が要ることが多い） |
 | 8 | HPC（Wisteria / Miyabi / ABCI）とGPUをつなぐ。`jobs` の中身をSLURMなどに差し替える |
 
@@ -234,6 +238,8 @@ Codexから直接Slackに投稿する運用は、フェーズとは別に、依�
 
 
 ## 12. フェーズ6の設計（Slack から Ezra 自身を直す）
+
+流れの図は [self-improve.svg](self-improve.svg)。
 
 2026-09-19 の設計の確認で決めた内容。`#research-ezra` に書いた要望から、Ezra が自分のコードを直し、取り込み、再起動するまでを回す。
 コードを書くのは Ezra か Claude Code だけで、人は Slack で方針と取り込みを決める。
