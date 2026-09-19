@@ -83,6 +83,19 @@ def test_check_change_accepts_a_normal_fix(repo):
     assert guard.check_change(repo, "main", "HEAD") == []
 
 
+def test_commit_message_uses_the_subject_claude_wrote():
+    summary = "**やったこと**\n\nログの進捗行を間引いた。\n\n📝 件名: ジョブのログから進捗の行を間引く"
+    message = improve.commit_message("ログが読みにくい（とても長い要望の文が続く）", summary)
+    assert message.splitlines()[0] == "ジョブのログから進捗の行を間引く"
+    assert "件名:" not in message and "ログの進捗行を間引いた。" in message
+    assert message.splitlines()[1] == "" and "**やったこと**" in message   # 空行を残す
+
+
+def test_commit_message_falls_back_to_the_request():
+    message = improve.commit_message("ログが読みにくい", "直したよ")
+    assert message.splitlines()[0] == "ログが読みにくい"
+
+
 # やりとりから着手まで
 
 async def test_improve_channel_records_backlog_and_plans_without_writing_code(env, config):
@@ -106,7 +119,7 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     assistant, slack, claude, cfg = env
     claude.behaviors = [
         {"text": "こう直すつもり\n🛠 着手"},
-        {"text": "直したよ。テストは通った", "side_effect": edits_code()},
+        {"text": "直したよ。テストは通った\n📝 件名: app.py の値を直す", "side_effect": edits_code()},
     ]
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
     await settle(assistant)
@@ -114,6 +127,7 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     row = assistant.store.improvement("C9", "20.1")
     assert row["status"] == "review" and row["branch"] == "ezra/improve-20-1"
     assert claude.calls[1]["cwd"] == Path(row["worktree"])
+    assert git(Path(row["worktree"]), "log", "-1", "--format=%s") == "app.py の値を直す"
     texts = "\n".join(slack.texts())
     assert "直し始めるね" in texts and "取り込んでいい？" in texts and "`src/app.py`" in texts
     upload, = [kw for name, kw in slack.calls if name == "files_upload_v2"]

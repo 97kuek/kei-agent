@@ -178,13 +178,6 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     )
 
 
-def self_fix_commit_message(request: str, summary: str) -> str:
-    """Ezra 自身を直したときのコミットメッセージ。件名は要望、本文は変えた内容の要約。"""
-    subject = " ".join(request.split())[:60] or "Ezra の改善"
-    body = "\n".join(line for line in summary.strip().splitlines() if line.strip())[:1500]
-    return f"{subject}\n\n{body}\n\n#research-ezra の要望から、Ezra 自身が直した。"
-
-
 def rules_update_prompt(rules: str) -> str:
     """会話の途中で prompts/system.md が変わったときに、依頼の前に付ける文。"""
     return ("[Ezra からの自動メッセージ] Ezra としての振る舞いの決まりが更新されました。"
@@ -853,7 +846,8 @@ class Assistant:
                                           detail="; ".join(result.errors)[:500])
             await self.post(req, f"{FAILED_PREFIX} 直している途中で止まったよ: {'; '.join(result.errors)[:500]}")
             return
-        commit = await asyncio.to_thread(improve.commit_all, worktree, self_fix_commit_message(req.text, result.text))
+        message = improve.commit_message(req.text, result.text)
+        commit = await asyncio.to_thread(improve.commit_all, worktree, message)
         if commit is None:
             self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail="変更なし")
             await self.post(req, f"{FAILED_PREFIX} 変わったファイルがなかったよ。")

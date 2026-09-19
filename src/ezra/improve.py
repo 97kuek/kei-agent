@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 # Claude が返答の最後に書く行。Ezra 本体は、依頼者の投稿で始まった回の返事にあるときだけ動く
 START_MARKER = "🛠 着手"
+# 直したあと、コミットの件名として書いてもらう行
+SUBJECT_MARKER = "📝 件名:"
 MERGE_MARKER = "📦 取り込み"
 
 # 取り込んだあとに残すファイル。新しい版が Slack につながったら消す
@@ -174,6 +176,7 @@ FIX_PROMPT = """\
 - テストのないところを直すときは、先に落ちるテストを書いてから直してください
 - コミットはしないでください（Ezra 本体がまとめてコミットします）
 - 最後に、何をどう変えたかと、テストの結果を短くまとめてください
+- いちばん最後の行に `📝 件名: <コミットの件名を一行で>` と書いてください（何をしたかが分かる、50字くらいの日本語）
 
 これまでのやりとり:
 """
@@ -196,3 +199,21 @@ def mark_backlog_done(config: Config, request: str) -> None:
             lines[i] = line.replace("- [ ]", "- [x]", 1) + "（Ezra が直して取り込み済み）"
             break
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def subject_from(text: str, fallback: str) -> str:
+    """Claude が書いた `📝 件名:` の行。なければ要望の先頭を使う。"""
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith(SUBJECT_MARKER):
+            subject = line[len(SUBJECT_MARKER):].strip()
+            if subject:
+                return subject[:72]
+    return " ".join(fallback.split())[:50]
+
+
+def commit_message(request: str, summary: str) -> str:
+    """Ezra 自身を直したときのコミットメッセージ。件名は Claude が書いた1行、本文は変えた内容の要約。"""
+    body = [line for line in summary.strip().splitlines() if not line.strip().startswith(SUBJECT_MARKER)]
+    text = "\n".join(body).strip()[:1500]
+    return f"{subject_from(summary, request)}\n\n{text}\n\n#research-ezra の要望から、Ezra 自身が直した。"
