@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -29,9 +28,6 @@ log = logging.getLogger(__name__)
 PROGRESS_PREFIX = "⏳"
 DONE_PREFIX = "✅"
 FAILED_PREFIX = "⚠️"
-STATUS_INTERVAL_SECONDS = 3.0
-# ステータスに順ぐりに出す言葉（Slack が選んで表示する）
-LOADING_MESSAGES = ("考えています…", "調べています…", "手を動かしています…")
 MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # Slack から受け取って inputs/ に保存する1ファイルの上限
@@ -40,6 +36,8 @@ SLACK_TEXT_LIMIT = 11000
 
 NIGHT_REACTION = "crescent_moon"
 DONE_REACTION = "white_check_mark"
+SEEN_REACTION = "eyes"
+FAILED_REACTION = "warning"
 # Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
 AWAITING_MARKER = "❓ 確認:"
 
@@ -177,9 +175,10 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
 
 
 class ThreadUI:
-    """作業中の見せ方。Slack の AI アプリ向けの API を使う。
+    """作業中の見せ方。Slack の AI アプリ（Agent）向けの API を使う。
 
-    - `agents.sessions.setStatus`: Bot の名前のところと、入力欄の下に、いま何をしているかを出す
+    - `agents.sessions.setStatus`: スレッドの状態を切り替える。processing（作業中。Slack が「Working...」を出す）、
+      active（次の依頼待ち）、suspended（依頼者の返事待ち）のどれか。自由な文章は出せない
     - `chat.startStream` / `appendStream` / `stopStream`: 返事を書きながら流して見せる
 
     どちらもワークスペースや App の設定によっては使えないので、失敗したら黙って
@@ -195,15 +194,12 @@ class ThreadUI:
         self.status_ok = True
         self.stream_ok = True
         self.stream_ts: str | None = None
-        self.last_status = 0.0
 
     async def start(self) -> None:
-        await self._status("作業を始めます", LOADING_MESSAGES)
+        await self._status("processing")
 
     async def activity(self, activity: str) -> None:
-        """ツールを呼ぶたびに呼ばれる。出しすぎないよう間隔をあける。"""
-        if time.monotonic() - self.last_status >= STATUS_INTERVAL_SECONDS:
-            await self._status(activity)
+        """ツールを呼ぶたびに呼ばれる。agents.sessions.setStatus は文章を出せないので、いまは何もしない。"""
 
     async def text(self, chunk: str) -> None:
         """Claude が書いた文章を、そのままスレッドに流す。"""
@@ -225,8 +221,8 @@ class ThreadUI:
             log.warning("返事を流して見せられないので、まとめて投稿します", exc_info=True)
             self.stream_ok = False
 
-    async def finish(self) -> bool:
-        """ステータスを消す。流して見せられていれば True（結果をもう一度投稿しない）。"""
+    async def finish(self, awaiting: bool = False) -> bool:
+        """スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。流して見せられていれば True（結果をもう一度投稿しない）。"""
         streamed = False
         if self.stream_ts is not None:
             try:
@@ -234,20 +230,16 @@ class ThreadUI:
                 streamed = self.stream_ok
             except Exception:
                 log.warning("流して見せた返事を終われません", exc_info=True)
-        await self._status("")
+        await self._status("suspended" if awaiting else "active")
         return streamed
 
-    async def _status(self, status: str, loading_messages: tuple[str, ...] = ()) -> None:
+    async def _status(self, status: str) -> None:
         if not self.status_ok:
             return
-        self.last_status = time.monotonic()
-        params = {"channel_id": self.channel, "thread_ts": self.thread_ts, "status": status[:100]}
-        if loading_messages:
-            params["loading_messages"] = list(loading_messages)
         try:
-            await self.slack.agents_sessions_setStatus(**params)
+            await self.slack.agents_sessions_setStatus(channel_id=self.channel, thread_ts=self.thread_ts, status=status)
         except Exception:
-            # 「Agents & AI Apps」が有効でないワークスペースでは使えない
+            # App の「Agent experience」が有効でないと使えない
             log.info("スレッドのステータスを出せません", exc_info=True)
             self.status_ok = False
 
@@ -520,7 +512,7 @@ class Assistant:
             self.store.set_awaiting(req.channel, req.thread_ts, False)
         if req.message_ts:
             try:
-                await self.slack.reactions_add(channel=req.channel, timestamp=req.message_ts, name="eyes")
+                await self.slack.reactions_add(channel=req.channel, timestamp=req.message_ts, name=SEEN_REACTION)
             except Exception:
                 log.debug("リアクションをつけられません", exc_info=True)
         task = asyncio.create_task(self._process_and_report(req))
@@ -602,7 +594,7 @@ class Assistant:
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         await self.sync_review_conclusion(req)
-        streamed = await ui.finish()
+        streamed = await ui.finish(awaiting and not result.is_error)
 
         if result.text:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Ezra", result.text)
@@ -625,8 +617,20 @@ class Assistant:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")
             await self.post(req, f"{FAILED_PREFIX} `outputs/` のファイルを添付できませんでした: `{type(e).__name__}: {e}`")
+        await self.mark_answered(req, result.is_error)
         await self.handle_job_requests(ws.cwd)
         return result
+
+    async def mark_answered(self, req: Request, failed: bool) -> None:
+        """答えた依頼の 👀 を外し、✅（止まったときは ⚠️）をつける。どの依頼に答えたかが一目で分かる。"""
+        if not req.message_ts:
+            return
+        for method, name in ((self.slack.reactions_remove, SEEN_REACTION),
+                             (self.slack.reactions_add, FAILED_REACTION if failed else DONE_REACTION)):
+            try:
+                await method(channel=req.channel, timestamp=req.message_ts, name=name)
+            except Exception:
+                log.debug("リアクションを変えられません", exc_info=True)
 
     async def sync_review_conclusion(self, req: Request) -> None:
         """振り返りのスレッドに貼られた結論を、Notion の振り返りページにも追記する。"""

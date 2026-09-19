@@ -35,8 +35,11 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert call["prompt"] == "図を作って" and call["session_id"] is None and call["thread_ts"] == "10.1"
     assert (config.research_root / "vlm" / "CLAUDE.md").exists()
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "eyes"}) in slack.calls
-    # いま何をしているかはステータスで見せ、返事は流しながら見せる
-    assert slack.statuses()[0] == "作業を始めます" and slack.statuses()[-1] == ""
+    # 作業中は agent session を processing にし、終わったら active に戻す。返事は流しながら見せる
+    assert slack.statuses() == ["processing", "active"]
+    # 終わったら 👀 を外して ✅ にする。どの依頼に答えたかが一目で分かる
+    assert ("reactions_remove", {"channel": "C1", "timestamp": "10.1", "name": "eyes"}) in slack.calls
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
     assert slack.streamed() == ["結果です"]
     assert any(name == "chat_stopStream" for name, _ in slack.calls)
     assert "結果です" not in slack.texts()  # 流して見せたので、もう一度投稿しない
@@ -123,6 +126,18 @@ async def test_error_result_is_reported(env):
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
     assert slack.texts()[-1] == "⚠️ エラーで止まりました: rate limited"
+    # 止まったときは ✅ ではなく ⚠️ をつける
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) not in slack.calls
+
+
+async def test_session_is_suspended_while_awaiting_answer(env):
+    """依頼者の判断を待つときは、Slack 側でも「返事待ち」に見せる。"""
+    assistant, slack, claude, _ = env
+    claude.behaviors = [{"text": "どちらにしますか\n❓ 確認: A と B のどちらにしますか"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
+    await settle(assistant)
+    assert slack.statuses() == ["processing", "suspended"]
 
 
 async def test_improve_channel_records_backlog_in_research_data(env, config):
