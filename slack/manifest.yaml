@@ -1,7 +1,7 @@
 # Slack App「Kei Agent」のマニフェスト。https://api.slack.com/apps → Create New App → From a manifest で貼り付ける
 display_information:
   name: Kei Agent
-  description: 研究室の助手。依頼された作業を進めて、経過と結果をスレッドに返す
+  description: 頼まれた用事を担当のエージェントに振り分けて進めるアシスタント。経過と結果をスレッドに返す
   background_color: "#2c3e50"
 features:
   bot_user:
@@ -10,7 +10,7 @@ features:
   # AI アプリとして扱う。作業中のステータス（agents.sessions.setStatus）と、
   # 返事を流しながら見せる表示（chat.startStream）に必要
   agent_view:
-    agent_description: 研究の作業を進めて、経過と結果をスレッドに返す
+    agent_description: 研究・授業・仕事の用事を受け取り、担当のエージェントが進めて結果を返す
   # 設定画面（テーマごとの接続先と、決まった時刻の処理）。docs/plan.md の11章
   app_home:
     home_tab_enabled: true

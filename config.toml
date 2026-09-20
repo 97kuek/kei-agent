@@ -26,8 +26,8 @@ handoff_after_turns = 8
 enabled = true
 literature = "07:00"  # 先行研究の新着（テーマごと）
 course = "07:30"      # 授業の締切の一覧（#20_course）。締切24時間前の知らせは、これとは別に1時間ごとに見る
-daily = "08:00"       # Daily（#research-overview）
-review = "21:00"      # 振り返りの材料（#research-overview）
+daily = "08:00"       # Daily（#01_overview）
+review = "21:00"      # 振り返りの材料（#01_overview）
 night = "01:30"       # 🌙 をつけた Task
 # Mac のスリープなどで逃した処理を、何時間後まで実行するか
 catch_up_hours = 3
@@ -59,7 +59,7 @@ work = "http://127.0.0.1:8789"
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
-overview = ["research-overview", "research-strategy"]
+overview = ["overview", "research-overview", "research-strategy"]
 # Kei Agent の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
 # チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
 improve = ["research-agent", "kei-agent"]

@@ -1,7 +1,7 @@
 [project]
 name = "kei-agent"
 version = "0.1.0"
-description = "Kei Agent: Slack から Claude Code に研究作業を頼むアシスタント"
+description = "Kei Agent: Slack から頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進めるアシスタント"
 authors = [
     { name = "97kuek", email = "keitaro.ueki@icloud.com" }
 ]

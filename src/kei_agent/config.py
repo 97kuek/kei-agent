@@ -85,7 +85,7 @@ class Config:
     state_dir: Path
     repo_root: Path
     allowed_user_id: str
-    overview_channels: tuple[str, ...] = ("research-overview", "research-strategy")
+    overview_channels: tuple[str, ...] = ("overview", "research-overview", "research-strategy")
     improve_channels: tuple[str, ...] = ("research-agent",)
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
     course_channels: tuple[str, ...] = ("course",)
