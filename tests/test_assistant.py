@@ -1205,3 +1205,44 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
 
     assert asked == [("list-due", {"days": 3})]
     assert router.STATUS_TEXT in slack.thinking()
+
+
+# 仕事のチャンネル（#30_work）
+
+
+async def test_work_channel_asks_the_work_agent(env, monkeypatch):
+    """仕事の依頼は仕事エージェントに取り次ぎ、予定を日ごとに分けて出す。"""
+    import json as _json
+
+    from kei_agent import a2a, router
+
+    assistant, slack, claude, _ = env
+    slack.channels["C8"] = "30_work"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8789"
+
+        async def card(self):
+            return {"skills": [{"id": "list-events", "description": "予定"}]}
+
+        async def ask(self, skill, text="", params=None):
+            asked.append((skill, params))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "予定 1 件", "limit_reset_at": None, "cost_usd": None,
+                "data": {"days": 1, "items": [{"subject": "朝会", "start": "2026-09-21T10:00:00",
+                                               "end": "2026-09-21T10:15:00", "location": "Zoom"}]}}))
+
+    assistant.agents["work"] = _Agent()
+
+    async def fake_pick(config, skills, text):
+        return router.Choice("list-events", {"days": 1})
+
+    monkeypatch.setattr(router, "pick", fake_pick)
+
+    await assistant.on_mention({"channel": "C8", "user": "UME", "ts": "15.1", "text": "<@UBOT> 今日の予定は？"})
+    await settle(assistant)
+
+    assert asked == [("list-events", {"days": 1})]
+    assert claude.calls == []
+    assert any("朝会" in (t or "") for t in slack.texts())

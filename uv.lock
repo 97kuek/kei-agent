@@ -702,6 +702,10 @@ research = [
     { name = "a2a-sdk", extra = ["http-server"] },
     { name = "uvicorn" },
 ]
+work = [
+    { name = "a2a-sdk", extra = ["http-server"] },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -725,6 +729,10 @@ dev = [
 ]
 mcp = [{ name = "mcp", specifier = ">=1.19.0" }]
 research = [
+    { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
+    { name = "uvicorn", specifier = ">=0.53.0" },
+]
+work = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]

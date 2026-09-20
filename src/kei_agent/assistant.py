@@ -20,7 +20,19 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, agents, ask, course, guard, improve, research, runner, settings, themes
+from kei_agent import (
+    a2a,
+    agents,
+    ask,
+    course,
+    guard,
+    improve,
+    research,
+    runner,
+    settings,
+    themes,
+    work,
+)
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -59,6 +71,7 @@ from kei_agent.theme_files import (
 )
 from kei_agent.themes import ChannelKind, Workspace
 from kei_agent.thread_ui import ThreadUI
+from kei_agent.work import WorkChannel
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +115,7 @@ class ThemeRuns:
         return overlapped
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel):
+class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -322,6 +335,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel):
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
         elif ws.kind is ChannelKind.COURSE:
             text = "Kei Agent です。このチャンネルの用事は大学エージェントに取り次ぎます。\n" + course.CAN_DO
+        elif ws.kind is ChannelKind.WORK:
+            text = "Kei Agent です。このチャンネルの用事は仕事エージェントに取り次ぎます。\n" + work.CAN_DO
         else:
             state = "作りました" if created else "使います"
             text = (
@@ -518,6 +533,9 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel):
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.COURSE:
             await self.course(req)
+            return None
+        if ws.kind is ChannelKind.WORK:
+            await self.work(req)
             return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:

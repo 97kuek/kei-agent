@@ -55,6 +55,7 @@ timeout_seconds = 300
 # 行を消すと、そのエージェントは使わない（research を消すと、claude は本体の中で動く）
 course = "http://127.0.0.1:8787"
 research = "http://127.0.0.1:8788"
+work = "http://127.0.0.1:8789"
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
@@ -64,6 +65,8 @@ overview = ["research-overview", "research-strategy"]
 improve = ["research-agent", "kei-agent"]
 # 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない
 course = ["course"]
+# 仕事: 会社の予定など。依頼は仕事エージェント（A2A）に取り次ぐ
+work = ["work"]
 # 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
 # 個人用のチャンネルには Kei Agent を招待しない
 

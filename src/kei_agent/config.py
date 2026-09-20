@@ -89,6 +89,8 @@ class Config:
     improve_channels: tuple[str, ...] = ("research-agent",)
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
     course_channels: tuple[str, ...] = ("course",)
+    # 仕事エージェントに取り次ぐチャンネル
+    work_channels: tuple[str, ...] = ("work",)
     max_concurrent_runs: int = 2
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
@@ -135,7 +137,7 @@ TOP_LEVEL_KEYS = {
     "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule",
     "maintenance", "a2a",
 }
-CHANNELS_KEYS = {"overview", "improve", "course"}
+CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
 
 
@@ -187,6 +189,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
         course_channels=tuple(channels.get("course", Config.course_channels)),
+        work_channels=tuple(channels.get("work", Config.work_channels)),
         max_concurrent_runs=int(data.get("max_concurrent_runs", 2)),
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),

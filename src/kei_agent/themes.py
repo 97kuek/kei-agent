@@ -64,6 +64,8 @@ class ChannelKind(Enum):
     IMPROVE = "improve"
     # 大学（授業と課題）。ここでの依頼は大学エージェントに取り次ぐだけで、ファイルは持たない
     COURSE = "course"
+    # 仕事（会社の予定など）。同じく、仕事エージェントに取り次ぐ
+    WORK = "work"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
     SELF_FIX = "self_fix"
 
@@ -103,10 +105,12 @@ def theme_name(channel_name: str) -> str:
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・改善・大学以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・改善・大学・仕事以外は、すべて研究テーマとして扱う。"""
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
+    if channel_name in config.work_channels:
+        return Workspace(channel_name, ChannelKind.WORK, None)
     if channel_name in config.course_channels:
         # 作業場は大学エージェントの claude が使う（本体はここで claude を動かさない）
         return Workspace(channel_name, ChannelKind.COURSE, config.course_root)

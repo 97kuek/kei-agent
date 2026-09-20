@@ -23,6 +23,8 @@ kei-agent-course = "kei_agent_course.app:main"
 kei-agent-course-setup = "kei_agent_course.notion_setup:main"
 kei-agent-course-sync = "kei_agent_course.notion_sync:main"
 kei-agent-research = "kei_agent_research.app:main"
+kei-agent-work = "kei_agent_work.app:main"
+kei-agent-ms-login = "kei_agent_work.graph:main"
 kei-agent-box-login = "kei_agent_course.box:main"
 kei-agent-box-mcp = "kei_agent_course.box_mcp:main"
 
@@ -30,7 +32,8 @@ kei-agent-box-mcp = "kei_agent_course.box_mcp:main"
 # 机の上の音声対話（src/kei_agent_voice）と、A2A のエージェント（src/kei_agent_a2a、
 # src/kei_agent_course、src/kei_agent_research）は、Kei Agent 本体とは別のパッケージにしてある
 # （依存をそれぞれに閉じる）
-module-name = ["kei_agent", "kei_agent_voice", "kei_agent_a2a", "kei_agent_course", "kei_agent_research"]
+module-name = ["kei_agent", "kei_agent_voice", "kei_agent_a2a", "kei_agent_course", "kei_agent_research",
+               "kei_agent_work"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
@@ -48,6 +51,7 @@ mcp = [
 ]
 course = [{ include-group = "agents" }, { include-group = "mcp" }]
 research = [{ include-group = "agents" }]
+work = [{ include-group = "agents" }]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
