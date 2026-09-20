@@ -65,7 +65,13 @@ async def test_asking_a_skill_comes_back_with_an_answer(server):
     result = await Agent(server, TOKEN).ask("sync-assignments")
     assert result.ok and result.task_id
     # 中身はまだないので、何が足りないかを返す
-    assert "MOODLE_TOKEN" in result.text
+    assert "Notion の授業・課題データベース" in result.text
+
+
+async def test_list_due_says_what_is_missing_without_the_calendar_url(server, monkeypatch):
+    monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
+    result = await Agent(server, TOKEN).ask("list-due")
+    assert not result.ok and "カレンダーをエクスポート" in result.text
 
 
 async def test_unknown_skill_fails_with_a_reason(server):
