@@ -4,7 +4,7 @@
 - Agentの構成は以下の通り
 ![Kei Agent の構成](docs/architecture.svg)
 
-##　利用方法
+## 利用方法
 
 ![Kei Agent の1日](docs/schedule.svg)
 

@@ -442,6 +442,8 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         """依頼を受け付けて、裏で処理を始める。"""
         if req.trigger == "message":
             self.store.set_awaiting(req.channel, req.thread_ts, False)
+        if req.trigger in ("message", "voice"):
+            await self.drop_deferred_for(req)
         if req.message_ts:
             await self._react(self.slack.reactions_add, req.channel, req.message_ts, SEEN_REACTION)
         self.spawn(self._process_and_report(req))
@@ -482,6 +484,18 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 log.exception("依頼の処理に失敗しました")
                 await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
                 return None
+
+    async def drop_deferred_for(self, req: Request) -> None:
+        """上限で止まって自動でやり直す予定だった依頼を、このスレッドのぶんだけ取り消す。
+
+        依頼者が「続けて」と書いたあとに、同じ依頼が裏でもう一度走ると、二重に作業してしまう。
+        """
+        canceled = [i for i, payload in self.store.pending_deferred("request")
+                    if payload.get("channel") == req.channel and payload.get("thread_ts") == req.thread_ts]
+        for deferred_id in canceled:
+            self.store.finish_deferred(deferred_id)
+        if canceled:
+            await self.post(req, "上限で止まっていた依頼は、自動のやり直しをやめて、この続きとして進めるね。")
 
     async def tell_if_waiting(self, req: Request) -> bool:
         """同じスレッドの前の作業が続いているときは、黙って待たせずに一言返す。

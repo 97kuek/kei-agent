@@ -189,3 +189,34 @@ def test_a_normal_error_is_not_a_usage_limit():
 def test_describe_tool_uses_plain_japanese():
     assert runner.describe_tool("Read", {"file_path": "a.py"}) == "読んでいる: a.py"
     assert runner.describe_tool("Grep", {"pattern": "x"}) == "調べている: x"
+
+
+# 契約の上限の読み取り（書き方が版によって違う）
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Claude AI usage limit reached|1789830000", 1789830000.0),
+    ("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", "18:30"),
+    ("5-hour limit reached ∙ resets 3pm", "15:00"),
+    ("Weekly limit reached · resets 9am", "09:00"),
+    ("You've hit your session limit", runner.UNKNOWN_LIMIT_RESET),
+    ("ふつうのエラー: ファイルがありません", None),
+])
+def test_parse_limit_reads_every_wording(text, expected):
+    from datetime import datetime
+
+    now = datetime(2026, 9, 20, 12, 0).timestamp()
+    got = runner.parse_limit(text, now)
+    if isinstance(expected, str):
+        assert datetime.fromtimestamp(got).strftime("%H:%M") == expected
+        assert got > now  # 明ける時刻は必ず先
+    else:
+        assert got == expected
+
+
+def test_parse_limit_moves_to_tomorrow_when_the_time_has_passed():
+    from datetime import datetime
+
+    now = datetime(2026, 9, 20, 20, 0).timestamp()
+    got = runner.parse_limit("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", now)
+    assert datetime.fromtimestamp(got).strftime("%m/%d %H:%M") == "09/21 18:30"

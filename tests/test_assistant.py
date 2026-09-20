@@ -959,3 +959,27 @@ async def test_status_inquiry_during_busy_thread_answers_immediately_without_que
     await settle(assistant)
     # 進み具合を尋ねる一言は claude に渡らない。もとの依頼だけが処理される
     assert [c["prompt"] for c in claude.calls] == ["集計して"]
+
+
+async def test_saying_continue_cancels_the_scheduled_retry(env, store):
+    """上限で止まった依頼は明けたらやり直すが、先に依頼者が続けたら、そちらを優先して二重に走らせない。"""
+    assistant, slack, claude, _ = env
+    store.upsert_thread("C1", "10.1", "vlm", "sess-1")
+    claude.behaviors = [{"is_error": True, "text": "You've hit your session limit · resets 6:30pm (Asia/Tokyo)"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
+    await settle(assistant)
+
+    assert any("上限に達したみたい" in (t or "") for t in slack.texts())
+    assert len(store.pending_deferred("request")) == 1
+    assert store.get_thread("C1", "10.1")["stalled_request"] == "集計して"
+
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "続けて"})
+    await settle(assistant)
+
+    assert store.pending_deferred("request") == []
+    assert any("自動のやり直しをやめて" in (t or "") for t in slack.texts())
+    # 止まった依頼を文脈として渡す（「続けて」だけでは何を続けるか分からない）
+    assert "集計して" in claude.calls[1]["prompt"]
+    await assistant.retry_deferred(now=2 ** 31)
+    await settle(assistant)
+    assert len(claude.calls) == 2

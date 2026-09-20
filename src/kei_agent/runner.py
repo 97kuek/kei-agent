@@ -8,17 +8,25 @@ import json
 import os
 import re
 import signal
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from kei_agent import guard
 from kei_agent.config import Config, path_without_venv
 from kei_agent.themes import Workspace
 
-# 契約の上限に達したときに claude -p が返す文（`Claude AI usage limit reached|<エポック秒>`）。
+# 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
+#   `Claude AI usage limit reached|<エポック秒>`
+#   `You've hit your session limit · resets 6:30pm (Asia/Tokyo)`
+#   `5-hour limit reached ∙ resets 3pm`
 # 明ける時刻が古いまま返ることがあるので、過去の時刻はそのまま使わない
-_USAGE_LIMIT = re.compile(r"usage limit reached(?:\|(\d{10,13}))?", re.IGNORECASE)
+_USAGE_LIMIT = re.compile(r"(?:usage|session|hour|weekly)\s+limit\s+reached|hit your (?:usage|session|\w+)\s*limit",
+                          re.IGNORECASE)
+_LIMIT_EPOCH = re.compile(r"limit reached\|(\d{10,13})")
+_LIMIT_RESETS = re.compile(r"resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE)
 # 明ける時刻が分からないときに、これだけ待ってからやり直す（秒）
 UNKNOWN_LIMIT_RESET = -1.0
 
@@ -143,11 +151,31 @@ def apply_event(result: RunResult, event: dict) -> str | None:
         result.duration_ms = event.get("duration_ms")
         result.errors = [str(e) for e in event.get("errors") or []]
         if result.is_error:
-            match = _USAGE_LIMIT.search(" ".join([result.text, *result.errors]))
-            if match:
-                epoch = match.group(1)
-                result.limit_reset_at = float(epoch[:10]) if epoch else UNKNOWN_LIMIT_RESET
+            result.limit_reset_at = parse_limit(" ".join([result.text, *result.errors]))
     return None
+
+
+def parse_limit(text: str, now: float | None = None) -> float | None:
+    """契約の上限に当たったか。当たっていれば明ける時刻（エポック秒）、分からなければ UNKNOWN_LIMIT_RESET。"""
+    if not _USAGE_LIMIT.search(text):
+        return None
+    epoch = _LIMIT_EPOCH.search(text)
+    if epoch:
+        return float(epoch.group(1)[:10])
+    when = _LIMIT_RESETS.search(text)
+    if not when:
+        return UNKNOWN_LIMIT_RESET
+    hour, minute, ampm = int(when.group(1)), int(when.group(2) or 0), (when.group(3) or "").lower()
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return UNKNOWN_LIMIT_RESET
+    base = datetime.fromtimestamp(time.time() if now is None else now)
+    reset = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # 「3pm に明ける」が今より前なら、明日の 3pm のこと
+    return (reset if reset > base else reset + timedelta(days=1)).timestamp()
 
 
 def _kill_group(pid: int) -> None:

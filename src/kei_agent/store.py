@@ -278,6 +278,12 @@ class Store:
                 "UPDATE runs SET ended_at = ?, is_error = 1 WHERE ended_at IS NULL", (time.time(),))
         return cur.rowcount
 
+    def pending_deferred(self, kind: str) -> list[tuple[int, dict]]:
+        """まだやり直していないもの（時刻が来ているかは見ない）。"""
+        rows = self.conn.execute(
+            "SELECT id, payload FROM deferred_runs WHERE kind = ? AND done = 0 ORDER BY id", (kind,)).fetchall()
+        return [(r["id"], json.loads(r["payload"])) for r in rows]
+
     def finish_deferred(self, deferred_id: int) -> None:
         with self.conn:
             self.conn.execute("UPDATE deferred_runs SET done = 1 WHERE id = ?", (deferred_id,))
