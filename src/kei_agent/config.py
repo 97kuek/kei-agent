@@ -36,6 +36,7 @@ class ScheduleConfig:
     enabled: bool = True
     # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
     literature: str = "07:00"
+    course: str = "07:30"
     daily: str = "08:00"
     review: str = "21:00"
     night: str = "01:30"
@@ -63,21 +64,31 @@ class MaintenanceConfig:
 
 @dataclass(frozen=True)
 class A2AConfig:
-    """ほかのエージェントの住所（docs/plan.md の16章）。空なら、そのエージェントは使わない。"""
-    # 大学エージェント（Moodle・Notion の授業/課題・Toggl）
-    course_url: str = ""
-    # 相手を待つ時間（秒）
+    """ほかのエージェントの住所（docs/agents.md）。
+
+    `[a2a.agents]` に「名前 = 住所」を並べる。名前は launchd・ログ・秘密情報ファイル・ポートの
+    呼び名と同じにする。書かなければ、そのエージェントは使わない（研究を書かなければ本体の中で動かす）。
+    """
+    agents: dict[str, str] = field(default_factory=dict)
+    # 相手を待つ時間（秒）。claude を動かす仕事には、claude の上限時間を足して待つ
     timeout_seconds: float = 300
+
+    def url(self, name: str) -> str:
+        return self.agents.get(name, "")
 
 
 @dataclass(frozen=True)
 class Config:
     research_root: Path
+    # 授業の作業場（大学エージェントの claude が動くところ。資料は置かない）
+    course_root: Path
     state_dir: Path
     repo_root: Path
     allowed_user_id: str
     overview_channels: tuple[str, ...] = ("research-overview", "research-strategy")
     improve_channels: tuple[str, ...] = ("research-agent",)
+    # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
+    course_channels: tuple[str, ...] = ("course",)
     max_concurrent_runs: int = 2
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
@@ -120,11 +131,11 @@ class ConfigError(ValueError):
 
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
-    "research_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
+    "research_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule",
     "maintenance", "a2a",
 }
-CHANNELS_KEYS = {"overview", "improve"}
+CHANNELS_KEYS = {"overview", "improve", "course"}
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
 
 
@@ -144,6 +155,15 @@ def _section(cls, data: dict, name: str):
     return cls(**data)
 
 
+def _a2a(data: dict) -> A2AConfig:
+    """[a2a] と、その下の [a2a.agents]（名前 = 住所）を読む。"""
+    _check_keys(data, {"agents", "timeout_seconds"}, "[a2a]")
+    agents = data.get("agents", {})
+    if not isinstance(agents, dict) or any(not isinstance(v, str) for v in agents.values()):
+        raise ConfigError("config.toml の [a2a.agents] は「名前 = \"住所\"」の形で書いてください")
+    return A2AConfig(agents=dict(agents), timeout_seconds=float(data.get("timeout_seconds", 300)))
+
+
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
     env = dict(os.environ) if env is None else env
     path = path or Path(env.get("KEI_AGENT_CONFIG", REPO_ROOT / "config.toml"))
@@ -160,11 +180,13 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
+        course_root=_expand(data.get("course_root", "~/course")),
         state_dir=_expand(data.get("state_dir", "~/.local/state/kei-agent")),
         repo_root=REPO_ROOT,
         allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
+        course_channels=tuple(channels.get("course", Config.course_channels)),
         max_concurrent_runs=int(data.get("max_concurrent_runs", 2)),
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
@@ -178,6 +200,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),
         schedule=_section(ScheduleConfig, schedule, "schedule"),
         maintenance=_section(MaintenanceConfig, data.get("maintenance", {}), "maintenance"),
-        a2a=_section(A2AConfig, data.get("a2a", {}), "a2a"),
+        a2a=_a2a(data.get("a2a", {})),
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
     )

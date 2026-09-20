@@ -111,6 +111,21 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- エージェントが持っている会話の続き（どのスレッドの、どのエージェントの claude か）。
+-- 会話の単位はスレッドなので、本体が覚える（docs/agents.md）
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    channel TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (channel, thread_ts, agent)
+);
+-- 一度だけ知らせるもの（課題の締切 24 時間前など）。同じ目印では二度知らせない
+CREATE TABLE IF NOT EXISTS notices (
+    key TEXT PRIMARY KEY,
+    at REAL NOT NULL
+);
 """
 
 
@@ -439,6 +454,35 @@ class Store:
                 "INSERT OR REPLACE INTO schedule_runs (name, day, ran_at, detail) VALUES (?, ?, ?, ?)",
                 (name, day, time.time(), json.dumps(detail or {}, ensure_ascii=False)),
             )
+
+    # エージェントの会話の続き
+
+    def agent_session(self, channel: str, thread_ts: str, agent: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT session_id FROM agent_sessions WHERE channel = ? AND thread_ts = ? AND agent = ?",
+            (channel, thread_ts, agent)).fetchone()
+        return row["session_id"] if row else None
+
+    def set_agent_session(self, channel: str, thread_ts: str, agent: str, session_id: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO agent_sessions (channel, thread_ts, agent, session_id, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)", (channel, thread_ts, agent, session_id, time.time()))
+
+    # 一度だけ知らせるもの
+
+    def noticed(self, key: str) -> bool:
+        row = self.conn.execute("SELECT 1 FROM notices WHERE key = ?", (key,)).fetchone()
+        return row is not None
+
+    def record_notice(self, key: str) -> None:
+        with self.conn:
+            self.conn.execute("INSERT OR REPLACE INTO notices (key, at) VALUES (?, ?)", (key, time.time()))
+
+    def drop_old_notices(self, before: float) -> int:
+        """古い目印を捨てる（毎晩の保守から呼ぶ）。"""
+        with self.conn:
+            return self.conn.execute("DELETE FROM notices WHERE at < ?", (before,)).rowcount
 
     def forget_schedule(self, name: str, day: str) -> None:
         """その日の分の記録を消す（上限に当たったときなど、やり直せるようにする）。"""

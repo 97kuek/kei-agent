@@ -156,6 +156,11 @@ def test_course_setup_creates_two_databases(tmp_path):
     setup = notion_setup.CourseSetup(_Notion(), "home-page", tmp_path / "notion-course.json")
     setup.run()
 
+    setup.add_course("データベース", "月", 2)
+    setup.add_course("統計解析実習", "他")
+    added = [b["properties"] for m, p, b in calls if m == "POST" and p == "/pages"]
+    assert [(p["曜日"]["select"]["name"], p["時限"]["number"]) for p in added] == [("月", 2), ("他", None)]
+
     created = [b["title"][0]["text"]["content"] for m, p, b in calls if m == "POST" and p == "/databases"]
     assert created == ["授業", "課題"]
     assignments = next(b for m, p, b in calls if m == "POST" and p == "/databases"

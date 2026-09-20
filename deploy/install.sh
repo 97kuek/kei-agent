@@ -4,15 +4,20 @@
 #         deploy/install.sh remove        登録を外す
 #         deploy/install.sh course        大学エージェント（A2A サーバー）を登録
 #         deploy/install.sh course remove 大学エージェントの登録を外す
+#         deploy/install.sh research      研究エージェント（A2A サーバー）を登録
+#         deploy/install.sh research remove 研究エージェントの登録を外す
 set -eu
 
-# 引数に course を付けると、大学エージェント（A2A サーバー）のほうを登録する
-if [[ "${1:-}" == "course" ]]; then
-  LABEL="com.kei-agent.course"
-  shift
-else
-  LABEL="com.kei-agent.assistant"
-fi
+# 引数に course / research を付けると、そのエージェント（A2A サーバー）のほうを登録する
+case "${1:-}" in
+  course|research)
+    LABEL="com.kei-agent.${1}"
+    shift
+    ;;
+  *)
+    LABEL="com.kei-agent.assistant"
+    ;;
+esac
 REPO="${0:A:h:h}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/kei-agent"

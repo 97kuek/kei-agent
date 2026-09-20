@@ -101,3 +101,11 @@ def test_numbered_channel_uses_the_same_directory(config):
     plain = themes.resolve(config, "amr-query")
     numbered = themes.resolve(config, "10_amr-query")
     assert numbered.cwd == plain.cwd and numbered.channel_name == "amr-query"
+
+
+def test_course_channel_points_at_the_course_workspace(config):
+    """大学のチャンネルの作業場は ~/course（本体はここで claude を動かさず、大学エージェントが使う）。"""
+    ws = themes.resolve(config, "20_course")
+    assert ws.kind is themes.ChannelKind.COURSE and ws.cwd == config.course_root
+    assert themes.ensure_workspace(ws) is True
+    assert "授業と課題の資料は Box" in (ws.cwd / "CLAUDE.md").read_text()

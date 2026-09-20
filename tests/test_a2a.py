@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import json
 import socket
 
 import pytest
@@ -46,9 +47,9 @@ async def server():
 async def test_card_tells_what_the_agent_can_do(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"].startswith("Kei Agent")
-    assert [s["id"] for s in card["skills"]] == ["sync-assignments", "list-due", "time-report"]
-    # 流しながら返す機能は持たない、と正直に書く
-    assert card["capabilities"].get("streaming") in (False, None)
+    assert [s["id"] for s in card["skills"]] == ["sync-assignments", "list-due", "ask", "time-report"]
+    # 自由な質問（ask）は claude を動かすので、流しながら返す
+    assert card["capabilities"].get("streaming") is True
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
 
 
@@ -61,19 +62,41 @@ async def test_work_needs_the_password(server):
         await Agent(server, "違う合言葉").ask("list-due")
 
 
-async def test_asking_a_skill_comes_back_with_an_answer(server):
-    result = await Agent(server, TOKEN).ask("sync-assignments")
+async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
+    """締切の一覧が JSON で返る（見せ方はオーケストレーターが決める）。"""
+    from datetime import datetime
+
+    from kei_agent_course import ics, moodle
+
+    monkeypatch.setenv("MOODLE_ICS_URL", "https://example.invalid/calendar.ics")
+    monkeypatch.setattr(moodle, "due", lambda url, since=None, days=90: [
+        ics.Event(uid="1@moodle", summary="第3回レポート の 提出期限",
+                  starts_at=datetime(2026, 9, 25, 23, 59), course="データベース(2019ZZ)")])
+
+    result = await Agent(server, TOKEN).ask("list-due", params={"days": 30})
     assert result.ok and result.task_id
-    # 中身はまだないので、何が足りないかを返す
-    assert "Notion の授業・課題データベース" in result.text
+    # 返事は全エージェント共通の封筒。中身は data に入る
+    envelope = json.loads(result.answer)
+    assert envelope["ok"] is True and "1 件" in envelope["text"]
+    payload = envelope["data"]
+    assert payload["days"] == 30 and payload["more"] == 0
+    item, = payload["items"]
+    assert item["id"] == "1@moodle" and item["course"] == "データベース"
+    assert item["at"].startswith("2026-09-25T23:59")
+
+
+async def test_sync_says_what_is_missing_without_the_calendar_url(server, monkeypatch):
+    monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
+    result = await Agent(server, TOKEN).ask("sync-assignments")
+    assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
 
 
 async def test_list_due_says_what_is_missing_without_the_calendar_url(server, monkeypatch):
     monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
     result = await Agent(server, TOKEN).ask("list-due")
-    assert not result.ok and "カレンダーをエクスポート" in result.text
+    assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
 
 
 async def test_unknown_skill_fails_with_a_reason(server):
     result = await Agent(server, TOKEN).ask("", text="よろしく")
-    assert not result.ok and "どの仕事か分かりません" in result.text
+    assert not result.ok and "どの仕事か分かりません" in json.loads(result.answer)["text"]

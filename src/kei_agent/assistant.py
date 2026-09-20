@@ -15,12 +15,12 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Coroutine
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, ask, guard, improve, runner, settings, themes
+from kei_agent import a2a, agents, ask, course, guard, improve, research, runner, settings, themes
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -29,6 +29,7 @@ from kei_agent.auto_messages import (
     rules_update_prompt,
 )
 from kei_agent.config import Config
+from kei_agent.course import CourseChannel
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
 from kei_agent.notion import NotionError
@@ -101,7 +102,7 @@ class ThemeRuns:
         return overlapped
 
 
-class Assistant(SettingsActions, SelfFix, Handoff):
+class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -140,11 +141,10 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         self.restart_requested = asyncio.Event()
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
         self.limited_until = 0.0
-        # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手
-        self.agents: dict[str, a2a.Agent] = {}
-        if config.a2a.course_url:
-            self.agents["course"] = a2a.Agent(config.a2a.course_url, config.a2a_token,
-                                              timeout=config.a2a.timeout_seconds)
+        # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/agents.md）
+        self.agents: dict[str, a2a.Agent] = agents.build(config)
+        # 名刺から読んだスキルの一覧（振り分け係が使う）。起動時と、つながらなかったあとに読み直す
+        self.agent_skills: dict[str, list[dict]] = {}
 
     @contextmanager
     def claude_running(self):
@@ -320,6 +320,8 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             text = f"Kei Agent です。このチャンネルでメンションされた要望は `{self.config.backlog_path}` に記録します。"
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
+        elif ws.kind is ChannelKind.COURSE:
+            text = "Kei Agent です。このチャンネルの用事は大学エージェントに取り次ぎます。\n" + course.CAN_DO
         else:
             state = "作りました" if created else "使います"
             text = (
@@ -352,10 +354,18 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 await self.notify_trouble(f"{name} のエージェントにつながりません（{agent.base_url}）: "
                                           f"{type(e).__name__}: {e}")
                 continue
-            skills[name] = [s["id"] for s in card.get("skills", [])]
+            self.agent_skills[name] = list(card.get("skills") or [])
+            skills[name] = [s["id"] for s in self.agent_skills[name] if s.get("id")]
             log.info("%s のエージェントにつながりました（%s）: %s", name, card.get("name", "?"),
                      "、".join(skills[name]) or "できることなし")
         return skills
+
+    async def skills_of(self, name: str) -> list[dict]:
+        """そのエージェントのスキル（名刺から）。まだ読んでいなければ読む。"""
+        if name not in self.agent_skills and name in self.agents:
+            with suppress(Exception):
+                self.agent_skills[name] = list((await self.agents[name].card()).get("skills") or [])
+        return self.agent_skills.get(name, [])
 
     async def check_notion_schema(self) -> list[str]:
         """Notion の項目のずれを起動時に見て、あれば知らせる。黙って定期処理が止まるのを防ぐ。"""
@@ -426,6 +436,21 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         except NotionError as e:
             await self.notify_trouble(f"🌙 を外した Task を Notion で取り消せませんでした: {e}")
 
+    async def run_claude(self, ws: Workspace, prompt: str, session_id: str | None = None,
+                         channel: str = "", thread_ts: str = "",
+                         on_activity=None, on_text=None) -> runner.RunResult:
+        """claude を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
+
+        どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
+        """
+        agent = self.agents.get(research.AGENT)
+        with self.claude_running():
+            if agent is not None:
+                return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
+                                          on_activity, on_text)
+            return await runner.run_claude(self.config, ws, prompt, session_id, channel, thread_ts,
+                                           on_activity, on_text)
+
     # 決まった時刻の処理から使う（schedule.py）
 
     async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str) -> runner.RunResult:
@@ -434,8 +459,7 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         themes.ensure_workspace(ws)
         async with self.semaphore:
             run_id = self.store.start_run("", "", channel_name, trigger)
-            with self.claude_running():
-                result = await runner.run_claude(self.config, ws, prompt, None, "", "")
+            result = await self.run_claude(ws, prompt)
             self.store.end_run(run_id, result.is_error, result.cost_usd)
         return result
 
@@ -492,6 +516,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             return None
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
+        if ws.kind is ChannelKind.COURSE:
+            await self.course(req)
+            return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
             ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
@@ -640,9 +667,8 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         on_activity, on_text = (ui.activity, ui.text) if ui is not None else (None, None)
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
-            with self.claude_running():
-                return await runner.run_claude(self.config, ws, prompt, session_id, req.channel, req.thread_ts,
-                                               on_activity, on_text)
+            return await self.run_claude(ws, prompt, session_id, req.channel, req.thread_ts,
+                                         on_activity, on_text)
 
         result = await attempt(prompt, session_id)
         if result.session_missing:
@@ -762,6 +788,21 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         if reset_at <= now:
             return now + self.LIMIT_FALLBACK_SECONDS
         return reset_at + self.LIMIT_MARGIN_SECONDS
+
+    async def note_limit(self, reply: agents.Reply) -> None:
+        """エージェントが上限に当たったことを、本体の1か所に集める（約束は本体が持つ）。
+
+        エージェントは自分の claude を動かすが、契約の枠は1つなので、待つ・やり直すの管理は
+        オーケストレーターに寄せる（docs/agents.md）。
+        """
+        if reply.limit_reset_at is None:
+            return
+        until = self.limit_until(reply.limit_reset_at)
+        if until <= self.limited_until:
+            return
+        self.limited_until = until
+        when = datetime.fromtimestamp(until).strftime("%H:%M")
+        await self.notify_trouble(f"エージェントが Claude の契約の上限に当たりました。{when} ごろまで待ちます。")
 
     async def defer_for_limit(self, req: Request, reset_at: float) -> None:
         """上限に達した依頼を、明けてからやり直すものとして覚えておく。"""

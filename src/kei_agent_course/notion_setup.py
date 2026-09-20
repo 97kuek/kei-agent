@@ -30,7 +30,12 @@ COURSES = {
             {"name": "秋学期", "color": "orange"},
             {"name": "通年", "color": "blue"},
         ]}},
-        "曜日時限": {"rich_text": {}},
+        "曜日": {"select": {"options": [
+            {"name": day, "color": color} for day, color in
+            [("月", "red"), ("火", "orange"), ("水", "yellow"), ("木", "green"),
+             ("金", "blue"), ("土", "purple"), ("日", "pink"), ("他", "gray")]
+        ]}},
+        "時限": {"number": {"format": "number"}},
         "Moodle": {"url": {}},
         "状態": {"select": {"options": [
             {"name": "履修中", "color": "green"},
@@ -68,18 +73,53 @@ ASSIGNMENTS = {
 
 SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS)}
 
+# 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
+AUTUMN_2026 = [
+    ("データベース", "月", 2),
+    ("情報通信ネットワークB", "月", 4),
+    ("マルチメディア工学A", "火", 5),
+    ("情報セキュリティB", "金", 2),
+    ("マルチメディア工学B", "金", 3),
+    ("次世代ネットワーク", "金", 4),
+    ("統計解析実習", "他", None),
+    ("プロジェクト研究B", "他", None),
+]
+
 
 class CourseSetup(Setup):
     """授業ホームの下に、2つのデータベースを作る（すでにあれば、足りない項目だけ足す）。"""
 
-    def run(self) -> None:
+    def run(self, courses: list[tuple[str, str, int | None]] | None = None) -> None:
         for key, (title, spec) in SPECS.items():
             self.database(key, self.home, title, spec)
+        for name, weekday, period in courses or []:
+            self.add_course(name, weekday, period)
+
+    def add_course(self, name: str, weekday: str, period: int | None = None,
+                   term: str = "秋学期") -> None:
+        """科目を1つ足す（同じ名前があれば何もしない）。曜日と時限は別の列に入れる。"""
+        db = self.state["databases"]["courses"]
+        found = self.notion.request("POST", f"/data_sources/{db['data_source_id']}/query", {
+            "filter": {"property": "科目名", "title": {"equals": name}}, "page_size": 1})
+        if found.get("results"):
+            return
+        self.notion.request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": db["data_source_id"]},
+            "properties": {
+                "科目名": {"title": [{"text": {"content": name}}]},
+                "曜日": {"select": {"name": weekday}},
+                "時限": {"number": period},
+                "学期": {"select": {"name": term}},
+                "状態": {"select": {"name": "履修中"}},
+            },
+        })
+        self.log.append(f"科目を追加: {name}（{weekday}{period or ''}）")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-course-setup")
     parser.add_argument("home_page_id", help="授業ホームのページID（URL の末尾32文字）")
+    parser.add_argument("--seed", action="store_true", help="2026年度秋学期の履修科目を入れる")
     args = parser.parse_args(argv)
     token = os.environ.get("NOTION_COURSE_TOKEN")
     if not token:
@@ -87,7 +127,7 @@ def main(argv: list[str] | None = None) -> None:
     state_path = Path(load_config().state_dir) / "notion-course.json"
     setup = CourseSetup(Notion(token), args.home_page_id, state_path)
     try:
-        setup.run()
+        setup.run(AUTUMN_2026 if args.seed else None)
     except NotionError as e:
         sys.exit(f"Notion で失敗しました: {e}")
     finally:

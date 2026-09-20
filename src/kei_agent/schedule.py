@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import maintenance, settings, themes
+from kei_agent import course, maintenance, settings, themes
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
@@ -28,11 +28,15 @@ from kei_agent.themes import OVERVIEW_DIR
 log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
-TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
+TASK_NAMES = ("night", "literature", "course", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
 WEEKDAYS = "月火水木金土日"
+# 締切が近いものを知らせるために、カレンダーを見に行く間隔（秒）
+DUE_CHECK_SECONDS = 3600
+# 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
+NOTICE_RETENTION_DAYS = 60
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -70,6 +74,8 @@ class Scheduler:
         self.config = config
         self.store = store
         self.assistant = assistant
+        # 締切が近いものを最後に見に行った時刻（起動直後に1回見る）
+        self._due_checked = 0.0
 
     @property
     def overview_dir(self) -> Path:
@@ -108,6 +114,7 @@ class Scheduler:
             self.store.record_schedule(name, day, {"status": "running"})
             if not await self.run_or_defer(name, day, now.timestamp()):
                 return   # 上限に当たった。残りは明けてからにする
+        await self.notify_due_soon(now)
         await self.nudge_stale_threads()
 
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
@@ -359,6 +366,7 @@ class Scheduler:
         detail["removed"] = await asyncio.to_thread(
             maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None,
             keep_worktrees, keep_scratch)
+        detail["notices"] = self.store.drop_old_notices(time.time() - NOTICE_RETENTION_DAYS * 86400)
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)
@@ -366,6 +374,47 @@ class Scheduler:
                 await self.assistant.notify_trouble(f"研究データのバックアップに失敗しました: {e}")
                 detail = {**detail, "status": "error", "error": str(e)}
         return detail
+
+    # 授業（大学エージェント）
+
+    async def course_channel(self) -> str | None:
+        """#20_course の ID。Kei Agent がいなければ None。"""
+        name = self.config.course_channels[0] if self.config.course_channels else ""
+        return (await self.assistant.channel_ids()).get(name) if name else None
+
+    async def run_course(self, day: str) -> dict:
+        """朝の一覧。Moodle を取り込んでから、今日・明日・今週の締切を #20_course に出す。"""
+        channel = await self.course_channel()
+        if channel is None:
+            return {"status": "no_channel"}
+        synced = await self.assistant.ask_course(course.SYNC_ASSIGNMENTS)
+        items = await self.assistant.course_due(course.DIGEST_DAYS, datetime.now())
+        if items is None:
+            return {"status": "error", "synced": bool(synced and synced.ok)}
+        await self.assistant.slack.chat_postMessage(
+            channel=channel, text=course.digest_text(items, datetime.now()))
+        # 朝に出したものは、そのあと24時間前の知らせで繰り返さない
+        for item in course.soon_items(items, datetime.now()):
+            self.store.record_notice(course.notice_key(item))
+        return {"status": "done", "items": len(items), "synced": bool(synced and synced.ok)}
+
+    async def notify_due_soon(self, now: datetime) -> None:
+        """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる。"""
+        if now.timestamp() - self._due_checked < DUE_CHECK_SECONDS:
+            return
+        channel = await self.course_channel()
+        if channel is None:
+            return
+        self._due_checked = now.timestamp()
+        items = await self.assistant.course_due(2, now)
+        if items is None:
+            return
+        for item in course.soon_items(items, now):
+            key = course.notice_key(item)
+            if self.store.noticed(key):
+                continue
+            await self.assistant.slack.chat_postMessage(channel=channel, text=course.soon_text(item, now))
+            self.store.record_notice(key)
 
     # 声かけ
 

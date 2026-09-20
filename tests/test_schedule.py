@@ -1,6 +1,7 @@
 import asyncio
+import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
@@ -65,8 +66,9 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     monkeypatch.setattr(scheduler, "run_task", fake_run)
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
-    # 01:30 の夜間、07:00 の先行研究、08:00 の Daily が1回ずつ。21:00 はまだ
-    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("daily", "2026-09-18")]
+    # 01:30 の夜間、07:00 の先行研究、07:30 の授業、08:00 の Daily が1回ずつ。21:00 はまだ
+    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("course", "2026-09-18"),
+                   ("daily", "2026-09-18")]
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
@@ -481,3 +483,93 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
     await scheduler.catch_up_deferred(reset + 120)
     assert done == [("night", "2026-09-18")]
     assert scheduler.store.due_deferred("schedule", reset + 200) == []
+
+
+# 授業の締切（大学エージェント）
+
+
+class FakeCourseAgent:
+    """大学エージェントの代わり。list-due は JSON を返す。"""
+    base_url = "http://127.0.0.1:8787"
+
+    def __init__(self, items):
+        self.items = items
+        self.asked = []
+
+    async def ask(self, skill, text="", params=None):
+        from kei_agent import a2a
+        self.asked.append((skill, params))
+        data = {"days": (params or {}).get("days"), "items": self.items} if skill == "list-due" else {}
+        # 返事は全エージェント共通の封筒
+        envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
+                    "limit_reset_at": None, "cost_usd": None}
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(envelope, ensure_ascii=False))
+
+
+def due_item(at, title="第3回レポート の 提出期限", course="データベース", uid="1@moodle"):
+    return {"id": uid, "at": at, "course": course, "title": title, "url": "https://moodle/x"}
+
+
+async def test_course_digest_groups_today_tomorrow_and_this_week(env):
+    """07:30 は、取り込んでから今日・明日・今週に分けて #20_course に出す。"""
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    agent = FakeCourseAgent([
+        due_item("2026-09-20T17:00:00+09:00", "履修申請フォーム", "プロジェクト研究B"),
+        due_item("2026-09-21T23:59:00+09:00", "小テスト", "情報セキュリティB", uid="2@moodle"),
+        due_item("2026-09-24T23:59:00+09:00", "レポート", "マルチメディア工学A", uid="3@moodle"),
+        due_item("2026-10-30T23:59:00+09:00", "期末レポート", "データベース", uid="4@moodle"),
+    ])
+    assistant.agents["course"] = agent
+
+    detail = await scheduler.run_course("2026-09-20")
+
+    assert detail["status"] == "done" and detail["synced"]
+    assert ("sync-assignments", None) in agent.asked
+    posted = [kw for kw in slack.posted() if kw["channel"] == "C7"]
+    text = posted[-1]["text"]
+    assert "*今日*" in text and "履修申請フォーム" in text
+    assert "*明日*" in text and "小テスト" in text
+    assert "*今週*" in text and "レポート" in text
+    assert "期末レポート" not in text   # 1週間より先は出さない
+
+
+async def test_deadlines_within_a_day_are_told_once(env, store):
+    """締切24時間前の知らせは、同じ課題について1回だけ。"""
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
+    later = (datetime.now() + timedelta(hours=40)).astimezone().isoformat()
+    assistant.agents["course"] = FakeCourseAgent([due_item(soon), due_item(later, uid="2@moodle")])
+
+    await scheduler.notify_due_soon(datetime.now())
+    scheduler._due_checked = 0.0          # 1時間待たずにもう一度見る
+    await scheduler.notify_due_soon(datetime.now())
+
+    told = [kw["text"] for kw in slack.posted() if kw["channel"] == "C7"]
+    assert len(told) == 1 and "で締切" in told[0]
+    assert store.noticed("due:1@moodle:" + soon)
+
+
+async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
+    """朝の一覧に出したものは、そのあとの24時間前の知らせで繰り返さない。"""
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
+    assistant.agents["course"] = FakeCourseAgent([due_item(soon)])
+
+    await scheduler.run_course(datetime.now().date().isoformat())
+    before = len([kw for kw in slack.posted() if kw["channel"] == "C7"])
+    await scheduler.notify_due_soon(datetime.now())
+
+    assert len([kw for kw in slack.posted() if kw["channel"] == "C7"]) == before
+
+
+async def test_without_the_course_channel_nothing_is_posted(env):
+    """#20_course に Kei Agent がいなければ、何もしない（エラーにもしない）。"""
+    scheduler, assistant, slack, _ = env
+    assistant.agents["course"] = FakeCourseAgent([due_item("2026-09-20T17:00:00+09:00")])
+
+    assert (await scheduler.run_course("2026-09-20"))["status"] == "no_channel"
+    await scheduler.notify_due_soon(datetime.now())
+    assert slack.posted() == []

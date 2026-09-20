@@ -2,6 +2,8 @@
 
 # テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない
 research_root = "~/research"
+# 授業の作業場（大学エージェントの claude が動くところ）。資料は Box に置いたまま読むので、ここには置かない
+course_root = "~/course"
 # SQLite などBotの状態を置く場所
 state_dir = "~/.local/state/kei-agent"
 
@@ -23,6 +25,7 @@ handoff_after_turns = 8
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
 enabled = true
 literature = "07:00"  # 先行研究の新着（テーマごと）
+course = "07:30"      # 授業の締切の一覧（#20_course）。締切24時間前の知らせは、これとは別に1時間ごとに見る
 daily = "08:00"       # Daily（#research-overview）
 review = "21:00"      # 振り返りの材料（#research-overview）
 night = "01:30"       # 🌙 をつけた Task
@@ -43,10 +46,15 @@ digest_retention_days = 30
 session_retention_days = 90
 
 [a2a]
-# ほかのエージェントの住所（docs/plan.md の16章）。空にすると、そのエージェントは使わない。
-# 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
-course_url = "http://127.0.0.1:8787"
+# 相手を待つ時間（秒）。claude を動かす仕事には、これに claude の上限時間を足した時間まで待つ
 timeout_seconds = 300
+# 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
+
+[a2a.agents]
+# ほかのエージェントの住所（docs/agents.md）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
+# 行を消すと、そのエージェントは使わない（research を消すと、claude は本体の中で動く）
+course = "http://127.0.0.1:8787"
+research = "http://127.0.0.1:8788"
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
@@ -54,6 +62,8 @@ overview = ["research-overview", "research-strategy"]
 # Kei Agent の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
 # チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
 improve = ["research-agent", "kei-agent"]
+# 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない
+course = ["course"]
 # 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
 # 個人用のチャンネルには Kei Agent を招待しない
 

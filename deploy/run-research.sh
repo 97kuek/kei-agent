@@ -1,5 +1,5 @@
 #!/bin/zsh
-# launchd から大学エージェント（A2A サーバー）を起動する。127.0.0.1 でだけ待ち受ける。
+# launchd から研究エージェント（A2A サーバー）を起動する。127.0.0.1 でだけ待ち受ける。
 set -eu
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -7,7 +7,7 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/us
 # 秘密情報は、共通のものと、このエージェントだけのものに分けてある（docs/agents.md）。
 # こうすると、ほかのエージェントのトークンがこのプロセスに載らない
 SECRETS="$HOME/.config/zsh/local/research-assistant.zsh"
-AGENT_SECRETS="$HOME/.config/zsh/local/kei-agent-course.zsh"
+AGENT_SECRETS="$HOME/.config/zsh/local/kei-agent-research.zsh"
 if [[ ! -r "$SECRETS" ]]; then
   echo "秘密情報のファイルがありません: $SECRETS（deploy/README.md を参照）" >&2
   exit 1
@@ -15,8 +15,8 @@ fi
 source "$SECRETS"
 [[ -r "$AGENT_SECRETS" ]] && source "$AGENT_SECRETS"
 
-# ログは launchd の標準出力（~/Library/Logs/kei-agent/course-launchd.log）に出る
+# ログは launchd の標準出力（~/Library/Logs/kei-agent/research-launchd.log）に出る
 
 REPO="${0:A:h:h}"
 cd "$REPO"
-exec uv run --frozen --group course kei-agent-course
+exec uv run --frozen --group research kei-agent-research

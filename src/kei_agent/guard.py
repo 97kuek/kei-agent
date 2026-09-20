@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
 DEFAULT_DENY_READ = (
     "~/.config/zsh/local",   # Kei Agent の秘密情報（deploy/README.md）
+    "~/.local/state/kei-agent/secrets",  # 使うたびに更新するトークン（Box など）
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
@@ -81,6 +83,21 @@ def read_root(config: Config, ws: Workspace) -> Path:
     return ws.cwd                     # テーマと、自分を直すときの worktree
 
 
+def mcp_rules(ws: Workspace) -> list[str]:
+    """渡した MCP サーバーの道具を許可するルール（`mcp__box` など）。
+
+    エージェントに差した MCP は、その設定ファイルに書いてあるものだけ。ここでは名前を読み取って
+    許可するだけにし、どの道具を持たせるかはエージェント側（`docs/agents.md`）で決める。
+    """
+    if ws.mcp_config is None:
+        return []
+    try:
+        servers = json.loads(ws.mcp_config.read_text(encoding="utf-8")).get("mcpServers") or {}
+    except (OSError, ValueError):
+        return []
+    return [f"mcp__{name}" for name in servers]
+
+
 def build_settings(config: Config, ws: Workspace) -> dict:
     assert ws.cwd is not None
     return {
@@ -110,6 +127,7 @@ def build_settings(config: Config, ws: Workspace) -> dict:
                 "WebFetch",
                 "Skill",
                 "TodoWrite",
+                *mcp_rules(ws),
             ],
         },
     }

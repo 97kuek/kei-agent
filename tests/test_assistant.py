@@ -983,3 +983,225 @@ async def test_saying_continue_cancels_the_scheduled_retry(env, store):
     await assistant.retry_deferred(now=2 ** 31)
     await settle(assistant)
     assert len(claude.calls) == 2
+
+
+# 大学のチャンネル（#20_course）
+
+
+async def test_course_channel_asks_the_university_agent(env):
+    """大学の依頼は claude を動かさず、大学エージェントに取り次いで返事をそのまま出す。"""
+    from kei_agent import a2a
+
+    assistant, slack, claude, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            asked.append((skill, params))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="新しい課題 2 件")
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.1", "text": "<@UBOT> 課題を取り込んで"})
+    await settle(assistant)
+
+    assert asked == [("sync-assignments", None)]
+    assert "新しい課題 2 件" in slack.texts()
+    assert claude.calls == []
+    assert ("reactions_add", {"channel": "C7", "timestamp": "11.1", "name": "white_check_mark"}) in slack.calls
+
+
+async def test_course_channel_sends_free_questions_to_ask(env, store):
+    """定型に当てはまらない質問は ask に回し、大学エージェント自身の claude が答える。"""
+    import json as _json
+
+    from kei_agent import a2a
+
+    assistant, slack, claude, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            asked.append((skill, _json.loads(text)))
+            if on_progress:
+                await on_progress(_json.dumps({"activity": "box_search: 過去問"}))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
+                "ok": True, "text": "過去問は Box の Personal/過去問 にあるよ", "limit_reset_at": None,
+                "cost_usd": 0.01, "data": {"session_id": "course-1"}}))
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2",
+                                "text": "<@UBOT> 情報セキュリティBの過去問ある？"})
+    await settle(assistant)
+
+    skill, payload = asked[0]
+    assert skill == "ask" and payload["prompt"] == "情報セキュリティBの過去問ある？"
+    assert payload["session_id"] is None and payload["thread_ts"] == "11.2"
+    assert claude.calls == []                      # 本体では claude を動かさない
+    assert "box_search: 過去問" in slack.thinking()  # 経過は1行だけに出す
+    assert slack.streamed() == ["過去問は Box の Personal/過去問 にあるよ"]
+    # 会話の続きは本体が覚える（次の質問は同じ claude の会話につながる）
+    assert store.agent_session("C7", "11.2", "course") == "course-1"
+
+
+async def test_course_channel_formats_the_deadlines(env):
+    """締切は JSON で返ってくるので、Slack 向けの短い行に組み直して出す。"""
+    import json as _json
+
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            asked.append((skill, params))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "締切 1 件", "limit_reset_at": None, "cost_usd": None,
+                "data": {"days": 14, "more": 2,
+                         "items": [{"id": "1@moodle", "at": "2026-09-21T17:00:00+09:00",
+                                    "course": "プロジェクト研究B", "title": "履修申請フォーム"}]}}))
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.1", "text": "<@UBOT> 締切を教えて"})
+    await settle(assistant)
+
+    assert asked == [("list-due", None)]
+    reply = slack.texts()[-1]
+    assert "9/21（月） 17:00 プロジェクト研究B / 履修申請フォーム" in reply
+    assert "（ほかに 2 件）" in reply
+
+
+async def test_course_channel_tells_when_the_agent_is_down(env):
+    """大学エージェントにつながらないときは、スレッドに言って `#00_kei-agent` にも知らせる。"""
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            raise a2a.A2AError("名刺を読めません（HTTP 502）")
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.2", "text": "<@UBOT> 締切を教えて"})
+    await settle(assistant)
+
+    assert any("頼めなかった" in (t or "") for t in slack.texts())
+    assert any("HTTP 502" in (t or "") for t in slack.texts())
+    assert ("reactions_add", {"channel": "C7", "timestamp": "12.2", "name": "warning"}) in slack.calls
+
+
+# 研究エージェント（A2A）に実行を任せる
+
+
+async def test_claude_runs_through_the_research_agent_when_configured(env, store):
+    """[a2a] research_url を書くと、claude は研究エージェント経由で動く（本体の中では動かさない）。"""
+    import json as _json
+
+    from kei_agent import a2a
+
+    assistant, slack, claude, _ = env
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8788"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            asked.append((skill, _json.loads(text)))
+            if on_progress:
+                await on_progress(_json.dumps({"activity": "Bash: 図を描く"}))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps(
+                {"ok": True, "text": "できたよ", "limit_reset_at": None, "cost_usd": None,
+                 "data": {"text": "できたよ", "session_id": "sess-7", "is_error": False}}))
+
+    assistant.agents["research"] = _Agent()
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "13.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    assert claude.calls == []
+    skill, payload = asked[0]
+    assert skill == "run-claude"
+    assert payload["channel_name"] == "vlm" and payload["prompt"] == "図を作って"
+    assert payload["channel"] == "C1" and payload["thread_ts"] == "13.1"
+    # 経過は入力欄の下の1行に出し、返事はいつもどおり流して見せる
+    assert "Bash: 図を描く" in slack.thinking()
+    assert slack.streamed() == ["できたよ"]
+    assert store.get_thread("C1", "13.1")["session_id"] == "sess-7"
+
+
+# 振り分け係（軽いモデルで、どの仕事かを選ぶ）
+
+
+def test_router_reads_the_choice_and_ignores_junk():
+    from kei_agent import router
+
+    allowed = {"list-due", "ask"}
+    assert router.parse('{"skill": "list-due", "days": 7}', allowed) == router.Choice("list-due", {"days": 7})
+    # 前後に文が付いていても拾う
+    assert router.parse('はい\n{"skill": "ask"}\n', allowed).skill == "ask"
+    # 知らない仕事、読めない返事、日数が変なものは ask に回す
+    assert router.parse('{"skill": "drop-database"}', allowed).skill == "ask"
+    assert router.parse("よく分かりません", allowed).skill == "ask"
+    assert router.parse('{"skill": "list-due", "days": 9999}', allowed).params == {}
+
+
+def test_router_catalog_comes_from_the_card():
+    from kei_agent import router
+
+    text = router.catalog([{"id": "list-due", "description": "締切が近い順に JSON で返す\n2行目は捨てる"},
+                           {"name": "名前だけ"}, {"id": "ask", "name": "授業のことに答える"}])
+    assert text == "- list-due: 締切が近い順に JSON で返す\n- ask: 授業のことに答える"
+
+
+async def test_course_channel_uses_the_router_choice(env, monkeypatch):
+    """名刺のスキルを軽いモデルに選ばせ、その仕事を頼む（言葉の当ては使わない）。"""
+    import json as _json
+
+    from kei_agent import a2a, router
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def card(self):
+            return {"skills": [{"id": "list-due", "description": "締切"}, {"id": "ask", "description": "質問"}]}
+
+        async def ask(self, skill, text="", params=None):
+            asked.append((skill, params))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "締切 0 件", "data": {"items": []},
+                "limit_reset_at": None, "cost_usd": None}))
+
+    assistant.agents["course"] = _Agent()
+
+    async def fake_pick(config, skills, text):
+        assert [s["id"] for s in skills] == ["list-due", "ask"]
+        return router.Choice("list-due", {"days": 3})
+
+    monkeypatch.setattr(router, "pick", fake_pick)
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "14.1",
+                                "text": "<@UBOT> 来週までにやることある？"})
+    await settle(assistant)
+
+    assert asked == [("list-due", {"days": 3})]
+    assert router.STATUS_TEXT in slack.thinking()

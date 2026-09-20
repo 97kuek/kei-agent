@@ -43,6 +43,11 @@ def system_prompt_version(config: Config) -> str:
     return hashlib.sha256(system_prompt_text(config).encode("utf-8")).hexdigest()[:12]
 
 
+def run_timeout_seconds(config: Config, ws: Workspace) -> float:
+    """claude 1回の上限時間（秒）。ワークスペースの指定があれば、そちらを使う。"""
+    return (ws.timeout_minutes or config.run_timeout_minutes) * 60
+
+
 def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
     cmd = [
         config.claude_bin,
@@ -55,11 +60,16 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
         "--permission-mode", "dontAsk",
         "--plugin-dir", str(config.plugin_dir),
     ]
-    if config.system_prompt_path.exists():
+    prompt_path = ws.system_prompt or config.system_prompt_path
+    if prompt_path.exists():
         # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
-        cmd += ["--append-system-prompt", system_prompt_text(config)]
-    if config.model:
-        cmd += ["--model", config.model]
+        cmd += ["--append-system-prompt", prompt_path.read_text(encoding="utf-8")]
+    model = ws.model or config.model
+    if model:
+        cmd += ["--model", model]
+    if ws.mcp_config is not None:
+        # そのエージェントに渡した MCP だけを使う（手元の設定は持ち込まない）
+        cmd += ["--mcp-config", str(ws.mcp_config), "--strict-mcp-config"]
     if session_id:
         cmd += ["--resume", session_id]
     return cmd
@@ -235,7 +245,7 @@ async def run_claude(
 
     stderr_task = asyncio.create_task(proc.stderr.read())
     try:
-        await asyncio.wait_for(read_stdout(), timeout=config.run_timeout_minutes * 60)
+        await asyncio.wait_for(read_stdout(), timeout=run_timeout_seconds(config, ws))
     except TimeoutError:
         result.timed_out = True
         result.is_error = True
