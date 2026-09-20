@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 MODEL = "haiku"
 TIMEOUT_MINUTES = 2
 ASK = "ask"
+# 「どのエージェントでもない（本体が自分で答える）」を選ばせるための名前
+SELF = "self"
 STATUS_TEXT = "どこに聞くか選んでいる…"
 # 判定に渡す一言の長さ（長文は先頭だけで足りる）
 TEXT_LIMIT = 600
@@ -44,7 +46,8 @@ JSON 1行だけで答えてください。ほかの文は書かないでくだ�
 
 @dataclass
 class Choice:
-    """振り分けの結果。"""
+    """振り分けの結果。`agent` が空なら、本体（研究の claude）が自分で答える。"""
+    agent: str = ""
     skill: str = ASK
     params: dict = field(default_factory=dict)
     # 判定に使った額（分かるとき）
@@ -64,7 +67,10 @@ def catalog(skills: list[dict]) -> str:
 
 
 def parse(text: str, allowed: set[str]) -> Choice:
-    """返ってきた文から JSON を拾う。読めなければ ask に回す。"""
+    """返ってきた文から JSON を拾う。読めなければ ask に回す。
+
+    エージェントをまたぐときは、仕事の名前が `course:list-due` のように「相手:仕事」になる。
+    """
     found = _JSON.search(text or "")
     if not found:
         return Choice()
@@ -72,13 +78,14 @@ def parse(text: str, allowed: set[str]) -> Choice:
         data = json.loads(found.group(0))
     except ValueError:
         return Choice()
-    skill = str(data.get("skill") or "")
-    if skill not in allowed:
+    name = str(data.get("skill") or "")
+    if name not in allowed:
         return Choice()
+    agent, _, skill = name.rpartition(":")
     params = {}
     if isinstance(data.get("days"), int) and 1 <= data["days"] <= 400:
         params["days"] = data["days"]
-    return Choice(skill=skill, params=params)
+    return Choice(agent=agent, skill=skill or ASK, params=params)
 
 
 def workspace(config: Config) -> Workspace:
@@ -91,11 +98,32 @@ def workspace(config: Config) -> Workspace:
 
 
 async def pick(config: Config, skills: list[dict], text: str) -> Choice:
-    """どの仕事かを選ぶ。選べなければ `ask`。"""
+    """どの仕事かを選ぶ（相手が1人のとき）。選べなければ `ask`。"""
     allowed = {str(s.get("id")) for s in skills if s.get("id")}
     if not allowed:
         return Choice()
-    prompt = PROMPT.format(skills=catalog(skills), text=(text or "").strip()[:TEXT_LIMIT], ask=ASK)
+    return await _choose(config, catalog(skills), allowed, text, ASK)
+
+
+async def pick_across(config: Config, by_agent: dict[str, list[dict]], text: str) -> Choice:
+    """どのエージェントの、どの仕事かを選ぶ。どれでもなければ、本体が自分で答える（agent が空）。"""
+    lines, allowed = [], {SELF}
+    for agent, skills in by_agent.items():
+        for skill in skills:
+            name = str(skill.get("id") or "")
+            if not name:
+                continue
+            about = (skill.get("description") or skill.get("name") or "").splitlines()[0][:160]
+            allowed.add(f"{agent}:{name}")
+            lines.append(f"- {agent}:{name}: {about}")
+    if len(allowed) == 1:
+        return Choice()
+    lines.append(f"- {SELF}: 上のどれでもないとき（研究全体の相談、雑談、考えごと）")
+    return await _choose(config, "\n".join(lines), allowed, text, SELF)
+
+
+async def _choose(config: Config, skills: str, allowed: set[str], text: str, fallback: str) -> Choice:
+    prompt = PROMPT.format(skills=skills, text=(text or "").strip()[:TEXT_LIMIT], ask=fallback)
     result = await runner.run_claude(config, workspace(config), prompt, None, "", "")
     if result.is_error:
         log.warning("振り分けに失敗しました: %s", "; ".join(result.errors)[:200])

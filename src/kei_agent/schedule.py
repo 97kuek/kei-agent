@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import course, maintenance, research, settings, themes
+from kei_agent import course, maintenance, morning, research, settings, themes, work
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
@@ -28,7 +28,7 @@ from kei_agent.themes import OVERVIEW_DIR
 log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
-TASK_NAMES = ("night", "literature", "course", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
+TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
@@ -308,12 +308,15 @@ class Scheduler:
         )
         result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "daily")
         title = f"Daily {label(day)}"
-        thread_ts = await self.assistant.publish(channel, self.overview_channel_name, ws, f"🌅 {title}", result)
+        # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
+        timeline, gathered = await self.morning_text(datetime.now())
+        thread_ts = await self.assistant.publish(
+            channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result)
         note = None
         if not result.is_error:
             note = await self._save_note(channel, thread_ts, title, "Daily", day, result.text, f"daily/{day}.md")
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
-                "notion_url": note.url if note else None}
+                "notion_url": note.url if note else None, "morning": gathered}
 
     async def run_review(self, day: str) -> dict:
         ids = await self.assistant.channel_ids()
@@ -385,21 +388,36 @@ class Scheduler:
         name = self.config.course_channels[0] if self.config.course_channels else ""
         return (await self.assistant.channel_ids()).get(name) if name else None
 
-    async def run_course(self, day: str) -> dict:
-        """朝の一覧。Moodle を取り込んでから、今日・明日・今週の締切を #20_course に出す。"""
-        channel = await self.course_channel()
-        if channel is None:
-            return {"status": "no_channel"}
-        synced = await self.assistant.ask_course(course.SYNC_ASSIGNMENTS)
-        items = await self.assistant.course_due(course.DIGEST_DAYS, datetime.now())
-        if items is None:
-            return {"status": "error", "synced": bool(synced and synced.ok)}
-        await self.assistant.slack.chat_postMessage(
-            channel=channel, text=course.digest_text(items, datetime.now()))
-        # 朝に出したものは、そのあと24時間前の知らせで繰り返さない
-        for item in course.soon_items(items, datetime.now()):
+    async def morning_text(self, now: datetime) -> tuple[str, dict]:
+        """朝のまとめ（今日の時系列）。集められなかったものは黙って飛ばす。"""
+        detail: dict = {}
+        classes: list[dict] = []
+        dues: list[dict] = []
+        events: list[dict] = []
+        if course.AGENT in self.assistant.agents:
+            synced = await self.assistant.ask_course(course.SYNC_ASSIGNMENTS)
+            detail["synced"] = synced.ok
+            classes = (await self.assistant.ask_course(course.LIST_CLASSES)).data.get("items") or []
+            dues = await self.assistant.course_due(course.DIGEST_DAYS, now) or []
+        if work.AGENT in self.assistant.agents:
+            reply = await self.assistant.ask_work(work.LIST_EVENTS, days=2)
+            events = reply.data.get("items") or [] if reply.ok else []
+        detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
+        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない
+        for item in course.soon_items(dues, now):
             self.store.record_notice(course.notice_key(item))
-        return {"status": "done", "items": len(items), "synced": bool(synced and synced.ok)}
+        return morning.text(classes, events, dues, now, self.morning_notes()), detail
+
+    def morning_notes(self) -> list[str]:
+        """時刻の無いもの（先行研究の新着など）を、1行ずつ。"""
+        notes = []
+        last = self.store.last_schedule("literature")
+        if last:
+            themes_ = (json.loads(last["detail"] or "{}") or {}).get("themes") or {}
+            posted = [name for name, got in themes_.items() if got.get("status") == "posted"]
+            if posted:
+                notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
+        return notes
 
     async def notify_due_soon(self, now: datetime) -> None:
         """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる。"""

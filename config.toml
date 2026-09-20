@@ -25,8 +25,7 @@ handoff_after_turns = 8
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
 enabled = true
 literature = "07:00"  # 先行研究の新着（テーマごと）
-course = "07:30"      # 授業の締切の一覧（#20_course）。締切24時間前の知らせは、これとは別に1時間ごとに見る
-daily = "08:00"       # Daily（#01_overview）
+daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#01_overview）。締切24時間前の知らせは1時間ごと
 review = "21:00"      # 振り返りの材料（#01_overview）
 night = "01:30"       # 🌙 をつけた Task
 # Mac のスリープなどで逃した処理を、何時間後まで実行するか

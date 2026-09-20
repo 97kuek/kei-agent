@@ -1,0 +1,85 @@
+"""会社の Claude アカウントに付いている Microsoft 365 の連携から、Outlook を読む。
+
+会社の IT が Anthropic のアプリに読み取りを許可しているので（`Calendars.Read` など）、
+Entra ID にアプリを登録しなくても Outlook を読める。
+
+この連携は Claude のアカウント側にあり、Python からは直接呼べない。そこで claude を
+**連携の道具1つだけ**に絞って動かし、JSON で答えさせる（`kei_agent_a2a.claude.ask_connector`）。
+
+- 使わせるのは `outlook_calendar_search`（読むだけ）。送信・作成・削除の道具は名指しで断る
+- 会社の契約枠で動かすため、仕事用の秘密情報ファイルに会社の `CLAUDE_CODE_OAUTH_TOKEN` を置く
+- 返すのは件名・時間・場所・主催者・リンクまで。本文は持ち出さない（docs/plan.md の15章）
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, timedelta
+
+from kei_agent.config import Config
+from kei_agent_a2a import claude
+
+log = logging.getLogger(__name__)
+
+# 使わせる連携の道具（読むだけ）
+CALENDAR_TOOL = "mcp__claude_ai_Microsoft_365__outlook_calendar_search"
+ALLOWED = (CALENDAR_TOOL,)
+# 名指しで断る道具（許可の一覧に入れていなくても、念のため）
+DENY = (
+    "mcp__claude_ai_Microsoft_365__outlook_send_mail",
+    "mcp__claude_ai_Microsoft_365__outlook_send_draft",
+    "mcp__claude_ai_Microsoft_365__outlook_create_event",
+    "mcp__claude_ai_Microsoft_365__outlook_update_event",
+    "mcp__claude_ai_Microsoft_365__outlook_delete_event",
+    "mcp__claude_ai_Microsoft_365__teams_send_chat_message",
+    "mcp__claude_ai_Microsoft_365__teams_send_channel_message",
+    "mcp__claude_ai_Microsoft_365__sharepoint_upload_file",
+)
+DEFAULT_DAYS = 7
+TIMEOUT_MINUTES = 3
+
+PROMPT = """{tool} を使って、{since} から {until} までの私の予定を調べてください。
+
+見つかった予定を、JSON の配列だけで答えてください。前置きも説明も書かないでください。
+配列の1つは次の形です（値が無ければ空文字）。
+
+[{{"subject": "件名", "start": "2026-09-24T18:00", "end": "2026-09-24T19:00",
+   "location": "場所", "organizer": "主催者のメールアドレス", "all_day": false, "url": "Outlook のリンク"}}]
+
+- 時刻は Tokyo Standard Time の壁時計の時刻をそのまま使い、分までにしてください
+- 取り消された予定は除いてください
+- 予定が無ければ [] とだけ答えてください
+- 本文（会議の詳細、Teams の参加リンク、パスコード）は入れないでください"""
+
+
+class WorkCalendarError(RuntimeError):
+    pass
+
+
+async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = None) -> list[dict]:
+    """これから days 日ぶんの予定を、始まる順に。"""
+    start = today or date.today()
+    prompt = PROMPT.format(tool=CALENDAR_TOOL, since=start.isoformat(),
+                           until=(start + timedelta(days=max(days, 1))).isoformat())
+    try:
+        text = await claude.ask_connector(config, prompt, ALLOWED, DENY, TIMEOUT_MINUTES)
+        found = claude.json_reply(text)
+    except claude.ConnectorError as e:
+        raise WorkCalendarError(str(e)) from None
+    events_ = [_event(item) for item in found if str(item.get("start") or "").strip()]
+    events_.sort(key=lambda e: e["start"])
+    log.info("Outlook の予定を %d 件読みました（%d 日ぶん）", len(events_), days)
+    return events_
+
+
+def _event(item: dict) -> dict:
+    return {
+        "subject": str(item.get("subject") or "（件名なし）"),
+        "start": str(item.get("start") or "")[:16],
+        "end": str(item.get("end") or "")[:16],
+        "all_day": bool(item.get("all_day")),
+        "location": str(item.get("location") or ""),
+        "organizer": str(item.get("organizer") or ""),
+        "free": False,
+        "url": str(item.get("url") or ""),
+    }

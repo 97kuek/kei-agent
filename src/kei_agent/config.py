@@ -36,7 +36,6 @@ class ScheduleConfig:
     enabled: bool = True
     # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
     literature: str = "07:00"
-    course: str = "07:30"
     daily: str = "08:00"
     review: str = "21:00"
     night: str = "01:30"

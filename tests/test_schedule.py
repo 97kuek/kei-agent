@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import runner, themes
+from kei_agent import morning, runner, themes
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, due_day, search_keywords
@@ -66,9 +66,8 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     monkeypatch.setattr(scheduler, "run_task", fake_run)
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
-    # 01:30 の夜間、07:00 の先行研究、07:30 の授業、08:00 の Daily が1回ずつ。21:00 はまだ
-    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("course", "2026-09-18"),
-                   ("daily", "2026-09-18")]
+    # 01:30 の夜間、07:00 の先行研究、08:00 の Daily が1回ずつ。21:00 はまだ
+    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("daily", "2026-09-18")]
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
@@ -250,7 +249,9 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
     assert "返事が要る" in text and "中間発表" in text
     header, body = slack.posted()
-    assert header == {"channel": "C5", "text": "🌅 Daily 9/18（金）"}
+    # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
+    assert header["channel"] == "C5" and header["text"].endswith("🌅 Daily 9/18（金）")
+    assert header["text"].startswith("☀️")
     note = assistant.notion.notes[-1]
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", "今日の Daily")
     assert detail["notion_url"] == note.url
@@ -492,84 +493,80 @@ class FakeCourseAgent:
     """大学エージェントの代わり。list-due は JSON を返す。"""
     base_url = "http://127.0.0.1:8787"
 
-    def __init__(self, items):
+    def __init__(self, items, classes=None):
         self.items = items
+        self.classes = classes or []
         self.asked = []
 
     async def ask(self, skill, text="", params=None):
         from kei_agent import a2a
         self.asked.append((skill, params))
-        data = {"days": (params or {}).get("days"), "items": self.items} if skill == "list-due" else {}
+        data = {}
+        if skill == "list-due":
+            data = {"days": (params or {}).get("days"), "items": self.items}
+        elif skill == "list-classes":
+            data = {"items": self.classes}
         # 返事は全エージェント共通の封筒
         envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
                     "limit_reset_at": None, "cost_usd": None}
         return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(envelope, ensure_ascii=False))
 
 
+class FakeWorkAgent:
+    """仕事エージェントの代わり（Outlook の予定）。"""
+    base_url = "http://127.0.0.1:8789"
+
+    def __init__(self, items):
+        self.items = items
+
+    async def ask(self, skill, text="", params=None):
+        from kei_agent import a2a
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(
+            {"ok": True, "text": "予定", "data": {"items": self.items},
+             "limit_reset_at": None, "cost_usd": None}))
+
+
 def due_item(at, title="第3回レポート の 提出期限", course="データベース", uid="1@moodle"):
     return {"id": uid, "at": at, "course": course, "title": title, "url": "https://moodle/x"}
 
 
-async def test_course_digest_groups_today_tomorrow_and_this_week(env):
-    """07:30 は、取り込んでから今日・明日・今週に分けて #20_course に出す。"""
+async def test_morning_text_puts_everything_on_one_timeline(env):
+    """授業・会議・締切を、研究／授業／仕事で分けずに時刻の早い順で1本にする。"""
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
-    agent = FakeCourseAgent([
-        due_item("2026-09-20T17:00:00+09:00", "履修申請フォーム", "プロジェクト研究B"),
-        due_item("2026-09-21T23:59:00+09:00", "小テスト", "情報セキュリティB", uid="2@moodle"),
-        due_item("2026-09-24T23:59:00+09:00", "レポート", "マルチメディア工学A", uid="3@moodle"),
-        due_item("2026-10-30T23:59:00+09:00", "期末レポート", "データベース", uid="4@moodle"),
-    ])
-    assistant.agents["course"] = agent
+    now = datetime.now().replace(hour=7, minute=30, second=0, microsecond=0)
+    today = now.date().isoformat()
+    assistant.agents["course"] = FakeCourseAgent(
+        [due_item(f"{today}T17:00:00+09:00", "履修申請フォーム", "プロジェクト研究B")],
+        classes=[{"subject": "データベース", "start": f"{today}T10:40", "end": f"{today}T12:20"}])
+    assistant.agents["work"] = FakeWorkAgent(
+        [{"subject": "朝会", "start": f"{today}T10:00", "end": f"{today}T10:15", "location": "Zoom"}])
 
-    detail = await scheduler.run_course("2026-09-20")
+    text, detail = await scheduler.morning_text(now)
 
-    assert detail["status"] == "done" and detail["synced"]
-    assert ("sync-assignments", None) in agent.asked
-    posted = [kw for kw in slack.posted() if kw["channel"] == "C7"]
-    text = posted[-1]["text"]
-    assert "*今日*" in text and "履修申請フォーム" in text
-    assert "*明日*" in text and "小テスト" in text
-    assert "*今週*" in text and "レポート" in text
-    assert "期末レポート" not in text   # 1週間より先は出さない
+    lines = text.splitlines()
+    assert lines[0].startswith("☀️")
+    assert "10:00–10:15` 💼 朝会（Zoom）" in lines[1]
+    assert "10:40–12:20` 🎓 データベース" in lines[2]
+    assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
+    assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1}
 
 
-async def test_deadlines_within_a_day_are_told_once(env, store):
-    """締切24時間前の知らせは、同じ課題について1回だけ。"""
-    scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
-    soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
-    later = (datetime.now() + timedelta(hours=40)).astimezone().isoformat()
-    assistant.agents["course"] = FakeCourseAgent([due_item(soon), due_item(later, uid="2@moodle")])
-
-    await scheduler.notify_due_soon(datetime.now())
-    scheduler._due_checked = 0.0          # 1時間待たずにもう一度見る
-    await scheduler.notify_due_soon(datetime.now())
-
-    told = [kw["text"] for kw in slack.posted() if kw["channel"] == "C7"]
-    assert len(told) == 1 and "で締切" in told[0]
-    assert store.noticed("due:1@moodle:" + soon)
+async def test_morning_text_works_without_the_agents(env):
+    """エージェントがいないときは、黙って「予定なし」にする（朝の通知は止めない）。"""
+    scheduler, *_ = env
+    text, detail = await scheduler.morning_text(datetime.now())
+    assert morning.NOTHING in text and detail == {"classes": 0, "dues": 0, "events": 0}
 
 
 async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
-    """朝の一覧に出したものは、そのあとの24時間前の知らせで繰り返さない。"""
+    """朝のまとめに出した締切は、そのあとの24時間前の知らせで繰り返さない。"""
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "20_course"
     soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
     assistant.agents["course"] = FakeCourseAgent([due_item(soon)])
 
-    await scheduler.run_course(datetime.now().date().isoformat())
-    before = len([kw for kw in slack.posted() if kw["channel"] == "C7"])
+    await scheduler.morning_text(datetime.now())
+    before = len(slack.posted())
     await scheduler.notify_due_soon(datetime.now())
 
-    assert len([kw for kw in slack.posted() if kw["channel"] == "C7"]) == before
-
-
-async def test_without_the_course_channel_nothing_is_posted(env):
-    """#20_course に Kei Agent がいなければ、何もしない（エラーにもしない）。"""
-    scheduler, assistant, slack, _ = env
-    assistant.agents["course"] = FakeCourseAgent([due_item("2026-09-20T17:00:00+09:00")])
-
-    assert (await scheduler.run_course("2026-09-20"))["status"] == "no_channel"
-    await scheduler.notify_due_soon(datetime.now())
-    assert slack.posted() == []
+    assert len(slack.posted()) == before

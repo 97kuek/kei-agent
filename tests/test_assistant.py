@@ -1152,7 +1152,7 @@ def test_router_reads_the_choice_and_ignores_junk():
     from kei_agent import router
 
     allowed = {"list-due", "ask"}
-    assert router.parse('{"skill": "list-due", "days": 7}', allowed) == router.Choice("list-due", {"days": 7})
+    assert router.parse('{"skill": "list-due", "days": 7}', allowed) == router.Choice(skill="list-due", params={"days": 7})
     # 前後に文が付いていても拾う
     assert router.parse('はい\n{"skill": "ask"}\n', allowed).skill == "ask"
     # 知らない仕事、読めない返事、日数が変なものは ask に回す
@@ -1195,7 +1195,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
 
     async def fake_pick(config, skills, text):
         assert [s["id"] for s in skills] == ["list-due", "ask"]
-        return router.Choice("list-due", {"days": 3})
+        return router.Choice(skill="list-due", params={"days": 3})
 
     monkeypatch.setattr(router, "pick", fake_pick)
 
@@ -1236,7 +1236,7 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch):
     assistant.agents["work"] = _Agent()
 
     async def fake_pick(config, skills, text):
-        return router.Choice("list-events", {"days": 1})
+        return router.Choice(skill="list-events", params={"days": 1})
 
     monkeypatch.setattr(router, "pick", fake_pick)
 
@@ -1246,3 +1246,77 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch):
     assert asked == [("list-events", {"days": 1})]
     assert claude.calls == []
     assert any("朝会" in (t or "") for t in slack.texts())
+
+
+async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
+    """研究全体のチャンネルでは、どのエージェントの用事かも含めて判定し、そちらに回す。"""
+    import json as _json
+
+    from kei_agent import a2a, router
+
+    assistant, slack, claude, _ = env
+    asked = []
+
+    class _Course:
+        base_url = "http://127.0.0.1:8787"
+
+        async def card(self):
+            return {"skills": [{"id": "list-due", "description": "締切"}]}
+
+        async def ask(self, skill, text="", params=None):
+            asked.append((skill, params))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "締切 0 件", "data": {"items": []},
+                "limit_reset_at": None, "cost_usd": None}))
+
+    assistant.agents["course"] = _Course()
+
+    async def fake_pick_across(config, by_agent, text):
+        assert set(by_agent) == {"course"}
+        return router.Choice(agent="course", skill="list-due", params={"days": 7})
+
+    monkeypatch.setattr(router, "pick_across", fake_pick_across)
+
+    await assistant.on_mention({"channel": "C5", "user": "UME", "ts": "16.1",
+                                "text": "<@UBOT> 今週の課題の締切は？"})
+    await settle(assistant)
+
+    assert asked == [("list-due", {"days": 7})]
+    assert claude.calls == []            # 研究の claude は動かさない
+
+
+async def test_overview_channel_keeps_research_talk_in_house(env, monkeypatch):
+    """研究の相談は、いままでどおり本体の claude が答える。"""
+    from kei_agent import router
+
+    assistant, slack, claude, _ = env
+
+    class _Course:
+        base_url = "http://127.0.0.1:8787"
+
+        async def card(self):
+            return {"skills": [{"id": "list-due", "description": "締切"}]}
+
+    assistant.agents["course"] = _Course()
+
+    async def fake_pick_across(config, by_agent, text):
+        return router.Choice()          # どのエージェントでもない
+
+    monkeypatch.setattr(router, "pick_across", fake_pick_across)
+
+    await assistant.on_mention({"channel": "C5", "user": "UME", "ts": "16.2",
+                                "text": "<@UBOT> 次の実験の方針を相談したい"})
+    await settle(assistant)
+
+    assert len(claude.calls) == 1        # 研究の claude が答える
+
+
+def test_router_can_choose_between_agents():
+    from kei_agent import router
+
+    allowed = {"course:list-due", "work:list-events", "self"}
+    assert router.parse('{"skill": "work:list-events"}', allowed) == router.Choice(
+        agent="work", skill="list-events")
+    assert router.parse('{"skill": "self"}', allowed).agent == ""
+    # 知らない相手は、本体が自分で答える側に倒す
+    assert router.parse('{"skill": "hr:fire-everyone"}', allowed).agent == ""

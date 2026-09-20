@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 # あちらは a2a-sdk に依存していて本体からは読み込めないので、文字列で持つ
 SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
+LIST_CLASSES = "list-classes"
 TIME_REPORT = "time-report"
 # 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
 ASK = "ask"
@@ -155,9 +156,14 @@ def notice_key(item: dict) -> str:
 
 
 class CourseChannel:
-    async def course(self, req: Request) -> None:
-        """大学の依頼を大学エージェントに渡して、返事をスレッドに出す。"""
-        skill, params = await self.course_skill(req)
+    async def course(self, req: Request, skill: str = "", params: dict | None = None) -> None:
+        """大学の依頼を大学エージェントに渡して、返事をスレッドに出す。
+
+        すでに振り分けが済んでいるとき（研究全体のチャンネルから回ってきたとき）は、その仕事を使う。
+        """
+        params = params or {}
+        if not skill:
+            skill, params = await self.course_skill(req)
         if skill == ASK:
             # 定型に当てはまらない質問は、大学エージェントの claude が Box と Notion を読んで答える
             await self.course_ask(req)

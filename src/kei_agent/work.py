@@ -86,10 +86,13 @@ def events_text(events: list[dict], now: datetime) -> str:
 
 
 class WorkChannel:
-    async def work(self, req: Request) -> None:
-        """仕事の依頼を仕事エージェントに渡して、返事をスレッドに出す。"""
-        skills = await self.skills_of(AGENT)
-        params: dict = {}
+    async def work(self, req: Request, skill: str = "", params: dict | None = None) -> None:
+        """仕事の依頼を仕事エージェントに渡して、返事をスレッドに出す。
+
+        すでに振り分けが済んでいるとき（研究全体のチャンネルから回ってきたとき）は、その仕事を使う。
+        """
+        params = params or {}
+        skills = [] if skill else await self.skills_of(AGENT)
         if skills:
             choice = await router.pick(self.config, skills, req.text)
             if choice.skill and choice.skill != router.ASK:

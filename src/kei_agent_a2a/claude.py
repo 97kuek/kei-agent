@@ -14,10 +14,12 @@ MCP の設定にはトークンが入るので、sandbox から読めない場�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-from collections.abc import Iterator
+import re
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -108,3 +110,56 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater) ->
         limit_reset_at=result.limit_reset_at,
         cost_usd=result.cost_usd,
     )
+
+
+# アカウントに付いている連携（claude.ai のコネクタ）を使う
+
+# 連携の道具は、ユーザー設定を読み込まないと見えない。そのかわり、危ないものは名指しで断る
+DENY_ALWAYS = ("Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task")
+
+
+async def ask_connector(config: Config, prompt: str, allowed: Sequence[str],
+                        deny: Sequence[str] = (), timeout_minutes: int = 3) -> str:
+    """アカウントの連携を、道具を絞って使わせる（返事の文をそのまま返す）。
+
+    会社の Microsoft 365 のように、Claude のアカウントに付いている連携は、ユーザー設定を
+    読み込まないと claude から見えない。そこでここだけ `--setting-sources user` を使い、
+    **使ってよい道具を名指しで並べる**（Bash や書き込み、送信の道具は断る）。
+
+    柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/agents.md）。
+    """
+    command = [
+        config.claude_bin, "-p", "--output-format", "text",
+        # 連携はアカウント側にあるので、ユーザー設定を読み込む必要がある
+        "--setting-sources", "user",
+        "--permission-mode", "dontAsk",
+        "--allowedTools", *allowed,
+        "--disallowedTools", *DENY_ALWAYS, *deny,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, env=os.environ | {"CLAUDECODE": "1"})
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=timeout_minutes * 60)
+    except TimeoutError:
+        proc.kill()
+        raise ConnectorError(f"連携の返事が {timeout_minutes} 分で返りませんでした") from None
+    if proc.returncode:
+        raise ConnectorError(f"連携を使えませんでした: {err.decode('utf-8', 'replace').strip()[:300]}")
+    return out.decode("utf-8", "replace").strip()
+
+
+def json_reply(text: str) -> list[dict]:
+    """連携に JSON で答えさせたときの、返事の読み取り（前後に文が付いていても拾う）。"""
+    match = re.search(r"\[.*\]", text or "", re.DOTALL)
+    if not match:
+        return []
+    try:
+        found = json.loads(match.group(0))
+    except ValueError:
+        raise ConnectorError(f"連携の返事を読めません: {text[:200]}") from None
+    return [item for item in found if isinstance(item, dict)]
+
+
+class ConnectorError(RuntimeError):
+    pass

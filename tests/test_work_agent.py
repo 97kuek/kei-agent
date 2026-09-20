@@ -69,6 +69,8 @@ async def server(monkeypatch):
 
     fake = FakeGraph(EVENTS)
     monkeypatch.setattr(graph.Graph, "load", classmethod(lambda cls, **kw: fake))
+    # 既定は会社の連携から読む。ここでは Entra ID のアプリ（graph）の道を試す
+    monkeypatch.setenv("WORK_CALENDAR_SOURCE", "graph")
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
     server = uvicorn.Server(uvicorn.Config(build_app(base, TOKEN), host="127.0.0.1", port=port,
@@ -105,7 +107,34 @@ async def test_without_the_permission_it_says_what_to_run(server, monkeypatch):
     def _no_token(cls, **kw):
         raise graph.GraphError(graph.NO_TOKEN)
 
+    monkeypatch.setenv("WORK_CALENDAR_SOURCE", "graph")
     monkeypatch.setattr(graph.Graph, "load", classmethod(_no_token))
     base, _ = server
     task = await Agent(base, TOKEN, timeout=30).ask("list-events")
     assert not task.ok and "kei-agent-ms-login" in json.loads(task.answer)["text"]
+
+
+# 会社の Claude アカウントに付いている連携から読む道（既定）
+
+
+def test_connector_reads_the_json_and_drops_the_body():
+    """連携には JSON で答えさせる。会議の本文（参加リンクなど）は持ち込まない。"""
+    from kei_agent_a2a import claude
+
+    text = ('はい、調べました。\n[{"subject": "定例", "start": "2026-09-25T11:00", '
+            '"end": "2026-09-25T13:00", "location": "Teams", "organizer": "c@example.com"}]')
+    found = claude.json_reply(text)
+    assert found[0]["subject"] == "定例"
+    from kei_agent_work import connector
+
+    event = connector._event(found[0])
+    assert set(event) == {"subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
+    assert event["start"] == "2026-09-25T11:00"
+
+
+def test_connector_says_when_the_reply_is_not_json():
+    from kei_agent_a2a import claude
+
+    with pytest.raises(claude.ConnectorError, match="読めません"):
+        claude.json_reply("[これは JSON ではない]")
+    assert claude.json_reply("予定はありません") == []

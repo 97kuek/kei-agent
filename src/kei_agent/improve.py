@@ -8,6 +8,7 @@ main に取り込んで push し、作業がなくなってから自分を再起
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,16 +118,45 @@ def catch_up_with_main(worktree: Path) -> CommandResult:
     return result
 
 
+# エージェントのテストを飛ばさないために、確認で入れる依存のグループ
+AGENT_GROUPS = ("--group", "course", "--group", "research", "--group", "work")
+
+
 def run_checks(worktree: Path) -> CommandResult:
-    """テストと ruff。依頼者が差分を見て「いいよ」と言ったあとに、sandbox の外で動かす。"""
+    """テストと ruff。依頼者が差分を見て「いいよ」と言ったあとに、sandbox の外で動かす。
+
+    エージェント（大学・研究・仕事）のテストは、依存のグループを入れないと黙って飛ばされるので、
+    ここで全部のグループを指定する（docs/agents.md）。
+    """
     outputs = []
-    for args in (["uv", "run", "--frozen", "pytest", "-q"], ["uvx", "ruff", "check", "src", "tests", "plugin"]):
+    pytest_args = ["uv", "run", "--frozen", *AGENT_GROUPS, "pytest", "-q"]
+    for args in (pytest_args, ["uvx", "ruff", "check", "src", "tests", "plugin"]):
         proc = subprocess.run(args, cwd=worktree, capture_output=True, text=True, timeout=1800)
         tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
         outputs.append(f"$ {' '.join(args)}\n{tail}")
         if proc.returncode != 0:
             return CommandResult(False, "\n\n".join(outputs))
     return CommandResult(True, "\n\n".join(outputs))
+
+
+def restart_agents(config: Config) -> list[str]:
+    """エージェント（別プロセス）を、新しい版で起動し直す。
+
+    本体は launchd が入れ替えるが、エージェントは動き続けてしまう（古いコードのまま）。
+    取り込んだあと、本体が静かになってから呼ぶ。
+    """
+    done = []
+    for name in config.a2a.agents:
+        label = f"com.kei-agent.{name}"
+        proc = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
+                              capture_output=True, text=True, timeout=60)
+        if proc.returncode == 0:
+            done.append(name)
+        else:
+            log.warning("%s を起動し直せません: %s", label, (proc.stderr or "").strip()[:200])
+    if done:
+        log.info("エージェントを起動し直しました: %s", "、".join(done))
+    return done
 
 
 def merge_and_push(config: Config, branch: str) -> str:

@@ -28,6 +28,7 @@ from kei_agent import (
     guard,
     improve,
     research,
+    router,
     runner,
     settings,
     themes,
@@ -540,6 +541,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             return None
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
+        if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
+            return None
         if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK):
             # 同じスレッドで2つ同時に動かさない。claude を動かす仕事もあるので、全体の上限も守る
             async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
@@ -559,6 +562,36 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
                 log.exception("依頼の処理に失敗しました")
                 await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
                 return None
+
+    async def route_overview(self, req: Request) -> bool:
+        """研究全体のチャンネルで、ほかのエージェントの用事なら、そちらに回す（回したら True）。
+
+        朝のまとめがここに出るので、「この課題は？」「今日の会議は？」にも答えられるようにする。
+        スレッドの続きは、最初に答えた相手のまま続ける（毎回は判定しない）。
+        """
+        if req.trigger not in ("message", "voice") or not self.agents:
+            return False
+        for name in self.agents:
+            if self.store.agent_session(req.channel, req.thread_ts, name):
+                return await self._dispatch(req, name, "")
+        row = self.store.get_thread(req.channel, req.thread_ts)
+        if row is not None and row["session_id"]:
+            return False    # 研究の会話の続き
+        catalog = {name: skills for name in self.agents if (skills := await self.skills_of(name))}
+        if not catalog:
+            return False
+        await self.thread_ui(req).activity(router.STATUS_TEXT)
+        choice = await router.pick_across(self.config, catalog, req.text)
+        return await self._dispatch(req, choice.agent, choice.skill, choice.params)
+
+    async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
+        if agent == course.AGENT:
+            await self.course(req, skill, params)
+            return True
+        if agent == work.AGENT:
+            await self.work(req, skill, params)
+            return True
+        return False
 
     async def drop_deferred_for(self, req: Request) -> None:
         """上限で止まって自動でやり直す予定だった依頼を、このスレッドのぶんだけ取り消す。

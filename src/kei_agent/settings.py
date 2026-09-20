@@ -18,10 +18,9 @@ from kei_agent.store import Store
 # Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）
 CONNECT_MARKER = "🔒 接続:"
 
-SCHEDULE_NAMES = ("literature", "course", "daily", "review", "night", "maintenance")
+SCHEDULE_NAMES = ("literature", "daily", "review", "night", "maintenance")
 SCHEDULE_LABELS = {
     "literature": "先行研究の新着",
-    "course": "授業の締切の一覧",
     "daily": "Daily",
     "review": "振り返りの材料",
     "night": "🌙 をつけた Task",
