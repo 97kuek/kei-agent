@@ -80,6 +80,23 @@ def test_unknown_top_level_key_is_reported(tmp_path):
         load_config(path, env={})
 
 
+def test_a_broken_schedule_time_is_reported(tmp_path):
+    """`8:00` のような書き方は時刻として読めない。黙って「行わない」にせず、起動のときに断る。"""
+    from kei_agent.config import ConfigError, load_config
+    path = tmp_path / "config.toml"
+    path.write_text('[schedule]\ndaily = "8:00"\n')
+    with pytest.raises(ConfigError, match=r"\[schedule\] daily"):
+        load_config(path, env={})
+
+    path.write_text('[maintenance]\ntime = "22時"\n')
+    with pytest.raises(ConfigError, match=r"\[maintenance\] time"):
+        load_config(path, env={})
+
+    # 空文字は「行わない」の意味なので通す
+    path.write_text('[schedule]\nreview = ""\n')
+    assert load_config(path, env={}).schedule.review == ""
+
+
 def test_config_toml_in_repo_loads(tmp_path):
     """リポジトリの config.toml が、検査を通ること。"""
     from kei_agent.config import REPO_ROOT, load_config

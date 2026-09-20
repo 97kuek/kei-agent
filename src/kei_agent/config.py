@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -13,6 +14,9 @@ from pathlib import Path
 from kei_agent.guard import DEFAULT_DENY_READ
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# 決まった時刻の処理の時刻。空文字は「その処理を行わない」（settings.schedule_time と同じ形）
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _expand(path: str) -> Path:
@@ -137,6 +141,8 @@ TOP_LEVEL_KEYS = {
     "maintenance", "a2a",
 }
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
+# [schedule] のうち、時刻（HH:MM）を書くキー
+SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
 
 
@@ -154,6 +160,21 @@ def _section(cls, data: dict, name: str):
     """config.toml の [name] を cls にする。"""
     _check_keys(data, {f.name for f in fields(cls)}, f"[{name}]")
     return cls(**data)
+
+
+def _check_times(schedule: dict, maintenance: dict) -> None:
+    """決まった時刻の書き間違いを、黙って「行わない」にしない。
+
+    `daily = "8:00"` のように書くと、時刻として読めないので処理が動かなくなる。空文字だけが
+    「行わない」の意味なので、それ以外の読めない形は、起動のときに断る。
+    """
+    times = [(f"[schedule] {name}", schedule[name]) for name in SCHEDULE_TIME_KEYS if name in schedule]
+    if "time" in maintenance:
+        times.append(("[maintenance] time", maintenance["time"]))
+    for where, value in times:
+        if value != "" and not HHMM.match(str(value)):
+            raise ConfigError(
+                f"config.toml の {where} は HH:MM か、空文字（行わない）にしてください: {value!r}")
 
 
 def _a2a(data: dict) -> A2AConfig:
@@ -179,6 +200,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(data, TOP_LEVEL_KEYS, "一番外側")
     _check_keys(channels, CHANNELS_KEYS, "[channels]")
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
+    _check_times(schedule, data.get("maintenance", {}))
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
         course_root=_expand(data.get("course_root", "~/course")),

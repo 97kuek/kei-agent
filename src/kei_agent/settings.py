@@ -11,7 +11,7 @@ import re
 import sqlite3
 import time
 
-from kei_agent.config import Config
+from kei_agent.config import HHMM, Config
 from kei_agent.guard import valid_domain
 from kei_agent.store import Store
 
@@ -28,7 +28,6 @@ SCHEDULE_LABELS = {
 }
 
 _REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[）)])?\s*$")
-_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 # テーマごとの接続先
@@ -156,13 +155,13 @@ def schedule_time(config: Config, store: Store, name: str) -> str:
     if name == "maintenance" and not config.maintenance.enabled:
         return ""
     hhmm, enabled = schedule_setting(config, store, name)
-    return hhmm if enabled and _HHMM.match(hhmm or "") else ""
+    return hhmm if enabled and HHMM.match(hhmm or "") else ""
 
 
 def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
     if name not in SCHEDULE_NAMES:
         raise ValueError(f"知らない処理です: {name}")
-    if not _HHMM.match(hhmm):
+    if not HHMM.match(hhmm):
         raise ValueError(f"時刻は HH:MM で指定してください: {hhmm}")
     _set(store, f"schedule.{name}.time", hhmm)
     _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
