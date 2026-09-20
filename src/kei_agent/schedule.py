@@ -372,6 +372,9 @@ class Scheduler:
             maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None,
             keep_worktrees, keep_scratch)
         detail["notices"] = self.store.drop_old_notices(time.time() - NOTICE_RETENTION_DAYS * 86400)
+        # 声をかけてもさらに同じ時間が過ぎた返事待ちは閉じる（放っておくと何日も残る）
+        detail["awaits"] = self.store.forget_stale_awaits(
+            time.time() - self.config.schedule.unanswered_hours * 2 * 3600)
         # エージェントの claude の会話も、セッションの記録と同じ日数で忘れる
         detail["agent_sessions"] = self.store.drop_old_agent_sessions(
             time.time() - self.config.maintenance.session_retention_days * 86400)

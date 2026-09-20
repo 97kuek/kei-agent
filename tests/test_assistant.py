@@ -1211,6 +1211,37 @@ async def test_course_channel_tells_when_the_agent_is_down(env):
     assert ("reactions_add", {"channel": "C7", "timestamp": "12.2", "name": "warning"}) in slack.calls
 
 
+async def test_course_channel_waits_out_a_restart_instead_of_failing(env, monkeypatch):
+    """入れ替えの最中で一瞬つながらないだけなら、待ってやり直して失敗を見せない。"""
+    import json
+
+    from kei_agent import a2a, agents
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    monkeypatch.setattr(agents, "RETRY_WAIT", 0)
+    tries = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            tries.append(skill)
+            if len(tries) == 1:
+                raise a2a.NotReachable("つながりません（http://127.0.0.1:8787）")
+            return a2a.TaskResult(state="completed",
+                                  text=json.dumps({"ok": True, "text": "締切はないよ", "data": {"due": []}}))
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.3", "text": "<@UBOT> 締切を教えて"})
+    await settle(assistant)
+
+    assert len(tries) == 2
+    assert not any("頼めなかった" in (t or "") for t in slack.texts())
+    assert ("reactions_add", {"channel": "C7", "timestamp": "12.3", "name": "warning"}) not in slack.calls
+
+
 # 研究エージェント（A2A）に実行を任せる
 
 

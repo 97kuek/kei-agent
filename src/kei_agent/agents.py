@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,8 @@ log = logging.getLogger(__name__)
 
 # claude を動かす仕事は、返事までに claude の上限時間がかかる
 CLAUDE_SKILLS = ("run-claude", "ask")
+# 相手が入れ替わっている最中につながらなかったときに、待ってやり直す回数と秒数
+RETRIES, RETRY_WAIT = 1, 3.0
 
 
 @dataclass
@@ -76,13 +79,22 @@ async def ask(agent: a2a.Agent, skill: str, params: dict | None = None,
     経過を見せたい仕事（claude を動かすもの）は、流しながら受け取る。
     """
     stream = on_progress is not None or skill in CLAUDE_SKILLS
-    log.info("エージェントに頼みます: %s%s", skill, f"（{params}）" if params else "")
-    try:
-        if stream:
-            task = await agent.stream(skill, text or skill, params=params, on_progress=on_progress)
-        else:
-            task = await agent.ask(skill, text or skill, params=params)
-    except a2a.A2AError as e:
-        log.warning("%s を頼めませんでした: %s", skill, e)
-        return Reply.broken(f"{skill} を頼めなかった: {e}")
-    return Reply.of(task)
+    log.info("エージェントに頼みます: %s に %s%s", agent.base_url, skill,
+             f"（{params}）" if params else "")
+    for left in reversed(range(RETRIES + 1)):
+        try:
+            if stream:
+                return Reply.of(await agent.stream(skill, text or skill, params=params,
+                                                   on_progress=on_progress))
+            return Reply.of(await agent.ask(skill, text or skill, params=params))
+        except a2a.NotReachable as e:
+            # 入れ直しの最中は数秒つながらない。依頼者に失敗を見せる前に、待ってやり直す
+            if not left:
+                log.warning("%s を頼めませんでした: %s", skill, e)
+                return Reply.broken(f"{skill} を頼めなかった: {e}")
+            log.info("%s につながらないので %.0f 秒待ってやり直します", agent.base_url, RETRY_WAIT)
+            await asyncio.sleep(RETRY_WAIT)
+        except a2a.A2AError as e:
+            log.warning("%s を頼めませんでした: %s", skill, e)
+            return Reply.broken(f"{skill} を頼めなかった: {e}")
+    raise AssertionError("ここには来ない")  # pragma: no cover

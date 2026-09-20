@@ -130,5 +130,6 @@ async def _choose(config: Config, skills: str, allowed: set[str], text: str, fal
         return Choice(cost_usd=result.cost_usd)
     choice = parse(result.text, allowed)
     choice.cost_usd = result.cost_usd
-    log.info("振り分け: %s（%s）", choice.skill, choice.params or "指定なし")
+    log.info("振り分け: %s の %s（%s）", choice.agent or "本体", choice.skill,
+             choice.params or "指定なし")
     return choice

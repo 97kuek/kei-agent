@@ -124,7 +124,8 @@ def digest_text(items: list[dict], now: datetime) -> str:
             groups["明日"].append(item)
         elif at.date() <= (now + timedelta(days=DIGEST_DAYS)).date():
             groups["今週"].append(item)
-    lines = [f"📅 授業の締切（{_day(now)}）"]
+    # 見出しの日付は「いつ見た一覧か」。締切日と読み違えられないよう「時点」を添える
+    lines = [f"📅 授業の締切（{_day(now)} 時点）"]
     for name, found in groups.items():
         if not found:
             continue

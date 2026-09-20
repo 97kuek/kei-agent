@@ -351,6 +351,26 @@ async def test_awaiting_marker_nudges_once_and_clears_on_reply(env, config, stor
     assert store.get_thread("C1", "10.1")["awaiting_since"] is None
 
 
+async def test_maintenance_forgets_awaits_that_stayed_unanswered(env, config, store):
+    """声をかけても返事がないまま倍の時間がたった返事待ちは、保守で閉じる。
+
+    閉じないと、App Home の「いま動いているもの」に何日も居座り続ける。
+    """
+    scheduler, assistant, slack, claude = env
+    store.upsert_thread("C1", "10.1", "amr-query", "s1")
+    store.set_awaiting("C1", "10.1", True)
+
+    store.conn.execute("UPDATE threads SET awaiting_since = ?, nudged = 1", (time.time() - 30 * 3600,))
+    detail = await scheduler.run_maintenance("2026-09-18")
+    assert detail["awaits"] == 0                      # 声かけから 24 時間はまだ待つ
+    assert store.threads_awaiting()
+
+    store.conn.execute("UPDATE threads SET awaiting_since = ?, nudged = 1", (time.time() - 49 * 3600,))
+    detail = await scheduler.run_maintenance("2026-09-18")
+    assert detail["awaits"] == 1
+    assert store.threads_awaiting() == []
+
+
 async def test_maintenance_reports_backup_failure(env, config):
     scheduler, assistant, slack, claude = env
     config.research_root.mkdir(parents=True, exist_ok=True)  # Git のリポジトリではない

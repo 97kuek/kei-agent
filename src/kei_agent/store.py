@@ -399,6 +399,20 @@ class Store:
     def threads_awaiting(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM threads WHERE awaiting_since IS NOT NULL").fetchall()
 
+    def forget_stale_awaits(self, before: float) -> int:
+        """声をかけても返事がないまま古くなった返事待ちを、いったん閉じる。
+
+        閉じないと、App Home の「いま動いているもの」に何日も居座り続ける。返信すれば
+        またスレッドの続きとして動くので、ここで忘れても取り返しはつく。
+        """
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE threads SET awaiting_since = NULL, nudged = 0 "
+                "WHERE awaiting_since IS NOT NULL AND awaiting_since <= ? AND nudged = 1",
+                (before,),
+            )
+        return cur.rowcount
+
     def threads_updated_since(self, since: float) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM threads WHERE updated_at >= ? ORDER BY channel_name, updated_at", (since,)

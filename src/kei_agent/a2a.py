@@ -43,6 +43,14 @@ class A2AError(RuntimeError):
     pass
 
 
+class NotReachable(A2AError):
+    """相手に話しかけられなかった（落ちている・入れ替えの最中・住所が違う）。
+
+    エージェントを入れ直すと数秒つながらないので、呼ぶ側がこれだけを見て
+    待ってやり直せるように、ほかの失敗と分けておく。
+    """
+
+
 # 相手が落ちている・住所が違う・途中で切れた、はすべて A2AError にして返す
 # （呼ぶ側が aiohttp を知らずに済むように）
 NETWORK_ERRORS = (aiohttp.ClientError, OSError, TimeoutError, asyncio.TimeoutError)
@@ -139,7 +147,7 @@ class Agent:
                     raise A2AError(f"名刺を読めません（HTTP {resp.status}）: {self.base_url}")
                 text = await resp.text()
         except NETWORK_ERRORS as e:
-            raise A2AError(f"つながりません（{self.base_url}）: {type(e).__name__}: {e}") from None
+            raise NotReachable(f"つながりません（{self.base_url}）: {type(e).__name__}: {e}") from None
         try:
             return json.loads(text)
         except ValueError:
@@ -169,7 +177,9 @@ class Agent:
                 if resp.status != 200:
                     raise A2AError(f"{method} が断られました（HTTP {resp.status}）: {text[:200]}")
         except NETWORK_ERRORS as e:
-            raise A2AError(f"{method} を送れません（{self.base_url}）: {type(e).__name__}: {e}") from None
+            # つなぐ前に断られたなら、まだ何も届いていないのでやり直してよい
+            broken = NotReachable if isinstance(e, aiohttp.ClientConnectionError) else A2AError
+            raise broken(f"{method} を送れません（{self.base_url}）: {type(e).__name__}: {e}") from None
         try:
             payload = json.loads(text)
         except ValueError:
