@@ -13,8 +13,9 @@
    | 中長期の方針 | `#research-strategy` | 同上 |
    | Kei Agent の改善 | `#research-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
    | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Kei Agent を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
+   | 大学 | `#course` | 授業と課題。claude -p は動かさず、大学エージェント（A2A）に取り次ぐ（7.5節） |
 
-   Kei Agent を招待したチャンネルは、上の3つ以外すべて研究テーマとして扱う。個人用のチャンネルには Kei Agent を招待しない。
+   Kei Agent を招待したチャンネルは、上の4つ以外すべて研究テーマとして扱う。個人用のチャンネルには Kei Agent を招待しない。
 
 3. サイドバーは名前の順に並ぶので、`research-` のチャンネルはまとまる。朝に見る `#research-overview` にスターをつけると一番上に出る。サイドバーのカテゴリ（セクション）は Slack の有料プランでだけ使える
 
@@ -67,6 +68,19 @@ export TOGGL_WORKSPACE_ID="..."
 
 `chmod 600` にしておく。`~/.zshrc` から `~/.config/zsh/local/*.zsh` を読んでいれば、ターミナルでもそのまま使える。
 
+エージェントごとの秘密情報は、**別のファイルに分ける**（`docs/agents.md`）。こうすると、大学のトークンが
+研究エージェントのプロセスに載らない。
+
+```zsh
+# ~/.config/zsh/local/kei-agent-course.zsh（大学エージェントだけが読む）
+export MOODLE_ICS_URL="https://wsdmoodle.waseda.jp/calendar/export_execute.php?..."
+export NOTION_COURSE_TOKEN="ntn_..."        # 授業と課題を書く（Python 側）
+export NOTION_COURSE_READ_TOKEN="ntn_..."  # claude に渡す読み取り専用のコネクト
+export BOX_CLIENT_ID="..."                  # Box のアプリ（読み取りだけ）
+export BOX_CLIENT_SECRET="..."
+export BOX_REDIRECT_URI="http://localhost:8799/box/callback"
+```
+
 ## 4. 手元で起動して確かめる
 
 ```zsh
@@ -88,7 +102,9 @@ launchd から起動したプロセスは、macOS の保護フォルダ（`~/Doc
 
 ```zsh
 deploy/install.sh          # 登録して起動（ログイン時に起動し、落ちたら再起動する）
-deploy/install.sh remove   # 登録を外す
+deploy/install.sh course   # 大学エージェント（A2A サーバー、127.0.0.1:8787）
+deploy/install.sh research # 研究エージェント（A2A サーバー、127.0.0.1:8788）
+deploy/install.sh remove   # 登録を外す（course / research も同じように remove を付ける）
 tail -f ~/Library/Logs/kei-agent/kei-agent.log
 launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
 ```
@@ -140,10 +156,61 @@ uv run kei-agent-notion-setup <研究ホームのページID>
 4. 次を実行すると、「授業」「課題」の2つのデータベースができる（あとから実行しても、足りない項目だけ足す）
 
    ```zsh
-   uv run --group course kei-agent-course-setup <授業ホームのページID>
+   uv run --group course kei-agent-course-setup <授業ホームのページID> --seed
    ```
 
+   「授業」は科目名・科目コード・学期・曜日・時限・Moodle・状態、「課題」は締切や状態と、科目へのリレーションを持つ。
+   `--seed` を付けると、`notion_setup.py` の `AUTUMN_2026` に書いた履修科目を入れる（同じ名前があれば足さない）。
    研究用のコネクトとは分けてあるので、授業エージェントは研究のデータベースに触れない。
+
+5. Slack で `#20_course` を作り、Kei Agent を招待する（`config.toml` の `[channels] course` に名前を書く）。
+   このチャンネルの依頼は claude -p を動かさず、大学エージェントに取り次ぐ
+6. 手で取り込みたいときは、次を実行する
+
+   ```zsh
+   uv run --group course kei-agent-course-sync          # 履修科目の締切だけを「課題」に入れる
+   uv run --group course kei-agent-course-sync --all    # 履修していない科目の締切も入れる
+   ```
+
+   取り込むのは「授業」に入れた科目の締切だけ。Moodle のカレンダーには新入生向けの資料なども並ぶため、
+   それらは入れずに、科目名だけを返事で知らせる。
+
+## 7.6 研究エージェント（A2A）
+
+研究の作業（`claude -p`）を別のプロセスで動かす。`config.toml` の `[a2a] research_url` を空にすると、
+今までどおり本体の中で動かす（具合が悪いときは、この1行で元に戻せる）。
+
+```zsh
+deploy/install.sh research
+curl -s http://127.0.0.1:8788/.well-known/agent-card.json | python3 -m json.tool | head
+tail -f ~/Library/Logs/kei-agent/research-launchd.log
+```
+
+Kei Agent 本体を入れ替えたときは、研究エージェントも入れ替える（同じリポジトリを読むので、
+`launchctl kickstart -k gui/$(id -u)/com.kei-agent.research` で起動し直す）。
+
+## 7.7 Box（学部要項と過去問）
+
+大学エージェントの claude が、Box に置いたままの PDF や画像を読めるようにする（ローカルに保存しない）。
+
+1. <https://app.box.com/developers/console> → **Create Platform App → Custom App → User Authentication (OAuth 2.0)**、
+   名前は `Kei Agent (course)`
+2. **Configuration** で、リダイレクト URI に `http://localhost:8799/box/callback` を入れ、
+   スコープは「**すべてのファイルとフォルダの読み取り**」だけにする（書き込みは外す）
+3. Client ID と Secret を、大学用の秘密情報ファイルに書く
+4. 1回だけ許可を取る（ブラウザが開く）
+
+   ```zsh
+   source ~/.config/zsh/local/kei-agent-course.zsh
+   uv run --group course kei-agent-box-login
+   uv run --group course kei-agent-box-login --probe   # 読めるか確かめる
+   ```
+
+   リフレッシュトークンは `~/.local/state/kei-agent/secrets/box-token.json`（600）に入り、使うたびに
+   新しくなる。この場所は sandbox の `denyRead` に入れてあるので、claude の Bash からは読めない。
+
+Notion も claude に読ませる場合は、**読み取り専用のコネクト**を別に作り（機能から「コンテンツを更新」と
+「コンテンツを挿入」を外す）、授業ホームのページだけに接続して、そのトークンを `NOTION_COURSE_READ_TOKEN` に入れる。
 
 ## 8. バックアップとログ
 

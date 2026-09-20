@@ -1,7 +1,7 @@
 # Kei Agent
 
 - Slack で頼むと、自分の Mac のエージェントが動いて、経過と結果を同じスレッドに返すアシスタント
-- Kei Agent がオーケストレーター。研究の作業は研究エージェント、大学の課題は大学エージェントに、A2A で振り分ける
+- Kei Agent がオーケストレーター。研究の作業は研究エージェント、大学の授業は大学エージェントに、A2A で振り分ける（`docs/agents.md`）
 - Agentの構成は以下の通り
 ![Kei Agent の構成](docs/architecture.svg)
 
@@ -81,8 +81,18 @@ uv run pytest
 | `src/kei_agent/settings.py` | Slack から変える設定（テーマごとの接続先、決まった時刻の処理の時刻） |
 | `src/kei_agent/home.py` | App Home（Slack で Kei Agent を開いたときの設定画面） |
 | `src/kei_agent/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間、接続先、改善） |
-| `src/kei_agent_course/` | 大学エージェント（A2A サーバー。Moodle・Notion の授業/課題・Toggl） |
-| `src/kei_agent/a2a.py` | ほかのエージェントに仕事を頼む口（A2A のクライアント） |
+| `docs/agents.md` | **エージェントを増やすときの決まり**（層、名前のそろえ方、返事の封筒、柵、手順） |
+| `src/kei_agent_a2a/` | A2A サーバーの土台（名刺と窓口、返事の封筒、エージェントが claude を動かす共通部分） |
+| `src/kei_agent_course/` | 大学エージェント（Moodle・Notion の授業/課題・Toggl・Box。自分の claude で質問に答える） |
+| `src/kei_agent_course/box.py` | Box を読む（OAuth の許可、検索、本文、ページ画像）。`kei-agent-box-login` |
+| `src/kei_agent_course/box_mcp.py` | claude に Box を読む道具を渡す MCP サーバー（読み取りだけ） |
+| `src/kei_agent_research/` | 研究エージェント（テーマのディレクトリで `claude -p` を1回動かす） |
+| `src/kei_agent/a2a.py` | ほかのエージェントに仕事を頼む口（A2A のクライアント。長い仕事は流しながら受け取る） |
+| `src/kei_agent/agents.py` | エージェントの住所と、返事の封筒の読み方（どのエージェントも同じ形） |
+| `src/kei_agent/router.py` | どの仕事に振るかを軽いモデルで判定する（名刺からスキルの一覧を作る） |
+| `src/kei_agent/course.py` | 大学のチャンネル（`#20_course`）の依頼を、大学エージェントに振り分ける |
+| `src/kei_agent/research.py` | claude の1回分を、研究エージェントに頼む |
+| `prompts/course.md` | 大学エージェントの claude の指示書 |
 | `plugin/` | `claude -p` に読み込ませる skill（`kei-agent:job`、`kei-agent:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |
 
