@@ -130,6 +130,8 @@ async def _choose(config: Config, skills: str, allowed: set[str], text: str, fal
         return Choice(cost_usd=result.cost_usd)
     choice = parse(result.text, allowed)
     choice.cost_usd = result.cost_usd
-    log.info("振り分け: %s の %s（%s）", choice.agent or "本体", choice.skill,
-             choice.params or "指定なし")
+    # 相手も選ぶとき（研究全体のチャンネル）だけ、誰に渡したかを出す。
+    # 相手が1人のときは、チャンネルで決まっているので仕事の名前だけでよい
+    who = f"{choice.agent or '本体'} の " if fallback == SELF else ""
+    log.info("振り分け: %s%s（%s）", who, choice.skill, choice.params or "指定なし")
     return choice
