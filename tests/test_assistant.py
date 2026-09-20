@@ -932,3 +932,30 @@ async def test_second_request_in_a_busy_thread_says_it_will_wait(env, monkeypatc
     # 順番に処理する（2件とも動く）
     assert [c["prompt"] for c in claude.calls] == ["集計して", "図も"]
     assert sum("いま前の作業" in (t or "") for t in slack.texts()) == 1
+
+
+async def test_status_inquiry_during_busy_thread_answers_immediately_without_queuing(env, monkeypatch):
+    """処理中に「今どんな感じ？」と聞かれたら、新しい依頼としてキューに積まず、その場で状況を返す。"""
+    assistant, slack, claude, _ = env
+    gate = asyncio.Event()
+
+    async def slow(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+        await gate.wait()
+        return await claude(config, ws, prompt, session_id, channel, thread_ts, on_activity, on_text)
+
+    monkeypatch.setattr(runner, "run_claude", slow)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
+    await asyncio.sleep(0)
+    await assistant.on_message(
+        {"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "今どんな感じ？"})
+    await asyncio.sleep(0)
+
+    # 進み具合を尋ねる一言には、claude を待たせずにその場で状況を返す
+    assert any("処理してる" in t for t in slack.texts())
+    assert ("reactions_remove", {"channel": "C1", "timestamp": "10.2", "name": "eyes"}) in slack.calls
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.2", "name": "white_check_mark"}) in slack.calls
+
+    gate.set()
+    await settle(assistant)
+    # 進み具合を尋ねる一言は claude に渡らない。もとの依頼だけが処理される
+    assert [c["prompt"] for c in claude.calls] == ["集計して"]

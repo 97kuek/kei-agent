@@ -44,6 +44,8 @@ from kei_agent.slack_text import (
     NIGHT_REACTION,
     SEEN_REACTION,
     clean_text,
+    format_duration,
+    is_status_inquiry,
     split_text,
 )
 from kei_agent.store import Store
@@ -462,7 +464,8 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         except ValueError as e:
             await self.post(req, f"{FAILED_PREFIX} {e}")
             return None
-        await self.tell_if_waiting(req)
+        if await self.tell_if_waiting(req):
+            return None
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
         themes.ensure_workspace(ws)
@@ -480,12 +483,43 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
                 return None
 
-    async def tell_if_waiting(self, req: Request) -> None:
-        """同じスレッドの前の作業が続いているときは、黙って待たせずに一言返す。"""
+    async def tell_if_waiting(self, req: Request) -> bool:
+        """同じスレッドの前の作業が続いているときは、黙って待たせずに一言返す。
+
+        「今どんな感じ？」のような進み具合を尋ねるだけの一言は、新しい依頼としてキューの
+        後ろに積まず、いまの状況をその場で組み立てて即答する（True を返し、以降の処理は行わない）。
+        """
         if req.trigger not in ("message", "voice"):
-            return
-        if self.thread_locks[(req.channel, req.thread_ts)].locked():
+            return False
+        locked = self.thread_locks[(req.channel, req.thread_ts)].locked()
+        jobs = [j for j in self.store.active_jobs() if j.channel == req.channel and j.thread_ts == req.thread_ts]
+        if not locked and not jobs:
+            return False
+        if is_status_inquiry(req.text):
+            await self.post(req, self._busy_status_text(req, locked, jobs))
+            await self.mark_answered(req, failed=False)
+            return True
+        if locked:
             await self.post(req, "いま前の作業をしているから、終わったら取りかかるね。")
+        return False
+
+    def _busy_status_text(self, req: Request, locked: bool, jobs: list) -> str:
+        """まだのこと・止まっている理由を、いまの状況から短く組み立てる。"""
+        now = time.time()
+        lines = []
+        if locked:
+            run = next((r for r in self.store.open_runs()
+                       if r["channel"] == req.channel and r["thread_ts"] == req.thread_ts), None)
+            if run:
+                lines.append(f"まだ前の依頼を claude が処理してるよ（{format_duration(now - run['started_at'])}経過）。"
+                             "終わったらこのまま返事するね。")
+            else:
+                lines.append("まだ前の依頼を claude が処理してるよ。終わったらこのまま返事するね。")
+        for job in jobs:
+            started = job.started_at or job.submitted_at
+            lines.append(f"ジョブ「{job.name}」もまだ動いてるよ（{format_duration(now - started)}経過）。"
+                         "終わったら知らせるね。")
+        return "\n".join(lines)
 
     async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
         """1回分の依頼を claude に渡し、結果をスレッドに返す。スレッドのロックを取ってから呼ぶ。"""

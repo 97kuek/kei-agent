@@ -23,9 +23,21 @@ SLACK_TEXT_LIMIT = 11000
 
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 
+# 進み具合を尋ねるだけの短い一言に出てくる言葉。新しい依頼と混ざらないよう、短い文にだけ使う
+_STATUS_INQUIRY = re.compile(r"どんな感じ|進捗|終わ(った|りました|ってる|ってます)|できた|できました|止まってる|止まってます")
+_STATUS_INQUIRY_MAX_LENGTH = 12
+
 
 def clean_text(text: str) -> str:
     return _MENTION.sub("", text or "").strip()
+
+
+def is_status_inquiry(text: str) -> bool:
+    """新しい依頼ではなく、進み具合を尋ねるだけの短い一言かどうか。"""
+    stripped = clean_text(text)
+    if not stripped or len(stripped) > _STATUS_INQUIRY_MAX_LENGTH:
+        return False
+    return bool(_STATUS_INQUIRY.search(stripped))
 
 
 def format_duration(seconds: float) -> str:
