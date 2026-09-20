@@ -9,7 +9,7 @@ Kei Agent は「オーケストレーター＋ドメインごとのエージェ�
 | 層 | いまあるもの | LLM | 役目 |
 |---|---|---|---|
 | 判断 | Kei Agent 本体（`src/kei_agent/`） | 持つ | Slack の受け口、意図の判定、返事の組み立て、柵、Notion（研究）、決まった時刻の処理、上限の管理 |
-| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で `claude -p` を1回動かし、経過と結果を返す |
+| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で `claude -p` を1回動かし、経過と結果を返す。長い処理（pueue の待ち行列）もこちらが持つ |
 | 道具＋自分の判断 | 大学エージェント（`src/kei_agent_course/`） | 自分の claude を持つ | ドメインの外部サービス（Moodle・Box・Toggl・Notion の授業）を触り、そのドメインの質問に答える |
 
 **ドメイン1つ＝エージェント1つ。** 研究・大学・仕事（予定）。ドメインの中をさらに割らない。
@@ -87,10 +87,18 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
    外部サービスと claude は偽物に差し替える
 8. この文書の表と `README.md` のファイル一覧に足す
 
-## 6. エージェントに持たせないもの
+## 6. いまあるスキル
+
+| エージェント | スキル | 中身 |
+|---|---|---|
+| 大学 | `sync-assignments` / `list-due` / `time-report` / `ask` | Moodle の締切を Notion に取り込む／締切の一覧（JSON）／Toggl の集計／自由な質問（自分の claude が Box と Notion を読む） |
+| 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` | claude を1回動かす（経過を流す）／pueue の待ち行列の出し入れ |
+
+## 7. エージェントに持たせないもの
 
 - Slack の受け口（受けるのは本体だけ。エージェントは Slack に直接投稿しない）
 - 依頼者への約束（上限で待つ、やり直す、通知する）
 - スレッドと会話の単位（`session_id` は本体の SQLite が持ち、エージェントには渡すだけ）
 - ほかのドメインの秘密情報
 - Kei Agent 自身のコードを直す作業（本体の `self_fix.py` に残す）
+- ジョブが「どのスレッドのものか」の記録（本体の SQLite。エージェントが持つのは待ち行列だけ）

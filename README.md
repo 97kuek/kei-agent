@@ -86,7 +86,7 @@ uv run pytest
 | `src/kei_agent_course/` | 大学エージェント（Moodle・Notion の授業/課題・Toggl・Box。自分の claude で質問に答える） |
 | `src/kei_agent_course/box.py` | Box を読む（OAuth の許可、検索、本文、ページ画像）。`kei-agent-box-login` |
 | `src/kei_agent_course/box_mcp.py` | claude に Box を読む道具を渡す MCP サーバー（読み取りだけ） |
-| `src/kei_agent_research/` | 研究エージェント（テーマのディレクトリで `claude -p` を1回動かす） |
+| `src/kei_agent_research/` | 研究エージェント（テーマのディレクトリで `claude -p` を1回動かし、pueue の待ち行列を持つ） |
 | `src/kei_agent/a2a.py` | ほかのエージェントに仕事を頼む口（A2A のクライアント。長い仕事は流しながら受け取る） |
 | `src/kei_agent/agents.py` | エージェントの住所と、返事の封筒の読み方（どのエージェントも同じ形） |
 | `src/kei_agent/router.py` | どの仕事に振るかを軽いモデルで判定する（名刺からスキルの一覧を作る） |

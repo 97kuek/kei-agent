@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import course, maintenance, settings, themes
+from kei_agent import course, maintenance, research, settings, themes
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
@@ -436,14 +436,14 @@ async def _run_once(name: str, record: bool) -> None:
     from slack_sdk.web.async_client import AsyncWebClient
 
     from kei_agent.config import load_config
-    from kei_agent.jobs import JobManager, Pueue
+    from kei_agent.jobs import JobManager
     from kei_agent.notion_store import load_notion
 
     config = load_config()
     store = Store(config.db_path)
     slack = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     auth = await slack.auth_test()
-    pueue = Pueue(config)
+    pueue = research.pueue(config)
     await pueue.ensure_group()  # 夜間の Task がジョブを投入することがある
     assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
                           os.environ["SLACK_BOT_TOKEN"], auth["user_id"],

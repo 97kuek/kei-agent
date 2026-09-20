@@ -73,11 +73,12 @@ async def server(config, monkeypatch):
     await task
 
 
-async def test_card_says_it_runs_claude(server):
+async def test_card_says_it_runs_claude_and_holds_the_jobs(server):
     base, _ = server
     card = await Agent(base, TOKEN).card()
     assert card["name"] == "Kei Agent（研究）"
-    assert [s["id"] for s in card["skills"]] == ["run-claude"]
+    assert [s["id"] for s in card["skills"]] == [
+        "run-claude", "submit-job", "list-jobs", "cancel-job", "forget-job"]
 
 
 async def test_the_orchestrator_gets_the_result_and_the_progress(server, config):
@@ -141,3 +142,84 @@ def _collect(into):
     async def collect(value):
         into.append(value)
     return collect
+
+
+# 長い処理（pueue のジョブ）は、研究エージェント側の待ち行列に入れる
+
+
+class FakePueue:
+    """jobs.Pueue の代わり。呼ばれた内容を覚えておく。"""
+
+    def __init__(self):
+        self.calls = []
+        self.group_ready = False
+
+    async def ensure_group(self):
+        self.group_ready = True
+
+    async def add(self, cwd, command, label):
+        self.calls.append(("add", str(cwd), command, label))
+        return 42
+
+    async def kill(self, task_id):
+        self.calls.append(("kill", task_id))
+
+    async def remove(self, task_id):
+        self.calls.append(("remove", task_id))
+
+    async def tasks(self):
+        return {42: {"status": "Running"}}
+
+
+@pytest.fixture
+async def job_server(config, monkeypatch):
+    """ジョブを受け取る研究エージェント（pueue は偽物）。"""
+    import uvicorn
+
+    from kei_agent_research.app import build_app
+    from kei_agent_research.executor import ResearchExecutor
+
+    pueue = FakePueue()
+    port = _free_port()
+    base = f"http://127.0.0.1:{port}"
+    app = build_app(base, TOKEN, executor=ResearchExecutor(config, pueue=pueue))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    for _ in range(100):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+    yield base, pueue
+    server.should_exit = True
+    await task
+
+
+async def test_jobs_go_through_the_agent(job_server, config):
+    """本体は RemotePueue を、いままでの pueue と同じように使える。"""
+    from kei_agent.research import RemotePueue
+
+    base, pueue = job_server
+    cwd = config.research_root / "vlm"
+    cwd.mkdir(parents=True, exist_ok=True)
+    remote = RemotePueue(Agent(base, TOKEN, timeout=30))
+
+    await remote.ensure_group()
+    assert await remote.add(cwd, "uv run x.py", "kei-agent-3") == 42
+    assert await remote.tasks() == {42: {"status": "Running"}}
+    await remote.kill(42)
+    await remote.remove(42)
+
+    assert pueue.group_ready                       # 最初の投入で待ち行列を用意する
+    assert pueue.calls == [("add", str(cwd.resolve()), "uv run x.py", "kei-agent-3"),
+                           ("kill", 42), ("remove", 42)]
+
+
+async def test_a_job_outside_the_research_directory_is_refused(job_server):
+    """渡された場所で何でも動かさない（研究テーマのディレクトリの中だけ）。"""
+    from kei_agent.research import RemotePueue
+
+    base, pueue = job_server
+    remote = RemotePueue(Agent(base, TOKEN, timeout=30))
+    with pytest.raises(RuntimeError, match="研究のディレクトリの中ではありません"):
+        await remote.add("/tmp", "rm -rf /", "kei-agent-9")
+    assert pueue.calls == []

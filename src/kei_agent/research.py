@@ -13,13 +13,18 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 
-from kei_agent import a2a, agents, runner
+from kei_agent import a2a, agents, jobs, runner
+from kei_agent.config import Config
 from kei_agent.themes import Workspace
 
 log = logging.getLogger(__name__)
 
 AGENT = "research"
 RUN_CLAUDE = "run-claude"
+SUBMIT_JOB = "submit-job"
+LIST_JOBS = "list-jobs"
+CANCEL_JOB = "cancel-job"
+FORGET_JOB = "forget-job"
 # RunResult のうち、相手から受け取る項目（知らない項目が増えても落ちないように、ここで絞る）
 FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
           "timed_out", "requested_domains", "limit_reset_at")
@@ -66,3 +71,51 @@ async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | No
         # 封筒が開けなかった（つながらない、途中で切れた、形が違う）
         return runner.RunResult(is_error=True, errors=[reply.text or "研究エージェントが返事をしませんでした"])
     return to_result(reply.data)
+
+
+# 長い処理（ジョブ）
+
+
+class RemotePueue:
+    """研究エージェント越しの pueue。`jobs.Pueue` と同じ使い方ができる。"""
+
+    def __init__(self, agent: a2a.Agent):
+        self.agent = agent
+
+    async def _ask(self, skill: str, body: dict | None = None) -> agents.Reply:
+        reply = await agents.ask(self.agent, skill, text=json.dumps(body or {}, ensure_ascii=False))
+        if not reply.ok:
+            # jobs.Pueue と同じ形で失敗を返す（JobManager の扱いを変えずに済む）
+            raise RuntimeError(reply.text or f"{skill} に失敗しました")
+        return reply
+
+    async def ensure_group(self) -> None:
+        """待ち行列の用意は、相手が最初の投入のときに行う。"""
+        return None
+
+    async def add(self, cwd, command: str, label: str) -> int:
+        reply = await self._ask(SUBMIT_JOB, {"cwd": str(cwd), "command": command, "label": label})
+        try:
+            return int(reply.data["task_id"])
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(f"ジョブの番号が返りませんでした: {reply.text[:200]}") from None
+
+    async def kill(self, task_id: int) -> None:
+        await self._ask(CANCEL_JOB, {"task_id": int(task_id)})
+
+    async def remove(self, task_id: int) -> None:
+        await self._ask(FORGET_JOB, {"task_id": int(task_id)})
+
+    async def tasks(self) -> dict[int, dict]:
+        reply = await self._ask(LIST_JOBS)
+        found = reply.data.get("tasks") or {}
+        return {int(k): v for k, v in found.items()}
+
+
+def pueue(config: Config) -> jobs.Pueue | RemotePueue:
+    """ジョブの待ち行列。研究エージェントがいれば、そちらの pueue を使う。"""
+    url = config.a2a.url(AGENT)
+    if not url:
+        return jobs.Pueue(config)
+    log.info("ジョブは研究エージェントの pueue を使います（%s）", url)
+    return RemotePueue(a2a.Agent(url, config.a2a_token, timeout=config.a2a.timeout_seconds))

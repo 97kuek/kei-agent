@@ -13,10 +13,10 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import home
+from kei_agent import home, research
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config
-from kei_agent.jobs import JobManager, Pueue
+from kei_agent.jobs import JobManager
 from kei_agent.notion_store import load_notion
 from kei_agent.schedule import Scheduler
 from kei_agent.store import Store
@@ -38,7 +38,7 @@ async def serve() -> None:
     store = Store(config.db_path)
     for name, day in store.mark_interrupted_schedules():
         log.warning("前回の %s（%s）は途中で終わっていました。時間内ならやり直します", name, day)
-    pueue = Pueue(config)
+    pueue = research.pueue(config)
     await pueue.ensure_group()
 
     app = AsyncApp(token=os.environ["SLACK_BOT_TOKEN"])
