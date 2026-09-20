@@ -75,7 +75,9 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     domains = settings.all_theme_domains(store)
     for theme in theme_names:
         allowed = domains.get(theme, [])
-        blocks.append(_mrkdwn(f"*#{theme}*" + ("" if allowed else "\n許可した接続先はまだありません")))
+        # テーマ名は先頭の番号を外したもの（themes.theme_name）。`#` を付けると
+        # `#10_amr-query` というチャンネル名とずれて、別のものに見えてしまう
+        blocks.append(_mrkdwn(f"*{theme}*" + ("" if allowed else "\n許可した接続先はまだありません")))
         for domain in allowed:
             blocks.append({
                 "type": "section", "text": {"type": "mrkdwn", "text": f"`{domain}`"},

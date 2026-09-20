@@ -37,7 +37,8 @@ def test_home_lists_theme_domains_and_schedule(config, store):
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     view = home.build_home(config, store, ["vlm"], is_owner=True)
     text = _texts(view)
-    assert "#vlm" in text and "`zenodo.org`" in text
+    # テーマ名に `#` は付けない（`10_vlm` のようなチャンネル名とずれて見えるので）
+    assert "*vlm*" in text and "#vlm" not in text and "`zenodo.org`" in text
     assert "Daily" in text
     assert "export.arxiv.org" not in text  # 基本の接続先は出さない
     pickers = [b["accessory"] for b in view["blocks"] if b.get("accessory", {}).get("type") == "timepicker"]
