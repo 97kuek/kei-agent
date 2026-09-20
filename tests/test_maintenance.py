@@ -205,3 +205,13 @@ def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path,
     assert leftovers == [("improve-19-9", "kei-agent/improve-19-9")]
     assert removed["worktrees"] == 1
     assert not (scratch / "19.9").exists() and (scratch / "20.1").exists()
+
+
+async def test_dump_state_works_from_another_thread(config, store):
+    """毎晩の保守は別スレッドから呼ぶ。接続を作ったスレッド以外でも書き出せる。"""
+    import asyncio
+
+    store.upsert_thread("C1", "10.1", "vlm", "sess-1")
+    out = await asyncio.to_thread(maintenance.dump_state, config, store)
+    sql = (out / "kei-agent.sql").read_text()
+    assert "CREATE TABLE" in sql and "sess-1" in sql

@@ -123,16 +123,7 @@ def dump_state(config: Config, store: Store | None = None) -> Path:
             if store is not None:
                 store.snapshot(copy)
             else:
-                # WAL を使っているので、ファイルをコピーするだけでは中身がそろわない
-                reader = sqlite3.connect(config.db_path)
-                try:
-                    dest = sqlite3.connect(copy)
-                    try:
-                        reader.backup(dest)
-                    finally:
-                        dest.close()
-                finally:
-                    reader.close()
+                Store(config.db_path).snapshot(copy)
             src = sqlite3.connect(copy)
             try:
                 lines = "\n".join(src.iterdump())

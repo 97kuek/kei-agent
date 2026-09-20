@@ -211,12 +211,20 @@ class Store:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     def snapshot(self, path: Path) -> None:
-        """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。"""
-        dest = sqlite3.connect(path)
+        """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。
+
+        毎晩の保守は別スレッドから呼ぶ。sqlite3 の接続は作ったスレッドでしか使えないので、
+        ここで読み取り用につなぎ直す（WAL を使っているため、ファイルのコピーでは中身がそろわない）。
+        """
+        reader = sqlite3.connect(self.path)
         try:
-            self.conn.backup(dest)
+            dest = sqlite3.connect(path)
+            try:
+                reader.backup(dest)
+            finally:
+                dest.close()
         finally:
-            dest.close()
+            reader.close()
 
     # threads
 
