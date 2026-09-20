@@ -923,12 +923,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
             req = Request(o.channel, "", o.thread_ts, None, "")
             if o.error:
-                text = (f"ジョブ「{o.job.name}」を投入できなかったよ: {o.error}") if o.job else o.error
+                text = f"ジョブ「{o.job.name}」を投入できなかったよ: {o.error}" if o.job else o.error
                 if known:
                     await self.post(req, f"{FAILED_PREFIX} {text}")
                 else:
                     await self.notify_trouble(f"`{cwd}` のジョブの依頼: {text}")
                 continue
+            # 投入できた依頼は、JobManager がスレッドを確かめてある（jobs._check_thread）
             await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入したよ: `{o.job.command}`")
 
     async def poll_jobs(self) -> None:

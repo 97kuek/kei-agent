@@ -137,9 +137,14 @@ class Agent:
                         http.get(self.base_url + CARD_PATH, headers=self._headers()) as resp):
                 if resp.status != 200:
                     raise A2AError(f"名刺を読めません（HTTP {resp.status}）: {self.base_url}")
-                return json.loads(await resp.text())
+                text = await resp.text()
         except NETWORK_ERRORS as e:
             raise A2AError(f"つながりません（{self.base_url}）: {type(e).__name__}: {e}") from None
+        try:
+            return json.loads(text)
+        except ValueError:
+            # 別のものが同じポートで待っていると、JSON でない本文が返る
+            raise A2AError(f"名刺が JSON ではありません（{self.base_url}）: {text[:200]}") from None
 
     async def rpc_url(self, session: aiohttp.ClientSession | None = None) -> str:
         """JSON-RPC の窓口。名刺に書かれた supported_interfaces から選ぶ。"""
@@ -165,7 +170,10 @@ class Agent:
                     raise A2AError(f"{method} が断られました（HTTP {resp.status}）: {text[:200]}")
         except NETWORK_ERRORS as e:
             raise A2AError(f"{method} を送れません（{self.base_url}）: {type(e).__name__}: {e}") from None
-        payload = json.loads(text)
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            raise A2AError(f"{method} の返事が JSON ではありません（{self.base_url}）: {text[:200]}") from None
         if "error" in payload:
             raise A2AError(f"{method} でエラー: {payload['error']}")
         return payload.get("result") or {}
@@ -223,7 +231,12 @@ class Agent:
                     line = raw.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
                         continue
-                    payload = json.loads(line[len("data:"):].strip() or "{}")
+                    try:
+                        payload = json.loads(line[len("data:"):].strip() or "{}")
+                    except ValueError:
+                        # 経過の1行が壊れていても仕事は続いている。終わりの行が来なければ下で断る
+                        log.warning("%s の経過の行を読めません: %s", skill, line[:200])
+                        continue
                     if "error" in payload:
                         raise A2AError(f"{skill} でエラー: {payload['error']}")
                     result = payload.get("result") or {}

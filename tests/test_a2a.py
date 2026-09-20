@@ -44,6 +44,45 @@ async def server():
     await task
 
 
+@pytest.fixture
+async def stranger():
+    """同じポートで待っている、A2A ではない誰か（JSON を返さない）。"""
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    port = _free_port()
+
+    async def card(request):
+        # 名刺だけは読めるが、仕事の窓口は JSON を返さない
+        return PlainTextResponse(json.dumps({"url": f"http://127.0.0.1:{port}/a2a"}),
+                                 media_type="application/json")
+
+    async def hello(request):
+        return PlainTextResponse("<html>Not an agent</html>")
+
+    app = Starlette(routes=[Route("/.well-known/agent-card.json", card),
+                            Route("/{path:path}", hello, methods=["GET", "POST"])])
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    for _ in range(100):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    await task
+
+
+async def test_a_reply_that_is_not_json_is_an_a2a_error(stranger):
+    """別のものが同じポートにいても、ValueError を素で投げず A2AError にする。"""
+    with pytest.raises(A2AError, match="SendMessage の返事が JSON ではありません"):
+        await Agent(stranger, TOKEN).ask("list-due")
+    with pytest.raises(A2AError, match="名刺が JSON ではありません"):
+        await Agent(stranger + "/nope", TOKEN).card()
+
+
 async def test_card_tells_what_the_agent_can_do(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"].startswith("Kei Agent")
