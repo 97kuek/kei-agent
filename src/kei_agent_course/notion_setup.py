@@ -5,6 +5,12 @@
 
 使い方:
     NOTION_COURSE_TOKEN=... uv run --group course kei-agent-course-setup <授業ホームのページID>
+
+**ビューはここでは作れない。** Notion の公開 API はビュー（並び替え・絞り込み・列の順番）を
+扱えないので、作ったばかりのデータベースは英語の `Default view` に全列が作成順で並んだ状態になる。
+人が見て使える形（「時間割」を曜日→時限で並べる、「締切が近い順」で機械向けの列を右に送る、
+授業ホームに表を埋め込む）は、Claude の Notion 連携から整えてある。
+作り直したときは、そこも合わせて直すこと。
 """
 
 from __future__ import annotations
