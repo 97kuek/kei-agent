@@ -5,6 +5,7 @@ from __future__ import annotations
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
 LIST_EVENTS = "list-events"
+ASK = "ask"
 
 VERSION = "0.1.0"
 RPC_PATH = "/a2a"
@@ -14,16 +15,16 @@ def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺。base_url は `http://127.0.0.1:8789` のような、外から見える住所。"""
     return AgentCard(
         name="Kei Agent（仕事）",
-        description="会社のアカウントの Outlook を読む（いまは予定だけ）。読み取り専用で、"
-                    "個人の Slack には件名・時間・リンクだけを返す",
+        description="会社のアカウントの Outlook・SharePoint・Teams を読む。読み取り専用で、"
+                    "個人の Slack には件名・時間・相手・リンクと要約だけを返す（本文は持ち出さない）",
         version=VERSION,
         supported_interfaces=[AgentInterface(
             url=base_url.rstrip("/") + RPC_PATH,
             protocol_binding="JSONRPC",
             protocol_version="1.0",
         )],
-        # いまは数秒で終わる読み取りだけ。claude を持たせるのは、道具が増えてから
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        # 自由な質問（ask）は claude を動かすので、経過を流しながら返す
+        capabilities=AgentCapabilities(streaming=True, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["application/json"],
         skills=[
@@ -34,6 +35,15 @@ def build_card(base_url: str) -> AgentCard:
                             "location/organizer/url）。既定は7日先まで。metadata の days で変えられる",
                 tags=["outlook", "calendar"],
                 examples=["今日の予定は？", "明日の会議を教えて", "今週の予定"],
+            ),
+            AgentSkill(
+                id=ASK,
+                name="会社のことに答える",
+                description="定型に当てはまらない質問に、自分の claude が答える。Outlook のメール、"
+                            "SharePoint の資料、Teams のやりとりを読んで、要点とリンクを返す（本文は貼らない）",
+                tags=["outlook", "sharepoint", "teams"],
+                examples=["ゆうちょ案件の直近のやりとりは？", "先週のメールで急ぎのものある？",
+                          "この資料どこにある？"],
             ),
         ],
     )

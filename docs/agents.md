@@ -30,6 +30,7 @@ Kei Agent は「オーケストレーター＋ドメインごとのエージェ�
 | 起動スクリプト | `deploy/run-<agent>.sh`（`deploy/install.sh <agent>` で登録） | `deploy/run-course.sh` |
 | ログ | `~/Library/Logs/kei-agent/<agent>-launchd.log` | `course-launchd.log` |
 | 秘密情報 | `~/.config/zsh/local/kei-agent-<agent>.zsh`（600） | Box と Moodle と授業の Notion |
+| Claude のアカウント | 同じファイルの `CLAUDE_CODE_OAUTH_TOKEN`（書かなければ端末のログイン） | 仕事は会社のアカウント（連携と契約枠がそちらにある） |
 | 住所 | `config.toml` の `[a2a.agents]` に `<agent> = "http://127.0.0.1:87xx"` | `course = "…:8787"` |
 | ポート | 8787 から順番（大学 8787、研究 8788、仕事 8789 の予定） | 8787 |
 | 作業場（claude を持つとき） | `~/<agent>/`（研究だけは `~/research/<テーマ>/`） | `~/course/` |
@@ -74,6 +75,10 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 - MCP は `claude.mcp_config()` で **sandbox から読めない場所**（`<state_dir>/secrets/`）に書き、使い終わったら消す。
   トークンは claude に読ませない
 - 書き込みできる鍵を claude に渡さない（Notion は読み取り専用のコネクトを渡し、書き込みは Python 側が行う）
+- ほかのドメインの鍵は、子プロセスに渡さない（`guard.strip_env`。Slack・Notion・Box・Moodle・Microsoft・Toggl）
+- **アカウントに付いている連携（claude.ai のコネクタ）を使うときは `claude.ask_connector`**。
+  連携はユーザー設定を読み込まないと見えないので、そこだけ設定を読み、使ってよい道具を名指しで並べる
+  （Bash・ファイル・Web は断る）。ドメインごとに Claude のアカウントを分けられる
 
 ## 5. 増やすときの手順
 
@@ -93,6 +98,7 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 |---|---|---|
 | 大学 | `sync-assignments` / `list-due` / `time-report` / `ask` | Moodle の締切を Notion に取り込む／締切の一覧（JSON）／Toggl の集計／自由な質問（自分の claude が Box と Notion を読む） |
 | 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` | claude を1回動かす（経過を流す）／pueue の待ち行列の出し入れ |
+| 仕事 | `list-events` / `ask` | Outlook の予定（JSON）／メール・SharePoint・Teams を読んで要点で答える |
 
 ## 7. エージェントに持たせないもの
 

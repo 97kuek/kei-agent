@@ -11,6 +11,7 @@ Assistant に混ぜて使う。self.agents、self.post などは Assistant の�
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -22,12 +23,14 @@ log = logging.getLogger(__name__)
 
 # 仕事エージェントの仕事の名前（src/kei_agent_work/card.py と同じもの）
 LIST_EVENTS = "list-events"
+ASK = "ask"
 # config.toml の [a2a.agents] で書いたエージェントの名前
 AGENT = "work"
 
-CAN_DO = ("このチャンネルでできるのは、いまのところ Outlook の予定を見ることだけだよ。\n"
-          "• 「今日の予定は？」「今週の会議教えて」\n"
-          "メールや Sharepoint は、まだつないでいない。")
+CAN_DO = ("このチャンネルでできること。\n"
+          "• 「今日の予定は？」… Outlook の予定を、今日・明日・このあとで出す\n"
+          "• そのほかの質問… メール・SharePoint・Teams を読んで、要点とリンクで答える\n"
+          "会社の本文はここに貼らない（要約とリンクだけ）。送信や予定の作成はできない。")
 NO_EVENTS = "予定は入っていないよ。"
 WEEKDAYS = "月火水木金土日"
 # 何日先まで見るか（言われなかったとき）
@@ -94,23 +97,54 @@ class WorkChannel:
         すでに振り分けが済んでいるとき（研究全体のチャンネルから回ってきたとき）は、その仕事を使う。
         """
         params = params or {}
-        skills = [] if skill else await self.skills_of(AGENT)
-        if skills:
-            choice = await router.pick(self.config, skills, req.text)
-            if choice.skill and choice.skill != router.ASK:
-                params = choice.params
-            elif choice.skill == router.ASK:
-                # 自由な質問に答える口は、道具が増えてから作る
-                await self.post(req, CAN_DO)
-                await self.mark_answered(req, failed=False)
-                return
-        reply = await self.ask_work(LIST_EVENTS, **params)
+        if not skill:
+            skills = await self.skills_of(AGENT)
+            choice = await router.pick(self.config, skills, req.text) if skills else router.Choice()
+            skill, params = choice.skill or ASK, choice.params
+        if skill == ASK:
+            await self.work_ask(req)
+            return
+        reply = await self.ask_work(skill, **params)
         if not reply.ok:
             await self.post(req, f"{FAILED_PREFIX} {reply.text or '仕事エージェントが止まったよ'}")
             await self.mark_answered(req, failed=True)
             return
         await self.post(req, events_text(events_of(reply.data), datetime.now()))
         await self.mark_answered(req, failed=False)
+
+    async def work_ask(self, req: Request) -> None:
+        """自由な質問を仕事エージェントに渡す。経過は1行に出す。"""
+        ui = self.thread_ui(req)
+        await ui.start()
+
+        async def on_progress(raw: str) -> None:
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                return
+            if event.get("activity"):
+                await ui.activity(event["activity"])
+
+        reply = await self.ask_work_text(req.text or "今日の予定は？", on_progress)
+        answer = reply.text.strip() or "（返事が空だったよ）"
+        if not reply.ok:
+            answer = f"{FAILED_PREFIX} {answer}"
+        streamed = await ui.finish(answer)
+        if not streamed:
+            await self.post(req, answer, markdown=True)
+        await self.mark_answered(req, failed=not reply.ok)
+
+    async def ask_work_text(self, question: str, on_progress=None) -> agents.Reply:
+        """自由な質問を渡す（本文は相手が読んで、要点だけ返してくる）。"""
+        agent = self.agents.get(AGENT)
+        if agent is None:
+            await self.notify_trouble("仕事エージェントの住所が config.toml の [a2a.agents] にありません")
+            return agents.Reply.broken("仕事エージェントの住所がないよ")
+        reply = await agents.ask(agent, ASK, text=question, on_progress=on_progress)
+        if not reply.ok:
+            await self.notify_trouble(f"仕事エージェント（{agent.base_url}）の ask が返した理由: {reply.text[:300]}")
+        await self.note_limit(reply)
+        return reply
 
     async def ask_work(self, skill: str, **params) -> agents.Reply:
         """仕事エージェントに頼む。つながらなければ、その理由を入れた返事にして知らせる。"""

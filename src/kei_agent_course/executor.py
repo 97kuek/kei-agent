@@ -144,7 +144,7 @@ class CourseExecutor(AgentExecutor):
         day = date.today()
         weekday = str(metadata.get("weekday") or periods.weekday_of(day))
         try:
-            found = await asyncio.to_thread(notion_sync.courses_on, weekday)
+            found = await asyncio.to_thread(notion_sync.courses_on, weekday, day)
         except (notion_sync.SyncError, NotionError) as e:
             await self._fail(updater, str(e))
             return

@@ -17,11 +17,12 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError
+from kei_agent_course import periods
 from kei_agent_course.ics import Event
 
 log = logging.getLogger(__name__)
@@ -121,12 +122,18 @@ class CourseNotion:
         return {name: row["id"] for row in self._rows(self.courses)
                 if (name := _plain(row["properties"].get("科目名")))}
 
-    def courses_on(self, weekday: str = "") -> list[dict]:
-        """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。"""
+    def courses_on(self, weekday: str = "", on: date | None = None) -> list[dict]:
+        """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。
+
+        学期の終わった科目が残っていても混ざらないよう、その日の学期（と通年）だけを返す。
+        """
+        on = on or date.today()
         found = []
         for row in self._rows(self.courses):
             props = row["properties"]
             if _select(props.get("状態")) not in ("", "履修中"):
+                continue
+            if not periods.in_term(_select(props.get("学期")), on):
                 continue
             day = _select(props.get("曜日"))
             if weekday and day != weekday:
@@ -135,6 +142,7 @@ class CourseNotion:
                 "id": row["id"],
                 "subject": _plain(props.get("科目名")),
                 "weekday": day,
+                "term": _select(props.get("学期")),
                 "period": (props.get("時限") or {}).get("number"),
                 "url": row.get("url", ""),
             })
@@ -213,12 +221,13 @@ class CourseNotion:
         return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
 
 
-def courses_on(weekday: str = "", token: str = "", state: dict | None = None) -> list[dict]:
+def courses_on(weekday: str = "", on: date | None = None, token: str = "",
+               state: dict | None = None) -> list[dict]:
     """履修中の科目（曜日・時限つき）。朝のまとめで、時限を時刻に直すのに使う。"""
     token = token or os.environ.get(TOKEN_ENV, "")
     if not token:
         raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state()).courses_on(weekday)
+    return CourseNotion(Notion(token), state or read_state()).courses_on(weekday, on)
 
 
 def course_names(token: str = "", state: dict | None = None) -> set[str]:

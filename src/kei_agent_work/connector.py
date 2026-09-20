@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
+from pathlib import Path
 
 from kei_agent.config import Config
 from kei_agent_a2a import claude
@@ -22,8 +23,26 @@ from kei_agent_a2a import claude
 log = logging.getLogger(__name__)
 
 # 使わせる連携の道具（読むだけ）
-CALENDAR_TOOL = "mcp__claude_ai_Microsoft_365__outlook_calendar_search"
+_M365 = "mcp__claude_ai_Microsoft_365__"
+CALENDAR_TOOL = f"{_M365}outlook_calendar_search"
+# 予定を機械の形で取るときは、この1つだけ
 ALLOWED = (CALENDAR_TOOL,)
+# 自由な質問に答えるとき。読むものだけを並べる（送信・作成・削除は入れない）
+ALLOWED_ASK = (
+    CALENDAR_TOOL,
+    f"{_M365}outlook_email_search",
+    f"{_M365}sharepoint_search",
+    f"{_M365}sharepoint_folder_search",
+    f"{_M365}teams_list_chats",
+    f"{_M365}teams_list_teams",
+    f"{_M365}teams_list_channels",
+    f"{_M365}teams_list_channel_messages",
+    f"{_M365}chat_message_search",
+    f"{_M365}search_people",
+    f"{_M365}find_meeting_availability",
+    # 見つけたものの本文を読む（読んで要約するため。貼り付けは prompts/work.md で止める）
+    f"{_M365}read_resource",
+)
 # 名指しで断る道具（許可の一覧に入れていなくても、念のため）
 DENY = (
     "mcp__claude_ai_Microsoft_365__outlook_send_mail",
@@ -37,6 +56,8 @@ DENY = (
 )
 DEFAULT_DAYS = 7
 TIMEOUT_MINUTES = 3
+# 自由な質問は、探して読んで要約するので、少し長めに待つ
+ASK_TIMEOUT_MINUTES = 5
 
 PROMPT = """{tool} を使って、{since} から {until} までの私の予定を調べてください。
 
@@ -83,3 +104,14 @@ def _event(item: dict) -> dict:
         "free": False,
         "url": str(item.get("url") or ""),
     }
+
+
+async def ask(config: Config, question: str, prompt_path: Path | None = None) -> str:
+    """自由な質問に、連携を読んで答える（本文は貼らず、要点とリンクで返す）。"""
+    guide = (prompt_path or config.repo_root / "prompts" / "work.md")
+    instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
+    prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
+    try:
+        return await claude.ask_connector(config, prompt, ALLOWED_ASK, DENY, ASK_TIMEOUT_MINUTES)
+    except claude.ConnectorError as e:
+        raise WorkCalendarError(str(e)) from None

@@ -21,11 +21,25 @@ WASEDA = {
     7: (time(20, 45), time(22, 25)),
 }
 WEEKDAYS = "月火水木金土日"
+# 学期の呼び名（Notion の「授業」の選択肢と同じにする）
+SPRING, AUTUMN, ALL_YEAR = "春学期", "秋学期", "通年"
+# 春学期の月（4〜8月）。残りは秋学期として扱う
+SPRING_MONTHS = range(4, 9)
 
 
 def weekday_of(day: date) -> str:
     """その日の曜日（「月」など）。"""
     return WEEKDAYS[day.weekday()]
+
+
+def term_of(day: date) -> str:
+    """その日が、どの学期か。"""
+    return SPRING if day.month in SPRING_MONTHS else AUTUMN
+
+
+def in_term(term: str, day: date) -> bool:
+    """その科目が、その日に開かれているか（通年はいつでも対象。空欄は判断せず対象に含める）。"""
+    return term in ("", ALL_YEAR, term_of(day))
 
 
 def span(period: int | None) -> tuple[time, time] | None:

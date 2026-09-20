@@ -143,26 +143,32 @@ def _select(name):
 
 COURSE_ROWS_FULL = [
     {"id": "p1", "url": "https://notion/p1", "properties": {
-        "科目名": _title("データベース"), "曜日": _select("月"), "時限": {"number": 2}, "状態": _select("履修中")}},
+        "科目名": _title("データベース"), "曜日": _select("月"), "時限": {"number": 2},
+        "状態": _select("履修中"), "学期": _select("秋学期")}},
     {"id": "p2", "url": "https://notion/p2", "properties": {
-        "科目名": _title("次世代ネットワーク"), "曜日": _select("金"), "時限": {"number": 4}, "状態": _select("履修中")}},
+        "科目名": _title("次世代ネットワーク"), "曜日": _select("金"), "時限": {"number": 4},
+        "状態": _select("履修中"), "学期": _select("秋学期")}},
     {"id": "p3", "url": "https://notion/p3", "properties": {
         "科目名": _title("去年の科目"), "曜日": _select("月"), "時限": {"number": 1}, "状態": _select("終了")}},
     {"id": "p4", "url": "https://notion/p4", "properties": {
         "科目名": _title("プロジェクト研究B"), "曜日": _select("他"), "時限": {"number": None},
-        "状態": _select("履修中")}},
+        "状態": _select("履修中"), "学期": _select("秋学期")}},
 ]
 
 
 def test_courses_on_takes_only_the_courses_being_taken():
+    from datetime import date
+
     notion = FakeNotion(courses=COURSE_ROWS_FULL)
-    found = notion_sync.CourseNotion(notion, STATE).courses_on("月")
+    found = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 9, 21))
     assert [c["subject"] for c in found] == ["データベース"]   # 終了した科目は出さない
 
 
 def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
+    from datetime import date
+
     notion = FakeNotion(courses=COURSE_ROWS_FULL)
-    found = notion_sync.CourseNotion(notion, STATE).courses_on()
+    found = notion_sync.CourseNotion(notion, STATE).courses_on(on=date(2026, 9, 21))
     # 時限の早い順。時限のないもの（集中講義など）は最後
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
 
@@ -177,3 +183,34 @@ def test_waseda_periods_turn_into_times():
     assert (start.hour, start.minute) == (10, 40) and (end.hour, end.minute) == (12, 20)
     assert periods.at(date(2026, 9, 21), None) is None      # 時限なし（集中講義）
     assert periods.at(date(2026, 9, 21), 9) is None         # 無い時限
+
+
+def test_courses_on_drops_the_other_term():
+    """学期の終わった科目が「履修中」で残っていても、今の学期のものだけを返す。"""
+    from datetime import date
+
+    rows = COURSE_ROWS_FULL + [
+        {"id": "p5", "url": "", "properties": {
+            "科目名": _title("春の科目"), "曜日": _select("月"), "時限": {"number": 3},
+            "状態": _select("履修中"), "学期": _select("春学期")}},
+        {"id": "p6", "url": "", "properties": {
+            "科目名": _title("通年の科目"), "曜日": _select("月"), "時限": {"number": 5},
+            "状態": _select("履修中"), "学期": _select("通年")}},
+    ]
+    notion = FakeNotion(courses=rows)
+    autumn = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 9, 21))
+    assert [c["subject"] for c in autumn] == ["データベース", "通年の科目"]
+
+    notion = FakeNotion(courses=rows)
+    spring = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 5, 11))
+    assert [c["subject"] for c in spring] == ["春の科目", "通年の科目"]
+
+
+def test_a_course_without_a_term_is_kept():
+    """学期が空の科目は、隠すより出す（見落としのほうが困る）。"""
+    from datetime import date
+
+    rows = [{"id": "p9", "url": "", "properties": {
+        "科目名": _title("学期なし"), "曜日": _select("月"), "時限": {"number": 2}, "状態": _select("履修中")}}]
+    found = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE).courses_on("月", date(2026, 5, 11))
+    assert [c["subject"] for c in found] == ["学期なし"]

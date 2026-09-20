@@ -89,7 +89,7 @@ async def test_card_says_it_reads_the_calendar(server):
     base, _ = server
     card = await Agent(base, TOKEN).card()
     assert card["name"] == "Kei Agent（仕事）"
-    assert [s["id"] for s in card["skills"]] == ["list-events"]
+    assert [s["id"] for s in card["skills"]] == ["list-events", "ask"]
 
 
 async def test_list_events_comes_back_in_the_envelope(server):
