@@ -33,6 +33,18 @@ CATEGORIES:お知らせ
 DTSTART:20260922T010000Z
 END:VEVENT
 BEGIN:VEVENT
+UID:3333@wsdmoodle.waseda.jp
+SUMMARY:【ミニテスト】著作権 の受験可能期間開始
+CATEGORIES:新入生セミナー(2019ZZ9S00000135)
+DTSTART:20260924T000000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:4444@wsdmoodle.waseda.jp
+SUMMARY:【ミニテスト】著作権 の受験可能期間終了
+CATEGORIES:新入生セミナー(2019ZZ9S00000135)
+DTSTART:20260929T145900Z
+END:VEVENT
+BEGIN:VEVENT
 UID:1111@wsdmoodle.waseda.jp
 SUMMARY:第1回レポート の 提出期限
 CATEGORIES:情報理論
@@ -63,8 +75,21 @@ def test_date_only_events_land_at_the_end_of_that_day():
 
 def test_due_events_drops_the_past_and_the_not_due():
     found = ics.due_events(SAMPLE, since=date(2026, 9, 20))
-    assert [e.summary for e in found] == ["第3回レポート の 提出期限", "小テスト の 終了日時"]
-    # ガイダンス（締切ではない）と、4月の課題（過ぎている）は落とす
+    assert [e.summary for e in found] == [
+        "第3回レポート の 提出期限", "【ミニテスト】著作権 の受験可能期間終了", "小テスト の 終了日時"]
+    # ガイダンス（締切ではない）、受付の開始、4月の課題（過ぎている）は落とす
+
+
+def test_kind_tells_deadlines_from_openings():
+    kinds = {e.summary: e.kind for e in ics.parse(SAMPLE)}
+    assert kinds["【ミニテスト】著作権 の受験可能期間開始"] == "start"
+    assert kinds["【ミニテスト】著作権 の受験可能期間終了"] == "due"
+    assert kinds["学部ガイダンス"] == "other"
+
+
+def test_course_name_drops_the_enrolment_code():
+    event = next(e for e in ics.parse(SAMPLE) if e.uid.startswith("4444"))
+    assert event.course_name == "新入生セミナー"
 
 
 def test_due_events_respects_the_window():
@@ -98,4 +123,4 @@ def test_due_reads_the_calendar(monkeypatch):
 
     monkeypatch.setattr(moodle, "fetch", lambda url, timeout=30: SAMPLE)
     found = moodle.due("https://example.invalid/calendar.ics", since=date(2026, 9, 20))
-    assert [e.course for e in found] == ["情報理論", "自然言語処理"]
+    assert [e.course_name for e in found] == ["情報理論", "新入生セミナー", "自然言語処理"]

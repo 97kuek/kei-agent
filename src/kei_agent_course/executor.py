@@ -81,7 +81,7 @@ class CourseExecutor(AgentExecutor):
         if not events:
             await updater.complete(updater.new_agent_message([_text("締切の近い課題はありません")]))
             return
-        lines = [f"{e.starts_at:%m/%d %H:%M} {e.course + ' ' if e.course else ''}{e.summary}"
+        lines = [f"{e.starts_at:%m/%d %H:%M} {e.course_name[:24] + ' / ' if e.course_name else ''}{e.summary}"
                  for e in events[:MAX_DUE]]
         if len(events) > MAX_DUE:
             lines.append(f"（ほかに {len(events) - MAX_DUE} 件）")

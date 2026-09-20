@@ -13,8 +13,11 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-# 「課題名 の 提出期限」「… is due」など、Moodle が締切に付ける言い回し
-_DUE_WORDS = ("提出期限", "終了日時", "is due", "due")
+# Moodle が締切に付ける言い回し。同じ活動が「開始」と「終了」で2件入るので、終わりのほうだけを締切として扱う
+_DUE_WORDS = ("終了", "提出期限", "締切", "締め切り", "期限", "due", "close", "ends")
+_START_WORDS = ("開始", "オープン", "opens", "starts")
+# 科目名の末尾に付く履修コード（`…(2019ZZ2600000126)`）
+_COURSE_CODE = re.compile(r"\s*[（(][0-9A-Z]{6,}[）)]\s*$")
 _UNESCAPE = {"\\n": "\n", "\\N": "\n", "\\,": ",", "\\;": ";", "\\\\": "\\"}
 _ESCAPED = re.compile(r"\\[nN,;\\]")
 
@@ -30,9 +33,22 @@ class Event:
     url: str = ""
 
     @property
+    def kind(self) -> str:
+        """`due`（締切）／`start`（受付や公開の開始）／`other`（それ以外）。"""
+        if any(word in self.summary for word in _START_WORDS):
+            return "start"
+        if any(word in self.summary for word in _DUE_WORDS):
+            return "due"
+        return "other"
+
+    @property
     def is_due(self) -> bool:
-        """締切らしい予定か（授業の回そのものや、大学の行事を除く）。"""
-        return any(word in self.summary for word in _DUE_WORDS) or "assign" in self.uid.lower()
+        return self.kind == "due"
+
+    @property
+    def course_name(self) -> str:
+        """科目名（末尾の履修コードを外したもの）。"""
+        return _COURSE_CODE.sub("", self.course).strip()
 
 
 def unfold(text: str) -> list[str]:
