@@ -469,6 +469,16 @@ class Store:
                 "INSERT OR REPLACE INTO agent_sessions (channel, thread_ts, agent, session_id, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)", (channel, thread_ts, agent, session_id, time.time()))
 
+    def thread_agent(self, channel: str, thread_ts: str) -> str | None:
+        """そのスレッドに最後に答えたエージェント（会話の続きを同じ相手に回すのに使う）。
+
+        会話の鍵（session_id）を持たないエージェントもいるので、鍵の有無では判断しない。
+        """
+        row = self.conn.execute(
+            "SELECT agent FROM agent_sessions WHERE channel = ? AND thread_ts = ? "
+            "ORDER BY updated_at DESC LIMIT 1", (channel, thread_ts)).fetchone()
+        return row["agent"] if row else None
+
     # 一度だけ知らせるもの
 
     def noticed(self, key: str) -> bool:

@@ -571,9 +571,9 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         """
         if req.trigger not in ("message", "voice") or not self.agents:
             return False
-        for name in self.agents:
-            if self.store.agent_session(req.channel, req.thread_ts, name):
-                return await self._dispatch(req, name, "")
+        answered = self.store.thread_agent(req.channel, req.thread_ts)
+        if answered in self.agents and await self._dispatch(req, answered, ""):
+            return True
         row = self.store.get_thread(req.channel, req.thread_ts)
         if row is not None and row["session_id"]:
             return False    # 研究の会話の続き
@@ -589,6 +589,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         handler = {course.AGENT: self.course, work.AGENT: self.work}.get(agent)
         if handler is None:
             return False
+        # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
+        # 研究全体から回した続きも、毎回どこに聞くかを選び直してしまう
+        self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
+        self.store.set_agent_session(req.channel, req.thread_ts, agent,
+                                     self.store.agent_session(req.channel, req.thread_ts, agent) or "")
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
             await handler(req, skill, params)
         return True

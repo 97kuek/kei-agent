@@ -1082,6 +1082,80 @@ async def test_course_channel_sends_free_questions_to_ask(env, store):
     assert store.agent_session("C7", "11.2", "course") == "course-1"
 
 
+async def test_course_thread_takes_replies_without_a_mention(env, store):
+    """大学のスレッドでも、メンションなしの返信で続けられる（スレッドを覚えていないと拾えない）。"""
+    import json as _json
+
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            asked.append(skill)
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "締切はないよ", "data": {"items": []},
+                "limit_reset_at": None, "cost_usd": None}))
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.1",
+                                "text": "<@UBOT> 締切を教えて"})
+    await settle(assistant)
+    assert store.get_thread("C7", "12.1") is not None
+
+    await assistant.on_message({"channel": "C7", "user": "UME", "ts": "12.5",
+                                "thread_ts": "12.1", "text": "来週の締切は？"})
+    await settle(assistant)
+
+    assert asked == ["list-due", "list-due"]
+
+
+async def test_overview_thread_keeps_asking_the_agent_that_answered(env, monkeypatch):
+    """研究全体のスレッドの続きは、会話の鍵を持たない相手（仕事）でも、同じ相手のまま続ける。"""
+    import json as _json
+
+    from kei_agent import a2a, router
+
+    assistant, _, _, _ = env
+    asked, picked = [], []
+
+    class _Work:
+        base_url = "http://127.0.0.1:8789"
+
+        async def ask(self, skill, text="", params=None):
+            asked.append(skill)
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+                "ok": True, "text": "予定はないよ", "data": {"items": []},
+                "limit_reset_at": None, "cost_usd": None}))
+
+    assistant.agents.clear()
+    assistant.agents["work"] = _Work()
+    assistant.agent_skills["work"] = [{"id": "list-events", "description": "予定"}]
+    assistant.agent_skills_read_at["work"] = time.time()
+
+    async def fake_pick_across(config, by_agent, text):
+        picked.append(text)
+        return router.Choice(agent="work", skill="list-events")
+
+    async def fake_pick(config, skills, text):
+        return router.Choice(skill="list-events")
+
+    monkeypatch.setattr(router, "pick_across", fake_pick_across)
+    monkeypatch.setattr(router, "pick", fake_pick)
+
+    await assistant.process(Request("C5", "research-overview", "21.1", None, "今日の会議は？"))
+    await assistant.process(Request("C5", "research-overview", "21.1", None, "そのあとは？"))
+
+    assert asked == ["list-events", "list-events"]
+    # 2回目は、どのエージェントに聞くかを選び直さない
+    assert picked == ["今日の会議は？"]
+
+
 async def test_course_channel_formats_the_deadlines(env):
     """締切は JSON で返ってくるので、Slack 向けの短い行に組み直して出す。"""
     import json as _json
@@ -1344,7 +1418,12 @@ async def test_overview_agent_requests_use_the_same_thread_lock(env, monkeypatch
     async def fake_pick_across(config, by_agent, text):
         return router.Choice(agent="course", skill="list-due", params={"days": 7})
 
+    async def fake_pick(config, skills, text):
+        return router.Choice(skill="list-due", params={"days": 7})
+
     monkeypatch.setattr(router, "pick_across", fake_pick_across)
+    # 2回目は「前と同じ相手（大学）」に回り、仕事の中身だけを選び直す
+    monkeypatch.setattr(router, "pick", fake_pick)
     first = Request("C5", "research-overview", "20.1", None, "今週の締切")
     second = Request("C5", "research-overview", "20.1", None, "ほかには？")
     tasks = [asyncio.create_task(assistant.process(first)), asyncio.create_task(assistant.process(second))]

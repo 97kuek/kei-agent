@@ -195,7 +195,8 @@ class CourseChannel:
         """自由な質問を大学エージェントに渡す。経過は1行に出し、返事は流して見せる。"""
         ui = self.thread_ui(req)
         await ui.start()
-        session_id = self.store.agent_session(req.channel, req.thread_ts, AGENT)
+        # 空文字は「このスレッドは大学が答えた」という目印だけで、会話の鍵ではない（assistant._dispatch）
+        session_id = self.store.agent_session(req.channel, req.thread_ts, AGENT) or None
         payload = json.dumps({
             "prompt": req.text or "授業について教えて",
             "session_id": session_id,
