@@ -99,8 +99,8 @@ class ResearchExecutor(AgentExecutor):
             return
         ws = replace(ws, allowed_domains=tuple(ask.get("allowed_domains") or ()))
         themes.ensure_workspace(ws)
-        await updater.complete(updater.new_agent_message(
-            [Part(text=await claude.run(self.config, ws, ask, updater))]))
+        # claude が失敗したときは、封筒の ok が false になる。A2A のタスクも failed にする
+        await claude.finish(updater, await claude.run(self.config, ws, ask, updater))
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""
@@ -137,7 +137,7 @@ class ResearchExecutor(AgentExecutor):
         return path
 
     async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
-        await updater.complete(updater.new_agent_message([Part(text=envelope.reply(text, data))]))
+        await claude.finish(updater, envelope.reply(text, data))
 
     async def _fail(self, updater: TaskUpdater, reason: str) -> None:
         log.warning("断りました: %s", reason)

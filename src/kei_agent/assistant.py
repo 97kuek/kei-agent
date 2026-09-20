@@ -527,6 +527,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             log.exception("依頼の処理が落ちました")
             try:
                 await self.post(req, f"{FAILED_PREFIX} 依頼の処理が落ちました: `{type(e).__name__}: {e}`")
+                # 👀 のまま残ると、答えたのかどうかが分からなくなる
+                await self.mark_answered(req, failed=True)
             except Exception:
                 log.exception("落ちたことをスレッドに伝えられません")
             await self.notify_trouble(f"#{req.channel_name} の依頼の処理が落ちました: {type(e).__name__}: {e}")
@@ -544,9 +546,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
         if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK):
-            # 同じスレッドで2つ同時に動かさない。claude を動かす仕事もあるので、全体の上限も守る
-            async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
-                await (self.course(req) if ws.kind is ChannelKind.COURSE else self.work(req))
+            await self._dispatch(req, course.AGENT if ws.kind is ChannelKind.COURSE else work.AGENT, "")
             return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
@@ -585,13 +585,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
     async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
-        if agent == course.AGENT:
-            await self.course(req, skill, params)
-            return True
-        if agent == work.AGENT:
-            await self.work(req, skill, params)
-            return True
-        return False
+        """エージェントに渡す。同じスレッドで2つ同時に動かさず、全体の同時実行の上限も守る。"""
+        handler = {course.AGENT: self.course, work.AGENT: self.work}.get(agent)
+        if handler is None:
+            return False
+        async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
+            await handler(req, skill, params)
+        return True
 
     async def drop_deferred_for(self, req: Request) -> None:
         """上限で止まって自動でやり直す予定だった依頼を、このスレッドのぶんだけ取り消す。
@@ -663,8 +663,18 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         in_flight = self.store.start_in_flight(req.to_payload())
         try:
             result = await self._converse(req, ws, prompt, ui)
-        finally:
+        except asyncio.CancelledError:
+            # 終了処理などで止められた回。控えは残したまま（次の起動でやり直す）、
+            # 走りっぱなしの記録だけ閉じる
+            self.store.end_run(run_id, is_error=True, cost_usd=None)
+            self.theme_runs.end(req.channel_name, req.thread_ts)
+            raise
+        except Exception:
             self.store.finish_deferred(in_flight)
+            self.store.end_run(run_id, is_error=True, cost_usd=None)
+            self.theme_runs.end(req.channel_name, req.thread_ts)
+            raise
+        self.store.finish_deferred(in_flight)
         self.store.end_run(run_id, result.is_error, result.cost_usd)
         if req.trigger in ("message", "voice"):
             self.store.count_turn(req.channel, req.thread_ts)

@@ -31,7 +31,9 @@ DEFAULT_DENY_READ = (
 )
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV")
+STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
+                         # ドメインごとの鍵（Box・Moodle・Microsoft・Toggl）。エージェントの claude にも渡さない
+                         "BOX_", "MOODLE_", "MS_", "TOGGL_")
 KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）

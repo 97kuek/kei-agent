@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from kei_agent import agents, router
 from kei_agent.request import Request
-from kei_agent.slack_text import FAILED_PREFIX
+from kei_agent.slack_text import FAILED_PREFIX, escape
 
 log = logging.getLogger(__name__)
 
@@ -54,9 +54,11 @@ def _line(event: dict, with_day: bool = True) -> str:
     start, end = _at(event.get("start", "")), _at(event.get("end", ""))
     head = f"{_day(start)} " if with_day else ""
     span = "終日" if event.get("all_day") else f"{start:%H:%M}" + (f"–{end:%H:%M}" if end else "")
-    where = f"（{event['location']}）" if event.get("location") else ""
-    link = f" <{event['url']}|Outlook>" if event.get("url") else ""
-    return f"• {head}{span} {event.get('subject', '')}{where}{link}"
+    where = f"（{escape(event['location'])}）" if event.get("location") else ""
+    # リンクの中に `|` が入ると、そこから先が表示名になってしまう
+    url = str(event.get("url") or "").split("|")[0]
+    link = f" <{url}|Outlook>" if url else ""
+    return f"• {head}{span} {escape(event.get('subject', ''))}{where}{link}"
 
 
 def events_of(data: dict) -> list[dict]:

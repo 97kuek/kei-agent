@@ -137,4 +137,40 @@ def test_connector_says_when_the_reply_is_not_json():
 
     with pytest.raises(claude.ConnectorError, match="読めません"):
         claude.json_reply("[これは JSON ではない]")
-    assert claude.json_reply("予定はありません") == []
+    with pytest.raises(claude.ConnectorError, match="JSON の配列"):
+        claude.json_reply("予定はありません")
+
+
+def test_graph_sends_calendar_boundaries_with_the_tokyo_offset(monkeypatch):
+    """Graph が検索範囲を UTC と誤解して、朝の予定を落とさない。"""
+    from kei_agent_work import graph
+
+    seen = {}
+    client = graph.Graph(graph.App("client"))
+
+    def get(path, params=None):
+        seen.update(params)
+        return {"value": []}
+
+    monkeypatch.setattr(client, "_get", get)
+    client.events(days=1, since=datetime(2026, 9, 21, 0, 0))
+
+    assert seen["startDateTime"] == "2026-09-21T00:00:00+09:00"
+    assert seen["endDateTime"] == "2026-09-22T00:00:00+09:00"
+
+
+def test_calendar_text_escapes_values_from_outlook():
+    """予定名や場所を Slack のメンション・リンクとして解釈させない。"""
+    events = [{
+        "subject": "全社 <!channel> <https://evil.example|開く>",
+        "start": "2026-09-21T10:00",
+        "end": "2026-09-21T10:30",
+        "location": "<@U123>",
+        "url": "https://outlook.example/item?x=1|<!channel>",
+    }]
+
+    text = work.events_text(events, datetime(2026, 9, 21, 9, 0))
+
+    assert "<!channel>" not in text and "<@U123>" not in text
+    assert "&lt;!channel&gt;" in text and "&lt;@U123&gt;" in text
+    assert "|&lt;!channel&gt;" not in text

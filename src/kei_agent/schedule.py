@@ -309,9 +309,11 @@ class Scheduler:
         result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "daily")
         title = f"Daily {label(day)}"
         # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
-        timeline, gathered = await self.morning_text(datetime.now())
+        timeline, gathered, notices = await self.morning_text(datetime.now())
         thread_ts = await self.assistant.publish(
             channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result)
+        for key in notices:
+            self.store.record_notice(key)
         note = None
         if not result.is_error:
             note = await self._save_note(channel, thread_ts, title, "Daily", day, result.text, f"daily/{day}.md")
@@ -388,7 +390,7 @@ class Scheduler:
         name = self.config.course_channels[0] if self.config.course_channels else ""
         return (await self.assistant.channel_ids()).get(name) if name else None
 
-    async def morning_text(self, now: datetime) -> tuple[str, dict]:
+    async def morning_text(self, now: datetime) -> tuple[str, dict, list[str]]:
         """朝のまとめ（今日の時系列）。集められなかったものは黙って飛ばす。"""
         detail: dict = {}
         classes: list[dict] = []
@@ -403,10 +405,10 @@ class Scheduler:
             reply = await self.assistant.ask_work(work.LIST_EVENTS, days=2)
             events = reply.data.get("items") or [] if reply.ok else []
         detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
-        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない
-        for item in course.soon_items(dues, now):
-            self.store.record_notice(course.notice_key(item))
-        return morning.text(classes, events, dues, now, self.morning_notes()), detail
+        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
+        # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
+        notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
+        return morning.text(classes, events, dues, now, self.morning_notes()), detail, notices
 
     def morning_notes(self) -> list[str]:
         """時刻の無いもの（先行研究の新着など）を、1行ずつ。"""
@@ -426,10 +428,11 @@ class Scheduler:
         channel = await self.course_channel()
         if channel is None:
             return
-        self._due_checked = now.timestamp()
         items = await self.assistant.course_due(2, now)
         if items is None:
+            # 取れなかったときは時計を進めない（1時間待たずに、次の tick で取り直す）
             return
+        self._due_checked = now.timestamp()
         for item in course.soon_items(items, now):
             key = course.notice_key(item)
             if self.store.noticed(key):

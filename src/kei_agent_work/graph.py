@@ -190,8 +190,12 @@ class Graph:
         return self._get("/me", {"$select": "displayName,mail,userPrincipalName"})
 
     def events(self, days: int = DEFAULT_DAYS, since: datetime | None = None) -> list[dict]:
-        """これからの予定（繰り返しも展開したもの）を、始まる順に。"""
-        start = since or datetime.now()
+        """これからの予定（繰り返しも展開したもの）を、始まる順に。
+
+        検索の範囲には時差を付けて渡す。付けないと Graph が UTC と解釈して、朝の予定が
+        まるごと範囲から外れる。
+        """
+        start = (since or datetime.now()).astimezone()
         got = self._get("/me/calendarView", {
             "startDateTime": start.isoformat(timespec="seconds"),
             "endDateTime": (start + timedelta(days=max(days, 1))).isoformat(timespec="seconds"),

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 from kei_agent import agents, router
 from kei_agent.request import Request
-from kei_agent.slack_text import FAILED_PREFIX
+from kei_agent.slack_text import FAILED_PREFIX, escape
 
 log = logging.getLogger(__name__)
 
@@ -97,9 +97,9 @@ def _day(at: datetime) -> str:
 def _line(item: dict, with_day: bool = True, now: datetime | None = None) -> str:
     at = _at(item)
     head = f"{_day(at)} " if with_day else ""
-    course = f"{item.get('course')} / " if item.get("course") else ""
+    course = f"{escape(item['course'])} / " if item.get("course") else ""
     left = f"（{_left(at, now)}）" if now is not None else ""
-    return f"• {head}{at:%H:%M} {course}{item.get('title', '')}{left}"
+    return f"• {head}{at:%H:%M} {course}{escape(item.get('title', ''))}{left}"
 
 
 def due_text(items: list[dict], more: int = 0, now: datetime | None = None) -> str:
@@ -144,9 +144,9 @@ def soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS) -> lis
 def soon_text(item: dict, now: datetime) -> str:
     """締切が近いものを1件ずつ知らせる文。"""
     at = _at(item)
-    course = f"{item.get('course')} / " if item.get("course") else ""
-    url = f"\n{item['url']}" if item.get("url") else ""
-    return (f"⏰ {_left(at, now)}で締切: {course}{item.get('title', '')}\n"
+    course = f"{escape(item['course'])} / " if item.get("course") else ""
+    url = f"\n{str(item['url']).split('|')[0]}" if item.get("url") else ""
+    return (f"⏰ {_left(at, now)}で締切: {course}{escape(item.get('title', ''))}\n"
             f"{_day(at)} {at:%H:%M} まで{url}")
 
 

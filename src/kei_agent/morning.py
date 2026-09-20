@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from kei_agent.slack_text import escape
+
 WEEKDAYS = "月火水木金土日"
 CLASS, MEETING, DUE = "🎓", "💼", "⏰"
 NOTHING = "今日は、時間の決まった予定がないよ。"
@@ -56,18 +58,18 @@ def entries(classes: list[dict], events: list[dict], dues: list[dict], now: date
     for item in classes or []:
         start, end = _at(item.get("start", "")), _at(item.get("end", ""))
         if start and start.date() == today:
-            found.append(Entry(start, CLASS, item.get("subject", ""), end))
+            found.append(Entry(start, CLASS, escape(item.get("subject", "")), end))
     for item in events or []:
         start, end = _at(item.get("start", "")), _at(item.get("end", ""))
         if not start or start.date() != today:
             continue
-        where = f"（{item['location']}）" if item.get("location") else ""
-        found.append(Entry(start, MEETING, f"{item.get('subject', '')}{where}", end))
+        where = f"（{escape(item['location'])}）" if item.get("location") else ""
+        found.append(Entry(start, MEETING, f"{escape(item.get('subject', ''))}{where}", end))
     for item in dues or []:
         at = _at(item.get("at", ""))
         if at and at.date() == today:
-            course = f"{item['course']} " if item.get("course") else ""
-            found.append(Entry(at, DUE, f"締切: {course}{item.get('title', '')}"))
+            course = f"{escape(item['course'])} " if item.get("course") else ""
+            found.append(Entry(at, DUE, f"締切: {course}{escape(item.get('title', ''))}"))
     return sorted(found, key=lambda e: (e.at, e.icon))
 
 
@@ -82,7 +84,7 @@ def later(dues: list[dict], now: datetime, days: int = 7) -> str:
     if not found:
         return ""
     found.sort(key=lambda pair: pair[0])
-    shown = "、".join(f"{at.month}/{at.day} {item.get('title', '')[:24]}" for at, item in found[:MAX_LATER])
+    shown = "、".join(f"{at.month}/{at.day} {escape(item.get('title', ''))[:24]}" for at, item in found[:MAX_LATER])
     rest = f"（ほか {len(found) - MAX_LATER} 件）" if len(found) > MAX_LATER else ""
     return f"このあとの締切: {shown}{rest}"
 

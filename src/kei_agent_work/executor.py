@@ -20,7 +20,7 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent.config import Config, load_config
-from kei_agent_a2a import envelope
+from kei_agent_a2a import claude, envelope
 from kei_agent_work import connector, graph
 from kei_agent_work.card import LIST_EVENTS
 
@@ -62,8 +62,8 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, str(e))
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
-        await updater.complete(updater.new_agent_message([Part(text=envelope.reply(
-            f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events}))]))
+        await claude.finish(updater, envelope.reply(
+            f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events}))
 
     async def _events(self, days: int) -> list[dict]:
         """予定の取り方を選ぶ。既定は連携、`WORK_CALENDAR_SOURCE=graph` なら Entra ID のアプリ。"""

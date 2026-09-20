@@ -8,6 +8,15 @@ PROGRESS_PREFIX = "⏳"
 DONE_PREFIX = "✅"
 FAILED_PREFIX = "⚠️"
 
+
+def escape(text: str) -> str:
+    """外から来た文（予定の件名、課題の名前、場所）を、そのまま出せる形にする。
+
+    Slack は `<!channel>` や `<@U123>` を本物の呼びかけとして解釈する。会社の予定や Moodle の
+    課題名にそういう字が入っていても、チャンネル全員を呼んだりしないように、記号を潰しておく。
+    """
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 # 依頼のメッセージにつけるリアクション（受け取った、答えた、止まった）と、夜間の Task にする印
 SEEN_REACTION = "eyes"
 DONE_REACTION = "white_check_mark"

@@ -19,15 +19,17 @@ import json
 import logging
 import os
 import re
+import signal
+import uuid
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict
 from pathlib import Path
 
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 
-from kei_agent import runner
+from kei_agent import guard, runner
 from kei_agent.config import Config
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
@@ -36,6 +38,8 @@ log = logging.getLogger(__name__)
 
 # 経過1つの長さの上限（タスクの記録が長くなりすぎないように）
 PROGRESS_LIMIT = 800
+# 止めたあと、プロセスが消えるのを待つ秒数
+EXIT_GRACE_SECONDS = 5
 NO_PROMPT = "依頼の JSON に prompt が要ります"
 
 
@@ -71,7 +75,8 @@ def mcp_config(state_dir: Path, name: str, servers: dict) -> Iterator[Path | Non
     directory = state_dir / "secrets"
     directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o700)
-    path = directory / f"mcp-{name}-{os.getpid()}.json"
+    # 同じプロセスで同時に動いても、相手の設定を上書き・削除しないように、1回ごとに別の名前にする
+    path = directory / f"mcp-{name}-{os.getpid()}-{uuid.uuid4().hex[:8]}.json"
     path.write_text(json.dumps({"mcpServers": servers}, ensure_ascii=False), encoding="utf-8")
     path.chmod(0o600)
     try:
@@ -115,7 +120,9 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater) ->
 # アカウントに付いている連携（claude.ai のコネクタ）を使う
 
 # 連携の道具は、ユーザー設定を読み込まないと見えない。そのかわり、危ないものは名指しで断る
-DENY_ALWAYS = ("Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task")
+# 連携を使うだけなので、手元のファイルにも外の Web にも触らせない
+DENY_ALWAYS = ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit",
+               "WebFetch", "WebSearch", "Task")
 
 
 async def ask_connector(config: Config, prompt: str, allowed: Sequence[str],
@@ -138,27 +145,58 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str],
     ]
     proc = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, env=os.environ | {"CLAUDECODE": "1"})
+        stderr=asyncio.subprocess.PIPE,
+        # ほかのドメインの鍵（Slack・Notion・Box・Moodle など）を、会社の claude に渡さない
+        env=guard.strip_env(dict(os.environ)),
+        # 上限時間で止めるとき、中で動いているものもまとめて止められるようにする
+        start_new_session=True)
     try:
         out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=timeout_minutes * 60)
     except TimeoutError:
-        proc.kill()
+        await _stop(proc)
         raise ConnectorError(f"連携の返事が {timeout_minutes} 分で返りませんでした") from None
     if proc.returncode:
         raise ConnectorError(f"連携を使えませんでした: {err.decode('utf-8', 'replace').strip()[:300]}")
     return out.decode("utf-8", "replace").strip()
 
 
+async def _stop(proc) -> None:
+    """claude と、その中で動いているものを止めて、後始末まで待つ。"""
+    with suppress(OSError, ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    with suppress(TimeoutError, ProcessLookupError):
+        await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
+
+
 def json_reply(text: str) -> list[dict]:
-    """連携に JSON で答えさせたときの、返事の読み取り（前後に文が付いていても拾う）。"""
-    match = re.search(r"\[.*\]", text or "", re.DOTALL)
-    if not match:
-        return []
+    """連携に JSON で答えさせたときの、返事の読み取り（前後に文が付いていても拾う）。
+
+    「接続が拒否されました」のような文を「予定0件」と取り違えないよう、JSON の配列が
+    見つからなければ断る。前置きに角括弧があっても、後ろから順に読めるものを探す。
+    """
+    starts = [m.start() for m in re.finditer(r"\[", text or "")]
+    for start in reversed(starts):
+        for end in reversed([m.end() for m in re.finditer(r"\]", text or "") if m.end() > start]):
+            try:
+                found = json.loads(text[start:end])
+            except ValueError:
+                continue
+            if isinstance(found, list):
+                return [item for item in found if isinstance(item, dict)]
+    raise ConnectorError(f"連携の返事を読めません（JSON の配列がありません）: {(text or '')[:200]}")
+
+
+async def finish(updater: TaskUpdater, payload: str) -> None:
+    """封筒を見て、A2A のタスクを終わらせる。`ok: false` なら failed にする。
+
+    うまくいかなかったのに completed で返すと、頼んだ側は失敗に気づけない。
+    """
     try:
-        found = json.loads(match.group(0))
-    except ValueError:
-        raise ConnectorError(f"連携の返事を読めません: {text[:200]}") from None
-    return [item for item in found if isinstance(item, dict)]
+        ok = bool(json.loads(payload).get("ok"))
+    except (ValueError, AttributeError):
+        ok = False
+    message = updater.new_agent_message([Part(text=payload)])
+    await (updater.complete(message) if ok else updater.failed(message))
 
 
 class ConnectorError(RuntimeError):

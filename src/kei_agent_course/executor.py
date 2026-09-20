@@ -102,7 +102,7 @@ class CourseExecutor(AgentExecutor):
         await updater.failed(updater.new_agent_message([_text(envelope.failure(reason))]))
 
     async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
-        await updater.complete(updater.new_agent_message([_text(envelope.reply(text, data))]))
+        await claude.finish(updater, envelope.reply(text, data))
 
     async def _due_events(self, updater: TaskUpdater, days: int) -> list[Event] | None:
         """Moodle のカレンダーから締切を読む。読めなければ理由を返して None。"""
@@ -184,8 +184,7 @@ class CourseExecutor(AgentExecutor):
         with claude.mcp_config(self.config.state_dir, tools.AGENT,
                                tools.mcp_servers(self.config)) as mcp_path:
             ws = tools.workspace(self.config, mcp_path)
-            await updater.complete(updater.new_agent_message(
-                [_text(await claude.run(self.config, ws, ask, updater))]))
+            await claude.finish(updater, await claude.run(self.config, ws, ask, updater))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)

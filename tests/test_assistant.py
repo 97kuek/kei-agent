@@ -476,6 +476,7 @@ async def test_crash_before_the_run_is_reported_to_the_thread(env, monkeypatch):
     texts = slack.texts()
     assert any("依頼の処理が落ちました" in t and "ディスクが一杯です" in t for t in texts)
     assert claude.calls == []
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
 
 
 async def test_shows_thinking_text_while_working(env):
@@ -881,6 +882,36 @@ async def test_request_is_recorded_while_it_runs(env, store, monkeypatch):
     assert store.interrupted_requests() == []  # 終わったら消える
 
 
+async def test_cancelled_request_stays_recorded_for_the_next_start(env, store, monkeypatch):
+    """終了処理でキャンセルされた依頼は、次の起動でやり直せるよう控えを残す。"""
+    from kei_agent import themes
+
+    assistant, _, _, _ = env
+    gate = asyncio.Event()
+
+    async def slow(*args, **kwargs):
+        await gate.wait()
+
+    monkeypatch.setattr(runner, "run_claude", slow)
+    req = Request("C1", "vlm", "10.1", "10.1", "図を作って")
+    ws = themes.resolve(assistant.config, "vlm")
+    themes.ensure_workspace(ws)
+    task = asyncio.create_task(assistant.run(req, ws))
+    for _ in range(20):
+        if store.interrupted_requests():
+            break
+        await asyncio.sleep(0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert [payload["text"] for _, payload in store.interrupted_requests()] == ["図を作って"]
+    assert assistant.theme_runs.running == {}
+    run = store.conn.execute("SELECT ended_at, is_error FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    assert run["ended_at"] is not None and run["is_error"] == 1
+
+
 async def test_interrupted_request_is_resumed_on_start(env, store):
     """強制終了で控えが残ったまま起動したときは、断って続きからやり直す。"""
     assistant, slack, claude, _ = env
@@ -1283,6 +1314,47 @@ async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
 
     assert asked == [("list-due", {"days": 7})]
     assert claude.calls == []            # 研究の claude は動かさない
+
+
+async def test_overview_agent_requests_use_the_same_thread_lock(env, monkeypatch):
+    """研究全体から振り分けた依頼も、同じスレッドの中では1本ずつ動かす。"""
+    import json
+
+    from kei_agent import a2a, router
+
+    assistant, _, _, _ = env
+    gate = asyncio.Event()
+    calls = 0
+
+    class _Course:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            nonlocal calls
+            calls += 1
+            await gate.wait()
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps({
+                "ok": True, "text": "締切 0 件", "data": {"items": []},
+                "limit_reset_at": None, "cost_usd": None}))
+
+    assistant.agents["course"] = _Course()
+    assistant.agent_skills["course"] = [{"id": "list-due", "description": "締切"}]
+    assistant.agent_skills_read_at["course"] = time.time()
+
+    async def fake_pick_across(config, by_agent, text):
+        return router.Choice(agent="course", skill="list-due", params={"days": 7})
+
+    monkeypatch.setattr(router, "pick_across", fake_pick_across)
+    first = Request("C5", "research-overview", "20.1", None, "今週の締切")
+    second = Request("C5", "research-overview", "20.1", None, "ほかには？")
+    tasks = [asyncio.create_task(assistant.process(first)), asyncio.create_task(assistant.process(second))]
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert calls == 1
+    gate.set()
+    await asyncio.gather(*tasks)
+    assert calls == 2
 
 
 async def test_overview_channel_keeps_research_talk_in_house(env, monkeypatch):

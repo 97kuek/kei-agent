@@ -541,7 +541,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     assistant.agents["work"] = FakeWorkAgent(
         [{"subject": "朝会", "start": f"{today}T10:00", "end": f"{today}T10:15", "location": "Zoom"}])
 
-    text, detail = await scheduler.morning_text(now)
+    text, detail, _ = await scheduler.morning_text(now)
 
     lines = text.splitlines()
     assert lines[0].startswith("☀️")
@@ -554,7 +554,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
 async def test_morning_text_works_without_the_agents(env):
     """エージェントがいないときは、黙って「予定なし」にする（朝の通知は止めない）。"""
     scheduler, *_ = env
-    text, detail = await scheduler.morning_text(datetime.now())
+    text, detail, _ = await scheduler.morning_text(datetime.now())
     assert morning.NOTHING in text and detail == {"classes": 0, "dues": 0, "events": 0}
 
 
@@ -565,8 +565,30 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
     soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
     assistant.agents["course"] = FakeCourseAgent([due_item(soon)])
 
-    await scheduler.morning_text(datetime.now())
+    _, _, notices = await scheduler.morning_text(datetime.now())
+    for key in notices:
+        scheduler.store.record_notice(key)
     before = len(slack.posted())
     await scheduler.notify_due_soon(datetime.now())
 
     assert len(slack.posted()) == before
+
+
+async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypatch):
+    """一時的に一覧を取れなくても、1時間待たず次の tick で取り直す。"""
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    calls = 0
+
+    async def course_due(days, now):
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else []
+
+    monkeypatch.setattr(assistant, "course_due", course_due)
+    now = datetime.now()
+
+    await scheduler.notify_due_soon(now)
+    await scheduler.notify_due_soon(now)
+
+    assert calls == 2
