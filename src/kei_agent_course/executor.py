@@ -174,7 +174,7 @@ class CourseExecutor(AgentExecutor):
 
     async def _ask(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         """定型に当てはまらない質問に、自分の claude が答える（連携で Box と Notion を読む）。"""
-        question = (text or "").strip()
+        question = claude.ask_prompt(text)
         if not question:
             await self._fail(updater, "質問が空です")
             return

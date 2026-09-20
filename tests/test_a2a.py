@@ -98,6 +98,28 @@ async def test_list_due_says_what_is_missing_without_the_calendar_url(server, mo
     assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
 
 
+async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
+    """本体は session_id などを添えた JSON で頼む。claude に渡すのは質問だけにする。"""
+    from kei_agent_a2a import claude
+
+    seen = {}
+
+    async def ask_connector(config, prompt, allowed, deny=(), timeout_minutes=3):
+        seen["prompt"] = prompt
+        return "過去問は Box にあるよ"
+
+    monkeypatch.setattr(claude, "ask_connector", ask_connector)
+    payload = json.dumps({"prompt": "情報Bの過去問ある？", "session_id": None,
+                          "channel": "C123", "thread_ts": "1.2"}, ensure_ascii=False)
+
+    result = await Agent(server, TOKEN).stream("ask", text=payload)
+
+    assert result.ok and json.loads(result.answer)["text"] == "過去問は Box にあるよ"
+    assert seen["prompt"].endswith("情報Bの過去問ある？")
+    # スレッドの鍵やチャンネル ID を、質問として claude に渡さない
+    assert "C123" not in seen["prompt"] and "session_id" not in seen["prompt"]
+
+
 async def test_unknown_skill_fails_with_a_reason(server):
     result = await Agent(server, TOKEN).ask("", text="よろしく")
     assert not result.ok and "どの仕事か分かりません" in json.loads(result.answer)["text"]

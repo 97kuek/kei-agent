@@ -50,6 +50,25 @@ def ask_json(text: str) -> dict:
     return ask
 
 
+def ask_prompt(text: str) -> str:
+    """自由な質問（`ask`）の本文。
+
+    オーケストレーターは、スレッドの続きのために `session_id` や `channel` を添えた JSON で
+    渡してくる。そのまま claude に流すと、質問がチャンネル ID ごと JSON に埋もれてしまうので、
+    `prompt` だけを取り出す。素の文で届いたときは、そのまま質問として扱う。
+    """
+    stripped = (text or "").strip()
+    if not stripped.startswith("{"):
+        return stripped
+    try:
+        ask = json.loads(stripped)
+    except ValueError:
+        return stripped
+    if isinstance(ask, dict) and str(ask.get("prompt") or "").strip():
+        return str(ask["prompt"]).strip()
+    return stripped
+
+
 async def progress(updater: TaskUpdater, payload: dict) -> None:
     """途中の様子を、タスクの状態に流す。"""
     short = {k: str(v)[:PROGRESS_LIMIT] for k, v in payload.items()}
@@ -138,17 +157,30 @@ def json_reply(text: str) -> list[dict]:
 
     「接続が拒否されました」のような文を「予定0件」と取り違えないよう、JSON の配列が
     見つからなければ断る。前置きに角括弧があっても、後ろから順に読めるものを探す。
+
+    後ろに出典（`[1, 2]`）のような別の配列が付くことがあるので、**中身のある配列を優先**する。
+    先に見つけた `[1, 2]` を返すと、予定があるのに0件として返してしまう。
     """
-    starts = [m.start() for m in re.finditer(r"\[", text or "")]
+    text = text or ""
+    starts = [m.start() for m in re.finditer(r"\[", text)]
+    ends = [m.end() for m in re.finditer(r"\]", text)]
+    empty = None
     for start in reversed(starts):
-        for end in reversed([m.end() for m in re.finditer(r"\]", text or "") if m.end() > start]):
+        for end in reversed([e for e in ends if e > start]):
             try:
                 found = json.loads(text[start:end])
             except ValueError:
                 continue
-            if isinstance(found, list):
-                return [item for item in found if isinstance(item, dict)]
-    raise ConnectorError(f"連携の返事を読めません（JSON の配列がありません）: {(text or '')[:200]}")
+            if not isinstance(found, list):
+                continue
+            items = [item for item in found if isinstance(item, dict)]
+            if items:
+                return items
+            if empty is None:
+                empty = items
+    if empty is not None:
+        return empty
+    raise ConnectorError(f"連携の返事を読めません（JSON の配列がありません）: {text[:200]}")
 
 
 async def finish(updater: TaskUpdater, payload: str) -> None:

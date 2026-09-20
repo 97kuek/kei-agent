@@ -79,6 +79,23 @@ def test_json_reply_requires_a_json_array():
         claude.json_reply("Microsoft 365 への接続が拒否されました")
 
 
+def test_json_reply_prefers_the_array_that_holds_the_items():
+    """あとに出典の配列が付いていても、予定の入った配列を選ぶ（黙って0件にしない）。"""
+    assert claude.json_reply('[{"subject": "朝会"}]\n\n出典 [1, 2]') == [{"subject": "朝会"}]
+    # 本当に0件のときは、空の配列をそのまま返す
+    assert claude.json_reply("予定はありません。[]") == []
+
+
+def test_ask_prompt_takes_the_question_out_of_the_envelope():
+    """オーケストレーターが添えた session_id やチャンネル ID を、質問に混ぜない。"""
+    payload = '{"prompt": "過去問ある？", "session_id": null, "channel": "C1", "thread_ts": "1.2"}'
+    assert claude.ask_prompt(payload) == "過去問ある？"
+    # 素の文はそのまま。prompt の無い JSON も、質問として読めるように崩さない
+    assert claude.ask_prompt("  今日の授業は？  ") == "今日の授業は？"
+    assert claude.ask_prompt('{"foo": 1}') == '{"foo": 1}'
+    assert claude.ask_prompt("") == ""
+
+
 class _Updater:
     def __init__(self):
         self.state = ""

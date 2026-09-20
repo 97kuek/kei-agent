@@ -59,7 +59,7 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, f"できるのは {' / '.join(SKILLS)} だけです")
             return
         if skill == ASK:
-            await self._ask(updater, message_text(context))
+            await self._ask(updater, claude.ask_prompt(message_text(context)))
             return
         days = asked_days(metadata)
         try:
@@ -73,7 +73,7 @@ class WorkExecutor(AgentExecutor):
 
     async def _ask(self, updater: TaskUpdater, question: str) -> None:
         """自由な質問に、連携を読んで答える。"""
-        if not (question or "").strip():
+        if not question.strip():
             await self._fail(updater, "質問が空です")
             return
         try:
