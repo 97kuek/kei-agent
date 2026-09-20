@@ -169,9 +169,10 @@ class Assistant(SettingsActions, SelfFix, Handoff):
     # Slack の読み書き
 
     async def channel_name(self, channel: str) -> str:
+        """テーマの名前（チャンネル名から、並び順のための番号を外したもの）。"""
         if channel not in self.channel_names:
             info = await self.slack.conversations_info(channel=channel)
-            self.channel_names[channel] = info["channel"]["name"]
+            self.channel_names[channel] = themes.theme_name(info["channel"]["name"])
         return self.channel_names[channel]
 
     async def channel_ids(self) -> dict[str, str]:
@@ -184,8 +185,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             )
             for c in resp.get("channels", []):
                 if c.get("is_member"):
-                    ids[c["name"]] = c["id"]
-                    self.channel_names[c["id"]] = c["name"]
+                    # 番号つきの名前（`10_amr-query`）でも、テーマ名（`amr-query`）でも引けるようにする
+                    ids[c["name"]] = ids[themes.theme_name(c["name"])] = c["id"]
+                    self.channel_names[c["id"]] = themes.theme_name(c["name"])
             cursor = (resp.get("response_metadata") or {}).get("next_cursor")
             if not cursor:
                 return ids

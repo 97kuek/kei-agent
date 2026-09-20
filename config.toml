@@ -46,7 +46,8 @@ session_retention_days = 90
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]
 # Kei Agent の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
-improve = ["research-agent"]
+# チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
+improve = ["research-agent", "kei-agent"]
 # 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
 # 個人用のチャンネルには Kei Agent を招待しない
 

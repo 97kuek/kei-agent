@@ -84,3 +84,20 @@ def test_config_toml_in_repo_loads(tmp_path):
     """リポジトリの config.toml が、検査を通ること。"""
     from kei_agent.config import REPO_ROOT, load_config
     load_config(REPO_ROOT / "config.toml", env={})
+
+
+# チャンネル名の先頭の番号（並び順のためのもの）
+
+
+def test_theme_name_drops_the_sorting_number():
+    assert themes.theme_name("10_amr-query") == "amr-query"
+    assert themes.theme_name("00_kei-agent") == "kei-agent"
+    assert themes.theme_name("amr-query") == "amr-query"       # 番号なしはそのまま
+    assert themes.theme_name("2026_survey") == "survey"        # 4桁でも番号として外す
+    assert themes.theme_name("a10_x") == "a10_x"               # 先頭が数字でなければ名前の一部
+
+
+def test_numbered_channel_uses_the_same_directory(config):
+    plain = themes.resolve(config, "amr-query")
+    numbered = themes.resolve(config, "10_amr-query")
+    assert numbered.cwd == plain.cwd and numbered.channel_name == "amr-query"
