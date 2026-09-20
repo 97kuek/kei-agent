@@ -20,6 +20,7 @@ kei-agent-notion-setup = "kei_agent.notion:main"
 kei-agent-ask = "kei_agent.ask:main"
 kei-agent-voice = "kei_agent_voice.app:main"
 kei-agent-course = "kei_agent_course.app:main"
+kei-agent-course-setup = "kei_agent_course.notion_setup:main"
 
 [tool.uv.build-backend]
 # 机の上の音声対話（src/kei_agent_voice）と大学エージェント（src/kei_agent_course）は、

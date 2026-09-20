@@ -132,6 +132,19 @@ source ~/.config/zsh/local/research-assistant.zsh
 uv run kei-agent-notion-setup <研究ホームのページID>
 ```
 
+## 7.5 授業用の Notion（大学エージェント）
+
+1. <https://www.notion.so/profile/integrations> で、授業用のコネクト（例: `Kei Agent（授業）`）を作り、トークンを控える
+2. Notion に「授業ホーム」のページを作り、そのコネクトの「コンテンツへのアクセス」に追加する
+3. 秘密情報のファイルに `export NOTION_COURSE_TOKEN="ntn_..."` を足す
+4. 次を実行すると、「授業」「課題」の2つのデータベースができる（あとから実行しても、足りない項目だけ足す）
+
+   ```zsh
+   uv run --group course kei-agent-course-setup <授業ホームのページID>
+   ```
+
+   研究用のコネクトとは分けてあるので、授業エージェントは研究のデータベースに触れない。
+
 ## 8. バックアップとログ
 
 `~/research/` を非公開の GitHub リポジトリ（`research-data`）にし、毎晩 22:00 に Kei Agent がコミットして push する。

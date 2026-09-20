@@ -124,3 +124,42 @@ def test_due_reads_the_calendar(monkeypatch):
     monkeypatch.setattr(moodle, "fetch", lambda url, timeout=30: SAMPLE)
     found = moodle.due("https://example.invalid/calendar.ics", since=date(2026, 9, 20))
     assert [e.course_name for e in found] == ["情報理論", "新入生セミナー", "自然言語処理"]
+
+
+# 授業用 Notion のセットアップ
+
+
+def test_course_setup_creates_two_databases(tmp_path):
+    """授業と課題の2つを作り、課題から科目へのリレーションを張る。"""
+    from kei_agent_course import notion_setup
+
+    calls = []
+
+    class _Notion:
+        def children(self, page_id):
+            return []
+
+        def request(self, method, path, body=None):
+            calls.append((method, path, body))
+            if method == "POST" and path == "/databases":
+                return {"id": f"db-{body['title'][0]['text']['content']}"}
+            if method == "GET" and path.startswith("/databases/"):
+                return {"data_sources": [{"id": f"ds-{path.split('/')[-1]}"}], "url": "https://notion.so/x"}
+            if method == "GET" and path.startswith("/data_sources/"):
+                name = path.split("ds-db-")[-1]
+                spec = notion_setup.COURSES if name == "授業" else notion_setup.ASSIGNMENTS
+                props = {n: {"id": f"p{i}", "type": next(iter(v))} for i, (n, v) in enumerate(spec["properties"].items())}
+                props.update({n: {"id": "rel", "type": "relation"} for n in spec.get("relations", {})})
+                return {"properties": props}
+            return {}
+
+    setup = notion_setup.CourseSetup(_Notion(), "home-page", tmp_path / "notion-course.json")
+    setup.run()
+
+    created = [b["title"][0]["text"]["content"] for m, p, b in calls if m == "POST" and p == "/databases"]
+    assert created == ["授業", "課題"]
+    assignments = next(b for m, p, b in calls if m == "POST" and p == "/databases"
+                       and b["title"][0]["text"]["content"] == "課題")
+    relation = assignments["initial_data_source"]["properties"]["科目"]["relation"]
+    assert relation["data_source_id"] == "ds-db-授業" and relation["dual_property"]["synced_property_name"] == "課題"
+    assert set(setup.state["databases"]) == {"courses", "assignments"}
