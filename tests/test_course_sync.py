@@ -214,3 +214,15 @@ def test_a_course_without_a_term_is_kept():
         "科目名": _title("学期なし"), "曜日": _select("月"), "時限": {"number": 2}, "状態": _select("履修中")}}]
     found = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE).courses_on("月", date(2026, 5, 11))
     assert [c["subject"] for c in found] == ["学期なし"]
+
+
+def test_course_tools_are_read_only():
+    """大学エージェントに渡す道具は、読むものだけ（作成・移動・アップロードは入れない）。"""
+    from kei_agent_course import tools
+
+    assert all(name.startswith(("mcp__claude_ai_Box__", "mcp__claude_ai_Notion__")) for name in tools.ALLOWED)
+    banned = ("upload", "create", "update", "move", "copy", "delete", "set_", "spawn")
+    assert not [name for name in tools.ALLOWED if any(word in name for word in banned)]
+    # 危ないものは名指しでも断る
+    assert "mcp__claude_ai_Box__upload_file" in tools.DENY
+    assert "mcp__claude_ai_Notion__notion-update-page" in tools.DENY

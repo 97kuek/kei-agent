@@ -8,8 +8,6 @@
 - 返事は共通の封筒（`envelope.py`）。`data` には `RunResult` をそのまま入れる
 - 上限（レートリミット）に当たったら `limit_reset_at` を載せて返す。やり直しの約束は本体が持つ
 
-MCP の設定にはトークンが入るので、sandbox から読めない場所（`<state_dir>/secrets/`）に置き、
-使い終わったら消す。claude は MCP の道具としては使えるが、トークンの文字列は読めない。
 """
 
 from __future__ import annotations
@@ -20,11 +18,9 @@ import logging
 import os
 import re
 import signal
-import uuid
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager, suppress
+from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import asdict
-from pathlib import Path
 
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
@@ -52,37 +48,6 @@ def ask_json(text: str) -> dict:
     if not isinstance(ask, dict) or not str(ask.get("prompt") or "").strip():
         raise ValueError(NO_PROMPT)
     return ask
-
-
-def clean_mcp_configs(state_dir: Path, name: str) -> int:
-    """前に強制終了して残った MCP の設定を消す（トークンが書いてあるので残さない）。"""
-    directory = state_dir / "secrets"
-    removed = 0
-    for path in directory.glob(f"mcp-{name}-*.json"):
-        path.unlink(missing_ok=True)
-        removed += 1
-    if removed:
-        log.info("残っていた MCP の設定を %d 個片づけました", removed)
-    return removed
-
-
-@contextmanager
-def mcp_config(state_dir: Path, name: str, servers: dict) -> Iterator[Path | None]:
-    """MCP の設定を、sandbox から読めない場所に置く（使い終わったら消す）。"""
-    if not servers:
-        yield None
-        return
-    directory = state_dir / "secrets"
-    directory.mkdir(parents=True, exist_ok=True)
-    directory.chmod(0o700)
-    # 同じプロセスで同時に動いても、相手の設定を上書き・削除しないように、1回ごとに別の名前にする
-    path = directory / f"mcp-{name}-{os.getpid()}-{uuid.uuid4().hex[:8]}.json"
-    path.write_text(json.dumps({"mcpServers": servers}, ensure_ascii=False), encoding="utf-8")
-    path.chmod(0o600)
-    try:
-        yield path
-    finally:
-        path.unlink(missing_ok=True)
 
 
 async def progress(updater: TaskUpdater, payload: dict) -> None:

@@ -67,9 +67,6 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
     model = ws.model or config.model
     if model:
         cmd += ["--model", model]
-    if ws.mcp_config is not None:
-        # そのエージェントに渡した MCP だけを使う（手元の設定は持ち込まない）
-        cmd += ["--mcp-config", str(ws.mcp_config), "--strict-mcp-config"]
     if session_id:
         cmd += ["--resume", session_id]
     return cmd

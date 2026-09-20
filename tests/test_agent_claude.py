@@ -1,4 +1,4 @@
-"""エージェントが起動する Claude の秘密情報と一時ファイルの扱い。"""
+"""エージェントが起動する Claude の、秘密情報と後始末の扱い。"""
 
 from __future__ import annotations
 
@@ -8,16 +8,6 @@ import os
 import pytest
 
 from kei_agent_a2a import claude, envelope
-
-
-def test_concurrent_mcp_configs_do_not_share_a_path(tmp_path):
-    """同じプロセスの並行依頼が、相手の MCP 設定を上書き・削除しない。"""
-    with claude.mcp_config(tmp_path, "course", {"first": {}}) as first:
-        with claude.mcp_config(tmp_path, "course", {"second": {}}) as second:
-            assert first != second
-            assert first.exists() and second.exists()
-        assert first.exists()
-    assert not first.exists()
 
 
 class _Process:

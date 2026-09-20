@@ -75,8 +75,6 @@ def due_data(events: list[Event], days: int) -> dict:
 class CourseExecutor(AgentExecutor):
     def __init__(self, config: Config | None = None):
         self.config = config or load_config()
-        # 前に強制終了して残った MCP の設定（トークン入り）を片づけてから始める
-        claude.clean_mcp_configs(self.config.state_dir, tools.AGENT)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -175,16 +173,22 @@ class CourseExecutor(AgentExecutor):
         await self._done(updater, text + note)
 
     async def _ask(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        """定型に当てはまらない質問に、自分の claude が答える（Box と Notion を読む）。"""
+        """定型に当てはまらない質問に、自分の claude が答える（連携で Box と Notion を読む）。"""
+        question = (text or "").strip()
+        if not question:
+            await self._fail(updater, "質問が空です")
+            return
+        guide = self.config.repo_root / "prompts" / f"{tools.AGENT}.md"
+        prompt = (f"{guide.read_text(encoding='utf-8') if guide.exists() else ''}\n\n---\n\n"
+                  f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
+                  f"次の質問に答えてください。\n\n{question}")
         try:
-            ask = claude.ask_json(text)
-        except ValueError as e:
+            answer = await claude.ask_connector(self.config, prompt, tools.ALLOWED, tools.DENY,
+                                                tools.TIMEOUT_MINUTES)
+        except claude.ConnectorError as e:
             await self._fail(updater, str(e))
             return
-        with claude.mcp_config(self.config.state_dir, tools.AGENT,
-                               tools.mcp_servers(self.config)) as mcp_path:
-            ws = tools.workspace(self.config, mcp_path)
-            await claude.finish(updater, await claude.run(self.config, ws, ask, updater))
+        await claude.finish(updater, envelope.reply(answer))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)

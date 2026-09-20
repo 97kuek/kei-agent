@@ -49,38 +49,32 @@ def test_broken_times_are_dropped():
     assert work.events_of({"items": [{"subject": "壊れている", "start": "いつか"}]}) == []
 
 
-class FakeGraph:
-    def __init__(self, events):
-        self.events_ = events
-        self.asked = []
-
-    def events(self, days=7, since=None):
-        self.asked.append(days)
-        return self.events_
-
-
 @pytest.fixture
-async def server(monkeypatch):
-    """仕事エージェントを立てる（Outlook は偽物）。"""
+async def server(config, monkeypatch):
+    """仕事エージェントを立てる（会社の連携は偽物）。"""
     import uvicorn
 
-    from kei_agent_work import graph
+    from kei_agent_work import connector
     from kei_agent_work.app import build_app
+    from kei_agent_work.executor import WorkExecutor
 
-    fake = FakeGraph(EVENTS)
-    monkeypatch.setattr(graph.Graph, "load", classmethod(lambda cls, **kw: fake))
-    # 既定は会社の連携から読む。ここでは Entra ID のアプリ（graph）の道を試す
-    monkeypatch.setenv("WORK_CALENDAR_SOURCE", "graph")
+    asked = []
+
+    async def events(cfg, days=7, today=None):
+        asked.append(days)
+        return EVENTS
+
+    monkeypatch.setattr(connector, "events", events)
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    server = uvicorn.Server(uvicorn.Config(build_app(base, TOKEN), host="127.0.0.1", port=port,
-                                           log_level="error"))
+    app = build_app(base, TOKEN, executor=WorkExecutor(config))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     for _ in range(100):
         if server.started:
             break
         await asyncio.sleep(0.05)
-    yield base, fake
+    yield base, asked
     server.should_exit = True
     await task
 
@@ -93,25 +87,25 @@ async def test_card_says_it_reads_the_calendar(server):
 
 
 async def test_list_events_comes_back_in_the_envelope(server):
-    base, fake = server
+    base, asked = server
     task = await Agent(base, TOKEN, timeout=30).ask("list-events", params={"days": 3})
     envelope = json.loads(task.answer)
     assert task.ok and envelope["ok"] is True
     assert envelope["data"]["days"] == 3 and len(envelope["data"]["items"]) == 3
-    assert fake.asked == [3]
+    assert asked == [3]
 
 
-async def test_without_the_permission_it_says_what_to_run(server, monkeypatch):
-    from kei_agent_work import graph
+async def test_without_the_connection_it_says_so(server, monkeypatch):
+    """連携が使えないときは、その理由を返す（黙って0件にしない）。"""
+    from kei_agent_work import connector
 
-    def _no_token(cls, **kw):
-        raise graph.GraphError(graph.NO_TOKEN)
+    async def broken(cfg, days=7, today=None):
+        raise connector.WorkCalendarError("連携を使えませんでした")
 
-    monkeypatch.setenv("WORK_CALENDAR_SOURCE", "graph")
-    monkeypatch.setattr(graph.Graph, "load", classmethod(_no_token))
+    monkeypatch.setattr(connector, "events", broken)
     base, _ = server
     task = await Agent(base, TOKEN, timeout=30).ask("list-events")
-    assert not task.ok and "kei-agent-ms-login" in json.loads(task.answer)["text"]
+    assert not task.ok and "連携を使えませんでした" in json.loads(task.answer)["text"]
 
 
 # 会社の Claude アカウントに付いている連携から読む道（既定）
@@ -139,24 +133,6 @@ def test_connector_says_when_the_reply_is_not_json():
         claude.json_reply("[これは JSON ではない]")
     with pytest.raises(claude.ConnectorError, match="JSON の配列"):
         claude.json_reply("予定はありません")
-
-
-def test_graph_sends_calendar_boundaries_with_the_tokyo_offset(monkeypatch):
-    """Graph が検索範囲を UTC と誤解して、朝の予定を落とさない。"""
-    from kei_agent_work import graph
-
-    seen = {}
-    client = graph.Graph(graph.App("client"))
-
-    def get(path, params=None):
-        seen.update(params)
-        return {"value": []}
-
-    monkeypatch.setattr(client, "_get", get)
-    client.events(days=1, since=datetime(2026, 9, 21, 0, 0))
-
-    assert seen["startDateTime"] == "2026-09-21T00:00:00+09:00"
-    assert seen["endDateTime"] == "2026-09-22T00:00:00+09:00"
 
 
 def test_calendar_text_escapes_values_from_outlook():

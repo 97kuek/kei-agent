@@ -1,7 +1,7 @@
 """頼まれた仕事（いまは Outlook の予定を読むだけ）をこなすところ。
 
-予定の取り方は2つあり、既定は「会社の Claude アカウントに付いている Microsoft 365 の連携」
-（`connector.py`）。Entra ID にアプリを作った場合は `WORK_CALENDAR_SOURCE=graph` で切り替える。
+予定・メール・資料・Teams は、会社の Claude アカウントに付いている Microsoft 365 の連携で読む
+（`connector.py`）。
 
 返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）。見せ方はオーケストレーターが決める。
 会社のデータなので、返すのは件名・時間・場所・リンクまでにし、本文は持ち出さない
@@ -10,9 +10,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -21,15 +19,12 @@ from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent.config import Config, load_config
 from kei_agent_a2a import claude, envelope
-from kei_agent_work import connector, graph
+from kei_agent_work import connector
 from kei_agent_work.card import ASK, LIST_EVENTS
 
 log = logging.getLogger(__name__)
 
 SKILLS = (LIST_EVENTS, ASK)
-# 予定の取り方。既定は、会社の Claude アカウントに付いている Microsoft 365 の連携
-SOURCE_ENV = "WORK_CALENDAR_SOURCE"
-CONNECTOR, GRAPH = "connector", "graph"
 
 
 def message_text(context: RequestContext) -> str:
@@ -39,7 +34,7 @@ def message_text(context: RequestContext) -> str:
     return "\n".join(p.text for p in parts if getattr(p, "text", ""))
 
 
-def asked_days(metadata: dict | None, default: int = graph.DEFAULT_DAYS) -> int:
+def asked_days(metadata: dict | None, default: int = connector.DEFAULT_DAYS) -> int:
     try:
         days = int((metadata or {}).get("days", default))
     except (TypeError, ValueError):
@@ -68,8 +63,8 @@ class WorkExecutor(AgentExecutor):
             return
         days = asked_days(metadata)
         try:
-            events = await self._events(days)
-        except (connector.WorkCalendarError, graph.GraphError) as e:
+            events = await connector.events(self.config, days)
+        except connector.WorkCalendarError as e:
             await self._fail(updater, str(e))
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
@@ -87,12 +82,6 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, str(e))
             return
         await claude.finish(updater, envelope.reply(answer))
-
-    async def _events(self, days: int) -> list[dict]:
-        """予定の取り方を選ぶ。既定は連携、`WORK_CALENDAR_SOURCE=graph` なら Entra ID のアプリ。"""
-        if os.environ.get(SOURCE_ENV, CONNECTOR) == GRAPH:
-            return await asyncio.to_thread(lambda: graph.Graph.load().events(days=days))
-        return await connector.events(self.config, days)
 
     async def _fail(self, updater: TaskUpdater, reason: str) -> None:
         log.warning("断りました: %s", reason)

@@ -79,8 +79,6 @@ class Workspace:
     # config.toml の基本の接続先に足して、このテーマで許可した接続先（Slack で許可したもの。settings.py）
     allowed_domains: tuple[str, ...] = ()
     # ここから下は、エージェントが自分の claude を動かすときの上乗せ（docs/agents.md）
-    # claude に差す MCP サーバーの設定ファイル。渡すと、ほかの MCP は読み込まない
-    mcp_config: Path | None = None
     # そのエージェントの指示書（prompts/<agent>.md）。既定は prompts/system.md
     system_prompt: Path | None = None
     # claude 1回の上限時間（分）。既定は config.run_timeout_minutes

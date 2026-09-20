@@ -175,6 +175,25 @@ uv run kei-agent-notion-setup <研究ホームのページID>
    取り込むのは「授業」に入れた科目の締切だけ。Moodle のカレンダーには新入生向けの資料なども並ぶため、
    それらは入れずに、科目名だけを返事で知らせる。
 
+## 7.55 仕事エージェントの Claude アカウント
+
+仕事エージェントは、会社の Claude アカウントに付いている Microsoft 365 の連携（Outlook・
+SharePoint・Teams）を使う。**連携はログインにしか付いてこない**（`claude setup-token` で作る
+長期トークンでは使えない）ので、会社アカウント専用のプロファイルを1つ作る。
+
+```zsh
+CLAUDE_CONFIG_DIR=$HOME/.claude-work claude     # 起動して /login → 会社アカウント → 終了
+```
+
+そのうえで、秘密情報をこう分ける。
+
+| ファイル | 中身 | 効き先 |
+|---|---|---|
+| `kei-agent.zsh`（共通） | `CLAUDE_CODE_OAUTH_TOKEN`（**個人**アカウントの setup-token） | 本体・研究・大学 |
+| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR=$HOME/.claude-work` | 仕事だけ |
+
+こうすると、端末のログインをどちらに切り替えても、仕事だけ会社の枠・会社の連携で動く。
+
 ## 7.6 研究エージェント（A2A）
 
 研究の作業（`claude -p`）を別のプロセスで動かす。`config.toml` の `[a2a] research_url` を空にすると、
@@ -189,28 +208,24 @@ tail -f ~/Library/Logs/kei-agent/research-launchd.log
 Kei Agent 本体を入れ替えたときは、研究エージェントも入れ替える（同じリポジトリを読むので、
 `launchctl kickstart -k gui/$(id -u)/com.kei-agent.research` で起動し直す）。
 
-## 7.7 Box（学部要項と過去問）
+## 7.7 Box と Notion（学部要項・過去問・授業）
 
-大学エージェントの claude が、Box に置いたままの PDF や画像を読めるようにする（ローカルに保存しない）。
+大学エージェントの claude は、**Claude のアカウントに付いている連携**で Box と Notion を読む
+（自前のアプリは要らない）。連携はログインに付いてくるので、個人アカウント専用のプロファイルを1つ作る。
 
-1. <https://app.box.com/developers/console> → **Create Platform App → Custom App → User Authentication (OAuth 2.0)**、
-   名前は `Kei Agent (course)`
-2. **Configuration** で、リダイレクト URI に `http://localhost:8799/box/callback` を入れ、
-   スコープは「**すべてのファイルとフォルダの読み取り**」だけにする（書き込みは外す）
-3. Client ID と Secret を、大学用の秘密情報ファイルに書く
-4. 1回だけ許可を取る（ブラウザが開く）
+```zsh
+CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude    # 起動して /login → 個人アカウント → 終了
+```
 
-   ```zsh
-   source ~/.config/zsh/local/kei-agent-course.zsh
-   uv run --group course kei-agent-box-login
-   uv run --group course kei-agent-box-login --probe   # 読めるか確かめる
-   ```
+`kei-agent-course.zsh` に次を入れる（`unset` を忘れると、共通のトークンが効いて連携が見えない）。
 
-   リフレッシュトークンは `~/.local/state/kei-agent/secrets/box-token.json`（600）に入り、使うたびに
-   新しくなる。この場所は sandbox の `denyRead` に入れてあるので、claude の Bash からは読めない。
+```zsh
+unset CLAUDE_CODE_OAUTH_TOKEN
+export CLAUDE_CONFIG_DIR="$HOME/.claude-personal"
+```
 
-Notion も claude に読ませる場合は、**読み取り専用のコネクト**を別に作り（機能から「コンテンツを更新」と
-「コンテンツを挿入」を外す）、授業ホームのページだけに接続して、そのトークンを `NOTION_COURSE_READ_TOKEN` に入れる。
+claude.ai の設定で Box と Notion の連携を繋いでおくこと。使わせるのは読む道具だけで、
+書き込み・移動・アップロードは断る（`src/kei_agent_course/tools.py`）。
 
 ## 8. バックアップとログ
 

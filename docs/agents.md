@@ -30,7 +30,7 @@ Kei Agent は「オーケストレーター＋ドメインごとのエージェ�
 | 起動スクリプト | `deploy/run-<agent>.sh`（`deploy/install.sh <agent>` で登録） | `deploy/run-course.sh` |
 | ログ | `~/Library/Logs/kei-agent/<agent>-launchd.log` | `course-launchd.log` |
 | 秘密情報 | `~/.config/zsh/local/kei-agent-<agent>.zsh`（600） | Box と Moodle と授業の Notion |
-| Claude のアカウント | 同じファイルの `CLAUDE_CODE_OAUTH_TOKEN`（書かなければ端末のログイン） | 仕事は会社のアカウント（連携と契約枠がそちらにある） |
+| Claude のアカウント | `CLAUDE_CODE_OAUTH_TOKEN`（枠だけ分けるとき）か `CLAUDE_CONFIG_DIR`（連携も要るとき） | 仕事は会社のアカウント専用のプロファイル |
 | 住所 | `config.toml` の `[a2a.agents]` に `<agent> = "http://127.0.0.1:87xx"` | `course = "…:8787"` |
 | ポート | 8787 から順番（大学 8787、研究 8788、仕事 8789 の予定） | 8787 |
 | 作業場（claude を持つとき） | `~/<agent>/`（研究だけは `~/research/<テーマ>/`） | `~/course/` |
@@ -67,15 +67,30 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 ## 4. claude を持たせるとき
 
-`src/kei_agent_a2a/claude.py` の `run()` を使う。自分で `claude` を起動する処理を書かない。
+動かし方は2つある。**どちらも `src/kei_agent_a2a/claude.py` を使い、自分で `claude` を起動する処理は書かない。**
+
+| | 使う関数 | 何ができるか | 使うとき |
+|---|---|---|---|
+| **道具だけ** | `ask_connector()` | アカウントに付いている連携（Box・Notion・Microsoft 365）を読む。Bash もファイルも使えない | 外のサービスを読んで答える（大学・仕事の `ask`） |
+| **sandbox** | `run()` | テーマのディレクトリでファイルを読み書きし、Bash を使う | 手元で作業する（研究の `run-claude`） |
+
+「道具だけ」のほうは、使ってよい道具を名指しで並べる（読むものだけ）。触れる先が連携に限られるので、
+sandbox を締めるより結果的に狭い。連携はログイン（プロファイル）に付いてくるので、
+`CLAUDE_CONFIG_DIR` でそのドメインのアカウントを指す。
+
+### sandbox で動かすとき
 
 - 柵は `config.toml` から組む（`kei_agent.guard`）。接続先は**そのドメインに要るものだけ**を `Workspace.allowed_domains` に渡す
 - 指示書は `prompts/<agent>.md`（`Workspace.system_prompt`）。学期ごとに変わる前提は作業場の `CLAUDE.md` に置く
 - 上限時間は `Workspace.timeout_minutes`（大学は5分、研究は30分）
-- MCP は `claude.mcp_config()` で **sandbox から読めない場所**（`<state_dir>/secrets/`）に書き、使い終わったら消す。
-  トークンは claude に読ませない
 - 書き込みできる鍵を claude に渡さない（Notion は読み取り専用のコネクトを渡し、書き込みは Python 側が行う）
 - ほかのドメインの鍵は、子プロセスに渡さない（`guard.strip_env`。Slack・Notion・Box・Moodle・Microsoft・Toggl）
+- **外部サービスを足すときは、まずコネクタ（アカウントに付いている連携）を見る。**
+  すでに繋がっていれば、自前の登録は要らない（Outlook はこれで解決した）。ただし
+  **定期実行で機械的に取りたいもの**は自前で書く（コネクタは claude 経由でしか呼べず、
+  毎回モデルを通すことになる。Box は自前にした）
+- **連携はログインに付いてくる。`claude setup-token` の長期トークンでは使えない。**
+  ドメインごとに別のアカウントで動かすときは `CLAUDE_CONFIG_DIR` で専用のプロファイルを作る
 - **アカウントに付いている連携（claude.ai のコネクタ）を使うときは `claude.ask_connector`**。
   連携はユーザー設定を読み込まないと見えないので、そこだけ設定を読み、使ってよい道具を名指しで並べる
   （Bash・ファイル・Web は断る）。ドメインごとに Claude のアカウントを分けられる
@@ -96,7 +111,7 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 | エージェント | スキル | 中身 |
 |---|---|---|
-| 大学 | `sync-assignments` / `list-due` / `time-report` / `ask` | Moodle の締切を Notion に取り込む／締切の一覧（JSON）／Toggl の集計／自由な質問（自分の claude が Box と Notion を読む） |
+| 大学 | `sync-assignments` / `list-due` / `list-classes` / `time-report` / `ask` | Moodle の締切を Notion に取り込む／締切の一覧（JSON）／その日の授業／Toggl の集計／自由な質問（連携で Box と Notion を読む） |
 | 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` | claude を1回動かす（経過を流す）／pueue の待ち行列の出し入れ |
 | 仕事 | `list-events` / `ask` | Outlook の予定（JSON）／メール・SharePoint・Teams を読んで要点で答える |
 
