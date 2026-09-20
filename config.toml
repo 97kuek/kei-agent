@@ -42,6 +42,12 @@ backup = true
 digest_retention_days = 30
 session_retention_days = 90
 
+[a2a]
+# ほかのエージェントの住所（docs/plan.md の16章）。空にすると、そのエージェントは使わない。
+# 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
+course_url = "http://127.0.0.1:8787"
+timeout_seconds = 300
+
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["research-overview", "research-strategy"]

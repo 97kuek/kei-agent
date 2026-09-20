@@ -80,6 +80,8 @@ uv run pytest
 | `src/kei_agent/settings.py` | Slack から変える設定（テーマごとの接続先、決まった時刻の処理の時刻） |
 | `src/kei_agent/home.py` | App Home（Slack で Kei Agent を開いたときの設定画面） |
 | `src/kei_agent/store.py` | SQLite（スレッドとセッション、ジョブ、夜間 Task、定期処理、実行時間、接続先、改善） |
+| `src/kei_agent_course/` | 大学エージェント（A2A サーバー。Moodle・Notion の授業/課題・Toggl） |
+| `src/kei_agent/a2a.py` | ほかのエージェントに仕事を頼む口（A2A のクライアント） |
 | `plugin/` | `claude -p` に読み込ませる skill（`kei-agent:job`、`kei-agent:literature`） |
 | `prompts/system.md` | `claude -p` に足すシステムプロンプト |
 

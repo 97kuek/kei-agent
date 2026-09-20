@@ -117,6 +117,8 @@ async def serve() -> None:
         await assistant.resume_interrupted()
         # Notion の項目がずれていると、Daily や夜間の Task が黙って止まるので、起動時に確かめる
         await assistant.check_notion_schema()
+        # つないでいるエージェント（A2A）の名刺を読んで、生きているかを見る
+        await assistant.check_agents()
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()
     finally:

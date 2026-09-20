@@ -19,16 +19,22 @@ kei-agent-schedule = "kei_agent.schedule:main"
 kei-agent-notion-setup = "kei_agent.notion:main"
 kei-agent-ask = "kei_agent.ask:main"
 kei-agent-voice = "kei_agent_voice.app:main"
+kei-agent-course = "kei_agent_course.app:main"
 
 [tool.uv.build-backend]
-# 机の上の音声対話（src/kei_agent_voice）は、Kei Agent 本体とは別のパッケージにしてある
-module-name = ["kei_agent", "kei_agent_voice"]
+# 机の上の音声対話（src/kei_agent_voice）と大学エージェント（src/kei_agent_course）は、
+# Kei Agent 本体とは別のパッケージにしてある（依存をそれぞれに閉じる）
+module-name = ["kei_agent", "kei_agent_voice", "kei_agent_course"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+course = [
+    "a2a-sdk[http-server]>=1.1.4",
+    "uvicorn>=0.53.0",
+]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

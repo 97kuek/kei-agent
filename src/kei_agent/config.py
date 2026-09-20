@@ -62,6 +62,15 @@ class MaintenanceConfig:
 
 
 @dataclass(frozen=True)
+class A2AConfig:
+    """ほかのエージェントの住所（docs/plan.md の16章）。空なら、そのエージェントは使わない。"""
+    # 大学エージェント（Moodle・Notion の授業/課題・Toggl）
+    course_url: str = ""
+    # 相手を待つ時間（秒）
+    timeout_seconds: float = 300
+
+
+@dataclass(frozen=True)
 class Config:
     research_root: Path
     state_dir: Path
@@ -83,6 +92,9 @@ class Config:
     pueue_bin: str = "pueue"
     schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
     maintenance: MaintenanceConfig = field(default_factory=lambda: MaintenanceConfig())
+    a2a: A2AConfig = field(default_factory=lambda: A2AConfig())
+    # エージェント同士の合言葉（環境変数 KEI_AGENT_A2A_TOKEN）
+    a2a_token: str = ""
 
     @property
     def db_path(self) -> Path:
@@ -109,7 +121,8 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "research_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule", "maintenance",
+    "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule",
+    "maintenance", "a2a",
 }
 CHANNELS_KEYS = {"overview", "improve"}
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
@@ -165,4 +178,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),
         schedule=_section(ScheduleConfig, schedule, "schedule"),
         maintenance=_section(MaintenanceConfig, data.get("maintenance", {}), "maintenance"),
+        a2a=_section(A2AConfig, data.get("a2a", {}), "a2a"),
+        a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
     )

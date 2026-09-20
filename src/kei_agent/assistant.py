@@ -20,7 +20,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import ask, guard, improve, runner, settings, themes
+from kei_agent import a2a, ask, guard, improve, runner, settings, themes
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -140,6 +140,11 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         self.restart_requested = asyncio.Event()
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
         self.limited_until = 0.0
+        # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手
+        self.agents: dict[str, a2a.Agent] = {}
+        if config.a2a.course_url:
+            self.agents["course"] = a2a.Agent(config.a2a.course_url, config.a2a_token,
+                                              timeout=config.a2a.timeout_seconds)
 
     @contextmanager
     def claude_running(self):
@@ -336,6 +341,21 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         if not channel:
             return
         settings.drop_theme(self.store, await self.channel_name(channel))
+
+    async def check_agents(self) -> dict[str, list[str]]:
+        """つないでいるエージェントの名刺を読んで、生きているかと、何ができるかを見る。"""
+        skills: dict[str, list[str]] = {}
+        for name, agent in self.agents.items():
+            try:
+                card = await agent.card()
+            except Exception as e:
+                await self.notify_trouble(f"{name} のエージェントにつながりません（{agent.base_url}）: "
+                                          f"{type(e).__name__}: {e}")
+                continue
+            skills[name] = [s["id"] for s in card.get("skills", [])]
+            log.info("%s のエージェントにつながりました（%s）: %s", name, card.get("name", "?"),
+                     "、".join(skills[name]) or "できることなし")
+        return skills
 
     async def check_notion_schema(self) -> list[str]:
         """Notion の項目のずれを起動時に見て、あれば知らせる。黙って定期処理が止まるのを防ぐ。"""

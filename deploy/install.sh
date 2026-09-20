@@ -1,10 +1,18 @@
 #!/bin/zsh
 # Kei Agent を launchd に登録する（ログイン時に起動し、落ちたら再起動する）。
-# 使い方: deploy/install.sh        登録して起動
-#         deploy/install.sh remove 登録を外す
+# 使い方: deploy/install.sh               登録して起動
+#         deploy/install.sh remove        登録を外す
+#         deploy/install.sh course        大学エージェント（A2A サーバー）を登録
+#         deploy/install.sh course remove 大学エージェントの登録を外す
 set -eu
 
-LABEL="com.kei-agent.assistant"
+# 引数に course を付けると、大学エージェント（A2A サーバー）のほうを登録する
+if [[ "${1:-}" == "course" ]]; then
+  LABEL="com.kei-agent.course"
+  shift
+else
+  LABEL="com.kei-agent.assistant"
+fi
 REPO="${0:A:h:h}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/kei-agent"
@@ -33,5 +41,5 @@ plutil -lint "$PLIST" >/dev/null
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 launchctl kickstart -k "$DOMAIN/$LABEL"
-echo "登録しました。ログ: $LOG_DIR/kei-agent.log"
+echo "登録しました（$LABEL）。ログ: $LOG_DIR/"
 echo "状態の確認: launchctl print $DOMAIN/$LABEL | grep -E 'state|last exit'"
