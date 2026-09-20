@@ -7,7 +7,7 @@
 新入生向けの資料など、履修していない科目の締切も並ぶため）。
 
 使い方（手で動かすとき）:
-    source ~/.config/zsh/local/research-assistant.zsh
+    source ~/.config/zsh/local/kei-agent.zsh
     uv run --group course kei-agent-course-sync
 """
 

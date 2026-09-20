@@ -4,7 +4,7 @@ set -eu
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-SECRETS="$HOME/.config/zsh/local/research-assistant.zsh"
+SECRETS="$HOME/.config/zsh/local/kei-agent.zsh"
 if [[ ! -r "$SECRETS" ]]; then
   echo "秘密情報のファイルがありません: $SECRETS（deploy/README.md を参照）" >&2
   exit 1

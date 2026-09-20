@@ -6,7 +6,7 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/us
 
 # 秘密情報は、共通のものと、このエージェントだけのものに分けてある（docs/agents.md）。
 # こうすると、ほかのエージェントのトークンがこのプロセスに載らない
-SECRETS="$HOME/.config/zsh/local/research-assistant.zsh"
+SECRETS="$HOME/.config/zsh/local/kei-agent.zsh"
 AGENT_SECRETS="$HOME/.config/zsh/local/kei-agent-research.zsh"
 if [[ ! -r "$SECRETS" ]]; then
   echo "秘密情報のファイルがありません: $SECRETS（deploy/README.md を参照）" >&2

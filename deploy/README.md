@@ -44,7 +44,7 @@
 
 ## 3. 秘密情報
 
-`~/.config/zsh/local/research-assistant.zsh` を作る（Git に入れない）。
+`~/.config/zsh/local/kei-agent.zsh` を作る（Git に入れない）。
 
 ```zsh
 export SLACK_BOT_TOKEN="xoxb-..."
@@ -98,7 +98,7 @@ uv run kei-agent
 ## 5. 常時起動（launchd）
 
 launchd から起動したプロセスは、macOS の保護フォルダ（`~/Documents`、`~/Desktop`、`~/Downloads`）を読めない。
-リポジトリをその外（例: `~/src/research-support-assistant`）に置いてから登録する。
+リポジトリをその外（例: `~/src/kei-agent`）に置いてから登録する。
 
 ```zsh
 deploy/install.sh          # 登録して起動（ログイン時に起動し、落ちたら再起動する）
@@ -131,7 +131,7 @@ sudo pmset repeat cancel   # やめるとき
 今すぐ1回動かして確かめるときは、次を実行する（`--record` を付けなければ、今日の本番の実行には影響しない）。
 
 ```zsh
-source ~/.config/zsh/local/research-assistant.zsh
+source ~/.config/zsh/local/kei-agent.zsh
 uv run kei-agent-schedule daily        # night / literature / daily / review
 ```
 
@@ -144,7 +144,7 @@ uv run kei-agent-schedule daily        # night / literature / daily / review
 3. 次を実行する（何度実行しても重複しない）
 
 ```zsh
-source ~/.config/zsh/local/research-assistant.zsh
+source ~/.config/zsh/local/kei-agent.zsh
 uv run kei-agent-notion-setup <研究ホームのページID>
 ```
 

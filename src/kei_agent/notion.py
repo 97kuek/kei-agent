@@ -1,7 +1,7 @@
 """Notion の「研究ホーム」を作る（docs/notion-layout.md）。フェーズ3で Kei Agent が読み書きするときの接続も兼ねる。
 
 使い方:
-    source ~/.config/zsh/local/research-assistant.zsh
+    source ~/.config/zsh/local/kei-agent.zsh
     uv run kei-agent-notion-setup <研究ホームのページID>
 
 何度実行しても、すでにあるデータベース・ビュー・見出しは作り直さない。作ったものの ID は
