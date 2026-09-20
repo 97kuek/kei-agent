@@ -48,6 +48,18 @@ def ask_json(text: str) -> dict:
     return ask
 
 
+def clean_mcp_configs(state_dir: Path, name: str) -> int:
+    """前に強制終了して残った MCP の設定を消す（トークンが書いてあるので残さない）。"""
+    directory = state_dir / "secrets"
+    removed = 0
+    for path in directory.glob(f"mcp-{name}-*.json"):
+        path.unlink(missing_ok=True)
+        removed += 1
+    if removed:
+        log.info("残っていた MCP の設定を %d 個片づけました", removed)
+    return removed
+
+
 @contextmanager
 def mcp_config(state_dir: Path, name: str, servers: dict) -> Iterator[Path | None]:
     """MCP の設定を、sandbox から読めない場所に置く（使い終わったら消す）。"""

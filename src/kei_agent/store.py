@@ -479,6 +479,11 @@ class Store:
         with self.conn:
             self.conn.execute("INSERT OR REPLACE INTO notices (key, at) VALUES (?, ?)", (key, time.time()))
 
+    def drop_old_agent_sessions(self, before: float) -> int:
+        """古いスレッドのエージェントの会話を忘れる（毎晩の保守から呼ぶ）。"""
+        with self.conn:
+            return self.conn.execute("DELETE FROM agent_sessions WHERE updated_at < ?", (before,)).rowcount
+
     def drop_old_notices(self, before: float) -> int:
         """古い目印を捨てる（毎晩の保守から呼ぶ）。"""
         with self.conn:

@@ -77,6 +77,8 @@ log = logging.getLogger(__name__)
 
 # これ以上かかった作業が終わったら、依頼者に通知の別投稿を送る（短い依頼には送らない）
 NOTIFY_AFTER_SECONDS = 60
+# 名刺（エージェントのスキル）を読み直す間隔。入れ替えても、これだけたてば新しいスキルを使える
+SKILLS_TTL_SECONDS = 600
 # スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
 HISTORY_PAGE = 200
 HISTORY_MAX_MESSAGES = 600
@@ -156,8 +158,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         self.limited_until = 0.0
         # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/agents.md）
         self.agents: dict[str, a2a.Agent] = agents.build(config)
-        # 名刺から読んだスキルの一覧（振り分け係が使う）。起動時と、つながらなかったあとに読み直す
+        # 名刺から読んだスキルの一覧（振り分け係が使う）。エージェントを入れ替えるとスキルが増えるので、
+        # しばらくたったら読み直す（本体の再起動を待たない）
         self.agent_skills: dict[str, list[dict]] = {}
+        self.agent_skills_read_at: dict[str, float] = {}
 
     @contextmanager
     def claude_running(self):
@@ -369,17 +373,22 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
                 await self.notify_trouble(f"{name} のエージェントにつながりません（{agent.base_url}）: "
                                           f"{type(e).__name__}: {e}")
                 continue
-            self.agent_skills[name] = list(card.get("skills") or [])
+            self._remember_skills(name, card)
             skills[name] = [s["id"] for s in self.agent_skills[name] if s.get("id")]
             log.info("%s のエージェントにつながりました（%s）: %s", name, card.get("name", "?"),
                      "、".join(skills[name]) or "できることなし")
         return skills
 
+    def _remember_skills(self, name: str, card: dict) -> None:
+        self.agent_skills[name] = list(card.get("skills") or [])
+        self.agent_skills_read_at[name] = time.time()
+
     async def skills_of(self, name: str) -> list[dict]:
-        """そのエージェントのスキル（名刺から）。まだ読んでいなければ読む。"""
-        if name not in self.agent_skills and name in self.agents:
+        """そのエージェントのスキル（名刺から）。古くなっていたら読み直す。"""
+        fresh = time.time() - self.agent_skills_read_at.get(name, 0) < SKILLS_TTL_SECONDS
+        if not fresh and name in self.agents:
             with suppress(Exception):
-                self.agent_skills[name] = list((await self.agents[name].card()).get("skills") or [])
+                self._remember_skills(name, await self.agents[name].card())
         return self.agent_skills.get(name, [])
 
     async def check_notion_schema(self) -> list[str]:
@@ -531,11 +540,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             return None
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
-        if ws.kind is ChannelKind.COURSE:
-            await self.course(req)
-            return None
-        if ws.kind is ChannelKind.WORK:
-            await self.work(req)
+        if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK):
+            # 同じスレッドで2つ同時に動かさない。claude を動かす仕事もあるので、全体の上限も守る
+            async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
+                await (self.course(req) if ws.kind is ChannelKind.COURSE else self.work(req))
             return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:

@@ -9,7 +9,7 @@
 
    | 種類 | チャンネル名 | Kei Agent の動き |
    |---|---|---|
-   | 研究全体 | `#research-overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
+   | 研究全体・朝のまとめ | `#01_overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
    | Kei Agent の改善 | `#research-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
    | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Kei Agent を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
@@ -17,7 +17,7 @@
 
    Kei Agent を招待したチャンネルは、上の4つ以外すべて研究テーマとして扱う。個人用のチャンネルには Kei Agent を招待しない。
 
-3. サイドバーは名前の順に並ぶので、`research-` のチャンネルはまとまる。朝に見る `#research-overview` にスターをつけると一番上に出る。サイドバーのカテゴリ（セクション）は Slack の有料プランでだけ使える
+3. サイドバーは名前の順に並ぶので、`research-` のチャンネルはまとまる。朝に見る `#01_overview` にスターをつけると一番上に出る。サイドバーのカテゴリ（セクション）は Slack の有料プランでだけ使える
 
 4. テーマを終えたら、チャンネルをアーカイブする。Kei Agent は Daily の材料や論文の新着で、そのテーマを見なくなる。作業用ディレクトリはバックアップに残る
 

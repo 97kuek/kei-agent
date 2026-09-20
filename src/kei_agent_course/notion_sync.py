@@ -93,6 +93,10 @@ def _plain(prop: dict | None) -> str:
     return "".join(p.get("plain_text", "") for p in parts).strip()
 
 
+def _select(prop: dict | None) -> str:
+    return ((prop or {}).get("select") or {}).get("name") or ""
+
+
 def _when(prop: dict | None) -> datetime | None:
     start = ((prop or {}).get("date") or {}).get("start")
     try:
@@ -116,6 +120,26 @@ class CourseNotion:
         """科目名 → 「授業」のページ ID。"""
         return {name: row["id"] for row in self._rows(self.courses)
                 if (name := _plain(row["properties"].get("科目名")))}
+
+    def courses_on(self, weekday: str = "") -> list[dict]:
+        """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。"""
+        found = []
+        for row in self._rows(self.courses):
+            props = row["properties"]
+            if _select(props.get("状態")) not in ("", "履修中"):
+                continue
+            day = _select(props.get("曜日"))
+            if weekday and day != weekday:
+                continue
+            found.append({
+                "id": row["id"],
+                "subject": _plain(props.get("科目名")),
+                "weekday": day,
+                "period": (props.get("時限") or {}).get("number"),
+                "url": row.get("url", ""),
+            })
+        found.sort(key=lambda c: (c["period"] is None, c["period"] or 0, c["subject"]))
+        return found
 
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
@@ -187,6 +211,14 @@ class CourseNotion:
     def _label(self, event: Event) -> str:
         head = f"{event.course_name} / " if event.course_name else ""
         return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
+
+
+def courses_on(weekday: str = "", token: str = "", state: dict | None = None) -> list[dict]:
+    """履修中の科目（曜日・時限つき）。朝のまとめで、時限を時刻に直すのに使う。"""
+    token = token or os.environ.get(TOKEN_ENV, "")
+    if not token:
+        raise SyncError(NO_TOKEN)
+    return CourseNotion(Notion(token), state or read_state()).courses_on(weekday)
 
 
 def course_names(token: str = "", state: dict | None = None) -> set[str]:

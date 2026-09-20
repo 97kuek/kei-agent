@@ -367,6 +367,9 @@ class Scheduler:
             maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None,
             keep_worktrees, keep_scratch)
         detail["notices"] = self.store.drop_old_notices(time.time() - NOTICE_RETENTION_DAYS * 86400)
+        # エージェントの claude の会話も、セッションの記録と同じ日数で忘れる
+        detail["agent_sessions"] = self.store.drop_old_agent_sessions(
+            time.time() - self.config.maintenance.session_retention_days * 86400)
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)

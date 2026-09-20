@@ -10,6 +10,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 # 仕事の名前。オーケストレーターはこの id を指定して頼む
 SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
+LIST_CLASSES = "list-classes"
 TIME_REPORT = "time-report"
 # 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
 ASK = "ask"
@@ -51,6 +52,15 @@ def build_card(base_url: str) -> AgentCard:
                             "既定では2週間先まで。metadata の days で変えられる",
                 tags=["moodle"],
                 examples=["今週の締切は？", "明日までの課題を教えて"],
+            ),
+            AgentSkill(
+                id=LIST_CLASSES,
+                name="その日の授業",
+                description="履修中の科目のうち、その曜日のものを時刻つきで JSON で返す"
+                            "（data.items: subject/weekday/period/start/end）。"
+                            "既定は今日。metadata の weekday（月〜日）で変えられる",
+                tags=["notion"],
+                examples=["今日の授業は？", "金曜の時間割"],
             ),
             AgentSkill(
                 id=ASK,

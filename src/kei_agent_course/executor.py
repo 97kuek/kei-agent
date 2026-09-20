@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -22,13 +23,13 @@ from kei_agent.config import Config, load_config
 from kei_agent.notion import NotionError
 from kei_agent.timelog import TogglError
 from kei_agent_a2a import claude, envelope
-from kei_agent_course import moodle, notion_sync, toggl_report, tools
-from kei_agent_course.card import ASK, LIST_DUE, SYNC_ASSIGNMENTS, TIME_REPORT
+from kei_agent_course import moodle, notion_sync, periods, toggl_report, tools
+from kei_agent_course.card import ASK, LIST_CLASSES, LIST_DUE, SYNC_ASSIGNMENTS, TIME_REPORT
 from kei_agent_course.ics import Event
 
 log = logging.getLogger(__name__)
 
-SKILLS = (SYNC_ASSIGNMENTS, LIST_DUE, TIME_REPORT, ASK)
+SKILLS = (SYNC_ASSIGNMENTS, LIST_DUE, LIST_CLASSES, TIME_REPORT, ASK)
 NO_ICS = ("Moodle のカレンダーの URL がありません。Moodle のカレンダー画面で「カレンダーをエクスポートする」から "
           f"URL を作って、秘密情報のファイルの {moodle.ICS_ENV} に入れてください")
 # 一度に返す締切の数（声やスレッドで読める長さに収める）
@@ -74,6 +75,8 @@ def due_data(events: list[Event], days: int) -> dict:
 class CourseExecutor(AgentExecutor):
     def __init__(self, config: Config | None = None):
         self.config = config or load_config()
+        # 前に強制終了して残った MCP の設定（トークン入り）を片づけてから始める
+        claude.clean_mcp_configs(self.config.state_dir, tools.AGENT)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -91,7 +94,7 @@ class CourseExecutor(AgentExecutor):
             return
         log.info("頼まれた仕事: %s", skill)
         handlers = {SYNC_ASSIGNMENTS: self._sync_assignments, LIST_DUE: self._list_due,
-                    TIME_REPORT: self._time_report, ASK: self._ask}
+                    LIST_CLASSES: self._list_classes, TIME_REPORT: self._time_report, ASK: self._ask}
         await handlers[skill](updater, metadata, text)
 
     async def _fail(self, updater: TaskUpdater, reason: str) -> None:
@@ -135,6 +138,24 @@ class CourseExecutor(AgentExecutor):
             return
         data = due_data(events, days)
         await self._done(updater, f"これから {days} 日で締切の課題は {len(data['items'])} 件", data)
+
+    async def _list_classes(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
+        """その曜日の授業を、時刻つきで返す（朝のまとめで時系列に並べるために使う）。"""
+        day = date.today()
+        weekday = str(metadata.get("weekday") or periods.weekday_of(day))
+        try:
+            found = await asyncio.to_thread(notion_sync.courses_on, weekday)
+        except (notion_sync.SyncError, NotionError) as e:
+            await self._fail(updater, str(e))
+            return
+        items = []
+        for course in found:
+            span = periods.at(day, course["period"])
+            items.append({**course,
+                          "start": span[0].isoformat(timespec="minutes") if span else "",
+                          "end": span[1].isoformat(timespec="minutes") if span else ""})
+        await self._done(updater, f"{weekday}曜の授業は {len(items)} コマ",
+                         {"weekday": weekday, "items": items})
 
     async def _time_report(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """Toggl の記録を、科目ごと・課題ごとに集計して返す。"""

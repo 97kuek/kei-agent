@@ -132,3 +132,48 @@ def test_it_stops_before_writing_too_many_rows(monkeypatch):
 def test_state_file_missing_says_what_to_run(tmp_path):
     with pytest.raises(notion_sync.SyncError, match="kei-agent-course-setup"):
         notion_sync.read_state(tmp_path / "notion-course.json")
+
+
+# 履修中の科目（朝のまとめで、時限を時刻に直すのに使う）
+
+
+def _select(name):
+    return {"select": {"name": name}}
+
+
+COURSE_ROWS_FULL = [
+    {"id": "p1", "url": "https://notion/p1", "properties": {
+        "科目名": _title("データベース"), "曜日": _select("月"), "時限": {"number": 2}, "状態": _select("履修中")}},
+    {"id": "p2", "url": "https://notion/p2", "properties": {
+        "科目名": _title("次世代ネットワーク"), "曜日": _select("金"), "時限": {"number": 4}, "状態": _select("履修中")}},
+    {"id": "p3", "url": "https://notion/p3", "properties": {
+        "科目名": _title("去年の科目"), "曜日": _select("月"), "時限": {"number": 1}, "状態": _select("終了")}},
+    {"id": "p4", "url": "https://notion/p4", "properties": {
+        "科目名": _title("プロジェクト研究B"), "曜日": _select("他"), "時限": {"number": None},
+        "状態": _select("履修中")}},
+]
+
+
+def test_courses_on_takes_only_the_courses_being_taken():
+    notion = FakeNotion(courses=COURSE_ROWS_FULL)
+    found = notion_sync.CourseNotion(notion, STATE).courses_on("月")
+    assert [c["subject"] for c in found] == ["データベース"]   # 終了した科目は出さない
+
+
+def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
+    notion = FakeNotion(courses=COURSE_ROWS_FULL)
+    found = notion_sync.CourseNotion(notion, STATE).courses_on()
+    # 時限の早い順。時限のないもの（集中講義など）は最後
+    assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
+
+
+def test_waseda_periods_turn_into_times():
+    from datetime import date
+
+    from kei_agent_course import periods
+
+    assert periods.weekday_of(date(2026, 9, 21)) == "月"
+    start, end = periods.at(date(2026, 9, 21), 2)
+    assert (start.hour, start.minute) == (10, 40) and (end.hour, end.minute) == (12, 20)
+    assert periods.at(date(2026, 9, 21), None) is None      # 時限なし（集中講義）
+    assert periods.at(date(2026, 9, 21), 9) is None         # 無い時限
