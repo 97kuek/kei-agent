@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 
 ICS_ENV = "MOODLE_ICS_URL"
 TIMEOUT_SECONDS = 30
-# 取り込む先の期間（日）
-WINDOW_DAYS = 90
+# 取り込む先の期間（日）。学期の終わり（2月の締切）まで届く長さにする
+WINDOW_DAYS = 180
 
 
 class MoodleError(RuntimeError):

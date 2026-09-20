@@ -1,6 +1,7 @@
 # Kei Agent
 
-- Slack で研究の作業を頼むと、自分の Mac のClaude Codeが作業し、経過と結果を同じスレッドに返す研究室のアシスタント
+- Slack で頼むと、自分の Mac のエージェントが動いて、経過と結果を同じスレッドに返すアシスタント
+- Kei Agent がオーケストレーター。研究の作業は研究エージェント、大学の課題は大学エージェントに、A2A で振り分ける
 - Agentの構成は以下の通り
 ![Kei Agent の構成](docs/architecture.svg)
 
