@@ -112,30 +112,6 @@ def due_text(items: list[dict], more: int = 0, now: datetime | None = None) -> s
     return "\n".join(lines)
 
 
-def digest_text(items: list[dict], now: datetime) -> str:
-    """朝の一覧。今日・明日・今週に分ける。"""
-    today, tomorrow = now.date(), (now + timedelta(days=1)).date()
-    groups: dict[str, list[dict]] = {"今日": [], "明日": [], "今週": []}
-    for item in items:
-        at = _at(item)
-        if at.date() == today:
-            groups["今日"].append(item)
-        elif at.date() == tomorrow:
-            groups["明日"].append(item)
-        elif at.date() <= (now + timedelta(days=DIGEST_DAYS)).date():
-            groups["今週"].append(item)
-    # 見出しの日付は「いつ見た一覧か」。締切日と読み違えられないよう「時点」を添える
-    lines = [f"📅 授業の締切（{_day(now)} 時点）"]
-    for name, found in groups.items():
-        if not found:
-            continue
-        lines.append(f"*{name}*")
-        lines += [_line(item, with_day=name == "今週", now=now if name == "今日" else None) for item in found]
-    if len(lines) == 1:
-        lines.append(f"これから {DIGEST_DAYS} 日のうちに締切の課題はないよ。")
-    return "\n".join(lines)
-
-
 def soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS) -> list[dict]:
     """あと hours 時間以内に締切のもの（過ぎたものは入れない）。"""
     limit = now + timedelta(hours=hours)
