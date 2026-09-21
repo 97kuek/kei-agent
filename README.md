@@ -61,7 +61,7 @@
 | Slack で何が頼めるか、定期実行、設定画面 | [`docs/using.md`](docs/using.md) |
 | 入れ方（Slack App、秘密情報、常時起動） | [`deploy/README.md`](deploy/README.md) |
 | 仕組みと、そう決めた理由 | [`docs/design.md`](docs/design.md) |
-| 声のレイヤと Stack-chan の設計（未実装） | [`docs/voice.md`](docs/voice.md) |
+| 声で話す（Stack-chan はまだ無い） | [`docs/voice.md`](docs/voice.md) |
 | エージェントを増やすときの決まり | [`docs/agents.md`](docs/agents.md) |
 | Notion の構成 | [`docs/notion-layout.md`](docs/notion-layout.md) |
 | Codex App 側の使い方、依頼文のテンプレート | [`docs/codex.md`](docs/codex.md) |
