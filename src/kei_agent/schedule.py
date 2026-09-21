@@ -267,7 +267,8 @@ class Scheduler:
         path = self.overview_dir / ".kei-agent" / "digest" / f"{day}-{kind}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         title = {"daily": f"Daily の材料 {day}", "review": f"振り返りの材料 {day}"}[kind]
-        text = await DigestBuilder(self.config, self.store, self.assistant).build(since, time.time(), title, set(ids))
+        text = await DigestBuilder(self.config, self.store, self.assistant).build(
+            since, time.time(), title, set(ids), domains=kind == "review")
         path.write_text(text, encoding="utf-8")
         return path
 
@@ -333,10 +334,17 @@ class Scheduler:
             f"[Kei Agent の定期処理: 振り返りの材料 {day}]\n"
             f"`{digest}` に今日の材料があります。材料と、そこに書かれたスレッドのログを読み、"
             f"Codex App で振り返るための材料を `reviews/{day}.md` に書いてください。形式:\n\n"
-            f"```markdown\n# 振り返り {day}\n\n## 今日やったこと\n（テーマごとに、何をして何が分かったか）\n\n"
+            f"```markdown\n# 振り返り {day}\n\n## 今日やったこと\n（研究・大学・仕事ごとに、何をして何が分かったか）\n\n"
             "## 振り返りの問い\n1. 今日分かったことは何か（〜について、など具体的に）\n2. 明日やることは何か\n\n"
             "## Codex での振り返り\n（ここに Codex で話した結論を書く）\n```\n\n"
-            "返答には「今日やったこと」の要約と2つの問いだけを書いてください（Slack に投稿されます）。\n"
+            "返答は Slack に投稿されるので、**研究・大学・仕事の3つを同じ形で並べて**ください。\n"
+            "1つの領域につき、`*研究*` のような見出しのあと、次の3行だけを書きます。\n"
+            "- `✅` 今日片付いたこと（材料に無ければ、その領域は「なし」と1行）\n"
+            "- `⏳` 途中のもの・残っている締切\n"
+            "- `→ 明日:` 明日あるもの（授業、会議、締切）\n"
+            "材料に大学や仕事の節が無い領域は、まるごと省いてください。そのあと `─` の行を挟み、"
+            "「振り返りの問い」を2つ書きます。問いは、3つの領域を見たうえでの問いにしてください"
+            "（例: 明日は授業が2コマあるので、研究にどこを充てるか）。ほかには何も書かないでください。\n"
             "このあと、このスレッドに振り返りの結論が貼られたら、その内容を "
             f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。"
         )

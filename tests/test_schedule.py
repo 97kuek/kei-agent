@@ -1,7 +1,8 @@
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as dtime
 
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
@@ -538,9 +539,11 @@ class FakeWorkAgent:
 
     def __init__(self, items):
         self.items = items
+        self.asked = []
 
     async def ask(self, skill, text="", params=None):
         from kei_agent import a2a
+        self.asked.append((skill, params))
         return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(
             {"ok": True, "text": "予定", "data": {"items": self.items},
              "limit_reset_at": None, "cost_usd": None}))
@@ -565,10 +568,48 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
 
     lines = text.splitlines()
     assert lines[0].startswith("☀️")
-    assert "10:00–10:15` 💼 朝会（Zoom）" in lines[1]
-    assert "10:40–12:20` 🎓 データベース" in lines[2]
-    assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
+    assert lines[1].startswith("`9時 ") and lines[1].endswith("21時`")   # 1日の形（帯）
+    assert "10:00–10:15` 💼 朝会（Zoom）" in lines[2]
+    assert "10:40–12:20` 🎓 データベース" in lines[3]
+    assert "17:00" in lines[4] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[4]
+    assert "空き:" in text
     assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1}
+
+
+# 1日の帯と空き時間（morning.py）
+
+def _entry(at, end=None, icon=morning.CLASS, text="授業"):
+    day = date(2026, 9, 21)
+    return morning.Entry(datetime.combine(day, dtime(*at)), icon, text,
+                         datetime.combine(day, dtime(*end)) if end else None)
+
+
+def test_band_is_one_line_of_ascii_so_it_survives_a_phone():
+    """帯は1行だけ・ASCII だけにする。行をまたぐ桁合わせは、スマホの幅で崩れる。"""
+    found = [_entry((10, 40), (12, 20)), _entry((15, 5), (16, 45)),
+             _entry((17, 0), icon=morning.DUE, text="締切")]
+    line = morning.band(found)
+
+    assert line == "`9時 .###..##!... 21時`"
+    assert "\n" not in line
+    assert set(line.split()[1]) <= {morning.BUSY, morning.DUE_MARK, morning.FREE}
+
+
+def test_band_widens_for_a_late_meeting():
+    """ふだんの 9〜21 時からはみ出す予定があれば、その分だけ広げる。"""
+    assert morning.band([_entry((19, 0), (20, 30))]) == "`9時 ..........## 21時`"
+    assert morning.band([_entry((21, 30), (22, 0))]).endswith("22時`")
+    assert morning.band([]) == ""
+
+
+def test_free_slots_picks_the_long_gaps_not_the_first_ones():
+    """空きは長い順に選んでから、時刻の順に並べ直す（使えるのは長い切れ間なので）。"""
+    now = datetime(2026, 9, 21, 8, 0)
+    found = [_entry((10, 40), (12, 20)), _entry((13, 0), (14, 0)), _entry((15, 5), (16, 45))]
+
+    assert morning.free_slots(found, now) == "空き: 09:00–10:40、14:00–15:05、16:45–21:00（ほか 1 か所）"
+    # 30 分に満たない切れ間は数えない（移動と片付けで消える）
+    assert morning.free_slots([_entry((9, 0), (12, 0)), _entry((12, 20), (21, 0))], now) == ""
 
 
 async def test_morning_text_works_without_the_agents(env):
@@ -612,3 +653,47 @@ async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypa
     await scheduler.notify_due_soon(now)
 
     assert calls == 2
+
+
+# 振り返りの材料に、大学と仕事を足す（digest.py）
+
+async def test_review_digest_gathers_all_three_domains(env, config, store):
+    """振り返りの材料には、研究だけでなく大学と仕事も入れる。"""
+    from kei_agent.digest import DigestBuilder
+
+    scheduler, assistant, slack, _ = env
+    now = datetime.now().replace(hour=21, minute=0, second=0, microsecond=0)
+    today, tomorrow = now.date().isoformat(), (now + timedelta(days=1)).date().isoformat()
+    assistant.agents["course"] = FakeCourseAgent(
+        [due_item(f"{today}T17:00:00", "履修申請フォーム", "プロジェクト研究B"),
+         due_item(f"{tomorrow}T23:59:00", "第3回レポート", "データベース", "2@moodle")],
+        classes=[{"subject": "マルチメディア工学A", "start": "", "end": ""}])
+    assistant.agents["work"] = FakeWorkAgent(
+        [{"subject": "定例MTG", "start": f"{today}T18:00", "end": f"{today}T19:00"},
+         {"subject": "ゆうちょ様AML", "start": f"{tomorrow}T11:00", "end": f"{tomorrow}T13:00"}])
+
+    text = await DigestBuilder(config, store, assistant).build(
+        now.timestamp() - 86400, now.timestamp(), "振り返りの材料", set(), domains=True)
+
+    assert "## 大学" in text and "## 仕事" in text
+    assert "今日が期限だったもの: プロジェクト研究B / 履修申請フォーム（17:00）" in text
+    assert "第3回レポート" in text.split("残っている締切:")[1].splitlines()[0]
+    assert "明日（" in text and "マルチメディア工学A" in text
+    assert "今日あった会議: 18:00–19:00 定例MTG" in text
+    assert "明日の会議: 11:00–13:00 ゆうちょ様AML" in text
+
+
+async def test_daily_digest_does_not_ask_the_agents_again(env, config, store):
+    """朝は、朝のまとめですでに聞いているので、材料づくりで二度聞かない（claude を無駄に動かさない）。"""
+    from kei_agent.digest import DigestBuilder
+
+    scheduler, assistant, slack, _ = env
+    course_agent = FakeCourseAgent([])
+    work_agent = FakeWorkAgent([])
+    assistant.agents["course"], assistant.agents["work"] = course_agent, work_agent
+
+    text = await DigestBuilder(config, store, assistant).build(
+        time.time() - 86400, time.time(), "Daily の材料", set())
+
+    assert "## 大学" not in text and "## 仕事" not in text
+    assert course_agent.asked == [] and work_agent.asked == []
