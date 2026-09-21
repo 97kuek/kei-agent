@@ -36,7 +36,7 @@ uv run --group work pytest
 uvx ruff check .
 ```
 
-コードの地図は [`docs/design.md`](docs/design.md#13-コードの地図)。
+コードの地図は [`docs/design.md`](docs/design.md#14-コードの地図)。
 
 ## ライセンス
 

@@ -34,6 +34,12 @@ PER_PAGE = 100
 # ページ送りが止まらなかったときの上限。1週間分でここまで行くことはない
 MAX_PAGES = 50
 TIME_DIR = "time"
+# Toggl のプロジェクト名の先頭に付ける印。ここに挙げた領域だけを数え、印のないもの
+# （アルバイト、個人開発）は捨てる。科目やテーマが増えても、このコードは変えなくてよい
+DOMAINS = ("研究", "大学", "仕事")
+DOMAIN_SEP = "/"
+# テーマのチャンネル以外（研究全体、Kei Agent の改善）で動いた分をまとめる名前
+OTHER = "そのほか"
 
 
 class TogglError(RuntimeError):
@@ -47,6 +53,14 @@ def week_start(day: date) -> date:
 
 def _day(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).date().isoformat()
+
+
+def split_project(name: str) -> tuple[str, str] | None:
+    """Toggl のプロジェクト名を（領域, 名前）に分ける。印が無ければ None（数えない）。"""
+    domain, sep, rest = (name or "").partition(DOMAIN_SEP)
+    if not sep or domain.strip() not in DOMAINS or not rest.strip():
+        return None
+    return domain.strip(), rest.strip()
 
 
 def assistant_seconds(store: Store, since: float, until: float) -> dict[tuple[str, str], float]:
@@ -148,13 +162,19 @@ def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | No
     since = datetime.combine(monday, datetime.min.time()).timestamp()
     until = datetime.combine(sunday + timedelta(days=1), datetime.min.time()).timestamp()
 
-    agent = assistant_seconds(store, since, until)
-    human: dict[tuple[str, str], float] = {}
+    themes = {d.name for d in theme_dirs(config)}
+    # Kei Agent が動くのは研究だけ。テーマのチャンネル以外はまとめる
+    agent: dict[tuple[str, str, str], float] = defaultdict(float)
+    for (day_, name), seconds in assistant_seconds(store, since, until).items():
+        agent[(day_, "研究", name if name in themes else OTHER)] += seconds
+    human: dict[tuple[str, str, str], float] = defaultdict(float)
     if toggl is not None:
         try:
-            # Toggl にはアルバイトや個人開発の時間も入っている。研究テーマのプロジェクトだけを数える
-            themes = {d.name for d in theme_dirs(config)}
-            human = {k: v for k, v in human_seconds(toggl.entries(monday, sunday)).items() if k[1] in themes}
+            # Toggl にはアルバイトや個人開発の時間も入っている。印の付いたものだけを数える
+            for (day_, project), seconds in human_seconds(toggl.entries(monday, sunday)).items():
+                found = split_project(project)
+                if found:
+                    human[(day_, found[0], found[1])] += seconds
         except TogglError as e:
             log.warning("Toggl から読めません: %s", e)
 
@@ -162,9 +182,9 @@ def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | No
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["日付", "テーマ", "人の時間（分）", "Kei Agent の稼働（分）"])
+        writer.writerow(["日付", "領域", "プロジェクト", "人の時間（分）", "Kei Agent の稼働（分）"])
         for key in sorted(set(agent) | set(human)):
-            writer.writerow([key[0], key[1], round(human.get(key, 0) / 60, 1), round(agent.get(key, 0) / 60, 1)])
+            writer.writerow([*key, round(human.get(key, 0) / 60, 1), round(agent.get(key, 0) / 60, 1)])
     return path
 
 
@@ -173,16 +193,18 @@ def week_summary(path: Path) -> list[str]:
     if not path.exists():
         return ["- まだ記録がない"]
     human = agent = 0.0
-    by_theme: dict[str, float] = defaultdict(float)
+    by_domain: dict[str, float] = defaultdict(float)
     with path.open(encoding="utf-8") as f:
         for row in csv.DictReader(f):
             human += float(row["人の時間（分）"])
             agent += float(row["Kei Agent の稼働（分）"])
-            by_theme[row["テーマ"]] += float(row["人の時間（分）"])
+            # 先週までの CSV には「領域」の列がない
+            by_domain[row.get("領域") or "研究"] += float(row["人の時間（分）"])
     lines = [f"- 今週の合計: 人 {human / 60:.1f} 時間 / Kei Agent {agent / 60:.1f} 時間", f"- 材料: `{path}`"]
-    for theme, minutes in sorted(by_theme.items(), key=lambda kv: -kv[1]):
+    for domain, minutes in sorted(by_domain.items(), key=lambda kv: -kv[1]):
         if minutes:
-            lines.append(f"  - {theme}: {minutes / 60:.1f} 時間")
+            lines.append(f"  - {domain}: {minutes / 60:.1f} 時間")
     if human == 0:
-        lines.append("- 人の時間が0。Toggl を回していないか、プロジェクト名がテーマ名と違うか、`TOGGL_*` の環境変数が足りない")
+        lines.append("- 人の時間が0。Toggl を回していないか、プロジェクト名に "
+                     f"`{'/`・`'.join(DOMAINS)}/` の印が付いていないか、`TOGGL_*` の環境変数が足りない")
     return lines

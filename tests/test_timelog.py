@@ -24,7 +24,7 @@ def test_assistant_seconds_counts_only_finished_runs(store):
     assert totals == {(datetime.fromtimestamp(now).date().isoformat(), "amr-query"): 600}
 
 
-def _entry(start, duration, project="amr-query", **extra):
+def _entry(start, duration, project="研究/amr-query", **extra):
     """Toggl 2.0 の time-entries が返す1件（使う項目だけ）。"""
     e = {"start": start, "duration": duration, "type": "activity",
          "project": {"id": 7, "name": project} if project else None}
@@ -42,9 +42,9 @@ def test_human_seconds_skips_running_entries():
     ]
     totals = timelog.human_seconds(entries)
 
-    assert totals[("2026-09-14", "amr-query")] == 5400
+    assert totals[("2026-09-14", "研究/amr-query")] == 5400
     assert totals[("2026-09-15", "-")] == 600
-    assert ("2026-09-15", "amr-query") not in totals
+    assert ("2026-09-15", "研究/amr-query") not in totals
 
 
 def test_human_seconds_skips_breaks_and_deleted():
@@ -53,14 +53,14 @@ def test_human_seconds_skips_breaks_and_deleted():
         _entry("2026-09-14T03:00:00Z", 900, type="break"),
         _entry("2026-09-14T04:00:00Z", 900, deleted_at="2026-09-14T05:00:00Z"),
     ]
-    assert timelog.human_seconds(entries) == {("2026-09-14", "amr-query"): 3600}
+    assert timelog.human_seconds(entries) == {("2026-09-14", "研究/amr-query"): 3600}
 
 
 def test_human_seconds_uses_local_date():
     """UTC では前日でも、手元の時刻での日付に数える。"""
     start = datetime(2026, 9, 14, 0, 30).astimezone()   # 手元の 9/14 0:30
     entries = [_entry(start.astimezone(UTC).isoformat().replace("+00:00", "Z"), 60)]
-    assert timelog.human_seconds(entries) == {("2026-09-14", "amr-query"): 60}
+    assert timelog.human_seconds(entries) == {("2026-09-14", "研究/amr-query"): 60}
 
 
 def test_toggl_entries_reads_every_page():
@@ -105,7 +105,8 @@ def test_write_week_puts_both_columns_in_one_csv(config, store):
     path = timelog.write_week(config, store, toggl)
 
     rows = list(csv.DictReader(path.open(encoding="utf-8")))
-    row = next(r for r in rows if r["テーマ"] == "amr-query")
+    row = next(r for r in rows if r["プロジェクト"] == "amr-query")
+    assert row["領域"] == "研究"
     assert row["人の時間（分）"] == "120.0" and row["Kei Agent の稼働（分）"] == "5.0"
     assert path.name == f"{monday.isoformat()}.csv"
 
@@ -116,30 +117,42 @@ def test_write_week_works_without_toggl(config, store):
     assert "人の時間が0" in "\n".join(timelog.week_summary(path))
 
 
-def test_week_summary_totals_by_theme(config, store):
+def test_week_summary_totals_by_domain(config, store):
+    """まとめは、テーマや科目ごとではなく、研究・大学・仕事の3つでまとめる。"""
     (config.research_root / "amr-query").mkdir(parents=True)
     monday = timelog.week_start(date.today())
     toggl = FakeToggl([
         _entry(f"{monday.isoformat()}T10:00:00+09:00", 3600),
         _entry(f"{(monday + timedelta(days=1)).isoformat()}T10:00:00+09:00", 1800),
+        _entry(f"{monday.isoformat()}T14:00:00+09:00", 3600, project="大学/データベース"),
     ])
     summary = "\n".join(timelog.week_summary(timelog.write_week(config, store, toggl)))
-    assert "人 1.5 時間" in summary and "amr-query: 1.5 時間" in summary
+    assert "人 2.5 時間" in summary and "研究: 1.5 時間" in summary and "大学: 1.0 時間" in summary
 
 
-def test_write_week_counts_only_research_themes(config, store):
-    """Toggl には研究以外（アルバイトなど）の時間も入っている。テーマのフォルダがあるプロジェクトだけを数える。"""
+def test_write_week_counts_only_the_marked_projects(config, store):
+    """Toggl にはアルバイトや個人開発の時間も入っている。先頭に印のあるものだけを数える。"""
     (config.research_root / "amr-query").mkdir(parents=True)
     monday = timelog.week_start(date.today())
     toggl = FakeToggl([
         _entry(f"{monday.isoformat()}T10:00:00+09:00", 3600),
-        _entry(f"{monday.isoformat()}T12:00:00+09:00", 7200, project="neoAI"),
+        _entry(f"{monday.isoformat()}T11:00:00+09:00", 1800, project="仕事/ゆうちょ"),
+        _entry(f"{monday.isoformat()}T12:00:00+09:00", 7200, project="アルバイト"),
         _entry(f"{monday.isoformat()}T15:00:00+09:00", 600, project=None),
     ])
 
     rows = list(csv.DictReader(timelog.write_week(config, store, toggl).open(encoding="utf-8")))
+    got = {(r["領域"], r["プロジェクト"]): r["人の時間（分）"] for r in rows}
 
-    assert [r["テーマ"] for r in rows] == ["amr-query"]
+    assert got == {("研究", "amr-query"): "60.0", ("仕事", "ゆうちょ"): "30.0"}
+
+
+def test_split_project_needs_a_known_mark():
+    assert timelog.split_project("研究/amr-query") == ("研究", "amr-query")
+    assert timelog.split_project("大学/マルチメディア工学A") == ("大学", "マルチメディア工学A")
+    assert timelog.split_project("amr-query") is None       # 印がない
+    assert timelog.split_project("趣味/写真") is None        # 知らない印
+    assert timelog.split_project("研究/") is None            # 名前がない
 
 
 def test_load_toggl_needs_a_token_and_ids():
