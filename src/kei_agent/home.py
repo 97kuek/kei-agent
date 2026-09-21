@@ -90,13 +90,18 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
 
     blocks += [
         {"type": "divider"},
-        _mrkdwn("*声で知らせる*"),
+        _mrkdwn("*声*"),
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            "作業が終わったときなどに、机の上で声に出します。"
-            "Stack-chan がいればそちら、いなければ Mac のスピーカーで鳴らします"}]},
+            "*知らせる*: 作業が終わったときなどに、机の上で声に出します。"
+            "Stack-chan がいればそちら、いなければ Mac のスピーカーで鳴らします\n"
+            "*聞く*: マイクを開けて、「けい」と呼びかけたら答えます。"
+            "**切っている間はマイクを閉じます**（講義中などに録られないように）"}]},
         {"type": "actions", "elements": [
-            _button("止める" if settings.voice_enabled(store) else "知らせる",
+            _button("知らせるのを止める" if settings.voice_enabled(store) else "知らせる",
                     "kei_agent_home_toggle_voice", "voice"),
+            _button("聞くのを止める" if settings.listening_enabled(store) else "聞く",
+                    "kei_agent_home_toggle_listen", "listen",
+                    "danger" if settings.listening_enabled(store) else None),
         ]},
     ]
 

@@ -34,15 +34,40 @@ class VoiceSession:
     def __init__(self, held: dict, mouth: Mouth | None = None, ears: Ears | None = None):
         self.held = held
         self.mouth = mouth or Mouth()
-        self.ears = ears or Ears()
+        self._make_ears = (lambda: ears) if ears is not None else Ears
         self.heard: asyncio.Queue[str] = asyncio.Queue()
         self._stop = threading.Event()
+        self._reader: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self.ears: Ears | None = None
 
-    async def run(self) -> None:
-        """聞こえたものを、順に捌く。止めるには、このタスクを cancel する。"""
-        loop = asyncio.get_running_loop()
-        reader = threading.Thread(target=self._listen, args=(loop,), daemon=True)
-        reader.start()
+    @property
+    def listening(self) -> bool:
+        return self._reader is not None and self._reader.is_alive()
+
+    def set_listening(self, on: bool) -> None:
+        """マイクを開ける・閉じる。
+
+        閉じるときは**聞く側のプロセスごと終わらせる**（無視するだけだと、録り続けることになる）。
+        """
+        if on and not self.listening:
+            self._stop.clear()
+            self.ears = self._make_ears()
+            self._reader = threading.Thread(target=self._listen, args=(self._loop,), daemon=True)
+            self._reader.start()
+            log.info("マイクを開けました")
+        elif not on and self.listening:
+            self._stop.set()
+            if self.ears is not None:
+                self.ears.__exit__(None, None, None)
+            self._reader = None
+            log.info("マイクを閉じました")
+
+    async def run(self, listening: bool = False) -> None:
+        """聞こえたものを、順に捌く。**既定ではマイクを開けない**（Slack から入れる）。"""
+        self._loop = asyncio.get_running_loop()
+        if listening:
+            self.set_listening(True)
         try:
             while True:
                 text = await self.heard.get()
@@ -51,7 +76,7 @@ class VoiceSession:
                 except Exception:
                     log.exception("聞こえたことを捌けませんでした: %r", text[:80])
         finally:
-            self._stop.set()
+            self.set_listening(False)
 
     def _listen(self, loop: asyncio.AbstractEventLoop) -> None:
         """別スレッドで聞き続け、聞こえた文字を待ち行列に渡す。"""

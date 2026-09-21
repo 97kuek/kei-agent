@@ -37,22 +37,30 @@ def test_long_sentence_is_cut_at_a_comma():
 
 def test_engine_comes_from_env_so_the_voice_can_be_swapped():
     """AivisSpeech のような VOICEVOX 互換のエンジンに、コードを変えずに向け替えられる。"""
-    from kei_agent_voice.speech import DEFAULT_PORT, DEFAULT_SPEAKER, Voicevox
+    from kei_agent_voice.speech import (
+        DEFAULT_PORT,
+        DEFAULT_SPEAKER,
+        PORT_ENV,
+        SPEAKER_ENV,
+        SPEED_ENV,
+        Voicevox,
+    )
 
     plain = Voicevox.from_env(env={})
     assert plain.base == f"http://127.0.0.1:{DEFAULT_PORT}" and plain.speaker == DEFAULT_SPEAKER
 
+    # 名前そのものは、下の test_the_real_environment_variables_are_the_ones_read で確かめる
     swapped = Voicevox.from_env(env={
-        "KEI_AGENT_VOICE_PORT": "10101",
+        PORT_ENV: "10101",
         # AivisSpeech の話者 ID は 0 からの連番ではない
-        "KEI_AGENT_VOICE_SPEAKER": "888753760",
-        "KEI_AGENT_VOICE_SPEED": "1.0",
+        SPEAKER_ENV: "888753760",
+        SPEED_ENV: "1.0",
     })
     assert swapped.base == "http://127.0.0.1:10101"
     assert swapped.speaker == 888753760 and swapped.speed == 1.0
 
     # 読めない値で落ちない（起動しなくなるより、いまの声のままのほうがまし）
-    broken = Voicevox.from_env(env={"KEI_AGENT_VOICE_PORT": "みみっつ"})
+    broken = Voicevox.from_env(env={PORT_ENV: "みみっつ"})
     assert broken.base == f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
@@ -434,3 +442,83 @@ async def test_a_broken_answer_does_not_stop_the_loop(held, monkeypatch):
     task.cancel()
     # 落ちずに、次を待っている
     assert not task.done() or task.cancelled()
+
+
+def test_the_real_environment_variables_are_the_ones_read(monkeypatch):
+    """定数の名前がずれていないか。
+
+    `env=` を渡す試験だけだと、定数名が古いままでも通ってしまう（実際にすり抜けて、
+    VOICEVOX の声のまま動いていた）。本物の環境変数から読ませて確かめる。
+    """
+    from kei_agent_voice.speech import Voicevox
+
+    monkeypatch.setenv("KEI_AGENT_TTS_PORT", "10101")
+    monkeypatch.setenv("KEI_AGENT_TTS_SPEAKER", "1937616896")
+
+    engine = Voicevox.from_env()
+
+    assert engine.base == "http://127.0.0.1:10101" and engine.speaker == 1937616896
+
+
+# マイクの開け閉め（常に録らない）
+
+async def test_the_microphone_is_closed_until_slack_turns_it_on(held):
+    """既定では開けない。講義中などに録られないように。"""
+    from kei_agent_voice.session import VoiceSession
+
+    s = VoiceSession(held, mouth=FakeMouth())
+    import asyncio
+    task = asyncio.create_task(s.run())
+    await asyncio.sleep(0.05)
+    assert s.listening is False
+    task.cancel()
+
+
+def test_turning_it_off_closes_the_listener_not_just_ignores_it(held):
+    """閉じるときは、聞く側のプロセスごと終わらせる。"""
+    from kei_agent_voice.session import VoiceSession
+
+    closed = []
+
+    class FakeEars:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            closed.append(True)
+
+        def heard(self):
+            import time
+            while True:
+                time.sleep(0.01)
+
+    s = VoiceSession(held, mouth=FakeMouth(), ears=FakeEars())
+    import asyncio
+    s._loop = asyncio.new_event_loop()
+    s.set_listening(True)
+    assert s.listening is True
+
+    s.set_listening(False)
+    assert closed == [True]
+
+
+def test_the_listen_event_reaches_the_session():
+    """本体が押した listen が、マイクの開け閉めになる。"""
+    from kei_agent_voice import events
+    from kei_agent_voice.executor import VoiceExecutor
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def set_listening(self, on):
+            self.calls.append(on)
+
+    ex = VoiceExecutor(mouth=FakeMouth())
+    ex.session = FakeSession()
+    ex._hold({"kind": "listen", "on": True})
+    ex._hold({"kind": "listen", "on": False})
+
+    assert ex.session.calls == [True, False]
+    # listen では喋らない
+    assert not events.reaction({"kind": "listen", "on": True}).speaks

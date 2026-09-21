@@ -36,6 +36,16 @@ class VoiceNotices:
         event = {"kind": kind, **{k: v for k, v in fields.items() if v not in (None, "")}}
         self.spawn(self._notify(agent, event))
 
+    def notify_listening(self, on: bool) -> None:
+        """マイクを開ける・閉じるを伝える。
+
+        「聞く」は「知らせる」とは別に送る。知らせを切っていても、聞くのは止められるようにする
+        （逆も同じ）。
+        """
+        agent = self.agents.get(AGENT)
+        if agent is not None:
+            self.spawn(self._notify(agent, {"kind": "listen", "on": on}))
+
     async def _notify(self, agent, event: dict) -> None:
         reply = await agents.ask(agent, NOTIFY, text=json.dumps(event, ensure_ascii=False))
         if not reply.ok:

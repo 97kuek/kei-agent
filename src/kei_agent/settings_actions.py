@@ -129,6 +129,10 @@ class SettingsActions:
             settings.set_schedule(self.store, name, hhmm, not enabled)
         elif kind == "kei_agent_home_toggle_voice":
             settings.set_voice(self.store, not settings.voice_enabled(self.store))
+        elif kind == "kei_agent_home_toggle_listen":
+            on = not settings.listening_enabled(self.store)
+            settings.set_listening(self.store, on)
+            self.notify_listening(on)
         else:
             return
         await self.publish_home(user)

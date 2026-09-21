@@ -51,6 +51,8 @@ class VoiceExecutor(AgentExecutor):
         self._mouth = mouth
         # 朝のまとめなど、喋らずに手元へ置くもの（速い道で使う）
         self.held: dict[str, dict] = {}
+        # マイクの開け閉めを頼む相手（app.py が立ち上げのときに入れる）
+        self.session = None
 
     @property
     def mouth(self) -> Mouth:
@@ -98,6 +100,9 @@ class VoiceExecutor(AgentExecutor):
             self.held[kind] = int(self.held.get(kind) or 0) + 1
         elif kind == "limited":
             self.held["limited"] = True
+        elif kind == "listen" and self.session is not None:
+            # 常に録らない。Slack から入れたときだけ開ける（docs/voice.md の7節）
+            self.session.set_listening(bool(event.get("on")))
 
     def _react(self, found: events.Reaction) -> None:
         try:

@@ -170,6 +170,7 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
 # 声で知らせるか（docs/voice.md の7節）
 
 VOICE_KEY = "voice.enabled"
+LISTEN_KEY = "voice.listening"
 
 
 def voice_enabled(store: Store) -> bool:
@@ -183,3 +184,16 @@ def voice_enabled(store: Store) -> bool:
 
 def set_voice(store: Store, enabled: bool) -> None:
     _set(store, VOICE_KEY, "1" if enabled else "0")
+
+
+def listening_enabled(store: Store) -> bool:
+    """マイクで聞くか。**既定は切**。
+
+    常に録っているのは落ち着かないし、講義中に「経過」「計測」のような同音で反応しても困る。
+    聞きたいときだけ Slack から入れる（docs/voice.md の7節）。
+    """
+    return _get(store, LISTEN_KEY) == "1"
+
+
+def set_listening(store: Store, enabled: bool) -> None:
+    _set(store, LISTEN_KEY, "1" if enabled else "0")

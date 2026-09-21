@@ -39,13 +39,17 @@ def _ears(executor: VoiceExecutor):
     @asynccontextmanager
     async def lifespan(app):
         session = VoiceSession(executor.held, mouth=executor.mouth)
-        task = asyncio.create_task(session.run())
+        # マイクの開け閉めは、本体が Slack（App Home）から押してくる
+        executor.session = session
+        # **既定では開けない。** 常に録らない（docs/voice.md の7節）
+        task = asyncio.create_task(session.run(listening=False))
         try:
             yield
         finally:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+            executor.session = None
 
     return lifespan
 

@@ -16,8 +16,8 @@ from datetime import datetime
 # 表情は stackchan-atama が受け付ける6種だけ。`angry` は使わない（Kei Agent が怒る場面がない）
 NEUTRAL, HAPPY, SAD, DOUBT, SLEEPY = "neutral", "happy", "sad", "doubt", "sleepy"
 # 依頼を受けただけでは喋らない（依頼のたびに喋るとうるさい）
-SILENT_KINDS = ("working", "schedule")
-KINDS = ("schedule", "due", "working", "done", "failed", "limited", "awaiting")
+SILENT_KINDS = ("working", "schedule", "listen")
+KINDS = ("schedule", "due", "working", "done", "failed", "limited", "awaiting", "listen")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,9 @@ def reaction(event: dict) -> Reaction | None:
         # 手元に置くだけ（速い道で使う）。喋らない
         return Reaction(face=NEUTRAL)
     if kind == "working":
+        return Reaction(face=NEUTRAL)
+    if kind == "listen":
+        # マイクの開け閉め。喋らない（executor が session に渡す）
         return Reaction(face=NEUTRAL)
     if kind == "due":
         return Reaction(_due(event), NEUTRAL, look=True)
