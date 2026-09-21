@@ -254,25 +254,38 @@ uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップ�
 
 ## 9. 机の上の音声対話（`com.kei-agent.voice`）
 
-耳と口は Mac、相談は Codex、作業は Slack の Kei Agent（Claude）。docs/voice.md。
+**声は OpenAI Realtime API、考えるのは手元の購読エージェント**（Codex と Claude）。docs/voice.md。
 ほかのエージェントと同じく launchd で常駐する（`deploy/install.sh voice`）。
 
 **入れるものが2つある。**
 
 | もの | なぜ |
 |---|---|
-| AivisSpeech（`127.0.0.1:10101`） | 声を出すため。立ち上げていなければ黙る（Slack の仕事は止まらない） |
-| `~/.config/zsh/local/kei-agent-voice.zsh` | `KEI_AGENT_TTS_PORT` と `KEI_AGENT_TTS_SPEAKER`、Stack-chan を買ったら `KEI_AGENT_STACKCHAN_URL` |
+| `ffmpeg`（`brew install ffmpeg`） | マイクから音を取り、返ってきた音を鳴らす。無ければ声のレイヤは黙る |
+| `~/.config/zsh/local/kei-agent-voice.zsh` に `OPENAI_API_KEY` | これが無いと繋がらない（落ちはしない） |
 
-耳（`listen.swift`）は初回に `swiftc` で作って `<state_dir>/voice/listen` に置く。
-マイクの許可は、初めて開けたときに macOS が聞いてくる。
+```zsh
+# 声を替えたいとき（既定は cedar）。使えるのは alloy / ash / ballad / coral / echo /
+# sage / shimmer / verse / marin / cedar。公式が薦めるのは marin と cedar
+export KEI_AGENT_REALTIME_VOICE="cedar"
+# 安いモデルに落としたいとき（道具を正しく呼べるかを確かめてから）
+export KEI_AGENT_REALTIME_MODEL="gpt-realtime-2.1-mini"
+# 既定以外のマイクを使いたいとき（`ffmpeg -f avfoundation -list_devices true -i ""` で一覧）
+export KEI_AGENT_MIC=":1"
+```
 
-- **既定では喋らず、マイクも開けない。** Slack の App Home の「知らせる」「聞く」で入れる
-- 「けい、〜」と呼ぶ。「新しく話そう」で会話を切り、「じっくり考えて」を含めると、その回だけ深く考える
+**マイクの許可は、先に手で通しておく。** 許可は実行バイナリ（`ffmpeg`）に紐づくので、
+launchd から先に動かすと、ダイアログが出ないまま無音になることがある。
+
+```zsh
+ffmpeg -f avfoundation -i ":default" -t 1 -f null -   # 1回だけ手で動かして許可する
+```
+
+- **既定では繋がず、マイクも開けない。** Slack の App Home の「知らせる」「聞く」で入れる
+- 繋いでいるあいだ、喋ったぶんだけお金がかかる（黙っている間はかからない）
 - 依頼は読み上げの確認を経て Kei Agent に渡る（`<state_dir>/asks/`）
 - 声の全文は `~/kei-agent/overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
 - 手でも渡せる: `uv run kei-agent-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
-- 声を聴き比べたいとき: `uv run kei-agent-voice-compare`（wav は `overview/voice/compare/` に残る）
 
 ## 10. Kei Agent が自分を入れ替えるときの動き
 

@@ -1,14 +1,16 @@
 """本体から来た出来事を受け取って、喋る（A2A の受け口）。
 
-渡ってくるのは「何が起きたか」だけ。言い方と顔は `events.py` が決め、出し先は `mouth.py` が決める。
+渡ってくるのは「何が起きたか」だけ。言い方と顔は `events.py` が決め、
+**喋るのは Realtime のセッション**（`session.py` → `live.py`）に頼む。
 
-本体は返事を待たない（投げっぱなし。docs/voice.md の4節）ので、ここは**すぐ返して裏で喋る**。
+本体は返事を待たない（投げっぱなし。docs/voice.md の4節）ので、ここは**すぐ返す**。
 喋り終わるまで返さないと、Slack の処理が机の上のロボットの再生時間に引きずられる。
+
+**マイクを閉じているあいだは喋らない**（繋がりが無いので喋る口が無い）。顔だけ変える。
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 
@@ -20,7 +22,6 @@ from a2a.types import Part, Task, TaskState, TaskStatus
 from kei_agent_a2a import envelope
 from kei_agent_voice import events
 from kei_agent_voice.card import NOTIFY
-from kei_agent_voice.mouth import Mouth
 
 log = logging.getLogger(__name__)
 
@@ -47,19 +48,11 @@ def event_of(text: str, metadata: dict) -> dict:
 
 
 class VoiceExecutor(AgentExecutor):
-    def __init__(self, mouth: Mouth | None = None):
-        self._mouth = mouth
-        # 朝のまとめなど、喋らずに手元へ置くもの（速い道で使う）
+    def __init__(self):
+        # 朝のまとめなど、喋らずに手元へ置くもの（道具が読む）
         self.held: dict[str, dict] = {}
-        # マイクの開け閉めを頼む相手（app.py が立ち上げのときに入れる）
+        # 喋る・マイクを開け閉めする相手（app.py が立ち上げのときに入れる）
         self.session = None
-
-    @property
-    def mouth(self) -> Mouth:
-        # 出し先は呼ばれるたびに決めるので、作るのも最初に使うときでよい
-        if self._mouth is None:
-            self._mouth = Mouth()
-        return self._mouth
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -82,9 +75,8 @@ class VoiceExecutor(AgentExecutor):
         self._hold(event)
 
         log.info("知らせを受け取りました: %s（喋る: %s）", event.get("kind"), found.speaks)
-        # 喋るのは裏で。本体を待たせない
-        if found.speaks or found.face:
-            asyncio.get_running_loop().run_in_executor(None, self._react, found)
+        # 喋るのは投げっぱなし。本体を待たせない
+        self._react(found)
         await updater.complete(updater.new_agent_message(
             [Part(text=envelope.reply("受け取ったよ", {"spoke": found.speaks, "face": found.face}))]))
 
@@ -105,10 +97,10 @@ class VoiceExecutor(AgentExecutor):
             self.session.set_listening(bool(event.get("on")))
 
     def _react(self, found: events.Reaction) -> None:
+        if self.session is None:
+            return
         try:
-            self.mouth.face(found.face)
-            if found.speaks:
-                self.mouth.say(found.text)
+            self.session.announce(found.text if found.speaks else "", found.face)
         except Exception:
             # 喋れなくても本体の仕事は終わっている。落ちた理由だけ残す
             log.exception("知らせを声に出せませんでした")

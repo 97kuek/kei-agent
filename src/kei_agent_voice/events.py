@@ -15,8 +15,6 @@ from datetime import datetime
 
 # 表情は stackchan-atama が受け付ける6種だけ。`angry` は使わない（Kei Agent が怒る場面がない）
 NEUTRAL, HAPPY, SAD, DOUBT, SLEEPY = "neutral", "happy", "sad", "doubt", "sleepy"
-# 依頼を受けただけでは喋らない（依頼のたびに喋るとうるさい）
-SILENT_KINDS = ("working", "schedule", "listen")
 KINDS = ("schedule", "due", "working", "done", "failed", "limited", "awaiting", "listen")
 
 
@@ -79,17 +77,3 @@ def reaction(event: dict) -> Reaction | None:
         return Reaction(f"Claude の上限に当たっちゃった。{when}に自動でやり直すね。", SLEEPY)
     # awaiting
     return Reaction(f"{_theme(event)}、聞きたいことがあって止まってるよ。", DOUBT, look=True)
-
-
-def summary(events: list[dict]) -> str:
-    """離席中に溜まった知らせを、1回にまとめる（1件ずつ喋ると、離席が長いほど喋り続ける）。"""
-    done = sum(1 for e in events if e.get("kind") == "done")
-    failed = sum(1 for e in events if e.get("kind") == "failed")
-    parts = []
-    if done:
-        parts.append(f"{done}件終わった")
-    if failed:
-        parts.append(f"{failed}件うまくいかなかった")
-    if not parts:
-        return ""
-    return f"離れている間に、{'、'.join(parts)}よ。詳しくは Slack を見てね。"

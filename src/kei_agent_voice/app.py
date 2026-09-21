@@ -31,14 +31,14 @@ def build_app(base_url: str, token: str = "", executor: VoiceExecutor | None = N
 
 
 def _ears(executor: VoiceExecutor):
-    """A2A サーバーと同じプロセスで、マイクからも聞く。
+    """A2A サーバーと同じプロセスで、声でも話す。
 
-    耳が使えない機械でも、口（本体からの知らせ）だけで動く（`VoiceSession._listen` が握りつぶす）。
+    鍵が無い機械でも落とさない（`VoiceSession._talk` が握りつぶす）。
     """
 
     @asynccontextmanager
     async def lifespan(app):
-        session = VoiceSession(executor.held, mouth=executor.mouth)
+        session = VoiceSession(executor.held)
         # マイクの開け閉めは、本体が Slack（App Home）から押してくる
         executor.session = session
         # **既定では開けない。** 常に録らない（docs/voice.md の7節）

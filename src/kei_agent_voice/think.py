@@ -1,21 +1,20 @@
-"""遅い道。手元で答えられないことを Codex に相談する（docs/voice.md の6節）。
+"""調べもの。研究・授業・仕事の中身を Codex に読ませて答えてもらう（docs/voice.md の3節）。
 
-相談相手を Codex にするのは、契約の枠を Slack の Kei Agent（Claude）と分けるため。
-声で長く話した日に、研究の作業が止まらない。
+声の会話そのものは Realtime API が持つ。ここに回ってくるのは、**ファイルを読まないと
+答えられないもの**だけ（`tools.ask_research` から呼ばれる）。Codex にするのは、購読の枠が
+Slack の Kei Agent（Claude）と分かれるから。声で長く話した日に、研究の作業が止まらない。
 
 **実測（2026-09-21、`codex exec resume`）**
 
 - プロセスを起こして会話を戻すまで **0.17秒**。残りは全部モデルの往復（短い返事で約5秒）
 - 返事は**途中では出てこない**。`item.completed` で丸ごと届く
+- 放っておくと長い。6.2 秒で最初の答えを書いたあと**コマンドを3回走らせ、22 秒まで続けた**
 
-設計時は「1往復ごとにプロセスを起こすと時間が乗る」と考えて会話を開いたままにするつもりだったが、
-測ると開き直しは 0.17 秒しかかからない。**毎回 `codex exec resume` でよい**（常駐プロセスを
-抱えなくてよく、落ちても次の問いで勝手に戻る）。
+開き直しが 0.17 秒なので、**常駐プロセスは持たない**（毎回 `codex exec resume`。落ちても
+次の問いで勝手に戻る）。声の会話の途中なので、**25秒で諦める**。
 
-いっぽう返事が丸ごとしか来ないので、「文ができた端から喋る」はできない。
-**5秒の沈黙は相槌で埋めるしかない**（`session.py`）。
-
-Codex には読ませるだけにする（`-s read-only`）。実行するのは Slack の Kei Agent だけ。
+`~/research/` は**読ませるだけ**にする（`sandbox_mode=read-only`）。書いたり動かしたりするのは
+Slack の Kei Agent の仕事。
 """
 
 from __future__ import annotations
@@ -28,99 +27,39 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import themes
-
 log = logging.getLogger(__name__)
 
-# 読ませるだけにする（実行するのは Slack の Kei Agent だけ）。
-# `-s read-only` と同じことだが、`resume` が `-s` を受け付けないので設定の形で渡す
+# 読ませるだけにする。`-s read-only` と同じことだが、`resume` が `-s` を受け付けないので設定で渡す
 SANDBOX = ("-c", 'sandbox_mode="read-only"')
-# ふだんは速く、「じっくり考えて」と言った回だけ深く考える
-FAST_ARGS = ("-c", "model_reasoning_effort=low")
-DEEP_ARGS = ("-c", "model_reasoning_effort=high")
-DEEP_WORDS = ("じっくり", "よく考え", "深く考え", "本気で考え")
-
-# 会話の区切り（docs/voice.md の6節）。日付が変わるか、これだけ離れたら新しい会話にする
+# 声の返事なので、深く考えさせない
+EFFORT = ("-c", "model_reasoning_effort=low")
+# 会話の区切り。日付が変わるか、これだけ離れたら新しい会話にする
 GAP_SECONDS = 2 * 3600
-# 返事から拾う行。これ以外は読み上げる本文
-ASK_MARK = "🛠 依頼:"
-ASIDE_MARK = "🗣 ひとこと:"
-# 追いかけて喋ることが無いときに Codex が書く印
-NOTHING = "-"
-# 声で聞くので、長い返事は最後まで聞けない
+# 待つ上限。声の会話の途中なので、長く黙らせない
+VOICE_TIMEOUT = 25.0
 LIMIT = re.compile(r"usage limit", re.IGNORECASE)
 
-INSTRUCTIONS = f"""あなたは Kei Agent。依頼者の分身で、机の上のロボットの声として話す。
+INSTRUCTIONS = """あなたは Kei Agent の「調べる人」。声で話している相手に、短く答える。
 
-- **話し言葉で、3文以内。** 読み上げるので、箇条書き・記号・URL・コードは書かない
-- 分からないことは「分からない」と言う。推測で埋めない
+- **話し言葉で、3文以内。** 読み上げられるので、箇条書き・記号・URL・コードは書かない
+- `~/research/` を読んで答える。ここに回ってくるのは、読まないと分からないことだけ
+- **最初の1回で答えきる。** 読むファイルは必要最小限に。声で待てるのは10秒まで
 - 固有名詞は音声認識で崩れて届く（`amr-query` が「アムルクエリー」、`Slack` が「スラック」）。
-  `~/research/` のフォルダ名から推し量って読み替える
-- ファイルは読んでよい。**実行や書き込みはしない**（作業するのは Slack の Kei Agent）
-
-作業を頼むべきだと思ったら、本文とは別に最後の行にこう書く（依頼者に読み上げて確認してから渡す）。
-
-{ASK_MARK} <テーマ名> / <依頼の文>
-
-例: {ASK_MARK} amr-query / 条件Bの学習曲線を描いて
+  フォルダ名から推し量って読み替える
+- 分からないことは「分からない」と言う。推測で埋めない
+- **書き込みや実行はしない**（作業するのは Slack の Kei Agent）
 """
-
-# 速い道で即答したあと、追いかけて喋るかどうかを聞くときの前置き
-FOLLOW_UP = """依頼者の問いには、手元のデータからすでにこう答えた。
-
-問い: {asked}
-答えた: {answered}
-
-付け足すことがあれば、1文だけ次の形で書く。無ければ「{nothing}」だけ書く。
-
-{aside} <付け足す1文>
-"""
-
-
-@dataclass(frozen=True)
-class Ask:
-    """Codex が「これは作業として頼むべき」と判断したもの。"""
-    theme: str
-    text: str
-
-    @property
-    def spoken(self) -> str:
-        """読み上げて確認する文（docs/voice.md の8節）。"""
-        return f"{self.theme} に、{self.text}、って頼むよ。いい？"
 
 
 @dataclass
 class Turn:
     """1回のやりとりの結果。"""
     text: str = ""
-    ask: Ask | None = None
-    aside: str = ""
     failed: str = ""
-
-
-def wants_deep(text: str) -> bool:
-    return any(word in text for word in DEEP_WORDS)
 
 
 def _day(now: float) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(now))
-
-
-def parse(reply: str) -> Turn:
-    """返事を、読み上げる本文と、印のついた行に分ける。"""
-    body, ask, aside = [], None, ""
-    for line in reply.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(ASK_MARK):
-            theme, _, text = stripped[len(ASK_MARK):].strip().partition("/")
-            if theme.strip() and text.strip():
-                # 番号つきの名前（`10_amr-query`）でも渡せるが、読み上げるので番号は落とす
-                ask = Ask(themes.theme_name(theme.strip().lstrip("#")), text.strip())
-        elif stripped.startswith(ASIDE_MARK):
-            aside = stripped[len(ASIDE_MARK):].strip()
-        else:
-            body.append(line)
-    return Turn(text="\n".join(body).strip(), ask=ask, aside=aside)
 
 
 class Codex:
@@ -152,13 +91,9 @@ class Codex:
         self.session_path.write_text(
             json.dumps({"day": _day(now), "session_id": session_id, "at": now}), encoding="utf-8")
 
-    def forget(self) -> None:
-        """「新しく話そう」と言われたとき。"""
-        self.session_path.unlink(missing_ok=True)
-
     # やりとり
 
-    def build_command(self, session_id: str | None, deep: bool, out: Path) -> list[str]:
+    def build_command(self, session_id: str | None, out: Path) -> list[str]:
         """`codex exec`（または `resume`）の呼び出し方。
 
         **`resume` は `-s` と `-C` を受け付けない**（`error: unexpected argument '-s' found` で
@@ -171,11 +106,10 @@ class Codex:
         else:
             args += ["-C", str(self.cwd)]
         args += ["--json", "--skip-git-repo-check", *SANDBOX, "-o", str(out)]
-        return [*args, *(DEEP_ARGS if deep else FAST_ARGS), "-"]
+        return [*args, *EFFORT, "-"]
 
-    def ask(self, text: str, now: float | None = None, deep: bool | None = None,
-            timeout: float = 120.0) -> Turn:
-        """1回話しかけて、返事を待つ。**止まるので、呼ぶ側は別のスレッドに出す。**"""
+    def ask(self, text: str, now: float | None = None, timeout: float = VOICE_TIMEOUT) -> Turn:
+        """1回聞いて、返事を待つ。**止まるので、呼ぶ側は別のスレッドに出す。**"""
         now = time.time() if now is None else now
         session_id = self.session_id(now)
         prompt = text if session_id else f"{INSTRUCTIONS}\n\n---\n\n{text}"
@@ -184,22 +118,20 @@ class Codex:
         out.unlink(missing_ok=True)
         try:
             reply, started, failed = self._run(
-                self.build_command(session_id, wants_deep(text) if deep is None else deep, out),
-                prompt, timeout)
+                self.build_command(session_id, out), prompt, timeout)
         except FileNotFoundError:
             return Turn(failed="codex が入っていません")
         if started:
             self.remember(started, now)
         if failed:
             return Turn(failed=failed)
-        turn = parse(reply)
-        return turn if turn.text or turn.ask else Turn(failed="返事が空でした")
+        return Turn(text=reply) if reply else Turn(failed="返事が空でした")
 
     def _run(self, command: list[str], prompt: str, timeout: float) -> tuple[str, str, str]:
         """`codex exec` を1回動かして、（返事、会話の id、うまくいかなかった理由）を返す。
 
         **stderr は捨てない。** 捨てていたら、`resume` が `-s` を断っていたことに気づけず、
-        「返事が空でした」とだけ喋る状態になっていた。JSON でない行は出来事として読めないので、
+        「返事が空でした」とだけ言う状態になっていた。JSON でない行は出来事として読めないので、
         取っておいて、返事が無かったときの理由に使う。
         """
         said, noise, started, failed = [], [], "", ""

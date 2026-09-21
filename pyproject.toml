@@ -19,7 +19,6 @@ kei-agent-schedule = "kei_agent.schedule:main"
 kei-agent-notion-setup = "kei_agent.notion:main"
 kei-agent-ask = "kei_agent.ask:main"
 kei-agent-voice = "kei_agent_voice.app:main"
-kei-agent-voice-compare = "kei_agent_voice.compare:main"
 kei-agent-course = "kei_agent_course.app:main"
 kei-agent-course-setup = "kei_agent_course.notion_setup:main"
 kei-agent-course-sync = "kei_agent_course.notion_sync:main"
@@ -46,7 +45,11 @@ agents = [
 course = [{ include-group = "agents" }]
 research = [{ include-group = "agents" }]
 work = [{ include-group = "agents" }]
-voice = [{ include-group = "agents" }]
+voice = [
+    { include-group = "agents" },
+    # 声のレイヤは Realtime API の WebSocket を直に叩く（いまは a2a-sdk 経由で入っているだけ）
+    "aiohttp>=3.14.3",
+]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
