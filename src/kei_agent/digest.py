@@ -60,7 +60,7 @@ def _dues(items: list[dict], with_day: bool = False) -> str:
 
 
 def _events(items: list[dict], day) -> str:
-    """その日の会議を短い1行に。件名と時刻だけで、本文と参加リンクは持ち出さない。"""
+    """その日の会議を短い1行に（材料なので、件名と時刻だけで足りる）。"""
     found = []
     for item in items:
         at = _at(item.get("start", ""))
@@ -121,7 +121,7 @@ class DigestBuilder:
         return [*lines, ""]
 
     async def _work(self, now: float) -> list[str]:
-        """仕事（今日あった会議、明日の会議）。本文は持ち出さない（件名と時刻だけ）。"""
+        """仕事（今日あった会議、明日の会議）。材料なので、件名と時刻だけ。"""
         if work.AGENT not in self.assistant.agents:
             return []
         at = datetime.fromtimestamp(now)

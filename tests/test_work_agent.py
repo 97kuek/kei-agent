@@ -32,7 +32,7 @@ def _free_port() -> int:
 
 
 def test_events_are_grouped_by_day():
-    """今日・明日・そのあとに分け、件名と時間と場所とリンクだけを出す（本文は持ち出さない）。"""
+    """今日・明日・そのあとに分け、件名と時間と場所とリンクを出す（1行ずつ並べる形）。"""
     text = work.events_text(work.events_of({"items": EVENTS}), datetime(2026, 9, 21, 9, 0))
     lines = text.splitlines()
     assert lines[0] == "*今日*"

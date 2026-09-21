@@ -16,7 +16,7 @@ def build_card(base_url: str) -> AgentCard:
     return AgentCard(
         name="Kei Agent（仕事）",
         description="会社のアカウントの Outlook・SharePoint・Teams を読む。読み取り専用で、"
-                    "個人の Slack には件名・時間・相手・リンクと要約だけを返す（本文は持ち出さない）",
+                    "件名・時間・相手・場所・リンクを、始まる順に返す（1行ずつ並べる形に合わせる）",
         version=VERSION,
         supported_interfaces=[AgentInterface(
             url=base_url.rstrip("/") + RPC_PATH,
@@ -40,7 +40,7 @@ def build_card(base_url: str) -> AgentCard:
                 id=ASK,
                 name="会社のことに答える",
                 description="定型に当てはまらない質問に、自分の claude が答える。Outlook のメール、"
-                            "SharePoint の資料、Teams のやりとりを読んで、要点とリンクを返す（本文は貼らない）",
+                            "SharePoint の資料、Teams のやりとりを読んで答える（長い本文は要約する）",
                 tags=["outlook", "sharepoint", "teams"],
                 examples=["ゆうちょ案件の直近のやりとりは？", "先週のメールで急ぎのものある？",
                           "この資料どこにある？"],

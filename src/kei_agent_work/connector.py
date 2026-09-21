@@ -8,7 +8,8 @@ Entra ID にアプリを登録しなくても Outlook を読める。
 
 - 使わせるのは `outlook_calendar_search`（読むだけ）。送信・作成・削除の道具は名指しで断る
 - 会社の契約枠で動かすため、仕事用の秘密情報ファイルに会社の `CLAUDE_CODE_OAUTH_TOKEN` を置く
-- 返すのは件名・時間・場所・主催者・リンクまで。本文は持ち出さない（docs/design.md の11章）
+- `list-events` が返すのは件名・時間・場所・主催者・リンクまで。朝のまとめで1行ずつ並べる形なので、
+  本文を入れても読めない（秘密のためではない。自由な質問では本文を出してよい。prompts/work.md）
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ def _event(item: dict) -> dict:
 
 
 async def ask(config: Config, question: str, prompt_path: Path | None = None) -> str:
-    """自由な質問に、連携を読んで答える（本文は貼らず、要点とリンクで返す）。"""
+    """自由な質問に、連携を読んで答える（長さの加減は prompts/work.md が決める）。"""
     guide = (prompt_path or config.repo_root / "prompts" / "work.md")
     instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
     prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"

@@ -1,4 +1,4 @@
-# Kei Agent の設定。秘密情報（トークン）はここに書かず、環境変数で渡す（deploy/README.md を参照）。
+# Kei Agent の設定
 
 # テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない
 research_root = "~/research"

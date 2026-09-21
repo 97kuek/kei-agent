@@ -3,7 +3,9 @@
 Box（学部要項・過去問）と Notion（授業・課題）は、どちらも Claude のアカウントに
 **すでに連携として繋がっている**。自前で API を書かず、その連携を使う（docs/agents.md）。
 
-- 使わせるのは**読むための道具だけ**。作成・更新・移動・アップロードは名指しで断る
+- Box は読む道具だけ。アップロード・移動は名指しで断る
+- Notion は「課題」を直せるところまで（状態の更新、行の追加）。移動・複製・削除は名指しで断る。
+  連携はアカウント全体に届くので、**どこを触ってよいかは道具では絞れない**。範囲は prompts/course.md で縛る
 - 連携はログイン（プロファイル）に付いてくるので、仕事用と同じく `CLAUDE_CONFIG_DIR` で
   個人アカウントのプロファイルを指しておく（秘密情報のファイル）
 - 触れるのは連携だけ（Bash もファイルも使わせない）ので、作業用ディレクトリを持たない
@@ -19,7 +21,7 @@ AGENT = "course"
 _BOX = "mcp__claude_ai_Box__"
 _NOTION = "mcp__claude_ai_Notion__"
 
-# 使わせる道具（読むだけ）
+# 使わせる道具。Box は読むだけ、Notion は「課題」を直せるところまで
 ALLOWED = (
     # Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）
     f"{_BOX}search_files_keyword",
@@ -33,6 +35,11 @@ ALLOWED = (
     f"{_NOTION}notion-search",
     f"{_NOTION}notion-fetch",
     f"{_NOTION}notion-query-data-sources",
+    # Notion: 「課題」を直す（「提出済みにして」など）。
+    # 連携はアカウント全体に届くので、道具では授業ホームに絞れない。
+    # どこを触ってよいかは prompts/course.md で縛り、消す・移す道具は下で断る
+    f"{_NOTION}notion-update-page",
+    f"{_NOTION}notion-create-pages",
 )
 # 名指しで断る道具（許可の一覧に入れていなくても、念のため）
 DENY = (
@@ -46,8 +53,6 @@ DENY = (
     f"{_BOX}update_folder_properties",
     f"{_BOX}set_file_metadata",
     f"{_BOX}create_file_comment",
-    f"{_NOTION}notion-create-pages",
-    f"{_NOTION}notion-update-page",
     f"{_NOTION}notion-create-database",
     f"{_NOTION}notion-move-pages",
     f"{_NOTION}notion-duplicate-page",
