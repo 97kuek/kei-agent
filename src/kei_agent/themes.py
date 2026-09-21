@@ -9,7 +9,6 @@ from pathlib import Path
 
 from kei_agent.config import Config
 
-OVERVIEW_DIR = "_overview"
 THEME_SUBDIRS = ("inputs", "outputs", "logs", "papers")
 
 CLAUDE_MD_TEMPLATE = """# テーマ: {name}

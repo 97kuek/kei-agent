@@ -28,8 +28,6 @@ MERGE_MARKER = "📦 取り込み"
 PENDING_NAME = "update-pending"
 # deploy/run.sh が、起動できずに戻したときに残すファイル
 ROLLED_BACK_NAME = "update-rolled-back"
-# 起動し直しても Slack につながらないときに、run.sh が戻すまでの回数
-MAX_START_ATTEMPTS = 3
 
 
 # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回。これを数えてから着手する
