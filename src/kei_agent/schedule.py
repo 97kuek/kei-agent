@@ -36,6 +36,8 @@ WEEKDAYS = "月火水木金土日"
 DUE_CHECK_SECONDS = 3600
 # 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
 NOTICE_RETENTION_DAYS = 60
+# 声のレイヤに渡す日数。「明日の予定」「今週の予定」に答えられるように1週間ぶん
+VOICE_DAYS = 7
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -424,18 +426,20 @@ class Scheduler:
             classes = (await self.assistant.ask_course(course.LIST_CLASSES)).data.get("items") or []
             dues = await self.assistant.course_due(course.DIGEST_DAYS, now) or []
         if work.AGENT in self.assistant.agents:
-            reply = await self.assistant.ask_work(work.LIST_EVENTS, days=2)
+            # 声のレイヤが「今週の会議」に答えられるように、1週間ぶん取る
+            reply = await self.assistant.ask_work(work.LIST_EVENTS, days=VOICE_DAYS)
             events = reply.data.get("items") or [] if reply.ok else []
         detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
         # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
         # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
         notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
-        # 声の「速い道」は、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく。
-        # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）
+        # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく。
+        # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
+        # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
         self.assistant.notify_voice("schedule", items=[
-            {"at": f"{e.at:%H:%M}", "end": f"{e.end:%H:%M}" if e.end else "",
-             "icon": e.icon, "text": e.text}
-            for e in morning.entries(classes, events, dues, now)])
+            {"date": f"{e.at:%Y-%m-%d}", "at": f"{e.at:%H:%M}",
+             "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
+            for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
         return morning.text(classes, events, dues, now, self.morning_notes()), detail, notices
 
     def morning_notes(self) -> list[str]:

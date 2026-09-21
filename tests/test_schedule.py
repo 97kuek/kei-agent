@@ -697,3 +697,25 @@ async def test_daily_digest_does_not_ask_the_agents_again(env, config, store):
 
     assert "## 大学" not in text and "## 仕事" not in text
     assert course_agent.asked == [] and work_agent.asked == []
+
+
+def test_the_voice_layer_gets_a_week_not_just_today():
+    """声のレイヤは「明日の予定」「今週の予定」に答える。
+
+    今日ぶんだけ渡していたせいで、明日を聞かれても今日の予定を答えていた（実測）。
+    """
+    from datetime import datetime
+
+    classes = [{"start": "2026-09-21T10:40", "end": "2026-09-21T12:20", "subject": "データベース"},
+               {"start": "2026-09-22T13:00", "end": "2026-09-22T14:40", "subject": "信号処理"},
+               {"start": "2026-10-01T13:00", "end": "2026-10-01T14:40", "subject": "来月の授業"}]
+    dues = [{"at": "2026-09-24T17:00", "course": "実験", "title": "第3回レポート"}]
+    now = datetime(2026, 9, 21, 9, 0)
+
+    today = morning.entries(classes, [], dues, now)
+    assert [e.text for e in today] == ["データベース"]
+
+    week = morning.upcoming(classes, [], dues, now, days=7)
+    assert [e.text for e in week] == ["データベース", "信号処理", "締切: 実験 第3回レポート"]
+    # 範囲の外は入らない
+    assert "来月の授業" not in [e.text for e in week]

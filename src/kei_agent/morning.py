@@ -61,22 +61,37 @@ def day_label(day: datetime) -> str:
 
 
 def entries(classes: list[dict], events: list[dict], dues: list[dict], now: datetime) -> list[Entry]:
-    """今日ぶんだけを、時刻の早い順に並べる。"""
-    today = now.date()
+    """今日ぶんだけを、時刻の早い順に並べる（Slack の帯と1行の並びに使う）。"""
+    return upcoming(classes, events, dues, now, days=1)
+
+
+def upcoming(classes: list[dict], events: list[dict], dues: list[dict], now: datetime,
+             days: int = 1) -> list[Entry]:
+    """今日から `days` 日ぶんを、早い順に並べる。
+
+    声のレイヤは「明日の予定」「今週の予定」に答えるので、今日ぶんだけでは足りない
+    （今日ぶんしか渡していなかったせいで、明日を聞かれても今日を答えていた）。
+    """
+    first = now.date()
+    last = first + timedelta(days=max(days - 1, 0))
+
+    def within(at: datetime | None) -> bool:
+        return at is not None and first <= at.date() <= last
+
     found: list[Entry] = []
     for item in classes or []:
         start, end = _at(item.get("start", "")), _at(item.get("end", ""))
-        if start and start.date() == today:
+        if within(start):
             found.append(Entry(start, CLASS, escape(item.get("subject", "")), end))
     for item in events or []:
         start, end = _at(item.get("start", "")), _at(item.get("end", ""))
-        if not start or start.date() != today:
+        if not within(start):
             continue
         where = f"（{escape(item['location'])}）" if item.get("location") else ""
         found.append(Entry(start, MEETING, f"{escape(item.get('subject', ''))}{where}", end))
     for item in dues or []:
         at = _at(item.get("at", ""))
-        if at and at.date() == today:
+        if within(at):
             course = f"{escape(item['course'])} " if item.get("course") else ""
             found.append(Entry(at, DUE, f"締切: {course}{escape(item.get('title', ''))}"))
     return sorted(found, key=lambda e: (e.at, e.icon))
