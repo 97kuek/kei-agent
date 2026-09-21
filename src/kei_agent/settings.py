@@ -2,7 +2,7 @@
 
 柵そのもの（書き込み先、読ませない場所、基本の接続先）は `config.toml` に残し、ここでは扱わない。
 保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
-許可を足せてしまう（docs/plan.md の11章）。
+許可を足せてしまう（docs/design.md の9章）。
 """
 
 from __future__ import annotations

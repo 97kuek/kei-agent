@@ -1,7 +1,7 @@
 """ほかのエージェントに仕事を頼む口（A2A のクライアント）。
 
 Kei Agent 本体はオーケストレーターなので、A2A の呼ぶ側だけを持つ。相手の名刺を読み、
-JSON-RPC で `SendMessage` し、終わるまで `GetTask` で見に行く（docs/plan.md の16章）。
+JSON-RPC で `SendMessage` し、終わるまで `GetTask` で見に行く（docs/design.md の11章）。
 
 依存を増やさないよう、SDK は使わずに aiohttp で薄く書いている。
 仕様: https://a2a-protocol.org/latest/specification/

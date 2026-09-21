@@ -1,4 +1,4 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/plan.md の12章）。"""
+"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。"""
 
 import asyncio
 import subprocess
@@ -40,7 +40,7 @@ def repo(tmp_path):
 @pytest.fixture
 def env(config, store, repo, monkeypatch):
     config = replace(config, repo_root=repo)
-    slack = FakeSlack({"C9": "research-agent", "C1": "vlm"})
+    slack = FakeSlack({"C9": "00_kei-agent", "C1": "vlm"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
@@ -122,7 +122,7 @@ async def test_improve_channel_records_backlog_and_plans_without_writing_code(en
     await settle(assistant)
 
     backlog = cfg.backlog_path.read_text()
-    assert "#research-agent" in backlog and "経過をもっと細かく" in backlog
+    assert "#kei-agent" in backlog and "経過をもっと細かく" in backlog
     call, = claude.calls
     # 書けるのは一時ディレクトリだけ。読めるのは Kei Agent のリポジトリ
     assert call["cwd"] == cfg.state_dir / "improve" / "20.1" and call["cwd"].is_dir()
@@ -158,7 +158,7 @@ async def test_start_marker_from_an_automatic_run_is_ignored(env):
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}]
     from kei_agent.request import Request
-    await assistant.submit(Request("C9", "research-agent", "20.1", None, "ジョブが終わった", trigger="job"))
+    await assistant.submit(Request("C9", "00_kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
     await settle(assistant)
     assert assistant.store.improvement("C9", "20.1") is None
 

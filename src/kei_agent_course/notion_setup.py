@@ -1,7 +1,7 @@
 """授業用の Notion（「授業」と「課題」の2つのデータベース）を作る。
 
 研究ホームとは別のコネクト（トークン）で動かし、授業のページだけに接続する。
-研究のデータベースには触れない（docs/plan.md の15章）。
+研究のデータベースには触れない（docs/design.md の11章）。
 
 使い方:
     NOTION_COURSE_TOKEN=... uv run --group course kei-agent-course-setup <授業ホームのページID>

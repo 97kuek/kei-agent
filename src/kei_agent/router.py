@@ -4,7 +4,7 @@
 名刺を読むだけなので、ここのコードは変えなくてよい（docs/agents.md）。
 
 判定に使うのは短い分類なので、道具も会話の続きも要らない。うまく選べなかったときは、
-そのドメインの自由質問の窓口（`ask`）に回す（`docs/plan.md` の15章）。
+そのドメインの自由質問の窓口（`ask`）に回す（docs/design.md の11章）。
 """
 
 from __future__ import annotations

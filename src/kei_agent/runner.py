@@ -121,7 +121,7 @@ class RunResult:
     activities: list[str] = field(default_factory=list)
     timed_out: bool = False
     # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
-    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/plan.md の11章）
+    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/design.md の9章）
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None

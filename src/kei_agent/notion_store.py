@@ -1,4 +1,4 @@
-"""Kei Agent が動いている間に Notion の研究ホームを読み書きする（フェーズ3）。
+"""Kei Agent が動いている間に Notion の研究ホームを読み書きする。
 
 データベースの ID は、kei-agent-notion-setup が書いた ~/.local/state/kei-agent/notion.json から読む。
 Claude（claude -p）には Notion を直接触らせず、ここで取ってきたものをファイルにして渡す。

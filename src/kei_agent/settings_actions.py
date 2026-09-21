@@ -1,4 +1,4 @@
-"""Slack から設定を変える操作: 接続先の申し出のボタンと、App Home（docs/plan.md の11章）。
+"""Slack から設定を変える操作: 接続先の申し出のボタンと、App Home（docs/design.md の9章）。
 
 Assistant に混ぜて使う。self.slack、self.store、self.config、self.submit などは Assistant のもの。
 """

@@ -15,7 +15,7 @@ from kei_agent.slack_text import split_text
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "research-agent", "C5": "research-overview"})
+    slack = FakeSlack({"C1": "vlm", "C9": "00_kei-agent", "C5": "research-overview"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     pueue = FakePueue()
@@ -253,7 +253,7 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
     await settle(assistant)
 
     backlog = (config.research_root / "_overview" / "backlog.md").read_text()
-    assert "#research-agent" in backlog and "経過をもっと細かく" in backlog
+    assert "#kei-agent" in backlog and "経過をもっと細かく" in backlog
     # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
     assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
     assert "https://example.slack.com/archives/C9/p201" in backlog
@@ -782,7 +782,7 @@ async def test_next_request_after_an_error_carries_the_stalled_request(env, stor
     assert claude.calls[2]["session_id"] == "s2" and claude.calls[2]["prompt"] == "次"
 
 
-# Slack の外からの依頼（声のレイヤ。docs/plan.md の13章）
+# Slack の外からの依頼（声のレイヤ。docs/design.md の12章）
 
 async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
     assistant, slack, claude, _ = env

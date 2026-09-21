@@ -14,7 +14,7 @@ from kei_agent.schedule import Scheduler, due_day, search_keywords
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "research-agent"})
+    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",

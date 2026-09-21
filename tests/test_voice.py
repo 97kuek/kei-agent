@@ -1,4 +1,4 @@
-"""机の上の音声対話（docs/plan.md の13章）。"""
+"""机の上の音声対話（docs/design.md の12章）。"""
 
 import json
 import time

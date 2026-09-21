@@ -1,4 +1,4 @@
-"""Notion の「研究ホーム」を作る（docs/notion-layout.md）。フェーズ3で Kei Agent が読み書きするときの接続も兼ねる。
+"""Notion の「研究ホーム」を作る（docs/notion-layout.md）。Kei Agent が読み書きするときの接続も兼ねる。
 
 使い方:
     source ~/.config/zsh/local/kei-agent.zsh
@@ -132,7 +132,7 @@ THEMES = {
 
 TASKS = {
     "icon": "✅",
-    "description": "担当が Kei Agent で状態が「今夜やる」の Task は、フェーズ3から Kei Agent が 01:30 に実行する。",
+    "description": "担当が Kei Agent で状態が「今夜やる」の Task は、Kei Agent が 01:30 に実行する。",
     "properties": {
         "タイトル": {"title": {}},
         "状態": {"status": {"options": [

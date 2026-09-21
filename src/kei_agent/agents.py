@@ -4,7 +4,7 @@
 （`kei_agent_a2a/envelope.py`）で受け取る。どのエージェントでも同じように頼み、同じように読む。
 
 上限（レートリミット）に当たったことは封筒の `limit_reset_at` で返ってくる。依頼者への約束
-（「◯時ごろに自動でやり直す」）はオーケストレーターが1か所で持つ（docs/plan.md の15章）。
+（「◯時ごろに自動でやり直す」）はオーケストレーターが1か所で持つ（docs/design.md の11章）。
 """
 
 from __future__ import annotations

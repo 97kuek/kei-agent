@@ -14,7 +14,7 @@ from kei_agent.jobs import JobManager
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "research-agent"})
+    slack = FakeSlack({"C1": "vlm", "C9": "00_kei-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_claude", claude)
     assistant = Assistant(replace(config, handoff_after_turns=3), store, slack,

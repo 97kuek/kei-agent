@@ -4,7 +4,7 @@
 見せ方（今日・明日・今週）はここで決める。
 
 会社のデータなので、Slack に出すのは**件名・時間・場所・リンクまで**にする。本文は持ち出さない
-（docs/plan.md の15章）。
+（docs/design.md の11章）。
 
 Assistant に混ぜて使う。self.agents、self.post などは Assistant のもの。
 """

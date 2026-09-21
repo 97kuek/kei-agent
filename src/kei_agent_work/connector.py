@@ -8,7 +8,7 @@ Entra ID にアプリを登録しなくても Outlook を読める。
 
 - 使わせるのは `outlook_calendar_search`（読むだけ）。送信・作成・削除の道具は名指しで断る
 - 会社の契約枠で動かすため、仕事用の秘密情報ファイルに会社の `CLAUDE_CODE_OAUTH_TOKEN` を置く
-- 返すのは件名・時間・場所・主催者・リンクまで。本文は持ち出さない（docs/plan.md の15章）
+- 返すのは件名・時間・場所・主催者・リンクまで。本文は持ち出さない（docs/design.md の11章）
 """
 
 from __future__ import annotations

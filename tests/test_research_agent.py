@@ -110,7 +110,7 @@ async def test_a_channel_without_a_directory_is_refused(server, config):
     """作業用ディレクトリのないチャンネル（Kei Agent の改善）は断る。"""
     base, claude = server
     agent = Agent(base, TOKEN, timeout=30)
-    task = await agent.ask("run-claude", json.dumps({"channel_name": "research-agent", "prompt": "やって"}))
+    task = await agent.ask("run-claude", json.dumps({"channel_name": "00_kei-agent", "prompt": "やって"}))
     assert not task.ok and "作業用ディレクトリがありません" in json.loads(task.answer)["text"]
     assert claude.calls == []
 

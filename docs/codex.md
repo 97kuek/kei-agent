@@ -1,6 +1,6 @@
 # Codex App 側の使い方
 
-`docs/plan.md` 第6章のステップ11。Codex App は「考える場所」で、読むだけにする。実行は Kei Agent だけが行う。
+Codex App は「考える場所」で、読むだけにする。実行は Kei Agent だけが行う。
 
 ## 1. `~/research/` を開く
 

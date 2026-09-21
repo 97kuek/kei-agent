@@ -1,6 +1,6 @@
 """Kei Agent の柵。sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定。
 
-このファイルと `config.toml`、`deploy/` は、Kei Agent 自身に直させない（docs/plan.md の12章）。
+このファイルと `config.toml`、`deploy/` は、Kei Agent 自身に直させない（docs/design.md の10章）。
 ここに触れた差分は、中身を見る前に捨てる。
 """
 
@@ -122,7 +122,7 @@ def strip_env(base: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in base.items() if k in KEPT_CLAUDE_ENV or not k.startswith(STRIPPED_ENV_PREFIXES)}
 
 
-# Kei Agent 自身の差分の確認（docs/plan.md の12章）
+# Kei Agent 自身の差分の確認（docs/design.md の10章）
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout

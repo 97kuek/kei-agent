@@ -1,6 +1,6 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/plan.md の12章）。
+"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。
 
-#research-agent で案を話し合い、合意したら worktree で直し、差分を見せてから main に取り込んで入れ替わる。
+#00_kei-agent で案を話し合い、合意したら worktree で直し、差分を見せてから main に取り込んで入れ替わる。
 部品（git の操作、確認、合図）は improve.py、柵は guard.py にある。
 
 Assistant に混ぜて使う。self.slack、self.store、self.config、self.run などは Assistant のもの。
@@ -28,7 +28,7 @@ ACTIVE_STATUSES = ("working", "review", "restarting")
 
 class SelfFix:
     async def improve(self, req: Request, ws: Workspace) -> runner.RunResult | None:
-        """#research-agent のやりとり。案を考えるときはコードを読むだけで、書き込めるのは一時ディレクトリだけ。"""
+        """#00_kei-agent のやりとり。案を考えるときはコードを読むだけで、書き込めるのは一時ディレクトリだけ。"""
         if req.trigger == "message" and req.message_ts == req.thread_ts:
             await self.record_backlog(req)
         scratch = self.config.state_dir / "improve" / req.thread_ts

@@ -1,6 +1,6 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/plan.md の12章）。
+"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。
 
-`#research-agent` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
+`#00_kei-agent` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
 main に取り込んで push し、作業がなくなってから自分を再起動する。
 柵（`guard.py`、`config.toml`、`deploy/`）に触れた差分は取り込まない。
 """
@@ -266,4 +266,4 @@ def commit_message(request: str, summary: str) -> str:
     """Kei Agent 自身を直したときのコミットメッセージ。件名は Claude が書いた1行、本文は変えた内容の要約。"""
     body = [line for line in summary.strip().splitlines() if not line.strip().startswith(SUBJECT_MARKER)]
     text = "\n".join(body).strip()[:1500]
-    return f"{subject_from(summary, request)}\n\n{text}\n\n#research-agent の要望から、Kei Agent 自身が直した。"
+    return f"{subject_from(summary, request)}\n\n{text}\n\n#00_kei-agent の要望から、Kei Agent 自身が直した。"

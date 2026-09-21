@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 ACCEPT_ACTION = "kei_agent_handoff_accept"
 DECLINE_ACTION = "kei_agent_handoff_decline"
-# 区切りを勧めるチャンネル。#research-agent（自分を直す話）は1スレッド1件なので勧めない
+# 区切りを勧めるチャンネル。#00_kei-agent（自分を直す話）は1スレッド1件なので勧めない
 HANDOFF_KINDS = (ChannelKind.THEME, ChannelKind.OVERVIEW)
 TITLE_LIMIT = 60
 

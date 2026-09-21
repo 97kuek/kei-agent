@@ -1,6 +1,6 @@
 # Kei Agent のセットアップ
 
-`docs/plan.md` 第6章のステップ1（準備）とステップ10（常時起動）の手順。
+入れて動かすまでの手順。使い方は `docs/using.md`、仕組みは `docs/design.md`。
 
 ## 1. Slack のワークスペースとチャンネル
 
@@ -11,7 +11,7 @@
    |---|---|---|
    | 研究全体・朝のまとめ | `#01_overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
-   | Kei Agent の改善 | `#research-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
+   | Kei Agent の改善 | `#00_kei-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
    | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Kei Agent を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
    | 大学 | `#course` | 授業と課題。claude -p は動かさず、大学エージェント（A2A）に取り次ぐ（7.5節） |
 
@@ -75,10 +75,9 @@ export TOGGL_WORKSPACE_ID="..."
 # ~/.config/zsh/local/kei-agent-course.zsh（大学エージェントだけが読む）
 export MOODLE_ICS_URL="https://wsdmoodle.waseda.jp/calendar/export_execute.php?..."
 export NOTION_COURSE_TOKEN="ntn_..."        # 授業と課題を書く（Python 側）
-export NOTION_COURSE_READ_TOKEN="ntn_..."  # claude に渡す読み取り専用のコネクト
-export BOX_CLIENT_ID="..."                  # Box のアプリ（読み取りだけ）
-export BOX_CLIENT_SECRET="..."
-export BOX_REDIRECT_URI="http://localhost:8799/box/callback"
+# claude が Box と Notion を読むぶんはアカウントの連携を使うので、鍵は要らない（7.7 章）
+unset CLAUDE_CODE_OAUTH_TOKEN
+export CLAUDE_CONFIG_DIR="$HOME/.claude-personal"
 ```
 
 ## 4. 手元で起動して確かめる
@@ -104,7 +103,8 @@ launchd から起動したプロセスは、macOS の保護フォルダ（`~/Doc
 deploy/install.sh          # 登録して起動（ログイン時に起動し、落ちたら再起動する）
 deploy/install.sh course   # 大学エージェント（A2A サーバー、127.0.0.1:8787）
 deploy/install.sh research # 研究エージェント（A2A サーバー、127.0.0.1:8788）
-deploy/install.sh remove   # 登録を外す（course / research も同じように remove を付ける）
+deploy/install.sh work     # 仕事エージェント（A2A サーバー、127.0.0.1:8789）
+deploy/install.sh remove   # 登録を外す（course / research / work も同じように remove を付ける）
 tail -f ~/Library/Logs/kei-agent/kei-agent.log
 launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
 ```
@@ -196,8 +196,8 @@ CLAUDE_CONFIG_DIR=$HOME/.claude-work claude     # 起動して /login → 会社
 
 ## 7.6 研究エージェント（A2A）
 
-研究の作業（`claude -p`）を別のプロセスで動かす。`config.toml` の `[a2a] research_url` を空にすると、
-今までどおり本体の中で動かす（具合が悪いときは、この1行で元に戻せる）。
+研究の作業（`claude -p`）を別のプロセスで動かす。`config.toml` の `[a2a.agents]` から `research`
+の行を外すと、今までどおり本体の中で動かす（具合が悪いときは、この1行で元に戻せる）。
 
 ```zsh
 deploy/install.sh research
@@ -253,7 +253,7 @@ uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップ�
 
 ## 9. 机の上の音声対話（`kei-agent-voice`）
 
-相談相手は Codex、作業は Slack の Kei Agent（Claude）。`docs/plan.md` の13章。
+相談相手は Codex、作業は Slack の Kei Agent（Claude）。docs/design.md の12章。
 
 ```zsh
 # VOICEVOX アプリを立ち上げてから（立ち上げていなければ、声なしで文字だけ動く）
@@ -268,7 +268,7 @@ uv run kei-agent-voice
 
 ## 10. Kei Agent が自分を入れ替えるときの動き
 
-`#research-agent` から Kei Agent が自分のコードを直すと（`docs/plan.md` の12章）、main に取り込んで push したあと、
+`#00_kei-agent` から Kei Agent が自分のコードを直すと（docs/design.md の10章）、main に取り込んで push したあと、
 動いている作業がなくなったところで自分で終了する。launchd の `KeepAlive` が新しい版で起動し直す。
 
 - 取り込むときに `<state_dir>/update-pending` を置き、新しい版が Slack につながったら消す

@@ -9,13 +9,13 @@
     cancel-job / forget-job  {"task_id": 12}
 
 ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、オーケストレーターが覚えている。
-ここは pueue の待ち行列を持つだけ（docs/plan.md の15章のフェーズ③）。
+ここは pueue の待ち行列を持つだけ（docs/design.md の11章）。
 
 返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）で、`data` には `RunResult` が入る。
 経過と柵の扱いは `kei_agent_a2a/claude.py`（大学エージェントと共通）。
 
 会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方は持たない。
-それはオーケストレーターの仕事（docs/plan.md の15章）。
+それはオーケストレーターの仕事（docs/design.md の11章）。
 """
 
 from __future__ import annotations

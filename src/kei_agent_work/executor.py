@@ -5,7 +5,7 @@
 
 返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）。見せ方はオーケストレーターが決める。
 会社のデータなので、返すのは件名・時間・場所・リンクまでにし、本文は持ち出さない
-（docs/plan.md の15章）。
+（docs/design.md の11章）。
 """
 
 from __future__ import annotations

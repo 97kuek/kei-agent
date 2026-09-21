@@ -28,4 +28,4 @@ Slack で手を動かすのは Claude 側の Kei Agent（同じ助手の別の�
 ## 見えるもの
 
 - `~/research/` を読める（テーマの `CLAUDE.md`、Daily、振り返り、`outputs/`）。書き込みはしない
-- Kei Agent のコードは読まない。コードの相談は Slack の `#research-agent` に回す
+- Kei Agent のコードは読まない。コードの相談は Slack の `#00_kei-agent` に回す

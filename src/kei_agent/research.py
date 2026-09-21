@@ -1,7 +1,7 @@
 """研究エージェント（A2A）に、claude の1回分を頼む。
 
 `[a2a.agents]` に `research` を書いたときだけ使う。書かなければ、今までどおり同じプロセスで
-`runner.run_claude` を動かす（docs/plan.md の15章のフェーズ②）。
+`runner.run_claude` を動かす（docs/design.md の11章）。
 
 頼み方も返事も JSON。claude は数分〜数十分かかるので、流しながら返してもらう（A2A の
 SendStreamingMessage）。経過（使った道具と、返答の断片）が届くたびに、入力欄の下の1行に出す。

@@ -5,8 +5,8 @@ from kei_agent.themes import ChannelKind
 
 
 def test_resolve_kinds(config):
-    assert themes.resolve(config, "research-agent").kind is ChannelKind.IMPROVE
-    assert themes.resolve(config, "research-agent").cwd is None
+    assert themes.resolve(config, "00_kei-agent").kind is ChannelKind.IMPROVE
+    assert themes.resolve(config, "00_kei-agent").cwd is None
 
     overview = themes.resolve(config, "research-overview")
     assert overview.kind is ChannelKind.OVERVIEW

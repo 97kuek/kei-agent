@@ -79,7 +79,7 @@ async def serve() -> None:
     ):
         app.event(name)(guard(handler))
 
-    # ボタンと App Home（docs/plan.md の11章）。Slack は3秒以内の ack を待つので、先に返してから処理する
+    # ボタンと App Home（docs/design.md の9章）。Slack は3秒以内の ack を待つので、先に返してから処理する
     def acked(handler):
         async def wrapped(ack, body):
             await ack()

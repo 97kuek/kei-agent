@@ -1,31 +1,32 @@
 # コントリビュートの手順
 
-Kei Agent は、Slack で頼んだ研究の作業を Mac 上の Claude Code が進めて、同じスレッドに結果を返す Bot です。
-全体の設計は `docs/plan.md`、セットアップは `deploy/README.md` にあります。
+Kei Agent は、Slack で頼んだ作業を Mac 上のエージェントが進めて、同じスレッドに結果を返す Bot です。
+仕組みは `docs/design.md`、使い方は `docs/using.md`、入れ方は `deploy/README.md` にあります。
 
 ## 変更する前に
 
-- 設計の判断を変えるときは、先に `docs/plan.md` の該当する表を直し、理由も書く
+- 設計の判断を変えるときは、先に `docs/design.md` の該当する表を直し、理由も書く
+- エージェントを増やす・直すときは `docs/agents.md` の決まりに合わせる（名前、返事の封筒、柵）
 - Notion の構成を変えるときは `docs/notion-layout.md`、`src/kei_agent/notion.py`（作る側）、`src/kei_agent/notion_store.py`（読み書きする側）を合わせて直す
-- 大きな変更（Slack App の権限、sandbox の設定、フェーズの順番）は、Issue で相談してから始める
-- 使っていて気づいた要望は、Slack の `#research-agent` で `@Kei Agent` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
+- 大きな変更（Slack App の権限、sandbox の設定、柵の置き方）は、Issue で相談してから始める
+- 使っていて気づいた要望は、Slack の `#00_kei-agent` で `@Kei Agent` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
 
 ## 開発の準備
 
 ```zsh
 brew install pueue && brew services start pueue
 uv sync
-uv run pytest
+uv run --group work pytest
 ```
 
 Slack や Notion につないで動かすときは、`deploy/README.md` の手順で秘密情報のファイルを用意する。
 
 ## 確認すること
 
-- `uv run pytest` がすべて通る（プルリクエストと `main` への push では、GitHub Actions でも実行される）
-- `uvx ruff check src tests plugin` が通る（設定は `pyproject.toml` の `[tool.ruff]`）
+- `uv run --group work pytest` がすべて通る（プルリクエストと `main` への push では、GitHub Actions でも実行される）
+- `uvx ruff check .` が通る（設定は `pyproject.toml` の `[tool.ruff]`）
 - Slack を通る動きを変えたときは、手元で `uv run kei-agent` を起動し、テーマのチャンネルで実際に頼んで確かめる
-- 定期処理を変えたときは、`uv run kei-agent-schedule <night|literature|daily|review>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
+- 定期処理を変えたときは、`uv run kei-agent-schedule <night|literature|daily|review|maintenance>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
 - `claude -p` の権限や sandbox を変えたときは、テーマのディレクトリの外に書き込めないことを確かめる
 - Notion を読み書きする処理を変えたときは、本物の研究ホームで Task やノートを作って確かめ、確認用のページはゴミ箱に移す
 

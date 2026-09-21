@@ -814,7 +814,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         except NotionError as e:
             await self.notify_trouble(f"振り返りの結論を Notion に追記できませんでした: {e}")
 
-    # Slack の外からの依頼（声のレイヤなど。docs/plan.md の13章）
+    # Slack の外からの依頼（声のレイヤなど。docs/design.md の12章）
 
     async def ask_loop(self) -> None:
         """同じ Mac に置かれた依頼を、数秒ごとに拾う。"""
