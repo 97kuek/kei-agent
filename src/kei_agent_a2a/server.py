@@ -52,8 +52,13 @@ def build_app(card: AgentCard, executor: AgentExecutor, rpc_path: str, token: st
 
 
 def serve(name: str, build_card: Callable[[str], AgentCard], build_executor: Callable[[], AgentExecutor],
-          rpc_path: str, default_port: int, env_prefix: str) -> None:
-    """launchd から起動されたときの入口。"""
+          rpc_path: str, default_port: int, env_prefix: str,
+          build_app: Callable[..., Starlette] | None = None) -> None:
+    """launchd から起動されたときの入口。
+
+    `build_app` を渡すと、アプリの作り方を差し替えられる（声のレイヤは、A2A の口と同じプロセスで
+    マイクからも聞くので、起動と終了の処理を足す）。
+    """
     import uvicorn
 
     logging.basicConfig(level=os.environ.get("KEI_AGENT_LOG_LEVEL", "INFO"),
@@ -65,5 +70,6 @@ def serve(name: str, build_card: Callable[[str], AgentCard], build_executor: Cal
         print(f"{TOKEN_ENV} がありません（合言葉なしで起動します）", file=sys.stderr)
     base_url = f"http://{host}:{port}"
     logging.getLogger(env_prefix.lower()).info("%sを起動します（%s）", name, base_url)
-    app = build_app(build_card(base_url), build_executor(), rpc_path, token)
+    make = build_app or globals()["build_app"]
+    app = make(build_card(base_url), build_executor(), rpc_path, token)
     uvicorn.run(app, host=host, port=port, log_level="warning")

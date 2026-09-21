@@ -310,8 +310,6 @@ class Scheduler:
         title = f"Daily {label(day)}"
         # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
         timeline, gathered, notices = await self.morning_text(datetime.now())
-        # 声の「速い道」は、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく
-        self.assistant.notify_voice("schedule", text=timeline)
         thread_ts = await self.assistant.publish(
             channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result)
         for key in notices:
@@ -432,6 +430,12 @@ class Scheduler:
         # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
         # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
         notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
+        # 声の「速い道」は、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく。
+        # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）
+        self.assistant.notify_voice("schedule", items=[
+            {"at": f"{e.at:%H:%M}", "end": f"{e.end:%H:%M}" if e.end else "",
+             "icon": e.icon, "text": e.text}
+            for e in morning.entries(classes, events, dues, now)])
         return morning.text(classes, events, dues, now, self.morning_notes()), detail, notices
 
     def morning_notes(self) -> list[str]:

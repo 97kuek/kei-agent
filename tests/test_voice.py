@@ -302,3 +302,135 @@ def test_the_listener_is_compiled_once_and_reused(tmp_path):
     os.utime(source, (first.stat().st_mtime + 10, first.stat().st_mtime + 10))
     ears.build()
     assert len(built) == 2
+
+
+# 速い道（fast.py）。モデルを通さずに、手元のもので答える
+
+@pytest.fixture
+def held():
+    return {"schedule": {"items": [
+        {"at": "10:40", "end": "12:20", "icon": "🎓", "text": "データベース"},
+        {"at": "13:00", "end": "14:00", "icon": "💼", "text": "ゆうちょ様AML"},
+        {"at": "15:05", "end": "16:45", "icon": "🎓", "text": "情報通信ネットワークB"},
+        {"at": "17:00", "end": "", "icon": "⏰", "text": "締切: 第3回レポート"},
+    ]}}
+
+
+def test_the_next_thing_is_answered_from_what_was_pushed(held):
+    from datetime import datetime
+
+    from kei_agent_voice import fast
+
+    now = datetime(2026, 9, 21, 12, 30)
+    assert fast.answer("次は", held, now) == "次は13時から ゆうちょ様AML だよ。".replace(" ", "")
+
+
+def test_classes_and_deadlines_are_asked_separately(held):
+    from datetime import datetime
+
+    from kei_agent_voice import fast
+
+    now = datetime(2026, 9, 21, 9, 0)
+    assert "データベース" in fast.answer("今日の授業は", held, now)
+    assert "情報通信ネットワークB" in fast.answer("今日の授業は", held, now)
+    assert "ゆうちょ" not in fast.answer("今日の授業は", held, now)     # 会議は混ぜない
+    assert "第3回レポート" in fast.answer("締切は", held, now)
+
+
+def test_things_already_past_are_not_read_out(held):
+    from datetime import datetime
+
+    from kei_agent_voice import fast
+
+    now = datetime(2026, 9, 21, 16, 0)
+    got = fast.answer("今日の予定は", held, now)
+    assert "データベース" not in got and "第3回レポート" in got
+    assert fast.answer("今日の授業は", held, datetime(2026, 9, 21, 20, 0)) == "今日の授業はもう無いよ。"
+
+
+def test_the_time_is_read_in_words(held):
+    from datetime import datetime
+
+    from kei_agent_voice import fast
+
+    assert fast.answer("いま何時", held, datetime(2026, 9, 21, 14, 5)) == "いま14時5分だよ。"
+    assert fast.answer("いま何時", held, datetime(2026, 9, 21, 14, 0)) == "いま14時だよ。"
+
+
+def test_the_状況_comes_from_the_events_that_were_pushed():
+    from kei_agent_voice import fast
+
+    assert fast.answer("どんな感じ", {"running": 1, "done": 2}) == "今日は1件動いてる、2件終わったよ。"
+    assert fast.answer("どんな感じ", {}) == "いまは何も動いてないよ。"
+    assert "上限" in fast.answer("どんな感じ", {"limited": True})
+
+
+def test_anything_else_goes_to_the_slow_road(held):
+    """当てが外れても壊れない。Codex が答える。"""
+    from kei_agent_voice import fast
+
+    assert fast.answer("この論文どう思う", held) is None
+    assert fast.answer("", held) is None
+
+
+# 聞いて答える（session.py）
+
+class FakeMouth:
+    def __init__(self):
+        self.said = []
+
+    def say(self, text):
+        self.said.append(text)
+
+    def face(self, expression):
+        pass
+
+
+async def test_only_what_is_addressed_to_kei_is_answered(held):
+    from kei_agent_voice.session import VoiceSession
+
+    mouth = FakeMouth()
+    s = VoiceSession(held, mouth=mouth)
+
+    await s.handle("今日の天気はどう")      # 呼びかけなし
+    assert mouth.said == []
+
+    from datetime import datetime
+    await s.handle("けい、今日の授業は", now=datetime(2026, 9, 21, 9, 0))
+    assert any("データベース" in t for t in mouth.said)
+
+
+async def test_the_name_alone_gets_a_nod(held):
+    from kei_agent_voice.session import NODDED, VoiceSession
+
+    mouth = FakeMouth()
+    await VoiceSession(held, mouth=mouth).handle("ケイ")
+    assert mouth.said == [NODDED]
+
+
+async def test_what_the_fast_road_cannot_answer_says_so_for_now(held):
+    """遅い道（Codex）はまだ繋いでいない。黙らずに、その旨を言う。"""
+    from kei_agent_voice.session import NODDED, NOT_YET, VoiceSession
+
+    mouth = FakeMouth()
+    await VoiceSession(held, mouth=mouth).handle("けい、この論文どう思う")
+    assert mouth.said == [NODDED, NOT_YET]
+
+
+async def test_a_broken_answer_does_not_stop_the_loop(held, monkeypatch):
+    """1件捌けなくても、聞き続ける。"""
+    import asyncio
+
+    from kei_agent_voice import session as mod
+    from kei_agent_voice.session import VoiceSession
+
+    mouth = FakeMouth()
+    s = VoiceSession(held, mouth=mouth)
+    monkeypatch.setattr(mod.fast, "answer", lambda *a, **k: 1 / 0)
+
+    s.heard.put_nowait("けい、今日の予定は")
+    task = asyncio.create_task(s.run())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    # 落ちずに、次を待っている
+    assert not task.done() or task.cancelled()

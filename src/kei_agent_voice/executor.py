@@ -77,8 +77,7 @@ class VoiceExecutor(AgentExecutor):
         if found is None:
             await self._fail(updater, f"知らない出来事です: {event.get('kind')!r}")
             return
-        if event.get("kind") == "schedule":
-            self.held["schedule"] = event
+        self._hold(event)
 
         log.info("知らせを受け取りました: %s（喋る: %s）", event.get("kind"), found.speaks)
         # 喋るのは裏で。本体を待たせない
@@ -86,6 +85,19 @@ class VoiceExecutor(AgentExecutor):
             asyncio.get_running_loop().run_in_executor(None, self._react, found)
         await updater.complete(updater.new_agent_message(
             [Part(text=envelope.reply("受け取ったよ", {"spoke": found.speaks, "face": found.face}))]))
+
+    def _hold(self, event: dict) -> None:
+        """速い道で使えるように、押されてきたものを手元に置く（docs/voice.md の3節）。"""
+        kind = str(event.get("kind") or "")
+        if kind == "schedule":
+            self.held["schedule"] = event
+        elif kind == "working":
+            self.held["running"] = int(self.held.get("running") or 0) + 1
+        elif kind in ("done", "failed"):
+            self.held["running"] = max(int(self.held.get("running") or 0) - 1, 0)
+            self.held[kind] = int(self.held.get(kind) or 0) + 1
+        elif kind == "limited":
+            self.held["limited"] = True
 
     def _react(self, found: events.Reaction) -> None:
         try:
