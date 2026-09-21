@@ -26,8 +26,19 @@ DEFAULT_PORT = 50021
 # AivisSpeech のように VOICEVOX 互換の口を持つエンジンなら、ここだけで差し替わる
 HOST_ENV, PORT_ENV, SPEAKER_ENV, SPEED_ENV = (
     "KEI_AGENT_VOICE_HOST", "KEI_AGENT_VOICE_PORT", "KEI_AGENT_VOICE_SPEAKER", "KEI_AGENT_VOICE_SPEED")
-# 少し速めのほうが、待ち時間の不満が減る（聞き比べて 1.2 倍に決めた）
-DEFAULT_SPEED = 1.2
+# 少し速めのほうが、待ち時間の不満が減る（聞き比べて決めた）
+DEFAULT_SPEED = 1.15
+# 読みの調整（2026-09-21 に4通り聞き比べて決めた）。VOICEVOX は短い1文を7つのアクセント句に割り、
+# 読点で 0.4 秒あける。間を詰めて抑揚を上げると少しましになる。
+# **根本の「単語ごとに区切って聞こえる」は、これでは直らない**（アクセント句の分かれ方そのものなので、
+# エンジンを替えるしかない。docs/voice.md の9節）。
+# エンジンによって持っていない項目があるので、返ってきたクエリにある項目だけを上書きする
+TUNING = {
+    "pauseLengthScale": 0.5,   # 読点の間を半分にする
+    "intonationScale": 1.4,    # 抑揚を広げる（平板さを減らす）
+    "prePhonemeLength": 0.0,   # 文の前の無音。1文ずつ鳴らすので、ここが積み上がると間延びする
+    "postPhonemeLength": 0.05,
+}
 # 四国めたん／ノーマル。はきはきして、暗くならない声（2026-09-19 に聞き比べて決めた）
 DEFAULT_SPEAKER = 2
 TIMEOUT_SECONDS = 30
@@ -76,6 +87,8 @@ class Voicevox:
     def synthesize(self, sentence: str) -> bytes:
         query = self._post(f"/audio_query?{urllib.parse.urlencode({'text': sentence, 'speaker': self.speaker})}")
         query["speedScale"] = self.speed
+        # 相手が持っていない項目は足さない（知らないキーで断るエンジンがあっても困らないように）
+        query.update({k: v for k, v in TUNING.items() if k in query})
         return self._post(f"/synthesis?{urllib.parse.urlencode({'speaker': self.speaker})}", query, raw=True)
 
     def _post(self, path: str, body: dict | None = None, raw: bool = False):

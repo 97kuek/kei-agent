@@ -304,3 +304,27 @@ def test_engine_comes_from_env_so_the_voice_can_be_swapped():
     # 読めない値で落ちない（起動しなくなるより、いまの声のままのほうがまし）
     broken = Voicevox.from_env(env={"KEI_AGENT_VOICE_PORT": "みみっつ"})
     assert broken.base == f"http://127.0.0.1:{DEFAULT_PORT}"
+
+
+def test_tuning_only_touches_what_the_engine_returned():
+    """エンジンが持っていない項目は足さない（替えたエンジンで断られないように）。"""
+    from kei_agent_voice.speech import TUNING, Voicevox
+
+    engine = Voicevox()
+    sent: dict = {}
+
+    def fake_post(path, body=None, raw=False):
+        if path.startswith("/audio_query"):
+            # 古いエンジンや別のエンジンは pauseLengthScale を持たないことがある
+            return {"speedScale": 1.0, "intonationScale": 1.0, "prePhonemeLength": 0.1}
+        sent.update(body or {})
+        return b"wav"
+
+    engine._post = fake_post
+    assert engine.synthesize("ためし") == b"wav"
+
+    assert sent["speedScale"] == engine.speed
+    assert sent["intonationScale"] == TUNING["intonationScale"]
+    assert sent["prePhonemeLength"] == TUNING["prePhonemeLength"]
+    # 返ってこなかった項目は、勝手に足さない
+    assert "pauseLengthScale" not in sent and "postPhonemeLength" not in sent
