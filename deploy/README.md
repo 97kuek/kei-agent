@@ -104,7 +104,8 @@ deploy/install.sh          # 登録して起動（ログイン時に起動し、
 deploy/install.sh course   # 大学エージェント（A2A サーバー、127.0.0.1:8787）
 deploy/install.sh research # 研究エージェント（A2A サーバー、127.0.0.1:8788）
 deploy/install.sh work     # 仕事エージェント（A2A サーバー、127.0.0.1:8789）
-deploy/install.sh remove   # 登録を外す（course / research / work も同じように remove を付ける）
+deploy/install.sh voice    # 声のレイヤ（A2A サーバー＋マイク、127.0.0.1:8790）
+deploy/install.sh remove   # 登録を外す（course / research / work / voice も同じように remove を付ける）
 tail -f ~/Library/Logs/kei-agent/kei-agent.log
 launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
 ```
@@ -251,20 +252,27 @@ uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップ�
 ログは Kei Agent 自身が `~/Library/Logs/kei-agent/kei-agent.log` に書き、5MB ごとに回して5世代だけ残す。
 `~/Library/Logs/kei-agent/launchd.log` には、起動に失敗したときの出力だけが残る。
 
-## 9. 机の上の音声対話（`kei-agent-voice`）
+## 9. 机の上の音声対話（`com.kei-agent.voice`）
 
-相談相手は Codex、作業は Slack の Kei Agent（Claude）。docs/design.md の12章。
+耳と口は Mac、相談は Codex、作業は Slack の Kei Agent（Claude）。docs/voice.md。
+ほかのエージェントと同じく launchd で常駐する（`deploy/install.sh voice`）。
 
-```zsh
-# VOICEVOX アプリを立ち上げてから（立ち上げていなければ、声なしで文字だけ動く）
-uv run kei-agent-voice
-```
+**入れるものが2つある。**
 
-- 喋る入口は、いまのところ Aqua Voice などで「ターミナルに入力する」形
-- Enter だけ押すと読み上げが止まる。「新しく話そう」で会話を切る。「じっくり考えて」を含めると、その回だけ深く考える
-- 決まったことは Slack に残り、依頼は読み上げの確認を経て Kei Agent に渡る（`<state_dir>/asks/`）
+| もの | なぜ |
+|---|---|
+| AivisSpeech（`127.0.0.1:10101`） | 声を出すため。立ち上げていなければ黙る（Slack の仕事は止まらない） |
+| `~/.config/zsh/local/kei-agent-voice.zsh` | `KEI_AGENT_TTS_PORT` と `KEI_AGENT_TTS_SPEAKER`、Stack-chan を買ったら `KEI_AGENT_STACKCHAN_URL` |
+
+耳（`listen.swift`）は初回に `swiftc` で作って `<state_dir>/voice/listen` に置く。
+マイクの許可は、初めて開けたときに macOS が聞いてくる。
+
+- **既定では喋らず、マイクも開けない。** Slack の App Home の「知らせる」「聞く」で入れる
+- 「けい、〜」と呼ぶ。「新しく話そう」で会話を切り、「じっくり考えて」を含めると、その回だけ深く考える
+- 依頼は読み上げの確認を経て Kei Agent に渡る（`<state_dir>/asks/`）
 - 声の全文は `~/kei-agent/overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
 - 手でも渡せる: `uv run kei-agent-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
+- 声を聴き比べたいとき: `uv run kei-agent-voice-compare`（wav は `overview/voice/compare/` に残る）
 
 ## 10. Kei Agent が自分を入れ替えるときの動き
 

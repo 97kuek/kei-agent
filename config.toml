@@ -55,6 +55,7 @@ timeout_seconds = 300
 course = "http://127.0.0.1:8787"
 research = "http://127.0.0.1:8788"
 work = "http://127.0.0.1:8789"
+voice = "http://127.0.0.1:8790"
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
