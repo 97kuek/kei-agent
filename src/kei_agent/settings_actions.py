@@ -127,6 +127,8 @@ class SettingsActions:
         elif kind == "kei_agent_home_toggle" and name in settings.SCHEDULE_NAMES:
             hhmm, enabled = settings.schedule_setting(self.config, self.store, name)
             settings.set_schedule(self.store, name, hhmm, not enabled)
+        elif kind == "kei_agent_home_toggle_voice":
+            settings.set_voice(self.store, not settings.voice_enabled(self.store))
         else:
             return
         await self.publish_home(user)

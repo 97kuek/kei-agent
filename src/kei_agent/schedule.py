@@ -310,6 +310,8 @@ class Scheduler:
         title = f"Daily {label(day)}"
         # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
         timeline, gathered, notices = await self.morning_text(datetime.now())
+        # 声の「速い道」は、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく
+        self.assistant.notify_voice("schedule", text=timeline)
         thread_ts = await self.assistant.publish(
             channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result)
         for key in notices:
@@ -460,6 +462,7 @@ class Scheduler:
             if self.store.noticed(key):
                 continue
             await self.assistant.slack.chat_postMessage(channel=channel, text=course.soon_text(item, now))
+            self.assistant.notify_voice("due", title=item.get("title"), at=item.get("at"))
             self.store.record_notice(key)
 
     # 声かけ

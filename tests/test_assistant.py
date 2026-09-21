@@ -1502,3 +1502,77 @@ def test_router_can_choose_between_agents():
     assert router.parse('{"skill": "self"}', allowed).agent == ""
     # 知らない相手は、本体が自分で答える側に倒す
     assert router.parse('{"skill": "hr:fire-everyone"}', allowed).agent == ""
+
+
+# 声で知らせる（voice.py）
+
+class FakeVoiceAgent:
+    base_url = "http://127.0.0.1:8790"
+
+    def __init__(self):
+        self.got = []
+
+    async def ask(self, skill, text="", params=None):
+        import json as _json
+
+        from kei_agent import a2a
+        self.got.append((skill, _json.loads(text)))
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps(
+            {"ok": True, "text": "受け取ったよ", "data": {}, "limit_reset_at": None, "cost_usd": None}))
+
+
+async def test_nothing_is_spoken_until_it_is_turned_on(env, store):
+    """既定は切。机にロボットが無い状態で、急に喋り出さない。"""
+    from kei_agent import settings
+
+    assistant, slack, claude, _ = env
+    agent = FakeVoiceAgent()
+    assistant.agents["voice"] = agent
+
+    assert settings.voice_enabled(store) is False
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> やって"})
+    await settle(assistant)
+
+    assert agent.got == []
+
+
+async def test_events_are_sent_as_what_happened_not_as_words(env, store):
+    """渡すのは出来事だけ。言い方も顔も、声のレイヤが決める。"""
+    from kei_agent import settings
+
+    assistant, slack, claude, _ = env
+    agent = FakeVoiceAgent()
+    assistant.agents["voice"] = agent
+    settings.set_voice(store, True)
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> やって"})
+    await settle(assistant)
+
+    kinds = [e["kind"] for _, e in agent.got]
+    assert "working" in kinds and "done" in kinds
+    assert all(skill == "notify" for skill, _ in agent.got)
+    # 文は入れない（本体が「どう言うか」を持つと、対応表が2か所に散る）
+    assert all("text" not in e or e["kind"] == "schedule" for _, e in agent.got)
+    assert {"kind": "done", "theme": "vlm"} in [e for _, e in agent.got]
+
+
+async def test_a_dead_voice_layer_does_not_break_slack(env, store):
+    """声が出なくても、Slack の仕事は終わっている（知らせるだけのことなので、依頼者に見せない）。"""
+    from kei_agent import a2a, settings
+
+    assistant, slack, claude, _ = env
+    settings.set_voice(store, True)
+
+    class Dead:
+        base_url = "http://127.0.0.1:8790"
+
+        async def ask(self, skill, text="", params=None):
+            raise a2a.A2AError("名刺を読めません（HTTP 502）")
+
+    assistant.agents["voice"] = Dead()
+
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> やって"})
+    await settle(assistant)
+
+    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
+    assert not any("頼めなかった" in (t or "") for t in slack.texts())

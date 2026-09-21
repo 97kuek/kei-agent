@@ -88,6 +88,18 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     else:
         blocks.append(_mrkdwn("研究テーマのチャンネルがまだありません"))
 
+    blocks += [
+        {"type": "divider"},
+        _mrkdwn("*声で知らせる*"),
+        {"type": "context", "elements": [{"type": "mrkdwn", "text":
+            "作業が終わったときなどに、机の上で声に出します。"
+            "Stack-chan がいればそちら、いなければ Mac のスピーカーで鳴らします"}]},
+        {"type": "actions", "elements": [
+            _button("止める" if settings.voice_enabled(store) else "知らせる",
+                    "kei_agent_home_toggle_voice", "voice"),
+        ]},
+    ]
+
     blocks += [{"type": "divider"}, _mrkdwn("*決まった時刻の処理*")]
     for name in settings.SCHEDULE_NAMES:
         hhmm, enabled = settings.schedule_setting(config, store, name)

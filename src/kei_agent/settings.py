@@ -165,3 +165,21 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
         raise ValueError(f"時刻は HH:MM で指定してください: {hhmm}")
     _set(store, f"schedule.{name}.time", hhmm)
     _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
+
+
+# 声で知らせるか（docs/voice.md の7節）
+
+VOICE_KEY = "voice.enabled"
+
+
+def voice_enabled(store: Store) -> bool:
+    """声で知らせるか。既定は切（机にロボットが無い状態で急に喋り出さない）。
+
+    「Mac で鳴らすか Stack-chan で鳴らすか」は声のレイヤが決める（`/status` で分かる）。
+    本体が持つのは「知らせを送るかどうか」だけ。
+    """
+    return _get(store, VOICE_KEY) == "1"
+
+
+def set_voice(store: Store, enabled: bool) -> None:
+    _set(store, VOICE_KEY, "1" if enabled else "0")

@@ -32,6 +32,7 @@ from kei_agent import (
     runner,
     settings,
     themes,
+    voice,
     work,
 )
 from kei_agent.auto_messages import (
@@ -118,7 +119,7 @@ class ThemeRuns:
         return overlapped
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
+class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -277,6 +278,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         await self._react(self.slack.reactions_remove, req.channel, req.message_ts, SEEN_REACTION)
         await self._react(self.slack.reactions_add, req.channel, req.message_ts,
                           FAILED_REACTION if failed else DONE_REACTION)
+        self.notify_voice("failed" if failed else "done", theme=req.channel_name)
 
     async def notify_owner(self, req: Request, text: str) -> None:
         """スレッド内の投稿は通知が来ないので、依頼者へのメンション付きの短い投稿を足す。"""
@@ -530,6 +532,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             await self.drop_deferred_for(req)
         if req.message_ts:
             await self._react(self.slack.reactions_add, req.channel, req.message_ts, SEEN_REACTION)
+        self.notify_voice("working", theme=req.channel_name)
         self.spawn(self._process_and_report(req))
 
     async def _process_and_report(self, req: Request) -> None:
@@ -709,6 +712,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         connect = self.new_connect_requests(ws, result.text, result.requested_domains)
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
+        if awaiting:
+            self.notify_voice("awaiting", theme=req.channel_name)
         await self.sync_review_conclusion(req)
         await self._reply(req, ws, ui, result, awaiting)
         await self._attach_outputs(req, ws.cwd, before)
@@ -898,6 +903,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         self.store.defer_run("request", req.to_payload(), until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
         await self.post(req, f"{FAILED_PREFIX} Claude の契約の上限に達したみたい。{when} ごろに自動でやり直すね。")
+        self.notify_voice("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
 
     # 再起動で途中で止まった依頼
 
