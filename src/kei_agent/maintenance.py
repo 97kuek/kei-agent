@@ -182,13 +182,23 @@ async def backup(config: Config, day: str | None = None, store: Store | None = N
     await asyncio.to_thread(dump_state, config, store)
     d = date.fromisoformat(day) if day else date.today()
     detail = await _backup_repo(config.research_root, f"{d.month}/{d.day} の研究データを保存する")
-    if (config.agent_root / ".git").is_dir():
-        agent = await _backup_repo(config.agent_root, f"{d.month}/{d.day} の Kei Agent のデータを保存する")
-        detail["agent_root"] = agent
-    else:
-        # Daily・振り返り・backlog・状態が、どこにも残らないまま進むのを黙って許さない
-        detail["agent_root"] = {"status": "not_a_repo", "path": str(config.agent_root)}
+    detail["agent_root"] = await _backup_agent_root(config, d)
     return detail
+
+
+async def _backup_agent_root(config: Config, d: date) -> dict:
+    """Kei Agent 側の保存。支度ができていなければ、止めずに理由を返す。
+
+    研究側の保存は通っているので、ここで例外にすると毎晩の保守そのものが失敗になる。
+    いっぽう黙って飛ばすと、Daily と振り返りがどこにも残らないまま進むので、理由は必ず返す。
+    """
+    root = config.agent_root
+    if not (root / ".git").is_dir():
+        return {"status": "not_a_repo", "path": str(root)}
+    code, out = await _git(root, "remote")
+    if code or not out.strip():
+        return {"status": "no_remote", "path": str(root)}
+    return await _backup_repo(root, f"{d.month}/{d.day} の Kei Agent のデータを保存する")
 
 
 async def _backup_repo(repo: Path, message: str) -> dict:

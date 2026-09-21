@@ -388,10 +388,22 @@ class Scheduler:
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)
+                await self._warn_unsaved(detail["backup"].get("agent_root") or {})
             except maintenance.BackupError as e:
                 await self.assistant.notify_trouble(f"研究データのバックアップに失敗しました: {e}")
                 detail = {**detail, "status": "error", "error": str(e)}
         return detail
+
+    async def _warn_unsaved(self, agent: dict) -> None:
+        """Kei Agent 側（Daily・振り返り・backlog・状態）が保存できていないときに知らせる。"""
+        why = {
+            "not_a_repo": "Git のリポジトリになっていません",
+            "no_remote": "push 先（origin）が登録されていません",
+        }.get(str(agent.get("status") or ""))
+        if why:
+            await self.assistant.notify_trouble(
+                f"Daily と振り返りが保存できていません: `{agent.get('path')}` が{why}。"
+                "非公開のリポジトリを作って `git remote add origin <URL>` してください")
 
     # 授業（大学エージェント）
 

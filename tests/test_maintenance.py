@@ -251,3 +251,26 @@ async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
     assert "kei-agent.sql" not in research_files
     assert git(agent_remote, "log", "--format=%s", "main").splitlines()[0] == \
         "9/18 の Kei Agent のデータを保存する"
+
+
+async def test_agent_root_without_a_remote_is_reported_not_raised(config, store, tmp_path):
+    """push 先が無くても保守そのものは止めない。ただし理由は必ず返す。"""
+    remote = tmp_path / "research.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    config.research_root.mkdir(parents=True)
+    git(config.research_root, "init", "-q", "-b", "main")
+    git(config.research_root, "config", "user.name", "test")
+    git(config.research_root, "config", "user.email", "test@example.com")
+    git(config.research_root, "remote", "add", "origin", str(remote))
+    (config.research_root / "vlm").mkdir()
+    (config.research_root / "vlm" / "CLAUDE.md").write_text("# vlm")
+    git(config.research_root, "add", "-A")
+    git(config.research_root, "commit", "-q", "-m", "init")
+    git(config.research_root, "push", "-q", "-u", "origin", "main")
+    # Kei Agent 側は Git にしたが、origin をまだ登録していない
+    config.agent_root.mkdir(parents=True, exist_ok=True)
+    git(config.agent_root, "init", "-q", "-b", "main")
+
+    detail = await maintenance.backup(config, "2026-09-18")
+
+    assert detail["agent_root"] == {"status": "no_remote", "path": str(config.agent_root)}
