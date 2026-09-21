@@ -53,7 +53,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-voice-compare", description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, action="append", default=[],
-                        help="探す待ち受け口を足す（既定は 50021 と 10101）")
+                        help="ここを見る（書かなければ 50021 と 10101 を探す）")
     parser.add_argument("--speaker", type=int, action="append", default=[],
                         help="鳴らす話者。書かなければ、そのエンジンの先頭の話者")
     parser.add_argument("--speed", type=float, default=DEFAULT_SPEED)
@@ -62,11 +62,22 @@ def main() -> None:
     parser.add_argument("--no-play", action="store_true", help="wav を作るだけで鳴らさない（あとで聴く）")
     args = parser.parse_args()
 
-    ports = list(dict.fromkeys([*KNOWN_PORTS, *args.port]))
+    # `--port` を書いたらそこだけ見る。話者 ID はエンジンごとに違うので、
+    # 足し算にすると `--speaker` が別のエンジンに飛んで断られる
+    ports = list(dict.fromkeys(args.port)) or list(KNOWN_PORTS)
     found = running(ports, args.host)
     if not found:
         sys.exit(f"待ち受けているエンジンがありません（見た口: {', '.join(str(p) for p in ports)}）。\n"
                  "VOICEVOX か AivisSpeech を立ち上げてから、もう一度実行してください。")
+
+    if len(found) == 1 and not args.speaker and not args.speakers:
+        # 1つしか動いていないと、聴き比べにならない。黙って1本だけ鳴らして終わらない
+        port, version = found[0]
+        print(f"⚠ 待ち受けているエンジンが1つだけです（{args.host}:{port}／{version}）。"
+              "比較になりません。\n"
+              "  もう1つのエンジン（AivisSpeech など）を立ち上げてから、もう一度実行してください。\n"
+              "  同じエンジンで話者だけ比べるなら `--speaker <ID>` を2つ以上つけてください"
+              "（一覧は `--speakers`）。\n")
 
     if args.speakers:
         for port, version in found:
