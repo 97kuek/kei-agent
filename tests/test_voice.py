@@ -281,3 +281,26 @@ def test_reply_is_spoken_when_voicevox_is_up(session, capsys):
     s.say_reply("うん、それで進めよう。")
     assert speaker.said == ["うん、それで進めよう。"]
     assert capsys.readouterr().out == ""
+
+
+# 声のエンジンの差し替え（docs/voice.md の9節）
+
+def test_engine_comes_from_env_so_the_voice_can_be_swapped():
+    """AivisSpeech のような VOICEVOX 互換のエンジンに、コードを変えずに向け替えられる。"""
+    from kei_agent_voice.speech import DEFAULT_PORT, DEFAULT_SPEAKER, Voicevox
+
+    plain = Voicevox.from_env(env={})
+    assert plain.base == f"http://127.0.0.1:{DEFAULT_PORT}" and plain.speaker == DEFAULT_SPEAKER
+
+    swapped = Voicevox.from_env(env={
+        "KEI_AGENT_VOICE_PORT": "10101",
+        # AivisSpeech の話者 ID は 0 からの連番ではない
+        "KEI_AGENT_VOICE_SPEAKER": "888753760",
+        "KEI_AGENT_VOICE_SPEED": "1.0",
+    })
+    assert swapped.base == "http://127.0.0.1:10101"
+    assert swapped.speaker == 888753760 and swapped.speed == 1.0
+
+    # 読めない値で落ちない（起動しなくなるより、いまの声のままのほうがまし）
+    broken = Voicevox.from_env(env={"KEI_AGENT_VOICE_PORT": "みみっつ"})
+    assert broken.base == f"http://127.0.0.1:{DEFAULT_PORT}"

@@ -139,7 +139,7 @@ def main() -> None:
     instructions = _instructions(config)
     state = config.state_dir / "voice"
     codex = Codex(cwd=config.research_root, state_dir=state, instructions=instructions)
-    engine = Voicevox()
+    engine = Voicevox.from_env()
     speaker = Speaker(engine)
     session = Session(config=config, codex=codex, speaker=speaker)
     if not speaker.enabled:

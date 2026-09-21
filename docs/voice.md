@@ -196,7 +196,32 @@ Stack-chan を机に置くと、この前提は「その部屋にいる人なら
 | クラウド（ElevenLabs / OpenAI / Gemini / Azure） | 日本語の自然さに特化した評価が見つからない。ElevenLabs は日本語で text normalization を使うと遅延が大きく増えると API 文書が明記 |
 
 **自然さを定量比較したベンチマークは見つからなかった**（主観記事のみ）。だから**聴き比べて決める**。
-VOICEVOX 互換のまま試せるので、AivisSpeech → COEIROINK → SHAREVOX の順に鳴らして選ぶのが安い。
+
+### 聴き比べ方（用意してある）
+
+engine の向き先は環境変数で替えられる（`speech.Voicevox.from_env`）。コードは変えない。
+
+```zsh
+# 1. VOICEVOX と AivisSpeech の両方を立ち上げる（両方いても構わない。待ち受け口が違う）
+# 2. 同じ文を、動いている全部のエンジンで鳴らして wav に落とす
+uv run kei-agent-voice-compare
+
+# 話者を選びたいとき（AivisSpeech の ID は 0 からの連番ではない）
+uv run kei-agent-voice-compare --speakers
+uv run kei-agent-voice-compare --speaker 888753760
+
+# 待ち受け口が既定（50021 / 10101）と違うとき
+uv run kei-agent-voice-compare --port 12345
+```
+
+wav は `<agent_root>/overview/voice/compare/` に残るので、あとから聴き直せる。
+
+決まったら、秘密情報のファイル（`kei-agent-voice.zsh`）に書く。
+
+```zsh
+export KEI_AGENT_VOICE_PORT="10101"
+export KEI_AGENT_VOICE_SPEAKER="888753760"
+```
 
 ### 文字起こし
 

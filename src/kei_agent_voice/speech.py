@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import subprocess
 import tempfile
@@ -21,6 +22,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 50021
+# 声を替えるときに触る環境変数（秘密情報のファイルに書く）。
+# AivisSpeech のように VOICEVOX 互換の口を持つエンジンなら、ここだけで差し替わる
+HOST_ENV, PORT_ENV, SPEAKER_ENV, SPEED_ENV = (
+    "KEI_AGENT_VOICE_HOST", "KEI_AGENT_VOICE_PORT", "KEI_AGENT_VOICE_SPEAKER", "KEI_AGENT_VOICE_SPEED")
 # 少し速めのほうが、待ち時間の不満が減る（聞き比べて 1.2 倍に決めた）
 DEFAULT_SPEED = 1.2
 # 四国めたん／ノーマル。はきはきして、暗くならない声（2026-09-19 に聞き比べて決めた）
@@ -29,13 +34,31 @@ TIMEOUT_SECONDS = 30
 
 
 class Voicevox:
-    """VOICEVOX の待ち受け口。文を1つずつ音声にする。"""
+    """VOICEVOX（と、その API に合わせたエンジン）の待ち受け口。文を1つずつ音声にする。"""
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                  speaker: int = DEFAULT_SPEAKER, speed: float = DEFAULT_SPEED):
         self.base = f"http://{host}:{port}"
         self.speaker = speaker
         self.speed = speed
+
+    @classmethod
+    def from_env(cls, env: dict[str, str] | None = None) -> Voicevox:
+        """環境変数から作る。書かれていない項目は、いまの VOICEVOX の設定のまま。
+
+        AivisSpeech は話者 ID が 0 からの連番ではないので、エンジンを替えるときは
+        `KEI_AGENT_VOICE_SPEAKER` も一緒に書き換える（`/speakers` で調べられる）。
+        """
+        env = dict(os.environ) if env is None else env
+
+        def _num(name, default, cast):
+            try:
+                return cast(env[name])
+            except (KeyError, ValueError):
+                return default
+
+        return cls(env.get(HOST_ENV) or DEFAULT_HOST, _num(PORT_ENV, DEFAULT_PORT, int),
+                   _num(SPEAKER_ENV, DEFAULT_SPEAKER, int), _num(SPEED_ENV, DEFAULT_SPEED, float))
 
     def available(self) -> bool:
         try:
