@@ -1,14 +1,15 @@
-"""Codex の返事に混ぜてもらう目印の行と、読み上げのための文の切り出し。"""
+"""読み上げのために、文を整えて切り分ける。
+
+Codex の返事は目で読む形で来る（記号、箇条書き、長い一文）。声にすると邪魔なものを落とし、
+文の切れ目で分ける。
+
+分けるのは、**長い返事の出だしを早く鳴らすため**でもある。1文ずつ合成して順に鳴らせば、
+全部の合成を待たずに喋り始められる（AivisSpeech は一度に 500 文字程度までという制限もある）。
+"""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-
-# Slack 側（🛠 着手 / 📦 取り込み / 🔒 接続:）と同じやり方で揃えている
-DECISION = "📌 決定:"
-REQUEST = "🛠 依頼:"
-THEME = "🎯 テーマ:"
 
 # 読み上げの1回ぶんの上限。長すぎると止めにくく、短すぎると切れ切れに聞こえる
 MAX_SENTENCE = 120
@@ -17,38 +18,6 @@ _SPLIT = re.compile(r"(?<=[。．！？!?])")
 _STRIP = re.compile(r"[`*_#>|]+")
 # 行頭の箇条書きの印
 _BULLET = re.compile(r"^\s*(?:[-*・•]|\d+[.)])\s*")
-
-
-@dataclass
-class Reply:
-    """Codex の返事を、読み上げる文と、目印の中身に分けたもの。"""
-    spoken: str = ""
-    decisions: list[str] = field(default_factory=list)
-    requests: list[str] = field(default_factory=list)
-    theme: str | None = None
-
-
-def parse(text: str) -> Reply:
-    reply = Reply()
-    spoken_lines = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if line.startswith(DECISION):
-            value = line[len(DECISION):].strip()
-            if value:
-                reply.decisions.append(value)
-        elif line.startswith(REQUEST):
-            value = line[len(REQUEST):].strip()
-            if value:
-                reply.requests.append(value)
-        elif line.startswith(THEME):
-            value = line[len(THEME):].strip().lstrip("#")
-            if value:
-                reply.theme = value
-        else:
-            spoken_lines.append(raw)
-    reply.spoken = "\n".join(spoken_lines).strip()
-    return reply
 
 
 def for_speech(text: str) -> str:

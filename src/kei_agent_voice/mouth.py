@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from kei_agent_voice import reading
 from kei_agent_voice.speech import Voicevox
 
 log = logging.getLogger(__name__)
@@ -49,21 +50,27 @@ class Mouth:
         except (urllib.error.URLError, TimeoutError, OSError):
             return False
 
-    def say(self, sentence: str) -> None:
-        """1文を鳴らす。合成できなければ、何もしない（黙るほうが、途中で止まるよりまし）。"""
-        sentence = sentence.strip()
-        if not sentence:
-            return
+    def say(self, text: str) -> None:
+        """喋る。長い返事は文ごとに分けて、**出だしから先に鳴らす**。
+
+        合成できなければ、何もしない（黙るほうが、途中で止まるよりまし）。
+        """
+        for sentence in reading.sentences(text):
+            if not self._say_one(sentence):
+                return
+
+    def _say_one(self, sentence: str) -> bool:
         try:
             wav = self.engine.synthesize(sentence)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             log.warning("音声にできません（%s は動いていますか）: %s", self.engine.base, e)
-            return
+            return False
         if self.stackchan_ready():
             if self._send(wav):
-                return
+                return True
             log.info("Stack-chan に送れなかったので、Mac のスピーカーで鳴らします")
         self._play(wav)
+        return True
 
     def face(self, expression: str) -> None:
         """表情を変える。Stack-chan がいなければ何もしない。"""

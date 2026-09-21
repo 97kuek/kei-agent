@@ -76,6 +76,15 @@ def answer(text: str, held: dict, now: datetime | None = None) -> str | None:
     return None
 
 
+def closed(text: str) -> bool:
+    """付け足す余地のない問いか。
+
+    時刻だけは、答えたあとに Codex へ「ひとことある？」と聞く意味がない（毎回往復が乗るだけ）。
+    予定や締切は「なら先にこっちをやった方がいい」のような続きがありうるので、聞く。
+    """
+    return any(w in text for w in TIME_WORDS)
+
+
 def _listed(items: list[dict], now: datetime, what: str, empty: str) -> str:
     rest = _upcoming(items, now)
     if not rest:

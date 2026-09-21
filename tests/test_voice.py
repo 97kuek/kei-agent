@@ -5,31 +5,19 @@
 
 import pytest
 
-from kei_agent_voice import events, markers
+from kei_agent_voice import events, reading
 
-
-def test_parse_pulls_out_the_markers():
-    reply = markers.parse(
-        "その線でいいと思う。\n"
-        "📌 決定: 4条件で比べる\n"
-        "🛠 依頼: 条件ごとの精度を集計して\n"
-        "🎯 テーマ: #amr-query\n"
-    )
-    assert reply.decisions == ["4条件で比べる"]
-    assert reply.requests == ["条件ごとの精度を集計して"]
-    assert reply.theme == "amr-query"
-    assert reply.spoken == "その線でいいと思う。"   # 目印の行は読み上げない
-
+# 読み上げのために文を整える（reading.py）
 
 def test_sentences_split_and_drop_symbols():
-    said = markers.sentences("`msclap` を入れたよ。**次は**照合だね\n- 図は outputs/ にある")
+    said = reading.sentences("`msclap` を入れたよ。**次は**照合だね\n- 図は outputs/ にある")
     assert said == ["msclap を入れたよ。", "次は照合だね", "図は outputs/ にある"]
 
 
 def test_long_sentence_is_cut_at_a_comma():
     long = "、".join(["とても長い話がここに続く"] * 12) + "。"
-    said = markers.sentences(long)
-    assert len(said) > 1 and all(len(s) <= markers.MAX_SENTENCE for s in said)
+    said = reading.sentences(long)
+    assert len(said) > 1 and all(len(s) <= reading.MAX_SENTENCE for s in said)
 
 
 # 会話
@@ -181,6 +169,20 @@ def test_it_falls_back_to_the_mac_when_stackchan_does_not_answer():
     mouth.say("終わったよ。")
 
     assert played == [b"RIFF-wav"]
+
+
+def test_a_long_answer_starts_playing_from_its_first_sentence():
+    """全部の合成を待たずに喋り始める（長い返事の出だしを早くするため）。"""
+    from kei_agent_voice.mouth import Mouth
+
+    played = []
+    mouth = Mouth(FakeEngine(), url="")
+    mouth._play = lambda wav: played.append(wav)
+
+    mouth.say("まず一文目。つぎに二文目。")
+
+    assert mouth.engine.said == ["まず一文目。", "つぎに二文目。"]
+    assert len(played) == 2
 
 
 def test_a_dead_engine_does_not_raise():
@@ -394,46 +396,59 @@ class FakeMouth:
         pass
 
 
-async def test_only_what_is_addressed_to_kei_is_answered(held):
+class FakeCodex:
+    """遅い道の相手。試験で本物の Codex を呼ばないように、必ずこれを差す。"""
+
+    def __init__(self, *turns):
+        from kei_agent_voice.think import Turn
+        self.turns = list(turns) or [Turn(text="そうだね。")]
+        self.asked = []
+        self.forgotten = False
+
+    def ask(self, text, now=None, deep=None, timeout=None):
+        self.asked.append(text)
+        return self.turns[min(len(self.asked) - 1, len(self.turns) - 1)]
+
+    def forget(self):
+        self.forgotten = True
+
+
+def voice(held, config, mouth=None, codex=None, **kw):
     from kei_agent_voice.session import VoiceSession
 
+    return VoiceSession(held, mouth=mouth or FakeMouth(), config=config,
+                        codex=codex or FakeCodex(), **kw)
+
+
+async def test_only_what_is_addressed_to_kei_is_answered(held, config):
+    from datetime import datetime
+
     mouth = FakeMouth()
-    s = VoiceSession(held, mouth=mouth)
+    s = voice(held, config, mouth)
 
     await s.handle("今日の天気はどう")      # 呼びかけなし
     assert mouth.said == []
 
-    from datetime import datetime
     await s.handle("けい、今日の授業は", now=datetime(2026, 9, 21, 9, 0))
     assert any("データベース" in t for t in mouth.said)
 
 
-async def test_the_name_alone_gets_a_nod(held):
-    from kei_agent_voice.session import NODDED, VoiceSession
+async def test_the_name_alone_gets_a_nod(held, config):
+    from kei_agent_voice.session import NODDED
 
     mouth = FakeMouth()
-    await VoiceSession(held, mouth=mouth).handle("ケイ")
+    await voice(held, config, mouth).handle("ケイ")
     assert mouth.said == [NODDED]
 
 
-async def test_what_the_fast_road_cannot_answer_says_so_for_now(held):
-    """遅い道（Codex）はまだ繋いでいない。黙らずに、その旨を言う。"""
-    from kei_agent_voice.session import NODDED, NOT_YET, VoiceSession
-
-    mouth = FakeMouth()
-    await VoiceSession(held, mouth=mouth).handle("けい、この論文どう思う")
-    assert mouth.said == [NODDED, NOT_YET]
-
-
-async def test_a_broken_answer_does_not_stop_the_loop(held, monkeypatch):
+async def test_a_broken_answer_does_not_stop_the_loop(held, config, monkeypatch):
     """1件捌けなくても、聞き続ける。"""
     import asyncio
 
     from kei_agent_voice import session as mod
-    from kei_agent_voice.session import VoiceSession
 
     mouth = FakeMouth()
-    s = VoiceSession(held, mouth=mouth)
+    s = voice(held, config, mouth)
     monkeypatch.setattr(mod.fast, "answer", lambda *a, **k: 1 / 0)
 
     s.heard.put_nowait("けい、今日の予定は")
@@ -462,11 +477,10 @@ def test_the_real_environment_variables_are_the_ones_read(monkeypatch):
 
 # マイクの開け閉め（常に録らない）
 
-async def test_the_microphone_is_closed_until_slack_turns_it_on(held):
+async def test_the_microphone_is_closed_until_slack_turns_it_on(held, config):
     """既定では開けない。講義中などに録られないように。"""
-    from kei_agent_voice.session import VoiceSession
 
-    s = VoiceSession(held, mouth=FakeMouth())
+    s = voice(held, config)
     import asyncio
     task = asyncio.create_task(s.run())
     await asyncio.sleep(0.05)
@@ -474,9 +488,8 @@ async def test_the_microphone_is_closed_until_slack_turns_it_on(held):
     task.cancel()
 
 
-def test_turning_it_off_closes_the_listener_not_just_ignores_it(held):
+def test_turning_it_off_closes_the_listener_not_just_ignores_it(held, config):
     """閉じるときは、聞く側のプロセスごと終わらせる。"""
-    from kei_agent_voice.session import VoiceSession
 
     closed = []
 
@@ -492,7 +505,7 @@ def test_turning_it_off_closes_the_listener_not_just_ignores_it(held):
             while True:
                 time.sleep(0.01)
 
-    s = VoiceSession(held, mouth=FakeMouth(), ears=FakeEars())
+    s = voice(held, config, ears=FakeEars())
     import asyncio
     s._loop = asyncio.new_event_loop()
     s.set_listening(True)
@@ -522,3 +535,211 @@ def test_the_listen_event_reaches_the_session():
     assert ex.session.calls == [True, False]
     # listen では喋らない
     assert not events.reaction({"kind": "listen", "on": True}).speaks
+
+
+# 遅い道（think.py）。Codex に相談する
+
+def test_the_reply_is_split_into_what_is_spoken_and_what_is_a_request():
+    """依頼の行は読み上げず、依頼として扱う。"""
+    from kei_agent_voice import think
+
+    turn = think.parse(
+        "条件Bだけ精度が落ちてるね。データの偏りを見た方がいい。\n"
+        "🛠 依頼: #10_amr-query / 条件Bの混同行列を出して\n"
+    )
+    assert turn.text == "条件Bだけ精度が落ちてるね。データの偏りを見た方がいい。"
+    assert turn.ask.theme == "amr-query" and turn.ask.text == "条件Bの混同行列を出して"
+    # 形が崩れた行は、依頼にしない（勝手に動き出すより読み上げない方がまし）
+    assert think.parse("🛠 依頼: テーマだけ").ask is None
+
+
+def test_an_aside_is_pulled_out_for_the_follow_up():
+    from kei_agent_voice import think
+
+    assert think.parse(f"{think.ASIDE_MARK} 4限のあとだと時間が足りないよ。").aside \
+        == "4限のあとだと時間が足りないよ。"
+
+
+def test_the_conversation_is_cut_at_a_date_change_or_a_long_gap(tmp_path):
+    """離席から戻ると話題も変わっている。前の文脈を引きずると的外れになる（docs/voice.md の6節）。"""
+    import time
+
+    from kei_agent_voice.think import GAP_SECONDS, Codex
+
+    codex = Codex(tmp_path, tmp_path / "voice")
+    now = time.time()
+    codex.remember("01a0-thread", now)
+
+    assert codex.session_id(now + 60) == "01a0-thread"          # 続きは続き
+    assert codex.session_id(now + GAP_SECONDS + 1) is None      # 長く離席したら切る
+    # 日付が変わったら切る（2時間経っていなくても）
+    midnight = time.mktime(time.strptime(
+        time.strftime("%Y-%m-%d", time.localtime(now + 86400)), "%Y-%m-%d"))
+    assert codex.session_id(midnight + 60) is None
+
+    codex.forget()
+    assert codex.session_id(now + 60) is None
+
+
+def test_codex_is_only_allowed_to_read(tmp_path):
+    """実行するのは Slack の Kei Agent だけ。相談相手には読ませるだけ。"""
+    from kei_agent_voice.think import Codex
+
+    codex = Codex(tmp_path, tmp_path / "voice")
+
+    resumed = codex.build_command("01a0", deep=False, out=tmp_path / "o")
+    assert resumed[:4] == ["codex", "exec", "resume", "01a0"]
+    assert 'sandbox_mode="read-only"' in resumed
+    assert "model_reasoning_effort=low" in resumed
+    # `resume` は -s と -C を断る（`error: unexpected argument '-s' found` で即座に終わる）
+    assert "-s" not in resumed and "-C" not in resumed
+
+    fresh = codex.build_command(None, True, tmp_path / "o")
+    assert "resume" not in fresh and fresh[fresh.index("-C") + 1] == str(tmp_path)
+    assert "model_reasoning_effort=high" in fresh
+
+
+def test_asking_deeply_is_only_for_when_it_was_requested():
+    from kei_agent_voice import think
+
+    assert think.wants_deep("じっくり考えて") and not think.wants_deep("どう思う")
+
+
+async def test_the_slow_road_nods_first_then_answers(held, config):
+    """5秒の沈黙は「壊れている」に見える。先に相槌を返す。"""
+    from kei_agent_voice.session import NODDED, THINKING
+    from kei_agent_voice.think import Turn
+
+    mouth = FakeMouth()
+    codex = FakeCodex(Turn(text="その線でいいと思う。"))
+    await voice(held, config, mouth, codex).handle("けい、この論文どう思う")
+    assert mouth.said == [NODDED, "その線でいいと思う。"]
+
+    deep = FakeMouth()
+    await voice(held, config, deep, FakeCodex(Turn(text="うん。"))).handle("けい、じっくり考えて")
+    assert deep.said[0] == THINKING
+
+
+async def test_a_request_is_read_back_before_it_is_handed_over(held, config):
+    """文字起こしは必ず誤る。動き出してからでは戻せない（docs/voice.md の8節）。"""
+    from kei_agent import ask as asks
+    from kei_agent_voice.session import HANDED
+    from kei_agent_voice.think import Ask, Turn
+
+    mouth = FakeMouth()
+    codex = FakeCodex(Turn(text="やった方がいいね。", ask=Ask("amr-query", "学習曲線を描いて")))
+    s = voice(held, config, mouth, codex)
+
+    await s.handle("けい、この論文どう思う")
+    assert "いい？" in mouth.said[-1]
+    assert asks.pending_asks(config) == []      # 返事をもらうまで渡さない
+
+    await s.handle("うん")                       # 確認には呼びかけが要らない
+    assert mouth.said[-1] == HANDED
+    pending = asks.pending_asks(config)
+    assert len(pending) == 1
+    assert pending[0][1] == {"theme": "amr-query", "text": "学習曲線を描いて",
+                             "kind": "request", "created_at": pending[0][1]["created_at"]}
+
+
+async def test_saying_no_or_something_unclear_does_not_hand_it_over(held, config):
+    from kei_agent import ask as asks
+    from kei_agent_voice.session import DROPPED, UNSURE
+    from kei_agent_voice.think import Ask, Turn
+
+    def asked(reply):
+        return voice(held, config, FakeMouth(),
+                     FakeCodex(Turn(text="うん。", ask=Ask("amr-query", "描いて"))))
+
+    s = asked(None)
+    await s.handle("けい、どう思う")
+    await s.handle("いや、やめといて")
+    assert s.mouth.said[-1] == DROPPED
+
+    t = asked(None)
+    await t.handle("けい、どう思う")
+    await t.handle("えーっと、そのあたりは")
+    assert t.mouth.said[-1] == UNSURE
+    assert asks.pending_asks(config) == []
+
+
+async def test_an_old_confirmation_does_not_fire(held, config):
+    """1時間後の「うん」で勝手に動き出さない。"""
+    from kei_agent_voice.session import CONFIRM_SECONDS
+    from kei_agent_voice.think import Ask, Turn
+
+    mouth = FakeMouth()
+    s = voice(held, config, mouth, FakeCodex(Turn(text="うん。", ask=Ask("amr-query", "描いて"))))
+    await s.handle("けい、どう思う")
+    s._pending_at -= CONFIRM_SECONDS + 1
+
+    await s.handle("うん")                       # 呼びかけも無いので、何も起きない
+    assert "渡した" not in "".join(mouth.said)
+
+
+async def test_the_fast_road_follows_up_only_when_codex_adds_something(held, config):
+    """毎回2回喋るとうるさい。付け足しがあるときだけ（docs/voice.md の3節）。"""
+    from datetime import datetime
+
+    from kei_agent_voice.think import Turn
+
+    mouth = FakeMouth()
+    codex = FakeCodex(Turn(aside="4限のあとだと時間が足りないよ。"))
+    await voice(held, config, mouth, codex).handle(
+        "けい、今日の授業は", now=datetime(2026, 9, 21, 9, 0))
+    assert mouth.said[-1] == "4限のあとだと時間が足りないよ。"
+
+    quiet = FakeMouth()
+    await voice(held, config, quiet, FakeCodex(Turn(text="なし"))).handle(
+        "けい、今日の授業は", now=datetime(2026, 9, 21, 9, 0))
+    assert len(quiet.said) == 1
+
+
+async def test_the_time_question_does_not_cost_a_round_trip(held, config):
+    """時刻に付け足すことはない。往復が乗るだけ。"""
+    from datetime import datetime
+
+    mouth, codex = FakeMouth(), FakeCodex()
+    await voice(held, config, mouth, codex).handle(
+        "けい、いま何時", now=datetime(2026, 9, 21, 14, 5))
+    assert mouth.said == ["いま14時5分だよ。"] and codex.asked == []
+
+
+async def test_a_new_conversation_can_be_asked_for(held, config):
+    from kei_agent_voice.session import FRESH
+
+    mouth, codex = FakeMouth(), FakeCodex()
+    await voice(held, config, mouth, codex).handle("けい、新しく話そう")
+    assert codex.forgotten and mouth.said == [FRESH] and codex.asked == []
+
+
+async def test_a_failure_is_said_out_loud_not_swallowed(held, config):
+    """相談できなかったことは、黙らずに言う。"""
+    from kei_agent_voice.think import Turn
+
+    mouth = FakeMouth()
+    await voice(held, config, mouth, FakeCodex(Turn(failed="Codex の上限に当たったみたい。"))).handle(
+        "けい、どう思う")
+    assert mouth.said[-1] == "Codex の上限に当たったみたい。"
+
+
+async def test_the_conversation_is_written_down(held, config):
+    """全文の控えを日ごとに残す（30日で消える）。"""
+    from kei_agent_voice import journal
+    from kei_agent_voice.think import Turn
+
+    await voice(held, config, FakeMouth(), FakeCodex(Turn(text="そうだね。"))).handle(
+        "けい、この論文どう思う")
+
+    written = list((config.overview_dir / journal.VOICE_DIR).glob("*.md"))
+    assert len(written) == 1
+    body = written[0].read_text(encoding="utf-8")
+    assert "この論文どう思う" in body and "そうだね。" in body
+
+
+def test_the_wake_word_is_not_cut_out_of_the_middle_of_a_word():
+    """「けい、この設計で〜」が「でいちばん〜」になっていた（「設計」の「計」まで落ちていた）。"""
+    from kei_agent_voice import wake
+
+    assert wake.request("けい、この設計でいちばん危ないところは") == "この設計でいちばん危ないところは"
+    assert wake.request("けい、計測の結果どうだった") == "計測の結果どうだった"

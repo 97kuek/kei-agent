@@ -58,13 +58,16 @@ def request(text: str) -> str:
     """呼びかけを落として、依頼の本文だけを返す。
 
     元の文字（漢字やカタカナのまま）から落とすので、`_hiragana` は判定にだけ使う。
+
+    **落とすのは、当たった呼びかけ1つだけ。** いちばん後ろの当たりまで落とすようにしていたら、
+    「けい、この設計で〜」が「でいちばん〜」になった（「設計」の「計」まで落ちていた）。
     """
     if not called(text):
         return text.strip()
     body = text.strip()
-    cut = 0
-    for name in (*SPELLED, "ケイ", "ケー", *KANJI):
+    for name in (*SPELLED, "ケイ", "ケー"):
         found = body.find(name, 0, HEAD + len(name))
         if found >= 0:
-            cut = max(cut, found + len(name))
-    return _LEAD.sub("", body[cut:]).strip()
+            return _LEAD.sub("", body[found + len(name):]).strip()
+    # 漢字に化けた回。先頭の1文字だけ落とす（`called` が先頭しか認めていない）
+    return _LEAD.sub("", body[1:]).strip()
