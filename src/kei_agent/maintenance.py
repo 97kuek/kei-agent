@@ -19,9 +19,8 @@ from pathlib import Path
 
 from kei_agent.config import Config
 from kei_agent.store import Store
-from kei_agent.themes import OVERVIEW_DIR
 
-STATE_DIR = "_kei_agent_state"
+STATE_DIR = "state"
 # GitHub が受け付けない大きさ。これより大きいファイルはコミットしない
 MAX_FILE_BYTES = 50 * 1024 * 1024
 _EXCLUDE_BEGIN = "# kei-agent: 大きすぎるファイル（自動で書き換える）"
@@ -60,13 +59,15 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     m = config.maintenance
     root = config.research_root
 
-    digests = list((root / OVERVIEW_DIR / ".kei-agent" / "digest").glob("*.md"))
-    # 声の会話の全文（決まったことは Slack に残るので、控えは Daily の材料と同じ日数で消す）
-    digests += list((root / OVERVIEW_DIR / "voice").glob("*.md"))
+    digests = list((config.overview_dir / ".kei-agent" / "digest").glob("*.md"))
+    # 声の会話の全文（控えは Daily の材料と同じ日数で消す）
+    digests += list((config.overview_dir / "voice").glob("*.md"))
     removed_digests = remove_older_than(digests, now - m.digest_retention_days * 86400)
 
-    # 消すのは ~/research の下のディレクトリに対応するセッションだけ。ほかのプロジェクトには触らない
+    # 消すのは、Kei Agent が claude を動かす場所に対応するセッションだけ。ほかのプロジェクトには触らない
     workspaces = [p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")] if root.is_dir() else []
+    if config.overview_dir.is_dir():
+        workspaces.append(config.overview_dir)
     names = {claude_project_dir_name(p.resolve()) for p in workspaces}
     sessions: list[Path] = []
     for name in names:
@@ -110,12 +111,12 @@ def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
 
 
 def dump_state(config: Config, store: Store | None = None) -> Path:
-    """Kei Agent の状態を、差分の読みやすい形で ~/research/_kei_agent_state/ に書き出す。
+    """Kei Agent の状態を、差分の読みやすい形で <agent_root>/state/ に書き出す。
 
     Kei Agent が動いている最中に読むので、いったんスナップショットを取ってから書き出す。
     直接 iterdump すると、ジョブの途中の状態が混ざる。
     """
-    out = config.research_root / STATE_DIR
+    out = config.agent_root / STATE_DIR
     out.mkdir(parents=True, exist_ok=True)
     if config.db_path.exists():
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,12 +174,27 @@ async def _git(repo: Path, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> 
 
 
 async def backup(config: Config, day: str | None = None, store: Store | None = None) -> dict:
-    repo = config.research_root
+    """研究データと、Kei Agent 自身のもの（研究全体の作業場と状態）を、それぞれ Git に保存する。
+
+    2つに分かれているのは、置き場所を分けたから（docs/design.md）。研究のバックアップが
+    通っても Kei Agent 側が未設定なことがあるので、そこは止めずに結果に入れて知らせる。
+    """
+    await asyncio.to_thread(dump_state, config, store)
+    d = date.fromisoformat(day) if day else date.today()
+    detail = await _backup_repo(config.research_root, f"{d.month}/{d.day} の研究データを保存する")
+    if (config.agent_root / ".git").is_dir():
+        agent = await _backup_repo(config.agent_root, f"{d.month}/{d.day} の Kei Agent のデータを保存する")
+        detail["agent_root"] = agent
+    else:
+        # Daily・振り返り・backlog・状態が、どこにも残らないまま進むのを黙って許さない
+        detail["agent_root"] = {"status": "not_a_repo", "path": str(config.agent_root)}
+    return detail
+
+
+async def _backup_repo(repo: Path, message: str) -> dict:
     if not (repo / ".git").is_dir():
         raise BackupError(f"{repo} が Git のリポジトリではありません（deploy/backup-init.sh を実行してください）")
-    await asyncio.to_thread(dump_state, config, store)
     large = await asyncio.to_thread(exclude_large_files, repo)
-
     for path in large:
         # .git/info/exclude は「まだ追跡していない」ファイルにしか効かない。
         # 小さいうちにコミットしたファイルが育った場合は、追跡から外さないと push が通らない
@@ -190,8 +206,7 @@ async def backup(config: Config, day: str | None = None, store: Store | None = N
     code, _ = await _git(repo, "diff", "--cached", "--quiet")
     committed = False
     if code == 1:
-        d = date.fromisoformat(day) if day else date.today()
-        code, out = await _git(repo, "commit", "-q", "-m", f"{d.month}/{d.day} の研究データを保存する")
+        code, out = await _git(repo, "commit", "-q", "-m", message)
         if code:
             raise BackupError(f"git commit: {out}")
         committed = True

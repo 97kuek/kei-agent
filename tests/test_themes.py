@@ -10,7 +10,7 @@ def test_resolve_kinds(config):
 
     overview = themes.resolve(config, "research-overview")
     assert overview.kind is ChannelKind.OVERVIEW
-    assert overview.cwd == config.research_root / "_overview"
+    assert overview.cwd == config.overview_dir
 
     theme = themes.resolve(config, "vlm-counting")
     assert theme.kind is ChannelKind.THEME

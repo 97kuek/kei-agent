@@ -129,11 +129,14 @@ class ResearchExecutor(AgentExecutor):
             await self._fail(updater, f"pueue が失敗しました: {e}")
 
     def _theme_dir(self, cwd: str) -> Path:
-        """研究テーマのディレクトリの中だけを受け付ける（渡された場所で何でも動かさない）。"""
-        root = self.config.research_root.resolve()
+        """ジョブを動かしてよい場所だけを受け付ける（渡された場所で何でも動かさない）。
+
+        研究テーマの中と、研究全体の作業場（`<agent_root>/overview`。研究テーマの外にある）。
+        """
+        roots = (self.config.research_root.resolve(), self.config.overview_dir.resolve())
         path = Path(cwd).expanduser().resolve()
-        if not path.is_dir() or root not in path.parents:
-            raise ValueError(f"研究のディレクトリの中ではありません: {cwd}")
+        if not path.is_dir() or not any(root in path.parents or root == path for root in roots):
+            raise ValueError(f"ジョブを動かしてよい場所ではありません: {cwd}")
         return path
 
     async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:

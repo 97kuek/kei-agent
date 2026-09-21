@@ -137,7 +137,7 @@ Kei Agent はデータベースとプロパティを名前で読むので、Noti
 |---|---|
 | 夜間の Task | ✅ Task の「今夜」ビューを Kei Agent が読む。Slack の 🌙 は、Notion に Task を作る入口 |
 | Task の結果 | Task の「状態」と「結果」を Kei Agent が書き、Slack のスレッドにも返す |
-| Daily と振り返り | 📝 ノートにページを作る。ファイル（`_overview/daily/`、`reviews/`）は Codex が読むために残す |
+| Daily と振り返り | 📝 ノートにページを作る。ファイル（`~/kei-agent/overview/` の下）は Codex が読むために残す |
 | 計画と考察 | 📝 ノートの計画と考察を、Daily の材料として Kei Agent が読む |
 
 Kei Agent 本体が Notion の API（コネクト「Kei Agent」のトークン）で読み書きする（`src/kei_agent/notion_store.py`）。

@@ -14,8 +14,8 @@ Codex App で `~/research/` をプロジェクトとして開く。これで次�
 | 文献調査の結果 | `~/research/<theme>/papers/` |
 | スレッドの経緯（依頼と Kei Agent の返答） | `~/research/<theme>/.kei-agent/threads/<thread_ts>.md` |
 | ジョブの状態 | `~/research/<theme>/.kei-agent/jobs/<ID>.json` |
-| Daily | `~/research/_overview/daily/<日付>.md` |
-| 振り返りの材料 | `~/research/_overview/reviews/<日付>.md` |
+| Daily | `~/kei-agent/overview/daily/<日付>.md` |
+| 振り返りの材料 | `~/kei-agent/overview/reviews/<日付>.md` |
 
 Codex に最初に伝えておくとよいこと（プロジェクトの指示として `~/research/AGENTS.md` に置いてもよい）:
 

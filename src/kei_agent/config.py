@@ -82,7 +82,10 @@ class A2AConfig:
 
 @dataclass(frozen=True)
 class Config:
+    # 研究テーマだけを置く場所（研究エージェントの領分）
     research_root: Path
+    # Kei Agent 自身のもの（研究全体の作業場と、状態の書き出し）。研究テーマと混ぜない
+    agent_root: Path
     # 授業の作業場（大学エージェントの claude が動くところ。資料は置かない）
     course_root: Path
     state_dir: Path
@@ -126,9 +129,18 @@ class Config:
         return self.repo_root / "prompts" / "system.md"
 
     @property
+    def overview_dir(self) -> Path:
+        """研究全体・中長期の方針のチャンネルが書く場所。
+
+        Daily・振り返り・声の記録は、研究だけでなく授業と仕事の内容も含むので、
+        研究テーマの隣ではなく Kei Agent 側に置く（docs/design.md）。
+        """
+        return self.agent_root / "overview"
+
+    @property
     def backlog_path(self) -> Path:
-        # 研究データと一緒にバックアップする。公開しているコードのリポジトリには書かない
-        return self.research_root / "_overview" / "backlog.md"
+        # 公開しているコードのリポジトリには書かない（バックアップの対象には入る）
+        return self.overview_dir / "backlog.md"
 
 
 class ConfigError(ValueError):
@@ -137,7 +149,7 @@ class ConfigError(ValueError):
 
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
-    "research_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
+    "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule",
     "maintenance", "a2a",
 }
@@ -204,6 +216,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_times(schedule, data.get("maintenance", {}))
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
+        agent_root=_expand(data.get("agent_root", "~/kei-agent")),
         course_root=_expand(data.get("course_root", "~/course")),
         state_dir=_expand(data.get("state_dir", "~/.local/state/kei-agent")),
         repo_root=REPO_ROOT,

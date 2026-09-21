@@ -242,8 +242,8 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     detail = await scheduler.run_daily("2026-09-18")
 
     call, = claude.calls
-    assert call["cwd"] == config.research_root / "_overview"
-    digest = config.research_root / "_overview" / ".kei-agent" / "digest" / "2026-09-18-daily.md"
+    assert call["cwd"] == config.overview_dir
+    digest = config.overview_dir / ".kei-agent" / "digest" / "2026-09-18-daily.md"
     text = digest.read_text()
     assert "10.1.md" in text and "vlm: 新着なし" in text
     assert "条件Cも回して（vlm）: 完了 71%" in text
@@ -297,7 +297,7 @@ async def test_digest_skips_theme_never_asked(env, config, store):
 
 async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config, store):
     scheduler, assistant, slack, claude = env
-    review = config.research_root / "_overview" / "reviews" / "2026-09-18.md"
+    review = config.overview_dir / "reviews" / "2026-09-18.md"
 
     def write_review(cwd):
         review.parent.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,6 @@ from kei_agent.config import Config
 from kei_agent.notion import NotionError
 from kei_agent.slack_text import format_duration
 from kei_agent.store import Store
-from kei_agent.themes import OVERVIEW_DIR
 
 # 材料に入れるノートの本文の長さ
 NOTE_EXCERPT = 1500
@@ -209,7 +208,7 @@ class DigestBuilder:
 
     def _yesterday_review(self, now: float) -> list[str]:
         yesterday = (datetime.fromtimestamp(now).date() - timedelta(days=1)).isoformat()
-        review = self.config.research_root / OVERVIEW_DIR / "reviews" / f"{yesterday}.md"
+        review = self.config.overview_dir / "reviews" / f"{yesterday}.md"
         return ["", "## 前日の振り返り（ファイル）", "", f"- `{review}`" if review.exists() else "- なし"]
 
     async def _notion(self, since: float, now: float) -> list[str]:

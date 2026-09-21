@@ -20,7 +20,7 @@ def age(path, days):
 def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
-    digest_dir = config.research_root / "_overview" / ".kei-agent" / "digest"
+    digest_dir = config.overview_dir / ".kei-agent" / "digest"
     digest_dir.mkdir(parents=True)
     (digest_dir / "old.md").write_text("x")
     (digest_dir / "new.md").write_text("x")
@@ -96,7 +96,10 @@ async def test_backup_commits_and_pushes(config, store, tmp_path):
     log = git(remote, "log", "--format=%s", "main")
     assert log.splitlines()[0] == "9/18 の研究データを保存する"
     files = git(remote, "ls-tree", "-r", "--name-only", "main")
-    assert "vlm/result.csv" in files and "_kei_agent_state/kei-agent.sql" in files
+    # 状態の書き出しは Kei Agent 側に移したので、研究のリポジトリには入らない
+    assert "vlm/result.csv" in files and "kei-agent.sql" not in files
+    # Kei Agent 側が Git になっていないことは、黙って見逃さずに結果へ出す
+    assert detail["agent_root"] == {"status": "not_a_repo", "path": str(config.agent_root)}
 
     again = await maintenance.backup(config, "2026-09-18")
     assert again["committed"] is False
@@ -165,7 +168,7 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
 
 def test_cleanup_removes_old_voice_logs(config, tmp_path):
     """声の会話の控えも、Daily の材料と同じ日数で消す。"""
-    voice = config.research_root / "_overview" / "voice"
+    voice = config.overview_dir / "voice"
     voice.mkdir(parents=True)
     old, new = voice / "2026-01-01.md", voice / "2026-09-19.md"
     for path in (old, new):
@@ -215,3 +218,36 @@ async def test_dump_state_works_from_another_thread(config, store):
     out = await asyncio.to_thread(maintenance.dump_state, config, store)
     sql = (out / "kei-agent.sql").read_text()
     assert "CREATE TABLE" in sql and "sess-1" in sql
+
+
+async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
+    """Daily・振り返り・backlog と状態は ~/research の外にあるので、別のリポジトリに保存する。"""
+    def repo(path, remote_name):
+        remote = tmp_path / remote_name
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+        path.mkdir(parents=True, exist_ok=True)
+        git(path, "init", "-q", "-b", "main")
+        git(path, "config", "user.name", "test")
+        git(path, "config", "user.email", "test@example.com")
+        git(path, "remote", "add", "origin", str(remote))
+        (path / ".keep").write_text("")
+        git(path, "add", "-A")
+        git(path, "commit", "-q", "-m", "init")
+        git(path, "push", "-q", "-u", "origin", "main")
+        return remote
+
+    research_remote = repo(config.research_root, "research.git")
+    agent_remote = repo(config.agent_root, "agent.git")
+    (config.overview_dir / "reviews").mkdir(parents=True)
+    (config.overview_dir / "reviews" / "2026-09-18.md").write_text("# 振り返り")
+
+    detail = await maintenance.backup(config, "2026-09-18")
+
+    assert detail["agent_root"]["committed"] is True
+    agent_files = git(agent_remote, "ls-tree", "-r", "--name-only", "main")
+    assert "overview/reviews/2026-09-18.md" in agent_files
+    assert "state/kei-agent.sql" in agent_files          # 状態の書き出しもこちら側
+    research_files = git(research_remote, "ls-tree", "-r", "--name-only", "main")
+    assert "kei-agent.sql" not in research_files
+    assert git(agent_remote, "log", "--format=%s", "main").splitlines()[0] == \
+        "9/18 の Kei Agent のデータを保存する"

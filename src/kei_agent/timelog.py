@@ -1,7 +1,7 @@
 """研究時間の記録。
 
 人の時間は Toggl（2.0）で自分で測り、Kei Agent の稼働時間は `runs` テーブルから数える。
-その2つを日ごと・テーマごとに並べた CSV を `_overview/time/` に書き、
+その2つを日ごと・領域ごとに並べた CSV を `<agent_root>/overview/time/` に書き、
 グラフは Claude に作ってもらう（Kei Agent は材料を用意するところまで）。
 
 Toggl の鍵（`toggl_sk_...`）は環境変数 `TOGGL_API_TOKEN` から、宛先の組織とワークスペースの ID は
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from kei_agent.config import Config
 from kei_agent.store import Store
-from kei_agent.themes import OVERVIEW_DIR, theme_dirs
+from kei_agent.themes import theme_dirs
 
 log = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | No
         except TogglError as e:
             log.warning("Toggl から読めません: %s", e)
 
-    path = config.research_root / OVERVIEW_DIR / TIME_DIR / f"{monday.isoformat()}.csv"
+    path = config.overview_dir / TIME_DIR / f"{monday.isoformat()}.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)

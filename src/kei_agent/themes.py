@@ -113,14 +113,14 @@ def resolve(config: Config, channel_name: str) -> Workspace:
         # 作業場は大学エージェントの claude が使う（本体はここで claude を動かさない）
         return Workspace(channel_name, ChannelKind.COURSE, config.course_root)
     if channel_name in config.overview_channels:
-        return Workspace(channel_name, ChannelKind.OVERVIEW, config.research_root / OVERVIEW_DIR)
+        return Workspace(channel_name, ChannelKind.OVERVIEW, config.overview_dir)
     if not _SAFE_NAME.match(channel_name) or ".." in channel_name:
         raise ValueError(f"テーマ名に使えないチャンネル名です: {channel_name!r}")
     return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name)
 
 
 def theme_dirs(config: Config) -> list[Path]:
-    """研究テーマの作業用ディレクトリ。`_overview` などの特別なものは含めない。
+    """研究テーマの作業用ディレクトリ。
 
     「どれがテーマか」の判断は resolve() に合わせる（2か所で別々に決めない）。
     """

@@ -73,15 +73,16 @@ def _abs_rule(tool: str, path: Path) -> str:
     return f"{tool}(/{path}/**)"
 
 
-def read_root(config: Config, ws: Workspace) -> Path:
-    """そのワークスペースで読んでよい範囲の根。"""
+def read_roots(config: Config, ws: Workspace) -> tuple[Path, ...]:
+    """そのワークスペースで読んでよい範囲の根。書き込み先（Edit）は、これとは別に ws.cwd だけ。"""
     from kei_agent.themes import ChannelKind
     assert ws.cwd is not None
     if ws.kind is ChannelKind.OVERVIEW:
-        return config.research_root   # 各テーマを読むだけ。書き込みは _overview の中だけ
+        # 各テーマを読む。作業場は ~/research の外にあるので、そこも読めるようにする
+        return (config.research_root, ws.cwd)
     if ws.kind is ChannelKind.IMPROVE:
-        return config.repo_root       # 案を考えるために Kei Agent のコードを読む。書き込みは作業用の一時ディレクトリだけ
-    return ws.cwd                     # テーマと、自分を直すときの worktree
+        return (config.repo_root,)    # 案を考えるために Kei Agent のコードを読む。書き込みは作業用の一時ディレクトリだけ
+    return (ws.cwd,)                  # テーマと、自分を直すときの worktree
 
 
 def build_settings(config: Config, ws: Workspace) -> dict:
@@ -104,7 +105,7 @@ def build_settings(config: Config, ws: Workspace) -> dict:
         },
         "permissions": {
             "allow": [
-                _abs_rule("Read", read_root(config, ws)),
+                *[_abs_rule("Read", root) for root in read_roots(config, ws)],
                 _abs_rule("Edit", ws.cwd),
                 "Glob",
                 "Grep",

@@ -9,7 +9,7 @@ Kei Agent は、Slack で頼んだ作業を Mac 上のエージェントが進�
 - エージェントを増やす・直すときは `docs/agents.md` の決まりに合わせる（名前、返事の封筒、柵）
 - Notion の構成を変えるときは `docs/notion-layout.md`、`src/kei_agent/notion.py`（作る側）、`src/kei_agent/notion_store.py`（読み書きする側）を合わせて直す
 - 大きな変更（Slack App の権限、sandbox の設定、柵の置き方）は、Issue で相談してから始める
-- 使っていて気づいた要望は、Slack の `#00_kei-agent` で `@Kei Agent` をつけて書くと `~/research/_overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
+- 使っていて気づいた要望は、Slack の `#00_kei-agent` で `@Kei Agent` をつけて書くと `~/kei-agent/overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
 
 ## 開発の準備
 

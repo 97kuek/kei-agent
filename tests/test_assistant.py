@@ -252,12 +252,12 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 経過をもっと細かく"})
     await settle(assistant)
 
-    backlog = (config.research_root / "_overview" / "backlog.md").read_text()
+    backlog = config.backlog_path.read_text()
     assert "#kei-agent" in backlog and "経過をもっと細かく" in backlog
     # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
     assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
     assert "https://example.slack.com/archives/C9/p201" in backlog
-    assert slack.texts()[-1] == f"要望を `{config.research_root / '_overview' / 'backlog.md'}` に記録したよ。"
+    assert slack.texts()[-1] == f"要望を `{config.backlog_path}` に記録したよ。"
 
 
 async def test_thread_broadcast_reply_continues_thread(env, store):
@@ -356,7 +356,7 @@ async def test_overview_channel_runs_in_overview_dir(env, config):
     assistant, slack, claude, _ = env
     await assistant.on_mention({"channel": "C5", "user": "UME", "ts": "30.1", "text": "<@UBOT> 全体を見て"})
     await settle(assistant)
-    assert claude.calls[0]["cwd"] == config.research_root / "_overview"
+    assert claude.calls[0]["cwd"] == config.overview_dir
 
 
 async def test_job_submitted_during_run_then_resumed_when_finished(env, config, store):

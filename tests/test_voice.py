@@ -262,7 +262,7 @@ def test_journal_keeps_the_whole_conversation(config):
     journal.append(config, "2026-09-19", "依頼者", "こんにちは")
     path = journal.append(config, "2026-09-19", "Kei Agent（声）", "やあ")
     text = path.read_text()
-    assert path == config.research_root / "_overview" / "voice" / "2026-09-19.md"
+    assert path == config.overview_dir / "voice" / "2026-09-19.md"
     assert "## 依頼者" in text and "## Kei Agent（声）" in text and "やあ" in text
     assert isinstance(path, Path)
 

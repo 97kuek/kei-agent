@@ -9,9 +9,9 @@
 
    | 種類 | チャンネル名 | Kei Agent の動き |
    |---|---|---|
-   | 研究全体・朝のまとめ | `#01_overview` | すべてのテーマを読むだけ。書き込みは `~/research/_overview/`。Daily と振り返りもここに届く |
+   | 研究全体・朝のまとめ | `#01_overview` | すべてのテーマを読むだけ。書き込みは `~/kei-agent/overview/`。Daily と振り返りもここに届く |
    | 中長期の方針 | `#research-strategy` | 同上 |
-   | Kei Agent の改善 | `#00_kei-agent` | 要望を `~/research/_overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
+   | Kei Agent の改善 | `#00_kei-agent` | 要望を `~/kei-agent/overview/backlog.md` に記録し、案に同意すると Kei Agent が自分のコードを直す（9章）。Kei Agent がうまく動かなかったときの知らせもここに届く |
    | 研究テーマ | テーマの名前（例: `#vlm-counting`） | Kei Agent を招待すると、`~/research/<チャンネル名>/` で作業する。Notion のテーマの名前も同じ |
    | 大学 | `#course` | 授業と課題。claude -p は動かさず、大学エージェント（A2A）に取り次ぐ（7.5節） |
 
@@ -230,7 +230,7 @@ claude.ai の設定で Box と Notion の連携を繋いでおくこと。使わ
 ## 8. バックアップとログ
 
 `~/research/` を非公開の GitHub リポジトリ（`research-data`）にし、毎晩 22:00 に Kei Agent がコミットして push する。
-Kei Agent の状態（SQLite の中身を SQL にしたものと、Notion の ID）も `~/research/_kei_agent_state/` に書き出して一緒に保存する。
+Kei Agent の状態（SQLite の中身を SQL にしたものと、Notion の ID）も `~/kei-agent/state/` に書き出して一緒に保存する。
 50MB を超えるファイルは GitHub に置けないので、自動でコミットから外す。
 
 ```zsh
@@ -238,13 +238,13 @@ deploy/backup-init.sh              # 最初の1回だけ。非公開リポジト
 uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップを1回動かす
 ```
 
-別の Mac に移すときは、`research-data` を `~/research` に clone し、`_kei_agent_state/kei-agent.sql` から状態を戻す（`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/research/_kei_agent_state/kei-agent.sql`）。
+別の Mac に移すときは、`research-data` を `~/research` に clone し、`state/kei-agent.sql` から状態を戻す（`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql`）。
 
 同じ 22:00 に、古いファイルを整理する（日数は `config.toml` の `[maintenance]`）。
 
 | 整理するもの | 残す日数 |
 |---|---|
-| Daily と振り返りの材料（`_overview/.kei-agent/digest/`） | 30日 |
+| Daily と振り返りの材料（`overview/.kei-agent/digest/`） | 30日 |
 | テーマのディレクトリで動かした Claude のセッションの記録（`~/.claude/projects/` のうち `~/research` の下に対応するものだけ） | 90日。消えたセッションのスレッドは、次に返信したときにスレッドの履歴から続きを始める |
 | Kei Agent が自分を直すのに使った worktree（`<state_dir>/worktrees/`）と、案を考えるときの一時ディレクトリ | 直している最中のもの以外は毎晩消す |
 
@@ -263,7 +263,7 @@ uv run kei-agent-voice
 - 喋る入口は、いまのところ Aqua Voice などで「ターミナルに入力する」形
 - Enter だけ押すと読み上げが止まる。「新しく話そう」で会話を切る。「じっくり考えて」を含めると、その回だけ深く考える
 - 決まったことは Slack に残り、依頼は読み上げの確認を経て Kei Agent に渡る（`<state_dir>/asks/`）
-- 声の全文は `~/research/_overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
+- 声の全文は `~/kei-agent/overview/voice/<日付>.md` に残り、毎晩の保守で30日で消える
 - 手でも渡せる: `uv run kei-agent-ask --theme amr-query "〜して"`、`--note` を付けると作業させず記録だけ
 
 ## 10. Kei Agent が自分を入れ替えるときの動き

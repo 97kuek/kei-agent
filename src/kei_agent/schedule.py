@@ -23,7 +23,6 @@ from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
 from kei_agent.slack_text import AWAITING_MARKER, clean_text
 from kei_agent.store import Store
-from kei_agent.themes import OVERVIEW_DIR
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +78,7 @@ class Scheduler:
 
     @property
     def overview_dir(self) -> Path:
-        return self.config.research_root / OVERVIEW_DIR
+        return self.config.overview_dir
 
     @property
     def overview_channel_name(self) -> str:

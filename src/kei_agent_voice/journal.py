@@ -6,13 +6,12 @@ import time
 from pathlib import Path
 
 from kei_agent.config import Config
-from kei_agent.themes import OVERVIEW_DIR
 
 VOICE_DIR = "voice"
 
 
 def path_for(config: Config, day: str) -> Path:
-    return config.research_root / OVERVIEW_DIR / VOICE_DIR / f"{day}.md"
+    return config.overview_dir / VOICE_DIR / f"{day}.md"
 
 
 def append(config: Config, day: str, who: str, text: str, now: float | None = None) -> Path:

@@ -12,6 +12,7 @@ from kei_agent.store import Store
 def config(tmp_path: Path) -> Config:
     return Config(
         research_root=tmp_path / "research",
+        agent_root=tmp_path / "kei-agent",
         course_root=tmp_path / "course",
         state_dir=tmp_path / "state",
         repo_root=REPO_ROOT,

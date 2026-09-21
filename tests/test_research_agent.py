@@ -220,6 +220,6 @@ async def test_a_job_outside_the_research_directory_is_refused(job_server):
 
     base, pueue = job_server
     remote = RemotePueue(Agent(base, TOKEN, timeout=30))
-    with pytest.raises(RuntimeError, match="研究のディレクトリの中ではありません"):
+    with pytest.raises(RuntimeError, match="ジョブを動かしてよい場所ではありません"):
         await remote.add("/tmp", "rm -rf /", "kei-agent-9")
     assert pueue.calls == []

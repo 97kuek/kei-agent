@@ -30,7 +30,7 @@ def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
     ws = themes.resolve(config, "research-overview")
     allow = guard.build_settings(config, ws)["permissions"]["allow"]
     assert f"Read(/{config.research_root}/**)" in allow
-    assert f"Edit(/{config.research_root / '_overview'}/**)" in allow
+    assert f"Edit(/{config.overview_dir}/**)" in allow
     assert f"Edit(/{config.research_root}/**)" not in allow
 
 
