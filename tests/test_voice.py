@@ -1,64 +1,12 @@
-"""机の上の音声対話（docs/design.md の12章）。"""
+"""声のレイヤ（docs/voice.md）。
 
-import json
-import time
-from pathlib import Path
+机の上で喋る口。本体から出来事を受け取り、言い方と顔は自分で決める。
+"""
 
 import pytest
 
-from kei_agent import ask
-from kei_agent_voice import bridge, journal, markers
-from kei_agent_voice.app import Session
-from kei_agent_voice.brain import Codex, today, wants_deep
+from kei_agent_voice import events, markers
 
-
-class FakeSpeaker:
-    """読み上げの代わり。喋った文と、止められた回数を覚える。"""
-
-    def __init__(self):
-        self.said: list[str] = []
-        self.stopped = 0
-        self.enabled = True
-
-    def say(self, sentence):
-        self.said.append(sentence)
-
-    def stop(self):
-        self.stopped += 1
-
-
-class FakeCodex:
-    """Codex の代わり。決めた返事を返し、渡された文を覚える。"""
-
-    def __init__(self, replies=None):
-        self.replies = list(replies or [])
-        self.asked: list[str] = []
-        self.forgotten = 0
-
-    def ask(self, text, day, deep=None, on_text=None):
-        self.asked.append(text)
-        turn = self.replies.pop(0) if self.replies else _turn("うん")
-        if on_text and turn.text:
-            on_text(turn.text)
-        return turn
-
-    def forget(self):
-        self.forgotten += 1
-
-
-def _turn(text="", failed=None, limit_reset=None):
-    from kei_agent_voice.brain import Turn
-    return Turn(text=text, failed=failed, limit_reset=limit_reset)
-
-
-@pytest.fixture
-def session(config):
-    speaker = FakeSpeaker()
-    codex = FakeCodex()
-    return Session(config=config, codex=codex, speaker=speaker), codex, speaker
-
-
-# 目印と読み上げ
 
 def test_parse_pulls_out_the_markers():
     reply = markers.parse(
@@ -86,204 +34,6 @@ def test_long_sentence_is_cut_at_a_comma():
 
 # 会話
 
-def test_reply_is_spoken_and_written_down(session, config):
-    s, codex, speaker = session
-    codex.replies = [_turn("そこは4条件で比べるのがいいと思う。\n🎯 テーマ: amr-query")]
-
-    s.handle("条件の比べ方どうしよう")
-
-    assert speaker.said == ["そこは4条件で比べるのがいいと思う。"]
-    assert s.theme == "amr-query"
-    log = journal.path_for(config, today()).read_text()
-    assert "条件の比べ方どうしよう" in log and "4条件で比べる" in log
-
-
-def test_empty_line_stops_the_speech(session):
-    s, codex, speaker = session
-    s.handle("")
-    assert speaker.stopped == 1 and codex.asked == []
-
-
-def test_new_conversation_forgets_the_session(session):
-    s, codex, _ = session
-    assert "新しく話そう" in s.handle("新しく話そう")
-    assert codex.forgotten == 1
-
-
-def test_decision_is_recorded_in_slack_through_kei_agent(session, config):
-    s, codex, _ = session
-    s.theme = "amr-query"
-    codex.replies = [_turn("じゃあそれで進めよう。\n📌 決定: moments を正解として使う")]
-
-    s.handle("これで決めていい？")
-
-    asks = [payload for _, payload in ask.pending_asks(config)]
-    assert asks == [{"theme": "amr-query", "text": "moments を正解として使う", "kind": "note",
-                     "created_at": pytest.approx(time.time(), abs=10)}]
-
-
-def test_request_is_read_back_before_it_is_sent(session, config):
-    s, codex, speaker = session
-    s.theme = "amr-query"
-    codex.replies = [_turn("やっておくね。\n🛠 依頼: 条件ごとの精度を集計して")]
-
-    said = s.handle("さっきの集計やっといて")
-    assert "いい？" in said and ask.pending_asks(config) == []      # まだ渡さない
-
-    s.say(said)
-    sent = s.handle("いいよ")
-    assert "渡したよ" in sent
-    payload = ask.pending_asks(config)[0][1]
-    assert payload["text"] == "条件ごとの精度を集計して" and payload["kind"] == "request"
-
-
-def test_unclear_answer_does_not_send_the_request(session, config):
-    s, codex, _ = session
-    s.theme = "amr-query"
-    codex.replies = [_turn("🛠 依頼: 集計して")]
-    s.handle("やっといて")
-    assert "やめておく" in s.handle("えーと")
-    assert ask.pending_asks(config) == []
-
-
-def test_request_can_be_cancelled(session, config):
-    s, codex, _ = session
-    s.theme = "amr-query"
-    codex.replies = [_turn("🛠 依頼: 全部消して")]
-    s.handle("やっといて")
-    assert "やめておく" in s.handle("やめて")
-    assert ask.pending_asks(config) == []
-
-
-def test_request_without_a_theme_asks_for_one(session, config):
-    s, codex, _ = session
-    codex.replies = [_turn("🛠 依頼: 集計して")]
-    assert "テーマ" in s.handle("やっといて")
-    assert ask.pending_asks(config) == []
-
-
-def test_usage_limit_is_explained_with_the_reset_time(session):
-    s, codex, _ = session
-    codex.replies = [_turn(failed="You've hit your usage limit ... try again at 6:01 PM.", limit_reset="6:01 PM")]
-    said = s.handle("どう思う？")
-    assert "上限" in said and "6:01 PM" in said and "Slack の Kei Agent" in said
-
-
-# 終わったことの知らせ
-
-def test_finished_work_is_announced_once(session, config, store):
-    s, codex, speaker = session
-    run = store.start_run("C1", "1.1", "amr-query", "voice")
-    store.end_run(run, False, None)
-    s.watcher = bridge.Watcher(config, since=0)
-
-    s.announce_finished()
-    s.announce_finished()
-
-    spoken = "".join(speaker.said)
-    assert spoken.count("終わったよ") == 1 and "結果は Slack に出てる" in spoken
-
-
-def test_failed_work_is_announced_as_failed(session, config, store):
-    s, codex, speaker = session
-    run = store.start_run("C1", "1.1", "amr-query", "voice")
-    store.end_run(run, True, None)
-    s.watcher = bridge.Watcher(config, since=0)
-
-    s.announce_finished()
-
-    assert any("うまくいかなかった" in t for t in speaker.said)
-
-
-# Codex の呼び方
-
-def test_deep_thinking_is_asked_for_by_words():
-    assert wants_deep("じっくり考えてみて") and not wants_deep("どう思う？")
-
-
-def test_command_resumes_the_same_conversation(tmp_path):
-    codex = Codex(cwd=tmp_path, state_dir=tmp_path / "voice")
-    first = codex.build_command(None, deep=False)
-    assert "resume" not in first and "model_reasoning_effort=low" in first
-
-    codex.remember("2026-09-19", "abc-123")
-    assert codex.session_id("2026-09-19") == "abc-123"
-    assert codex.session_id("2026-09-20") is None      # 日が変わったら新しい会話
-
-    resumed = codex.build_command("abc-123", deep=True)
-    assert resumed[2:4] == ["resume", "abc-123"] and "model_reasoning_effort=high" in resumed
-
-
-def test_ask_reads_the_last_message_and_the_stream(tmp_path):
-    """codex exec の代わりに、出来事と最後の返事を出す小さなコマンドを使う。"""
-    fake = tmp_path / "fake-codex.py"
-    fake.write_text(
-        "import json, sys\n"
-        "args = sys.argv[1:]\n"
-        "out = args[args.index('-o') + 1]\n"
-        "sys.stdin.read()\n"
-        "print(json.dumps({'type': 'thread.started', 'thread_id': 'sess-9'}))\n"
-        "print(json.dumps({'type': 'item.completed',"
-        " 'item': {'type': 'agent_message', 'text': '前半だよ。'}}))\n"
-        "open(out, 'w').write('前半だよ。後半もね。')\n",
-        encoding="utf-8",
-    )
-    codex = Codex(cwd=tmp_path, state_dir=tmp_path / "voice", instructions="決まり",
-                  command=(sys_executable(), str(fake)))
-    spoken: list[str] = []
-
-    turn = codex.ask("どう思う？", "2026-09-19", on_text=spoken.append)
-
-    assert turn.text == "前半だよ。後半もね。" and spoken == ["前半だよ。"]
-    assert turn.session_id == "sess-9"
-    assert json.loads((tmp_path / "voice" / "session.json").read_text())["session_id"] == "sess-9"
-
-
-def test_ask_reports_the_usage_limit(tmp_path):
-    fake = tmp_path / "limited.py"
-    fake.write_text(
-        "import json, sys\n"
-        "sys.stdin.read()\n"
-        "print(json.dumps({'type': 'turn.failed', 'error': {'message':"
-        " \"You've hit your usage limit. ... try again at 6:01 PM.\"}}))\n",
-        encoding="utf-8",
-    )
-    codex = Codex(cwd=tmp_path, state_dir=tmp_path / "voice", command=(sys_executable(), str(fake)))
-    turn = codex.ask("どう思う？", "2026-09-19")
-    assert turn.limit_reset == "6:01 PM" and turn.failed
-
-
-def sys_executable() -> str:
-    import sys
-    return sys.executable
-
-
-def test_journal_keeps_the_whole_conversation(config):
-    journal.append(config, "2026-09-19", "依頼者", "こんにちは")
-    path = journal.append(config, "2026-09-19", "Kei Agent（声）", "やあ")
-    text = path.read_text()
-    assert path == config.overview_dir / "voice" / "2026-09-19.md"
-    assert "## 依頼者" in text and "## Kei Agent（声）" in text and "やあ" in text
-    assert isinstance(path, Path)
-
-
-def test_reply_is_printed_when_voicevox_is_down(session, capsys):
-    """声が出せないときは、返事を画面に出す。出さないと、どこにも残らない。"""
-    s, _, speaker = session
-    speaker.enabled = False
-    s.say_reply("うん、それで進めよう。\n📌 決定: A でいく")
-    assert "Kei> うん、それで進めよう。" in capsys.readouterr().out
-    assert speaker.said == []
-
-
-def test_reply_is_spoken_when_voicevox_is_up(session, capsys):
-    s, _, speaker = session
-    s.say_reply("うん、それで進めよう。")
-    assert speaker.said == ["うん、それで進めよう。"]
-    assert capsys.readouterr().out == ""
-
-
-# 声のエンジンの差し替え（docs/voice.md の9節）
 
 def test_engine_comes_from_env_so_the_voice_can_be_swapped():
     """AivisSpeech のような VOICEVOX 互換のエンジンに、コードを変えずに向け替えられる。"""
@@ -328,3 +78,119 @@ def test_tuning_only_touches_what_the_engine_returned():
     assert sent["prePhonemeLength"] == TUNING["prePhonemeLength"]
     # 返ってこなかった項目は、勝手に足さない
     assert "pauseLengthScale" not in sent and "postPhonemeLength" not in sent
+
+
+# 出来事 → 言い方と顔（events.py）
+
+def test_finished_work_is_announced_and_looks_up():
+    """終わったことは、気づいてほしいので喋って顔を向ける。"""
+    r = events.reaction({"kind": "done", "theme": "amr-query"})
+    assert r.speaks and r.look and r.face == events.HAPPY
+    assert "amr-query に頼んだ作業" in r.text and "Slack" in r.text
+
+
+def test_receiving_a_request_changes_the_face_but_stays_quiet():
+    """依頼を受けただけでは喋らない（依頼のたびに喋るとうるさい）。"""
+    r = events.reaction({"kind": "working", "theme": "amr-query"})
+    assert not r.speaks and not r.look
+
+
+def test_the_morning_summary_is_held_not_spoken():
+    """朝のまとめは手元に置くだけ（速い道で使う）。"""
+    assert not events.reaction({"kind": "schedule", "items": []}).speaks
+
+
+def test_a_deadline_is_read_in_words_not_in_the_slack_form():
+    """声では「あと23時間で締切」ではなく、時刻で言う。"""
+    r = events.reaction({"kind": "due", "title": "第3回レポート", "at": "2026-09-22T17:00"})
+    assert r.text == "第3回レポートの締切、明日の17時までだよ。" and r.look
+
+
+def test_the_usage_limit_says_when_it_comes_back():
+    r = events.reaction({"kind": "limited", "reset_at": "2026-09-21T23:30"})
+    assert "23時30分ごろ" in r.text and r.face == events.SLEEPY
+    # 時刻が読めなくても、黙らない
+    assert "しばらくしたら" in events.reaction({"kind": "limited"}).text
+
+
+def test_waiting_for_an_answer_is_announced():
+    """Slack を見ていないと、聞き返して止まっていることに気づけない。"""
+    r = events.reaction({"kind": "awaiting", "theme": "amr-query"})
+    assert r.speaks and r.look and r.face == events.DOUBT
+
+
+def test_an_unknown_event_is_ignored():
+    assert events.reaction({"kind": "とつぜんの何か"}) is None
+    assert events.reaction({}) is None
+
+
+def test_missed_notices_are_merged_into_one():
+    """離席中の知らせは1回にまとめる（1件ずつ喋ると、離席が長いほど喋り続ける）。"""
+    got = events.summary([{"kind": "done"}, {"kind": "done"}, {"kind": "failed"}])
+    assert got == "離れている間に、2件終わった、1件うまくいかなかったよ。詳しくは Slack を見てね。"
+    assert events.summary([{"kind": "working"}]) == ""
+
+
+# 出し先の切り替え（mouth.py）
+
+class FakeEngine:
+    base = "http://127.0.0.1:10101"
+
+    def __init__(self, broken=False):
+        self.broken = broken
+        self.said = []
+
+    def synthesize(self, sentence):
+        if self.broken:
+            raise OSError("engine is down")
+        self.said.append(sentence)
+        return b"RIFF-wav"
+
+
+def test_the_mac_speaker_is_used_when_there_is_no_stackchan(tmp_path):
+    """Stack-chan を買う前でも作れる。住所を書かなければ Mac のスピーカー。"""
+    from kei_agent_voice.mouth import Mouth
+
+    played = []
+    mouth = Mouth(FakeEngine(), url="", play_command=("true",))
+    mouth._play = lambda wav: played.append(wav)
+
+    mouth.say("聞いてるよ。")
+
+    assert played == [b"RIFF-wav"] and mouth.engine.said == ["聞いてるよ。"]
+    # 住所が無いので、生きているかを見に行きもしない
+    assert mouth.stackchan_ready() is False
+
+
+def test_it_falls_back_to_the_mac_when_stackchan_does_not_answer():
+    """電源が入っていない日でも黙らない。"""
+    from kei_agent_voice.mouth import Mouth
+
+    played = []
+    mouth = Mouth(FakeEngine(), url="http://127.0.0.1:9/")   # 誰もいない口
+    mouth._play = lambda wav: played.append(wav)
+
+    mouth.say("終わったよ。")
+
+    assert played == [b"RIFF-wav"]
+
+
+def test_a_dead_engine_does_not_raise():
+    """合成できないときは黙る（途中で止まるより、静かなほうがまし）。"""
+    from kei_agent_voice.mouth import Mouth
+
+    mouth = Mouth(FakeEngine(broken=True), url="")
+    mouth._play = lambda wav: pytest.fail("鳴らしてはいけない")
+
+    mouth.say("聞いてるよ。")   # 例外にならないこと
+
+
+# A2A の受け口（executor.py）
+
+def test_the_event_can_come_in_the_body_or_the_metadata():
+    from kei_agent_voice.executor import event_of
+
+    assert event_of('{"kind": "done", "theme": "vlm"}', {}) == {"kind": "done", "theme": "vlm"}
+    assert event_of("", {"skill": "notify", "kind": "failed"}) == {"kind": "failed"}
+    # 壊れた JSON でも落ちない
+    assert event_of("{こわれてる", {"kind": "done"}) == {"kind": "done"}

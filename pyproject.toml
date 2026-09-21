@@ -46,6 +46,7 @@ agents = [
 course = [{ include-group = "agents" }]
 research = [{ include-group = "agents" }]
 work = [{ include-group = "agents" }]
+voice = [{ include-group = "agents" }]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
