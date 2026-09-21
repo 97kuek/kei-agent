@@ -59,6 +59,7 @@ def main() -> None:
     parser.add_argument("--speed", type=float, default=DEFAULT_SPEED)
     parser.add_argument("--text", action="append", default=[], help="鳴らす文。書かなければ見本の文")
     parser.add_argument("--speakers", action="store_true", help="話者の一覧を出して終わる")
+    parser.add_argument("--no-play", action="store_true", help="wav を作るだけで鳴らさない（あとで聴く）")
     args = parser.parse_args()
 
     ports = list(dict.fromkeys([*KNOWN_PORTS, *args.port]))
@@ -87,7 +88,10 @@ def main() -> None:
                 made.append(path)
             print(f"{args.host}:{port}（{version}）話者 {sid}: {len(texts)} 本")
 
-    print(f"\n{len(made)} 本を {OUT_DIR} に書きました。続けて鳴らします（Ctrl-C で止める）。")
+    print(f"\n{len(made)} 本を {OUT_DIR} に書きました。")
+    if args.no_play:
+        return
+    print("続けて鳴らします（Ctrl-C で止める）。")
     for path in made:
         print(f"  {path.name}")
         subprocess.run(["afplay", str(path)], check=False)

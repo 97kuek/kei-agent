@@ -205,6 +205,7 @@ engine の向き先は環境変数で替えられる（`speech.Voicevox.from_env
 # 1. VOICEVOX と AivisSpeech の両方を立ち上げる（両方いても構わない。待ち受け口が違う）
 # 2. 同じ文を、動いている全部のエンジンで鳴らして wav に落とす
 uv run kei-agent-voice-compare
+uv run kei-agent-voice-compare --no-play   # 作るだけ（あとで聴く）
 
 # 話者を選びたいとき（AivisSpeech の ID は 0 からの連番ではない）
 uv run kei-agent-voice-compare --speakers
