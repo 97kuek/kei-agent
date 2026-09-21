@@ -194,3 +194,111 @@ def test_the_event_can_come_in_the_body_or_the_metadata():
     assert event_of("", {"skill": "notify", "kind": "failed"}) == {"kind": "failed"}
     # 壊れた JSON でも落ちない
     assert event_of("{こわれてる", {"kind": "done"}) == {"kind": "done"}
+
+
+# 呼びかけの判定（wake.py）。実測で出た文字列をそのまま使う
+
+def test_the_shapes_that_actually_came_out_of_the_microphone():
+    """2026-09-21 にマイクで測って、実際に出た文字。"""
+    from kei_agent_voice import wake
+
+    # 当たってほしいもの
+    assert wake.called("けい今日の予定は")          # 素直に出た回
+    assert wake.called("経えーじぇんと今日の予定は")  # 漢字に化けた回
+    assert wake.called("おいけい今日の予定は")        # 長音が落ちた回
+    assert wake.called("ケイ、今日の予定は")          # カタカナ（実測では出なかったが、来ても拾う）
+
+    # 当たってはいけないもの
+    assert not wake.called("今日の予定は")            # 呼びかけが消えた回
+    assert not wake.called("け今日の予定は")          # 「け」1文字だけでは拾わない
+    assert not wake.called("今朝は寒いね")
+    assert not wake.called("")
+
+
+def test_the_name_is_dropped_from_the_request():
+    """依頼として渡すのは、呼びかけを落とした残り。"""
+    from kei_agent_voice import wake
+
+    assert wake.request("けい、今日の予定は") == "今日の予定は"
+    assert wake.request("経えーじぇんと、学習曲線を描いて") == "えーじぇんと、学習曲線を描いて"
+    assert wake.request("おいけい 学習曲線を描いて") == "学習曲線を描いて"
+    # 呼ばれていない文は、そのまま返す
+    assert wake.request("今日の予定は") == "今日の予定は"
+
+
+def test_a_name_late_in_the_sentence_is_not_a_call():
+    """呼びかけは文の頭にある。後ろに出た同音の漢字で誤爆しない。"""
+    from kei_agent_voice import wake
+
+    assert not wake.called("この論文の経過をまとめて")
+    assert not wake.called("時間を計測しておいて")
+
+
+# 耳（ears.py）。Swift 側はマイクが要るので、標準出力の読み方だけを押さえる
+
+def test_the_lines_from_the_listener_are_read_as_events():
+    from kei_agent_voice.ears import _event
+
+    assert _event('{"kind":"final","text":"けい今日の予定は"}') == {"kind": "final", "text": "けい今日の予定は"}
+    assert _event('{"kind":"ready"}') == {"kind": "ready"}
+    # コンパイルの警告などが混ざっても落ちない
+    assert _event("warning: something") == {}
+    assert _event("{こわれてる") == {} and _event("") == {}
+
+
+def test_missing_swift_is_explained(tmp_path):
+    """Xcode が無い機械で、黙って動かないのを避ける。"""
+    from kei_agent_voice.ears import Ears, EarsUnavailable
+
+    with pytest.raises(EarsUnavailable, match="見つかりません"), Ears(swift="swift-that-does-not-exist"):
+        pass
+
+
+def test_a_missing_listener_is_explained(tmp_path):
+    from kei_agent_voice.ears import Ears, EarsUnavailable
+
+    with pytest.raises(EarsUnavailable, match="聞く側のプログラムがありません"), \
+            Ears(listener=tmp_path / "nope.swift"):
+        pass
+
+
+def test_errors_from_the_listener_are_raised():
+    from kei_agent_voice.ears import Ears, EarsUnavailable
+
+    ears = Ears()
+
+    class FakeProc:
+        stdout = iter(['{"kind":"ready"}\n', '{"kind":"error","text":"マイクが使えません"}\n'])
+
+    ears.proc = FakeProc()
+    with pytest.raises(EarsUnavailable, match="マイクが使えません"):
+        list(ears.heard())
+
+
+def test_the_listener_is_compiled_once_and_reused(tmp_path):
+    """`swift <file>` は毎回コンパイルして 12 秒かかる。常駐なので、先に作って使い回す。"""
+    from kei_agent_voice.ears import Ears
+
+    source = tmp_path / "listen.swift"
+    source.write_text("print(1)")
+    cache = tmp_path / "cache"
+    built = []
+
+    class Fake(Ears):
+        def _compile(self, compiler, out):
+            built.append(out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("binary")
+
+    ears = Fake(listener=source, cache=cache)
+    first = ears.build()
+    assert first.exists() and len(built) == 1
+
+    ears.build()
+    assert len(built) == 1          # 2度目は作り直さない
+
+    source.write_text("print(2)")   # 元が新しくなったら作り直す
+    import os
+    os.utime(source, (first.stat().st_mtime + 10, first.stat().st_mtime + 10))
+    ears.build()
+    assert len(built) == 2
