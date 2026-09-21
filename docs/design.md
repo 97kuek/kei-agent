@@ -6,7 +6,7 @@
 
 ## 1. 全体の構成
 
-![Kei Agent の構成](architecture.svg)
+![Kei Agent の構成](architecture.png)
 
 - オーケストレータは Slack の受け口、権限と接続先、Notion、決まった時刻の処理を持ち、
 エージェントは頼まれた仕事だけをして返す構成
@@ -152,7 +152,7 @@
 
 ## 10. 自己改善
 
-- 流れは [`using.md`](using.md#自己改善00_kei-agent)、図は [self-improve.svg](self-improve.svg)を参照
+- 流れは [`using.md`](using.md#自己改善00_kei-agent)、図は [self-improve.png](self-improve.png)
 
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
@@ -215,7 +215,7 @@
 ## 12. 声のレイヤ（`src/kei_agent_voice/`）
 
 - 現時点では第0段階（ハードなし、追加のお金なし）まで実装済み
-- アーキテクチャは [voice.svg](voice.svg)を参照
+- アーキテクチャは [voice.svg](voice.svg)
 
 | 項目 | 決めたこと | 理由 |
 |---|---|---|

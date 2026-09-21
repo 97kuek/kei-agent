@@ -115,8 +115,16 @@ class Handoff:
             if row is None or row["handed_off_to"]:
                 return None  # 2度押しで、もう引き継いである
             run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
-            result = await self._converse(req, ws, req.text, None)
+            # 途中で終了させられても、次の起動で拾えるように控えておく（resume_interrupted）
+            in_flight = self.store.start_in_flight(req.to_payload())
+            try:
+                result = await self._converse(req, ws, req.text, None)
+            except BaseException:
+                # 控えは残したまま（次の起動でやり直す）、走りっぱなしの記録だけ閉じる
+                self.store.end_run(run_id, is_error=True, cost_usd=None)
+                raise
             self.store.end_run(run_id, result.is_error, result.cost_usd)
+            self.store.finish_deferred(in_flight)
             if result.is_error or not result.text.strip():
                 await self.post(req, f"{FAILED_PREFIX} 引き継ぎのまとめを作れなかったよ。"
                                      "もう一度区切りたいときは「新しいスレッドにして」と書いてね。")

@@ -2,7 +2,7 @@
 
 > Slackから頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進める個人用アシスタント
 
-![Kei Agent の構成](docs/architecture.svg)
+![Kei Agent の構成](docs/architecture.png)
 
 ## 概要
 

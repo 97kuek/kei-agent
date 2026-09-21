@@ -58,7 +58,7 @@ Slack で Kei Agent に頼むときの案内。入れ方は [`deploy/README.md`]
 ## 自己改善（`#00_kei-agent`）
 
 要望を書くと `~/research/_overview/backlog.md` に記録され、Kei Agent が自分のコードを直す。
-図は [self-improve.svg](self-improve.svg)。
+図は [self-improve.png](self-improve.png)。
 
 要望 → 案 →「いいよ」→「これで進めていい？」→「いいよ」→ 直してテスト → 差分を見せて
 「取り込んでいい？」→「いいよ」→ 取り込み・push・入れ替え。

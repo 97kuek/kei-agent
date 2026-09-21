@@ -181,7 +181,20 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
         task = asyncio.create_task(coro)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        task.add_done_callback(self._log_if_broken)
         return task
+
+    @staticmethod
+    def _log_if_broken(task: asyncio.Task) -> None:
+        """裏で動かした仕事が落ちたら、必ずログに残す。
+
+        これがないと、例外が誰にも見られないまま消える（引き継ぎが
+        「新しいスレッドに引き継いでいるよ…」のまま止まったのはこれ）。
+        """
+        if task.cancelled():
+            return
+        if (error := task.exception()) is not None:
+            log.error("裏で動かした仕事が落ちました", exc_info=error)
 
     def thread_ui(self, req: Request) -> ThreadUI:
         return ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
@@ -896,6 +909,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel):
             self.store.finish_deferred(deferred_id)
             req = Request.from_payload(payload)
             if not req.text.strip():
+                continue
+            if req.trigger == "handoff":
+                # 引き継ぎは、普通の依頼として投げ直すと会話が続くだけになる。もう一度区切らせる
+                try:
+                    await self.post(req, "🧵 入れ替えで引き継ぎが途中で止まったので、もう一度まとめるね。")
+                except Exception:
+                    log.warning("中断を知らせられません", exc_info=True)
+                self.spawn(self.hand_off(req))
                 continue
             try:
                 await self.post(req, f"{FAILED_PREFIX} さっきの作業は Kei Agent の入れ替えで途中で止まっちゃった。"

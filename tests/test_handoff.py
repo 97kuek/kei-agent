@@ -163,3 +163,46 @@ async def test_failed_memo_keeps_the_thread(env, store):
     await settle(assistant)
     assert store.get_thread("C1", "10.1")["handed_off_to"] is None
     assert "作れなかった" in slack.texts()[-1]
+
+
+async def test_a_broken_background_job_is_logged(env, caplog):
+    """裏で動かした仕事が落ちたら、必ずログに残す（黙って消えると原因が追えない）。"""
+    import asyncio
+    import logging
+
+    assistant, *_ = env
+
+    async def broken():
+        raise RuntimeError("こわれた")
+
+    with caplog.at_level(logging.ERROR, logger="kei_agent.assistant"):
+        task = assistant.spawn(broken())
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+
+    assert any("裏で動かした仕事が落ちました" in r.message for r in caplog.records)
+
+
+async def test_an_interrupted_handoff_is_summarised_again(env, store, monkeypatch):
+    """入れ替えで引き継ぎが止まったら、普通の依頼にせず、もう一度区切らせる。"""
+    from kei_agent.request import Request
+
+    assistant, slack, claude = env
+    req = Request("C1", "vlm", "10.1", None, "引き継ぎメモを書いて", trigger="handoff")
+    store.upsert_thread("C1", "10.1", "vlm", "s1")
+    store.start_in_flight(req.to_payload())
+    handed = []
+
+    async def fake_hand_off(r):
+        handed.append(r.trigger)
+
+    monkeypatch.setattr(assistant, "hand_off", fake_hand_off)
+
+    assert await assistant.resume_interrupted() == 1
+    import asyncio
+    await asyncio.gather(*list(assistant.tasks))
+
+    assert handed == ["handoff"]
+    assert any("入れ替えで引き継ぎが途中で止まった" in (t or "") for t in slack.texts())
+    # 普通の「やり直すね」は出さない（引き継ぎとしてやり直すので）
+    assert not any("続きからやり直すね" in (t or "") for t in slack.texts())
