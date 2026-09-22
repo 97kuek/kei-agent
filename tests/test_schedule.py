@@ -245,7 +245,11 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert call["cwd"] == config.overview_dir
     digest = config.overview_dir / ".kei-agent" / "digest" / "2026-09-18-daily.md"
     text = digest.read_text()
-    assert "10.1.md" in text and "vlm: 新着なし" in text
+    assert "10.1.md" in text
+    # 先行研究はテーマのチャンネルに流すので、Daily の材料には入れない（2026-09-22）
+    assert "先行研究" not in text
+    # 「今日のタスク」の元になる（済みも入れて、取り消し線にする）
+    assert "## Notion: 今日が期日の Task（済みを含む）" in text
     assert "条件Cも回して（vlm）: 完了 71%" in text
     assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
     assert "返事が要る" in text and "中間発表" in text
@@ -567,12 +571,12 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     text, detail, _ = await scheduler.morning_text(now)
 
     lines = text.splitlines()
+    # 帯と空き時間はやめた（2026-09-22）。時刻の一覧だけにする
     assert lines[0].startswith("☀️")
-    assert lines[1].startswith("`9時 ") and lines[1].endswith("21時`")   # 1日の形（帯）
-    assert "10:00–10:15` 💼 朝会（Zoom）" in lines[2]
-    assert "10:40–12:20` 🎓 データベース" in lines[3]
-    assert "17:00" in lines[4] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[4]
-    assert "空き:" in text
+    assert "10:00–10:15` 💼 朝会（Zoom）" in lines[1]
+    assert "10:40–12:20` 🎓 データベース" in lines[2]
+    assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
+    assert "空き:" not in text and "9時 " not in text
     assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1}
 
 
@@ -582,34 +586,6 @@ def _entry(at, end=None, icon=morning.CLASS, text="授業"):
     day = date(2026, 9, 21)
     return morning.Entry(datetime.combine(day, dtime(*at)), icon, text,
                          datetime.combine(day, dtime(*end)) if end else None)
-
-
-def test_band_is_one_line_of_ascii_so_it_survives_a_phone():
-    """帯は1行だけ・ASCII だけにする。行をまたぐ桁合わせは、スマホの幅で崩れる。"""
-    found = [_entry((10, 40), (12, 20)), _entry((15, 5), (16, 45)),
-             _entry((17, 0), icon=morning.DUE, text="締切")]
-    line = morning.band(found)
-
-    assert line == "`9時 .###..##!... 21時`"
-    assert "\n" not in line
-    assert set(line.split()[1]) <= {morning.BUSY, morning.DUE_MARK, morning.FREE}
-
-
-def test_band_widens_for_a_late_meeting():
-    """ふだんの 9〜21 時からはみ出す予定があれば、その分だけ広げる。"""
-    assert morning.band([_entry((19, 0), (20, 30))]) == "`9時 ..........## 21時`"
-    assert morning.band([_entry((21, 30), (22, 0))]).endswith("22時`")
-    assert morning.band([]) == ""
-
-
-def test_free_slots_picks_the_long_gaps_not_the_first_ones():
-    """空きは長い順に選んでから、時刻の順に並べ直す（使えるのは長い切れ間なので）。"""
-    now = datetime(2026, 9, 21, 8, 0)
-    found = [_entry((10, 40), (12, 20)), _entry((13, 0), (14, 0)), _entry((15, 5), (16, 45))]
-
-    assert morning.free_slots(found, now) == "空き: 09:00–10:40、14:00–15:05、16:45–21:00（ほか 1 か所）"
-    # 30 分に満たない切れ間は数えない（移動と片付けで消える）
-    assert morning.free_slots([_entry((9, 0), (12, 0)), _entry((12, 20), (21, 0))], now) == ""
 
 
 async def test_morning_text_works_without_the_agents(env):

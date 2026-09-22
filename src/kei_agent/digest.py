@@ -17,13 +17,8 @@ from kei_agent.store import Store
 NOTE_EXCERPT = 1500
 # 大学・仕事の材料で、1行に並べる件数の上限（材料が長いと、要点が埋もれる）
 MAX_DOMAIN_ITEMS = 4
-LITERATURE_STATUS = {
-    "posted": "新着あり（テーマのチャンネルに投稿済み）",
-    "no_new": "新着なし",
-    "no_keywords": "CLAUDE.md に検索キーワードがない",
-    "no_channel": "チャンネルが見つからない",
-    "error": "エラー",
-}
+# Notion の Task の「終わった」状態の名前
+DONE = "完了"
 
 
 def _ts(value: float | None) -> str:
@@ -89,7 +84,6 @@ class DigestBuilder:
         lines += self._threads(since)
         lines += self._jobs(since)
         lines += self._night(since)
-        lines += self._literature(since)
         lines += self._stalled(now, active_channels)
         lines += self._waiting(active_channels)
         lines += self._time(now)
@@ -166,15 +160,6 @@ class DigestBuilder:
             lines.append("- なし" if night.get("status") != "error" else f"- Notion から読めなかった: {night.get('error')}")
         return lines
 
-    def _literature(self, since: float) -> list[str]:
-        lines = ["", "## 先行研究の新着", ""]
-        last = self.store.last_schedule("literature")
-        if not (last and last["ran_at"] >= since):
-            return lines + ["- この期間は確認していない"]
-        for name, info in (json.loads(last["detail"] or "{}").get("themes") or {}).items():
-            lines.append(f"- {name}: {LITERATURE_STATUS.get(info.get('status'), info.get('status'))}")
-        return lines
-
     def _stalled(self, now: float, active_channels: set[str]) -> list[str]:
         days = self.config.schedule.stall_days
         lines = ["", f"## {days}日以上やり取りのないテーマ", ""]
@@ -219,6 +204,7 @@ class DigestBuilder:
         try:
             notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since),
                                             ["計画", "考察", "振り返り"])
+            today_tasks = await asyncio.to_thread(notion.tasks_due_on, today)
             awaiting = await asyncio.to_thread(notion.awaiting_tasks)
             due = await asyncio.to_thread(notion.tasks_due_within, today, 3)
             milestones = await asyncio.to_thread(notion.upcoming_milestones, today)
@@ -233,7 +219,11 @@ class DigestBuilder:
             lines += [f"### {n.kind}: {n.title}（{n.day or '-'}） {n.url}", "", body or "（本文なし）", ""]
         if not notes:
             lines += ["- なし", ""]
-        lines += ["## Notion: 確認待ちの Task", ""]
+        # Daily の「今日のタスク」になる。済みも入れて、やったことも見せる
+        lines += ["## Notion: 今日が期日の Task（済みを含む）", ""]
+        lines += [f"- {'済' if t.status == DONE else '未'} {t.title}（{t.status}） {t.url}"
+                  for t in today_tasks] or ["- なし"]
+        lines += ["", "## Notion: 確認待ちの Task", ""]
         lines += [f"- {t.title}（{', '.join(t.theme_names) or '-'}） {t.url}" for t in awaiting] or ["- なし"]
         lines += ["", "## Notion: 期日が3日以内の Task", ""]
         lines += [f"- {t.due} {t.title}（{t.status}・{t.assignee or '-'}） {t.url}" for t in due] or ["- なし"]

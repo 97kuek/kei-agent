@@ -259,6 +259,10 @@ class FakeNotion:
         self._check()
         return [t for t in self.tasks.values() if t.status == "確認待ち"]
 
+    def tasks_due_on(self, day):
+        """その日が期日の Task。済みも返す（Daily で取り消し線にするため）。"""
+        return [t for t in self.tasks.values() if t.due == day.isoformat()]
+
     def tasks_due_within(self, today, days):
         self._check()
         return []

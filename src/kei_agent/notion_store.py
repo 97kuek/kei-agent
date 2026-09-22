@@ -338,6 +338,14 @@ class NotionStore:
         return [self._task(r) for r in self._query("tasks", {
             "filter": {"property": "状態", "status": {"equals": "確認待ち"}}})]
 
+    def tasks_due_on(self, day: date) -> list[Task]:
+        """その日が期日の Task。**済みも返す**（Daily では取り消し線にして、やったことも見せる）。"""
+        rows = self._query("tasks", {
+            "filter": {"property": "期日", "date": {"equals": day.isoformat()}},
+            "sorts": [{"property": "期日", "direction": "ascending"}],
+        })
+        return [self._task(r) for r in rows]
+
     def tasks_due_within(self, today: date, days: int) -> list[Task]:
         rows = self._query("tasks", {
             "filter": {"and": [
