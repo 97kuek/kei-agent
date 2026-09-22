@@ -99,6 +99,47 @@ sandbox を締めるより結果的に狭い。連携はログイン（プロフ
   連携はユーザー設定を読み込まないと見えないので、そこだけ設定を読み、使ってよい道具を名指しで並べる
   （Bash・ファイル・Web は断る）。ドメインごとに Claude のアカウントを分けられる
 
+### 外部サービスのトークンを claude に渡さないとき（ゲートウェイ）
+
+研究の `claude -p` は sandbox の中で Bash を使える。その中に Notion のトークンを置くと、
+研究ホームの外まで届いてしまう。そこで **トークンを持つ小さなサーバーを別に立て、claude には
+そこへの入口だけを渡す**。
+
+| もの | 中身 |
+|---|---|
+| プロセス | `kei-agent-notion-gateway`（`src/kei_agent_notion_gateway/`） |
+| 住所 | `http://127.0.0.1:8791/mcp`（loopback だけ。`/health` 以外は Bearer 認証） |
+| 合言葉 | `KEI_AGENT_NOTION_GATEWAY_TOKEN`。空なら起動しない。Notion の API には使えない |
+| 渡し方 | 研究の起動だけ `--mcp-config` と `--strict-mcp-config` を付ける。`NOTION_TOKEN` は渡さない |
+| 範囲 | 対象と親が研究ホームの子孫か、Notion に問い合わせて確かめる。外・親不明・循環・深すぎは断る |
+| tool | 操作ごとに型のある11個だけ。任意の method と path を受ける tool は置かない |
+| 記録 | 時刻・操作名・対象のID・成否・失敗の種類だけ。本文、プロパティの値、検索結果、合言葉は残さない |
+
+止まっているときは「ゲートウェイにつながらない」と返す。**別のトークンや別の Notion 連携に
+乗り換えない**（乗り換えられると、範囲を狭めた意味がなくなる）。
+
+### skill と hook（`plugin/<agent>/`）
+
+prompt には**いつでも要る規則**（役割、権限の境界、返事の形、原典を確かめること）だけを残し、
+**依頼によって使う手順**は `SKILL.md` に置く。
+
+```text
+plugin/<agent>/
+├── .claude-plugin/plugin.json   # name は kei-agent-<agent>
+├── skills/<skill 名>/SKILL.md   # description は「Use when…」から書く。本文は500語まで
+└── hooks/{hooks.json,policy.py} # PreToolUse。第二防御
+```
+
+- **担当の plugin だけを渡す。** `--plugin-dir plugin/<agent>` と名指しする。`plugin/` そのものを
+  渡すと中の plugin を全部読んでしまう
+- skill の名前は **動詞-目的語**（`running-jobs`、`finding-course-materials`）。呼ぶときは
+  `kei-agent-<agent>:<skill>`
+- skill のスクリプトは、その skill の `scripts/` に置く。環境変数を前提にしない
+- hook は「明らかな安全違反」だけを断る（exit 2）。sandbox や `--allowedTools` と同じ判定を書き足さない。
+  読み取れない入力は、書き込み系なら断り、読み取り系は allowlist に任せる
+- hook の出力に tool の中身や鍵を出さない。断った操作の種類と、代わりの手だけを返す
+- router・voice・自己改善には、これらの plugin を渡さない
+
 ## 5. 増やすときの手順
 
 1. `src/kei_agent_<agent>/` に `card.py`（名刺）、`executor.py`（仕事）、`app.py`（`kei_agent_a2a.server.serve` を呼ぶだけ）
@@ -109,7 +150,8 @@ sandbox を締めるより結果的に狭い。連携はログイン（プロフ
 6. 本体側の取り次ぎ（`src/kei_agent/<agent>.py`）と、Slack のチャンネル（`config.toml` の `[channels]`）
 7. テストは**本物のサーバーを立てて往復を見る**（`tests/test_a2a.py`、`tests/test_research_agent.py` の型）。
    外部サービスと claude は偽物に差し替える
-8. この文書の表と `README.md` のファイル一覧に足す
+8. skill を持たせるなら `plugin/<agent>/` を作り、`Config.agent_plugin_dir` の一覧（`AGENT_PLUGINS`）に足す
+9. この文書の表と `README.md` のファイル一覧に足す
 
 ## 6. いまあるスキル
 

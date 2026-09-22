@@ -23,6 +23,7 @@ from kei_agent_a2a import claude
 
 log = logging.getLogger(__name__)
 
+AGENT = "work"
 # 使わせる連携の道具（読むだけ）
 _M365 = "mcp__claude_ai_Microsoft_365__"
 CALENDAR_TOOL = f"{_M365}outlook_calendar_search"
@@ -84,7 +85,8 @@ async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = 
     prompt = PROMPT.format(tool=CALENDAR_TOOL, since=start.isoformat(),
                            until=(start + timedelta(days=max(days, 1))).isoformat())
     try:
-        text = await claude.ask_connector(config, prompt, ALLOWED, DENY, TIMEOUT_MINUTES)
+        text = await claude.ask_connector(config, prompt, ALLOWED, config.agent_plugin_dir(AGENT),
+                                          DENY, TIMEOUT_MINUTES)
         found = claude.json_reply(text)
     except claude.ConnectorError as e:
         raise WorkCalendarError(str(e)) from None
@@ -113,6 +115,7 @@ async def ask(config: Config, question: str, prompt_path: Path | None = None) ->
     instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
     prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
     try:
-        return await claude.ask_connector(config, prompt, ALLOWED_ASK, DENY, ASK_TIMEOUT_MINUTES)
+        return await claude.ask_connector(config, prompt, ALLOWED_ASK, config.agent_plugin_dir(AGENT),
+                                          DENY, ASK_TIMEOUT_MINUTES)
     except claude.ConnectorError as e:
         raise WorkCalendarError(str(e)) from None

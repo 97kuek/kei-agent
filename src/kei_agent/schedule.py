@@ -247,7 +247,7 @@ class Scheduler:
             prompt = (
                 f"[Kei Agent の定期処理: 先行研究の新着 {day}]\n"
                 f"検索キーワード: {' / '.join(keywords)}\n\n"
-                f"kei-agent:literature skill で、キーワードごとに arXiv を `--sort date` で検索し、{since.isoformat()} 以降に"
+                f"kei-agent-research:researching-literature skill で、キーワードごとに arXiv を `--sort date` で検索し、{since.isoformat()} 以降に"
                 "投稿された論文のうち、papers/ にまだ保存していないものを探してください。"
                 "テーマの CLAUDE.md の前提に照らして関係のある論文だけを papers/ に保存し、1本ずつ要点と関係を報告してください。\n"
                 f"関係のある新着が1本もなければ、返答は `{NO_NEW_PAPERS}` の1行だけにしてください。"

@@ -33,7 +33,10 @@ DEFAULT_DENY_READ = (
 STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
                          # ドメインごとの鍵（Box・Moodle・Microsoft・Toggl）。エージェントの claude にも渡さない
                          "BOX_", "MOODLE_", "MS_", "TOGGL_")
-KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
+# 上の prefix に当たっても、子プロセスに残すもの。
+# 研究の claude が持つ Notion の鍵は、研究ホームだけを操作できるゲートウェイの合言葉だけ
+# （生の NOTION_TOKEN は NOTION_ の prefix で落ちる）
+KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "KEI_AGENT_NOTION_GATEWAY_TOKEN")
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
 PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.toml", "deploy/")
@@ -114,6 +117,8 @@ def build_settings(config: Config, ws: Workspace) -> dict:
                 "WebFetch",
                 "Skill",
                 "TodoWrite",
+                # 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）
+                "mcp__research-notion",
             ],
         },
     }

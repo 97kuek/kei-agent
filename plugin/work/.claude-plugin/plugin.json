@@ -1,0 +1,5 @@
+{
+  "name": "kei-agent-work",
+  "version": "0.1.0",
+  "description": "仕事エージェントの claude が使う skill（Microsoft 365 の調査、会議の準備、文章の下書き）"
+}

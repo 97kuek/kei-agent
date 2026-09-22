@@ -1,0 +1,5 @@
+{
+  "name": "kei-agent-course",
+  "version": "0.1.0",
+  "description": "大学エージェントの claude が使う skill（Box の資料探し、課題、授業ホームの Notion）"
+}

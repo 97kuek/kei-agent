@@ -52,8 +52,12 @@ export SLACK_APP_TOKEN="xapp-..."
 export KEI_AGENT_ALLOWED_USER_ID="U..."
 # 本体と全A2Aエージェントで共通。空だとA2Aエージェントは起動しない
 export KEI_AGENT_A2A_TOKEN="$(openssl rand -hex 32)"
-# Notion のコネクト「Kei Agent」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）
+# Notion のコネクト「Kei Agent」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）。
+# 研究 Claude には渡さない。読むのは Kei Agent 本体と Notion ゲートウェイだけ
 export NOTION_TOKEN="ntn_..."
+# 研究 Claude から Notion ゲートウェイ（127.0.0.1:8791）に入るときの合言葉。
+# Notion の API には使えない。一度作ったら、この行に貼って使い回す（7.65 を参照）
+export KEI_AGENT_NOTION_GATEWAY_TOKEN="$(openssl rand -hex 32)"
 # 任意: Toggl の API キーと宛先（研究時間の記録に使う。どれかがなければ人の時間は空欄になる）
 # キーは Toggl の設定 →「Togglアカウント」→「APIトークン」。ID は Toggl を開いたときの URL
 # （focus.toggl.com/<組織>/workspaces/<ワークスペース>/）から写す
@@ -110,6 +114,7 @@ deploy/install.sh course   # 大学エージェント（A2A サーバー、127.0
 deploy/install.sh research # 研究エージェント（A2A サーバー、127.0.0.1:8788）
 deploy/install.sh work     # 仕事エージェント（A2A サーバー、127.0.0.1:8789）
 deploy/install.sh voice    # 声のレイヤ（A2A サーバー＋マイク、127.0.0.1:8790）
+deploy/install.sh notion-gateway  # 研究 Claude 用の Notion ゲートウェイ（127.0.0.1:8791）
 deploy/install.sh remove   # 登録を外す（course / research / work / voice も同じように remove を付ける）
 tail -f ~/Library/Logs/kei-agent/kei-agent.log
 launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
@@ -214,6 +219,36 @@ tail -f ~/Library/Logs/kei-agent/research-launchd.log
 Kei Agent 本体を入れ替えたときは、研究エージェントも入れ替える（同じリポジトリを読むので、
 `launchctl kickstart -k gui/$(id -u)/com.kei-agent.research` で起動し直す）。
 
+## 7.65 研究 Claude の Notion ゲートウェイ
+
+研究の `claude -p` には、Notion のトークンを渡さない。代わりに `kei-agent-notion-gateway` を
+127.0.0.1:8791 に常駐させ、研究 Claude はそこへ MCP でつなぐ。ゲートウェイは、頼まれた対象が
+**研究ホームの子孫か**を Notion に問い合わせて確かめてから動くので、研究ホームの外には手が届かない。
+
+1. 秘密情報のファイルに合言葉を作って貼る（Notion のトークンとは別物。Notion の API には使えない）
+
+   ```zsh
+   # 生成して、出た値を kei-agent.zsh の KEI_AGENT_NOTION_GATEWAY_TOKEN に貼る
+   openssl rand -hex 32
+   ```
+
+   作り直すとつながらなくなるので、一度決めた値を使い続ける。ゲートウェイと研究 Claude は、
+   この同じ値を読む（研究 Claude 側へは Kei Agent が渡すので、書くのは1か所だけでよい）。
+
+2. 登録して起動する（`kei-agent-notion-setup` を先に済ませておく。研究ホームの ID を `notion.json` から読む）
+
+   ```zsh
+   deploy/install.sh notion-gateway
+   curl -s http://127.0.0.1:8791/health
+   tail -f ~/Library/Logs/kei-agent/notion-gateway-launchd.log
+   ```
+
+記録に残るのは、時刻・操作名・対象のID・成功したか・失敗の種類だけ。ページの本文、プロパティの値、
+検索結果、合言葉は残らない。
+
+ゲートウェイが止まっていると、研究 Claude は Notion を操作できず「ゲートウェイにつながらない」と返す。
+別のトークンや別の Notion 連携を探すことはしない。
+
 ## 7.7 Box と Notion（学部要項・過去問・授業）
 
 大学エージェントの claude は、**Claude のアカウントに付いている連携**で Box と Notion を使う
@@ -230,10 +265,10 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 export CLAUDE_CONFIG_DIR="$HOME/.claude-personal"
 ```
 
-claude.ai の設定で Box と Notion の連携を繋いでおくこと。Box は読み取り専用。Notion は授業・課題の
-読み取り、課題の状態更新、課題ページの作成だけを許可し、削除・移動・複製・データベース作成は断る
-（`prompts/course.md`）。コネクタの道具だけでは対象ページを限定できないため、専用 Claude プロファイル、
-Notion 側でそのプロファイルに共有する範囲、`prompts/course.md` の3つで制約する。
+claude.ai の設定で Box と Notion の連携を繋いでおくこと。Box は**読み取り専用**（書き込みの道具は
+名指しで断り、plugin の hook でも断る）。Notion は**授業ホームの中なら全部**できる。
+コネクタの道具ではページを絞れないので、**このプロファイルには授業ホームだけを共有する**。
+外のページは Notion 側の権限で見つからない。
 
 ## 8. バックアップとログ
 

@@ -1,5 +1,5 @@
 {
-  "name": "kei-agent",
+  "name": "kei-agent-research",
   "version": "0.1.0",
-  "description": "Kei Agent（研究支援の Slack Bot）が claude -p で使う skill"
+  "description": "研究エージェントの claude が使う skill（ジョブ、文献調査、研究ホームの Notion）"
 }

@@ -67,7 +67,7 @@ def test_env_strips_secrets_and_adds_thread(config):
     assert "CLAUDECODE" not in env and "CLAUDE_CODE_SESSION_ID" not in env
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"
     assert env["KEI_AGENT_CHANNEL"] == "C1" and env["KEI_AGENT_THREAD_TS"] == "123.456"
-    assert env["KEI_AGENT_PLUGIN_DIR"].endswith("plugin")
+    assert "KEI_AGENT_PLUGIN_DIR" not in env
 
 
 def test_apply_event_keeps_domains_claude_asked_for():
@@ -220,3 +220,47 @@ def test_parse_limit_moves_to_tomorrow_when_the_time_has_passed():
     now = datetime(2026, 9, 20, 20, 0).timestamp()
     got = runner.parse_limit("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", now)
     assert datetime.fromtimestamp(got).strftime("%m/%d %H:%M") == "09/21 18:30"
+
+
+def test_research_runner_loads_only_the_research_plugin(config):
+    """担当外の plugin（大学・仕事）を、同じ claude に読ませない。"""
+    ws = themes.resolve(config, "vlm")
+    cmd = runner.build_command(config, ws, None)
+
+    loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
+    assert loaded == [str(config.repo_root / "plugin" / "research")]
+
+
+def test_agent_plugin_dir_refuses_an_unknown_agent(config):
+    assert config.agent_plugin_dir("course").name == "course"
+    with pytest.raises(ValueError, match="未知のagent"):
+        config.agent_plugin_dir("voice")
+
+
+def test_research_runner_uses_only_the_scoped_notion_mcp(config):
+    """研究の Notion は、研究ホームだけを操作できるゲートウェイ経由。ほかの MCP は読み込まない。"""
+    ws = themes.resolve(config, "vlm")
+    cmd = runner.build_command(config, ws, None)
+
+    mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["research-notion"]
+    assert mcp["url"] == config.notion_gateway_url
+    assert mcp["headers"]["Authorization"] == "Bearer ${KEI_AGENT_NOTION_GATEWAY_TOKEN}"
+    assert "--strict-mcp-config" in cmd
+
+
+def test_research_settings_allow_the_gateway_tools(config):
+    ws = themes.resolve(config, "vlm")
+    allow = guard.build_settings(config, ws)["permissions"]["allow"]
+
+    assert "mcp__research-notion" in allow
+
+
+def test_research_env_carries_the_gateway_token_but_not_the_notion_token(config):
+    env = runner.build_env(config, {
+        "PATH": "/bin",
+        "NOTION_TOKEN": "ntn_raw",
+        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "scoped",
+    }, "C1", "1.2")
+
+    assert "NOTION_TOKEN" not in env
+    assert env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "scoped"

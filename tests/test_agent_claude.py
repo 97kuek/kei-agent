@@ -45,7 +45,8 @@ async def test_connector_passes_only_the_environment_it_needs(config, monkeypatc
     monkeypatch.setenv("NOTION_TOKEN", "notion-secret")
     monkeypatch.setenv("BOX_CLIENT_SECRET", "box-secret")
 
-    assert await claude.ask_connector(config, "予定", ("calendar_search",)) == "[]"
+    assert await claude.ask_connector(config, "予定", ("calendar_search",),
+                                      config.agent_plugin_dir("work")) == "[]"
 
     assert seen["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "company-claude"
     assert not {"SLACK_BOT_TOKEN", "NOTION_TOKEN", "BOX_CLIENT_SECRET"} & seen["env"].keys()
@@ -66,7 +67,8 @@ async def test_connector_reaps_the_process_after_a_timeout(config, monkeypatch):
     monkeypatch.setattr(os, "killpg", lambda pid, sig: killed.append(pid))
 
     with pytest.raises(claude.ConnectorError, match="返りませんでした"):
-        await claude.ask_connector(config, "予定", ("calendar_search",), timeout_minutes=0)
+        await claude.ask_connector(config, "予定", ("calendar_search",),
+                                   config.agent_plugin_dir("work"), timeout_minutes=0)
 
     assert killed == [process.pid]
     assert process.waited
@@ -116,3 +118,19 @@ async def test_failed_envelope_makes_the_a2a_task_fail():
     updater = _Updater()
     await claude.finish(updater, envelope.failure("上限に達した"))
     assert updater.state == "failed"
+
+
+def test_connector_loads_only_its_own_plugin(config):
+    """大学の claude に仕事の skill を渡さない（その逆も）。"""
+    command = claude.connector_command(config, ["mcp__read"], (), config.agent_plugin_dir("course"))
+
+    loaded = [command[i + 1] for i, arg in enumerate(command) if arg == "--plugin-dir"]
+    assert loaded == [str(config.repo_root / "plugin" / "course")]
+    allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
+    assert "Skill" in allowed and "mcp__read" in allowed
+
+
+def test_connector_does_not_disallow_the_skill_tool(config):
+    command = claude.connector_command(config, ["mcp__read"], (), config.agent_plugin_dir("work"))
+
+    assert "Skill" not in command[command.index("--disallowedTools") + 1:]

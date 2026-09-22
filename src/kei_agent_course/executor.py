@@ -183,8 +183,9 @@ class CourseExecutor(AgentExecutor):
                   f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
                   f"次の質問に答えてください。\n\n{question}")
         try:
-            answer = await claude.ask_connector(self.config, prompt, tools.ALLOWED, tools.DENY,
-                                                tools.TIMEOUT_MINUTES)
+            answer = await claude.ask_connector(
+                self.config, prompt, tools.ALLOWED, self.config.agent_plugin_dir(tools.AGENT),
+                tools.DENY, tools.TIMEOUT_MINUTES)
         except claude.ConnectorError as e:
             await self._fail(updater, str(e))
             return

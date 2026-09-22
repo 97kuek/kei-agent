@@ -1,19 +1,21 @@
 ---
-name: literature
-description: 先行研究や関連論文を arXiv と Semantic Scholar で探し、要約して papers/ に保存する。「先行研究を調べて」「関連論文を探して」「この論文の周辺を整理して」などの依頼で使う。
+name: researching-literature
+description: Use when先行研究や関連論文を探すとき、ある論文の周辺を整理するとき、見つけた論文を papers/ に残すとき。
 ---
 
 # 文献調査
+
+このファイルのあるディレクトリ（skill を読み込んだときに示される base directory）を `$SKILL` とする。
 
 ## 探す
 
 ```bash
 # Semantic Scholar（引用数と出版年つき。年で絞れる）
-python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source s2 --limit 20 --year 2023-
+python3 "$SKILL/scripts/lit.py" search "vision language model counting" --source s2 --limit 20 --year 2023-
 # arXiv（新しいプレプリント。--sort date で新しい順）
-python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" search "vision language model counting" --source arxiv --sort date --limit 20
+python3 "$SKILL/scripts/lit.py" search "vision language model counting" --source arxiv --sort date --limit 20
 # 保存済みの論文
-python3 "$KEI_AGENT_PLUGIN_DIR/skills/literature/scripts/lit.py" known
+python3 "$SKILL/scripts/lit.py" known
 ```
 
 - 検索語を2〜3通り変え、両方のソースを使う。Semantic Scholar が 429 を返し続けるときは arXiv と Web検索で補う
