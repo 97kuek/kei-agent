@@ -21,6 +21,27 @@ model = ""
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
+# agent ごとの実行器とモデル。skill は共通の内容を使い、ここだけで Claude/Codex を切り替える。
+# 既定は既存の Claude サブスクリプション。Codex に切り替える agent だけ provider = "codex" にする。
+[agents.research]
+provider = "claude"
+model = ""
+reasoning_effort = "high"
+# Codexへ切り替えるときだけ、`codex mcp list --json` に有効として出た名前を列挙する
+connectors = []
+
+[agents.course]
+provider = "claude"
+model = ""
+reasoning_effort = "high"
+connectors = []
+
+[agents.work]
+provider = "claude"
+model = ""
+reasoning_effort = "high"
+connectors = []
+
 [schedule]
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
 enabled = true

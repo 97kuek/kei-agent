@@ -15,7 +15,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from kei_agent import guard
-from kei_agent.config import Config, path_without_venv
+from kei_agent.codex_runtime import discover_mcp_names
+from kei_agent.config import AgentProfile, Config, path_without_venv
+from kei_agent import run_hooks
 from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -63,7 +65,31 @@ def notion_mcp_config(config: Config) -> dict:
     }}}
 
 
-def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+def _profile(config: Config) -> AgentProfile:
+    return config.agent_profiles.get(AGENT, AgentProfile())
+
+
+def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+    """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
+    assert ws.cwd is not None
+    profile = _profile(config)
+    cmd = [
+        config.codex_bin, "exec", "--json", "--sandbox", "workspace-write",
+        "--cd", str(ws.cwd),
+    ]
+    model = ws.model or profile.model or config.model
+    if model:
+        cmd += ["--model", model]
+    if profile.reasoning_effort:
+        cmd += ["--config", f"model_reasoning_effort={profile.reasoning_effort}"]
+    if session_id:
+        cmd += ["resume", session_id]
+    # prompt は stdin から渡す。`-` を明示しないと、Codex CLI は引数のpromptを待つ。
+    cmd += ["-"]
+    return cmd
+
+
+def _build_claude_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
     cmd = [
         config.claude_bin,
         "-p",
@@ -88,6 +114,32 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
     if session_id:
         cmd += ["--resume", session_id]
     return cmd
+
+
+def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+    """agent profile に従い、Claude または Codex のコマンドを作る。"""
+    if _profile(config).provider == "codex":
+        return build_codex_command(config, ws, session_id)
+    return _build_claude_command(config, ws, session_id)
+
+
+def install_codex_skills(config: Config, ws: Workspace) -> None:
+    """テーマ作業場へ研究 plugin の skill を安全な相対シンボリックリンクで公開する。"""
+    assert ws.cwd is not None
+    source_root = config.agent_plugin_dir(AGENT) / "skills"
+    if not source_root.is_dir():
+        return
+
+    target_root = ws.cwd / ".agents" / "skills"
+    target_root.mkdir(parents=True, exist_ok=True)
+    for source in sorted(source_root.iterdir()):
+        if not source.is_dir() or not (source / "SKILL.md").is_file():
+            continue
+        target = target_root / source.name
+        # 作業場にある既存 skill は利用者が管理しているものなので、上書きしない。
+        if target.exists() or target.is_symlink():
+            continue
+        target.symlink_to(os.path.relpath(source, target_root), target_is_directory=True)
 
 
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str) -> dict[str, str]:
@@ -179,6 +231,38 @@ def apply_event(result: RunResult, event: dict) -> str | None:
     return None
 
 
+def apply_codex_event(result: RunResult, event: dict) -> str | None:
+    """Codex の JSONL event を、Claude と同じ RunResult に写す。"""
+    etype = event.get("type")
+    if etype == "thread.started":
+        result.session_id = event.get("thread_id")
+        return None
+    item = event.get("item") or {}
+    item_type = item.get("type")
+    if etype in {"item.started", "item.completed"} and item_type == "command_execution":
+        command = item.get("command") or ""
+        activity = describe_tool("Bash", {"command": command})
+        result.activities.append(activity)
+        return activity
+    if etype == "item.completed" and item_type == "agent_message":
+        text = str(item.get("text") or "").strip()
+        if text:
+            result.text = f"{result.text}\n{text}".strip()
+        return None
+    if etype == "turn.failed":
+        error = event.get("error") or {}
+        message = str(error.get("message") if isinstance(error, dict) else error)
+        result.errors.append(message)
+        result.is_error = True
+        result.limit_reset_at = parse_limit(message)
+    elif etype == "error":
+        message = str(event.get("message") or event.get("error") or "Codex のエラー")
+        result.errors.append(message)
+        result.is_error = True
+        result.limit_reset_at = parse_limit(message)
+    return None
+
+
 def parse_limit(text: str, now: float | None = None) -> float | None:
     """契約の上限に当たったか。当たっていれば明ける時刻（エポック秒）、分からなければ UNKNOWN_LIMIT_RESET。"""
     if not _USAGE_LIMIT.search(text):
@@ -223,6 +307,19 @@ async def run_claude(
     on_text: Callable[[str], Awaitable[None]] | None = None,
 ) -> RunResult:
     assert ws.cwd is not None
+    profile = _profile(config)
+    is_codex = profile.provider == "codex"
+    context = run_hooks.RunContext(
+        agent=AGENT,
+        provider=profile.provider,
+        workspace_kind=ws.kind.value,
+        model=ws.model or profile.model or config.model,
+    )
+    if is_codex:
+        install_codex_skills(config, ws)
+        configured_connectors = await discover_mcp_names(config.codex_bin)
+        run_hooks.preflight(context, frozenset(getattr(profile, "connectors", ())), configured_connectors)
+    started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *build_command(config, ws, session_id),
         cwd=ws.cwd,
@@ -245,14 +342,18 @@ async def run_claude(
                 event = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if on_text and event.get("type") == "assistant":
+            if on_text and not is_codex and event.get("type") == "assistant":
                 for block in event.get("message", {}).get("content", []):
                     if block.get("type") == "text" and (block.get("text") or "").strip():
                         await on_text(block["text"])
-            activity = apply_event(result, event)
+            if is_codex and on_text and event.get("type") == "item.completed":
+                item = event.get("item") or {}
+                if item.get("type") == "agent_message" and (item.get("text") or "").strip():
+                    await on_text(item["text"])
+            activity = apply_codex_event(result, event) if is_codex else apply_event(result, event)
             if activity and on_activity:
                 await on_activity(activity)
-            if event.get("type") == "result":
+            if event.get("type") == "result" or event.get("type") in {"turn.completed", "turn.failed", "error"}:
                 # claude の最後のイベント。ここで読むのをやめる。
                 # Bash が残したプロセスが出力を握っていると、EOF はいつまでも来ない
                 return
@@ -280,6 +381,12 @@ async def run_claude(
     if proc.returncode and not result.text and not result.errors and stderr:
         result.is_error = True
         result.errors.append(stderr[-2000:])
+    run_hooks.post_run(run_hooks.RunOutcome(
+        context=context,
+        duration_ms=round((time.monotonic() - started_at) * 1000),
+        is_error=result.is_error,
+        session_id=result.session_id,
+    ))
     return result
 
 

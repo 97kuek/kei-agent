@@ -74,7 +74,7 @@ def test_skills_do_not_depend_on_an_environment_variable_for_their_scripts():
 
 def test_course_plugin_has_three_scoped_skills():
     assert set(skill_metadata(PLUGIN / "course")) == {
-        "finding-course-materials", "managing-assignments", "managing-course-notion"}
+        "finding-course-materials", "managing-assignments", "managing-course-notion", "managing-academic-record"}
 
 
 def test_work_plugin_has_three_scoped_skills():

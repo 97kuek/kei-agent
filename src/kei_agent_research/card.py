@@ -20,7 +20,7 @@ def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺を作る。base_url は `http://127.0.0.1:8788` のような、外から見える住所。"""
     return AgentCard(
         name="Kei Agent（研究）",
-        description="研究テーマのディレクトリで claude を sandbox の中で動かし、長い処理を pueue のジョブにする。"
+        description="研究テーマのディレクトリで claude または codex を sandbox の中で動かし、長い処理を pueue のジョブにする。"
                     "会話の続け方と Slack への見せ方、ジョブの行き先の管理はオーケストレーターが持つ",
         version=VERSION,
         supported_interfaces=[AgentInterface(
@@ -37,7 +37,7 @@ def build_card(base_url: str) -> AgentCard:
                 id=RUN_CLAUDE,
                 name="claude を1回動かす",
                 description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、"
-                            "そのテーマのディレクトリで claude を1回動かして、結果を JSON で返す。"
+                            "そのテーマのディレクトリで設定された claude または codex を1回動かして、結果を JSON で返す。"
                             "途中の経過（使った道具と、返答の断片）はタスクの状態に流す",
                 tags=["claude", "sandbox"],
                 examples=['{"channel_name": "amr-query", "prompt": "図を作って"}'],

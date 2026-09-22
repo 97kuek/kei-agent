@@ -22,6 +22,25 @@ HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 AGENT_PLUGINS = frozenset({"research", "course", "work"})
 
 
+@dataclass(frozen=True)
+class AgentProfile:
+    """実行するCLIと、そのCLIに渡すモデルの方針。
+
+    skill は手順、profile は実行器を決める。skill の中にモデル名を埋め込まないため、
+    Claude と Codex を同じ agent から切り替えられる。
+    """
+
+    provider: str = "claude"
+    model: str = ""
+    reasoning_effort: str = "high"
+    # Codex に切り替えるとき、実際に使う MCP 名だけを明示する。空なら外部 connector は渡さない。
+    connectors: frozenset[str] = field(default_factory=frozenset)
+
+
+def _default_agent_profiles() -> dict[str, AgentProfile]:
+    return {agent: AgentProfile() for agent in AGENT_PLUGINS}
+
+
 def _expand(path: str) -> Path:
     return Path(os.path.expanduser(path)).resolve()
 
@@ -106,12 +125,14 @@ class Config:
     job_poll_seconds: int = 60
     job_parallel: int = 1
     model: str = ""
+    agent_profiles: dict[str, AgentProfile] = field(default_factory=_default_agent_profiles)
     # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
     handoff_after_turns: int = 8
     allowed_domains: tuple[str, ...] = ()
     allow_write: tuple[Path, ...] = ()
     deny_read: tuple[Path, ...] = ()
     claude_bin: str = "claude"
+    codex_bin: str = "codex"
     pueue_bin: str = "pueue"
     schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
     maintenance: MaintenanceConfig = field(default_factory=lambda: MaintenanceConfig())
@@ -164,9 +185,11 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "model", "handoff_after_turns", "channels", "sandbox", "schedule",
-    "maintenance", "a2a",
+    "job_poll_seconds", "job_parallel", "model", "agents", "handoff_after_turns", "channels", "sandbox",
+    "schedule", "maintenance", "a2a",
 }
+AGENTS_KEYS = AGENT_PLUGINS
+AGENT_PROFILE_KEYS = {"provider", "model", "reasoning_effort", "connectors"}
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 # [schedule] のうち、時刻（HH:MM）を書くキー
 SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
@@ -213,6 +236,39 @@ def _a2a(data: dict) -> A2AConfig:
     return A2AConfig(agents=dict(agents), timeout_seconds=float(data.get("timeout_seconds", 300)))
 
 
+def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
+    """[agents.<name>] を読み、未指定の agent は Claude の既定値にする。"""
+    if not isinstance(data, dict):
+        raise ConfigError("config.toml の [agents] はテーブルにしてください")
+    unknown = sorted(set(data) - AGENTS_KEYS)
+    if unknown:
+        raise ConfigError(f"config.toml の [agents] に知らないagentがあります: {', '.join(unknown)}")
+    profiles = _default_agent_profiles()
+    for name, raw in data.items():
+        if not isinstance(raw, dict):
+            raise ConfigError(f"config.toml の [agents.{name}] はテーブルにしてください")
+        _check_keys(raw, AGENT_PROFILE_KEYS, f"[agents.{name}]")
+        provider = str(raw.get("provider", "claude"))
+        if provider not in {"claude", "codex"}:
+            raise ConfigError(f"config.toml の [agents.{name}].provider は claude または codex にしてください")
+        connectors = raw.get("connectors", [])
+        if (
+            not isinstance(connectors, list)
+            or any(not isinstance(connector, str) or not connector for connector in connectors)
+            or len(connectors) != len(set(connectors))
+        ):
+            raise ConfigError(
+                f"config.toml の [agents.{name}].connectors は重複のない空でない文字列の配列にしてください"
+            )
+        profiles[name] = AgentProfile(
+            provider=provider,
+            model=str(raw.get("model", "")),
+            reasoning_effort=str(raw.get("reasoning_effort", "high")),
+            connectors=frozenset(connectors),
+        )
+    return profiles
+
+
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
     env = dict(os.environ) if env is None else env
     path = path or Path(env.get("KEI_AGENT_CONFIG", REPO_ROOT / "config.toml"))
@@ -244,11 +300,13 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
         model=data.get("model", ""),
+        agent_profiles=_agent_profiles(data.get("agents", {})),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
         deny_read=tuple(_expand(p) for p in sandbox.get("deny_read", DEFAULT_DENY_READ)),
         claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),
+        codex_bin=env.get("KEI_AGENT_CODEX_BIN", "codex"),
         pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),
         schedule=_section(ScheduleConfig, schedule, "schedule"),
         maintenance=_section(MaintenanceConfig, data.get("maintenance", {}), "maintenance"),

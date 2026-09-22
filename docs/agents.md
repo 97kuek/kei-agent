@@ -10,7 +10,7 @@
 | 層 | いまあるもの | LLM | 役目 |
 |---|---|---|---|
 | 判断 | Kei Agent 本体（`src/kei_agent/`） | 持つ | Slack の受け口、意図の判定、返事の組み立て、柵、Notion（研究）、決まった時刻の処理、上限の管理 |
-| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で `claude -p` を1回動かし、経過と結果を返す。長い処理（pueue の待ち行列）もこちらが持つ |
+| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で `claude -p` または `codex exec` を1回動かし、経過と結果を返す。長い処理（pueue の待ち行列）もこちらが持つ |
 | 道具＋自分の判断 | 大学エージェント（`src/kei_agent_course/`） | 自分の claude を持つ | ドメインの外部サービス（Moodle・Box・Toggl・Notion の授業）を触り、そのドメインの質問に答える |
 
 - **ドメイン1つ＝エージェント1つ** 研究・大学・仕事（予定）。ドメインの中をさらに割らない。
@@ -68,6 +68,26 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 ## 4. claude を持たせるとき
 
+### CLIとモデルの選択
+
+`config.toml` の `[agents.<agent>]` が実行器とモデルの正である。skill は手順を定義し、モデル名を埋め込まない。
+
+```toml
+[agents.research]
+provider = "claude"       # または "codex"
+model = ""                # Codexなら例: gpt-5.3-codex
+reasoning_effort = "high" # Codexの推論強度。Claudeでは記録用の方針値
+connectors = []            # Codexで使う有効なMCP名だけを明示する
+```
+
+既定はClaudeで、agent単位でCodexへ切り替えられる。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。暗黙のモデル切り替えや、契約上限時の別モデルへの自動フォールバックはしない。
+
+Codexで外部 connector を使うときは、`connectors` に名前を明示し、`codex mcp list --json` で有効と確認できるものだけを列挙する。実行前には agent ごとの許可範囲と照合し、未接続・担当外なら起動しない。許可範囲は研究が `research-notion` と `wandb`、大学が `notion` と `box`、仕事が読み取り専用の `microsoft-365`。SharePoint はこの経路に含めない。connector の自動インストール、OAuth、認証情報・URLの移行はしない。
+
+2026-09-22 時点でこの Mac の Codex CLI が有効として検出した MCP は `drawio`、`node_repl`、`openaiDeveloperDocs`。上記の agent 用 connector は検出されていないため、研究・大学・仕事の provider は Claude のまま保つ。必要な connector が有効になった後にだけ、該当 agent の `provider = "codex"` と `connectors` を同時に設定する。
+
+この切り替えが現時点で直接適用されるのは、研究のsandbox実行器である。研究テーマの作業場はリポジトリ外なので、Codex起動前に `plugin/research/skills` だけを `<テーマ>/.agents/skills` へ相対シンボリックリンクとして公開する。既存の利用者skillは上書きしない。大学・仕事の `ask` は、Notion／Box／Microsoft 365のアカウント連携を使うため、Codex側の同等MCPコネクタを確認するまではClaude connectorを正とする。
+
 動かし方は2つある。**どちらも `src/kei_agent_a2a/claude.py` を使い、自分で `claude` を起動する処理は書かない。**
 
 | | 使う関数 | 何ができるか | 使うとき |
@@ -84,8 +104,7 @@ sandbox を締めるより結果的に狭い。連携はログイン（プロフ
 - 柵は `config.toml` から組む（`kei_agent.guard`）。接続先は**そのドメインに要るものだけ**を `Workspace.allowed_domains` に渡す
 - 指示書は `prompts/<agent>.md`（`Workspace.system_prompt`）。学期ごとに変わる前提は作業場の `CLAUDE.md` に置く
 - 上限時間は `Workspace.timeout_minutes`（大学は5分、研究は30分）
-- Box は読み取り専用。大学の Notion は授業・課題の読み取り、課題の状態更新、課題ページ作成だけを許可し、
-  削除・移動・複製・データベース作成は許可しない
+- Box は読み取り専用。大学の Notion は授業ホームの範囲で、削除・移動・複製・データベース作成を含む操作を許可する
 - コネクタの道具だけでは対象ページを限定できない。大学は専用 Claude プロファイル、Notion 側の共有範囲、
   `prompts/course.md` の3つで権限を狭める
 - ほかのドメインの鍵は、子プロセスに渡さない（`guard.strip_env`。Slack・Notion・Box・Moodle・Microsoft・Toggl）
@@ -157,8 +176,8 @@ plugin/<agent>/
 
 | エージェント | スキル | 中身 |
 |---|---|---|
-| 大学 | `sync-assignments` / `list-due` / `list-classes` / `time-report` / `ask` | Moodle の締切を Notion に取り込む／締切の一覧（JSON）／その日の授業／Toggl の集計／自由な質問（連携で Box と Notion を読む） |
-| 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` | claude を1回動かす（経過を流す）／pueue の待ち行列の出し入れ |
+| 大学 | `sync-assignments` / `list-due` / `list-classes` / `time-report` / `ask` / `managing-academic-record` | Moodle の締切、授業ホームの成績・GPA・単位要件を扱う |
+| 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` / `managing-wandb` | Claude/Codexの実行、pueue、W&Bのrun・artifact・metricsの読み取りと研究ログへの投影 |
 | 仕事 | `list-events` / `ask` | Outlook の予定（JSON）／メール・SharePoint・Teams を読んで要点で答える |
 
 ## 7. エージェントに持たせないもの

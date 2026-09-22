@@ -103,6 +103,42 @@ def test_config_toml_in_repo_loads(tmp_path):
     load_config(REPO_ROOT / "config.toml", env={})
 
 
+def test_agent_profile_selects_codex_and_keeps_other_agents_on_claude(tmp_path):
+    from kei_agent.config import load_config
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[agents.research]\nprovider = "codex"\nmodel = "gpt-5.3-codex"\nreasoning_effort = "high"\n'
+    )
+    config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
+    assert config.codex_bin == "codex-test"
+    assert config.agent_profiles["research"].provider == "codex"
+    assert config.agent_profiles["research"].model == "gpt-5.3-codex"
+    assert config.agent_profiles["course"].provider == "claude"
+
+
+def test_agent_profile_reads_unique_connector_declarations(tmp_path):
+    """connector 宣言を落として Codex の権限制査を迂回する変更を捕捉する。"""
+    from kei_agent.config import load_config
+    path = tmp_path / "config.toml"
+    path.write_text('[agents.research]\nprovider = "codex"\nconnectors = ["wandb", "research-notion"]\n')
+
+    config = load_config(path, env={})
+
+    assert config.agent_profiles["research"].connectors == frozenset({"wandb", "research-notion"})
+    assert config.agent_profiles["course"].connectors == frozenset()
+
+
+@pytest.mark.parametrize("connectors", ['"wandb"', '["wandb", "wandb"]'])
+def test_agent_profile_rejects_invalid_connector_declarations(tmp_path, connectors):
+    """非配列や重複を黙って許可して、意図しない connector を有効にする変更を捕捉する。"""
+    from kei_agent.config import ConfigError, load_config
+    path = tmp_path / "config.toml"
+    path.write_text(f'[agents.research]\nconnectors = {connectors}\n')
+
+    with pytest.raises(ConfigError, match="connectors"):
+        load_config(path, env={})
+
+
 # チャンネル名の先頭の番号（並び順のためのもの）
 
 

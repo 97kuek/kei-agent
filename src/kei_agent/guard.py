@@ -32,7 +32,7 @@ DEFAULT_DENY_READ = (
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
 STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
                          # ドメインごとの鍵（Box・Moodle・Microsoft・Toggl）。エージェントの claude にも渡さない
-                         "BOX_", "MOODLE_", "MS_", "TOGGL_")
+                         "BOX_", "MOODLE_", "MS_", "TOGGL_", "OPENAI_API_KEY", "CODEX_API_KEY")
 # 上の prefix に当たっても、子プロセスに残すもの。
 # 研究の claude が持つ Notion の鍵は、研究ホームだけを操作できるゲートウェイの合言葉だけ
 # （生の NOTION_TOKEN は NOTION_ の prefix で落ちる）

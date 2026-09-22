@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from kei_agent import guard, runner, themes
+from kei_agent.config import AgentProfile
 
 
 def test_settings_limit_theme_to_its_directory(config):
@@ -44,6 +45,54 @@ def test_command_resumes_session_and_ignores_user_settings(config):
     assert "--resume" not in runner.build_command(config, ws, None)
 
 
+def test_codex_profile_builds_a_jsonl_workspace_write_command(config):
+    ws = themes.resolve(config, "vlm")
+    config = replace(
+        config,
+        codex_bin="codex-test",
+        agent_profiles={"research": AgentProfile(provider="codex", model="gpt-5.3-codex", reasoning_effort="high")},
+    )
+
+    cmd = runner.build_command(config, ws, "thread-1")
+
+    assert cmd[:4] == ["codex-test", "exec", "--json", "--sandbox"]
+    assert "workspace-write" in cmd
+    assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-5.3-codex"
+    assert "--config" in cmd and "model_reasoning_effort=high" in cmd
+    assert "--plugin-dir" not in cmd
+    assert cmd[-1] == "-"
+
+
+def test_codex_install_links_only_research_skills_into_theme_workspace(config):
+    """Codex をテーマ直下から起動しても、研究 plugin の skill だけを発見できる。"""
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+
+    runner.install_codex_skills(config, ws)
+
+    skills_dir = ws.cwd / ".agents" / "skills"
+    wandb = skills_dir / "managing-wandb"
+    assert wandb.is_symlink()
+    assert wandb.resolve() == config.agent_plugin_dir("research") / "skills" / "managing-wandb"
+    assert not (skills_dir / "managing-academic-record").exists()
+
+
+def test_apply_codex_events_maps_thread_message_and_command_activity():
+    result = runner.RunResult()
+    assert runner.apply_codex_event(result, {"type": "thread.started", "thread_id": "t1"}) is None
+    activity = runner.apply_codex_event(result, {
+        "type": "item.started",
+        "item": {"type": "command_execution", "command": "pytest -q"},
+    })
+    assert activity == "実行している: pytest -q"
+    runner.apply_codex_event(result, {
+        "type": "item.completed",
+        "item": {"type": "agent_message", "text": "完了"},
+    })
+    runner.apply_codex_event(result, {"type": "turn.completed", "usage": {"total_cost_usd": 0.2}})
+    assert (result.session_id, result.text, result.is_error) == ("t1", "完了", False)
+
+
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
     """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
     text = runner.system_prompt_text(config)
@@ -60,10 +109,13 @@ def test_env_strips_secrets_and_adds_thread(config):
         "CLAUDECODE": "1",
         "CLAUDE_CODE_SESSION_ID": "parent",
         "CLAUDE_CODE_OAUTH_TOKEN": "keep",
+        "OPENAI_API_KEY": "sk-secret",
+        "CODEX_API_KEY": "codex-secret",
     }
     env = runner.build_env(config, base, "C1", "123.456")
     assert "SLACK_BOT_TOKEN" not in env and "SLACK_APP_TOKEN" not in env and "NOTION_TOKEN" not in env
     assert "KEI_AGENT_ALLOWED_USER_ID" not in env
+    assert "OPENAI_API_KEY" not in env and "CODEX_API_KEY" not in env
     assert "CLAUDECODE" not in env and "CLAUDE_CODE_SESSION_ID" not in env
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"
     assert env["KEI_AGENT_CHANNEL"] == "C1" and env["KEI_AGENT_THREAD_TS"] == "123.456"
@@ -163,6 +215,47 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
         await asyncio.sleep(0.1)
     else:
         pytest.fail(f"claude が残したプロセス {pid} が生きています")
+
+
+async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_path):
+    """Codex JSONLの応答・進捗と、テーマ作業場の研究skillを同時に扱える。"""
+    fake = tmp_path / "fake-codex.sh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "cat > /dev/null\n"
+        "printf '%s\\n' "
+        "'{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}' "
+        "'{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"pwd\"}}' "
+        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"完了\"}}' "
+        "'{\"type\":\"turn.completed\"}'\n"
+    )
+    fake.chmod(0o755)
+    config = replace(
+        config,
+        codex_bin=str(fake),
+        agent_profiles={"research": AgentProfile(provider="codex")},
+    )
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+    seen_text: list[str] = []
+    seen_activity: list[str] = []
+
+    async def on_text(text: str) -> None:
+        seen_text.append(text)
+
+    async def on_activity(activity: str) -> None:
+        seen_activity.append(activity)
+
+    result = await runner.run_claude(
+        config, ws, "調べて", None, "C1", "1.1",
+        on_activity=on_activity,
+        on_text=on_text,
+    )
+
+    assert (result.session_id, result.text, result.is_error) == ("thread-1", "完了", False)
+    assert seen_text == ["完了"]
+    assert seen_activity == ["実行している: pwd"]
+    assert (ws.cwd / ".agents" / "skills" / "managing-wandb").is_symlink()
 
 
 def test_apply_event_reads_the_usage_limit_and_when_it_resets():
