@@ -12,6 +12,10 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # この仕組みは JST の Mac で動く。UTC で走らせると、Moodle の締切（UTC で書き出される）を
+      # 手元の時刻に直すところが9時間ずれて落ちる
+      TZ: Asia/Tokyo
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
