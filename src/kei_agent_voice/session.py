@@ -36,6 +36,8 @@ class VoiceSession:
         self.face = face or Face()
         self.brain = brain or live.Live(Tools(held, self.config))
         self._talking: asyncio.Task | None = None
+        self._notices: asyncio.Queue[str] = asyncio.Queue()
+        self._notice_worker: asyncio.Task | None = None
 
     @property
     def listening(self) -> bool:
@@ -58,13 +60,32 @@ class VoiceSession:
 
     async def run(self, listening: bool = False) -> None:
         """立ち上げ。**既定ではマイクを開けない**（docs/voice.md の7節）。"""
+        self._notice_worker = asyncio.create_task(self._speak_notices())
         if listening:
             self.set_listening(True)
         try:
             # 開け閉めは本体（Slack）から押されるので、ここは待つだけ
             await asyncio.Event().wait()
         finally:
+            talking = self._talking
             self.set_listening(False)
+            self._notice_worker.cancel()
+            tasks = [self._notice_worker]
+            if talking is not None:
+                tasks.append(talking)
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _speak_notices(self) -> None:
+        while True:
+            text = await self._notices.get()
+            try:
+                await self.brain.say_once(text, on_said=self._write)
+            except live.Unavailable as e:
+                log.warning("知らせを喋れません: %s", e)
+            except Exception:
+                log.exception("知らせの読み上げに失敗しました")
+            finally:
+                self._notices.task_done()
 
     async def _talk(self) -> None:
         try:
@@ -78,16 +99,15 @@ class VoiceSession:
             log.exception("声のやりとりが止まりました")
 
     def announce(self, text: str, expression: str = "") -> None:
-        """本体から来た知らせを喋る。マイクを開けていなければ、顔だけ変える。"""
+        """顔をすぐ変え、通知を既存接続かマイクなしの通知workerに渡す。"""
         if expression:
             self.face.show(expression)
         if not text.strip():
             return
-        if not self.listening:
-            log.info("聞いていないので、知らせは喋りません: %s", text[:60])
-            return
-        self.brain.announce(text)
-        self._write("Kei Agent", text)
+        if self.listening:
+            self.brain.announce(text)
+        else:
+            self._notices.put_nowait(text)
 
     def _write(self, who: str, text: str) -> None:
         journal.append(self.config.overview_dir, who, text)

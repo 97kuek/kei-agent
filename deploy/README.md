@@ -50,6 +50,8 @@
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
 export KEI_AGENT_ALLOWED_USER_ID="U..."
+# 本体と全A2Aエージェントで共通。空だとA2Aエージェントは起動しない
+export KEI_AGENT_A2A_TOKEN="$(openssl rand -hex 32)"
 # Notion のコネクト「Kei Agent」のアクセストークン（ないと Notion につながず、夜間の Task は動かない）
 export NOTION_TOKEN="ntn_..."
 # 任意: Toggl の API キーと宛先（研究時間の記録に使う。どれかがなければ人の時間は空欄になる）
@@ -65,6 +67,9 @@ export TOGGL_WORKSPACE_ID="..."
 # 任意: Semantic Scholar の APIキー（なくても動くが、混雑時に 429 になりやすい）
 # export S2_API_KEY="..."
 ```
+
+`KEI_AGENT_A2A_TOKEN` はコマンドを各プロセスで実行し直さず、生成した値をこのファイルへ一度だけ保存する。
+本体・大学・研究・仕事・声の全プロセスが、同じ `kei-agent.zsh` から同じ値を読む必要がある。
 
 `chmod 600` にしておく。`~/.zshrc` から `~/.config/zsh/local/*.zsh` を読んでいれば、ターミナルでもそのまま使える。
 
@@ -211,7 +216,7 @@ Kei Agent 本体を入れ替えたときは、研究エージェントも入れ�
 
 ## 7.7 Box と Notion（学部要項・過去問・授業）
 
-大学エージェントの claude は、**Claude のアカウントに付いている連携**で Box と Notion を読む
+大学エージェントの claude は、**Claude のアカウントに付いている連携**で Box と Notion を使う
 （自前のアプリは要らない）。連携はログインに付いてくるので、個人アカウント専用のプロファイルを1つ作る。
 
 ```zsh
@@ -225,8 +230,10 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 export CLAUDE_CONFIG_DIR="$HOME/.claude-personal"
 ```
 
-claude.ai の設定で Box と Notion の連携を繋いでおくこと。使わせるのは読む道具だけで、
-書き込み・移動・アップロードは断る（`src/kei_agent_course/tools.py`）。
+claude.ai の設定で Box と Notion の連携を繋いでおくこと。Box は読み取り専用。Notion は授業・課題の
+読み取り、課題の状態更新、課題ページの作成だけを許可し、削除・移動・複製・データベース作成は断る
+（`prompts/course.md`）。コネクタの道具だけでは対象ページを限定できないため、専用 Claude プロファイル、
+Notion 側でそのプロファイルに共有する範囲、`prompts/course.md` の3つで制約する。
 
 ## 8. バックアップとログ
 

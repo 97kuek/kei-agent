@@ -1,6 +1,7 @@
 import asyncio
 import time
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_request
@@ -799,6 +800,70 @@ async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
     assert ask.pending_asks(config) == []      # 拾ったら消す
 
 
+async def test_ask_from_outside_is_retried_when_slack_post_fails(env, config, monkeypatch):
+    """Slack へのスレッド作成が一時失敗しても、依頼を次回へ残す。"""
+    assistant, slack, _, _ = env
+    from kei_agent import ask
+    path = ask.write_ask(config, "vlm", "集計して")
+    monkeypatch.setattr(slack, "chat_postMessage", AsyncMock(side_effect=RuntimeError("temporary")))
+
+    with pytest.raises(RuntimeError, match="temporary"):
+        await assistant.handle_asks()
+
+    assert path.exists()
+    assert ask.pending_asks(config)[0][1]["text"] == "集計して"
+
+
+async def test_ask_from_outside_is_retried_when_submit_fails(env, config, monkeypatch):
+    """依頼の受付を再試行しても、Slack スレッドは重複させない。"""
+    assistant, slack, _, _ = env
+    from kei_agent import ask
+    path = ask.write_ask(config, "vlm", "集計して")
+    submit = AsyncMock(side_effect=[RuntimeError("temporary"), None])
+    monkeypatch.setattr(assistant, "submit", submit)
+
+    with pytest.raises(RuntimeError, match="temporary"):
+        await assistant.handle_asks()
+
+    assert path.exists()
+    persisted = ask.pending_asks(config)[0][1]
+    assert persisted["text"] == "集計して"
+    assert persisted["thread_ts"] == "1001.000"
+
+    await assistant.handle_asks()
+
+    assert len(slack.posted()) == 1
+    assert submit.await_count == 2
+    assert submit.await_args_list[0].args[0].thread_ts == persisted["thread_ts"]
+    assert submit.await_args_list[1].args[0].thread_ts == persisted["thread_ts"]
+    assert ask.pending_asks(config) == []
+
+
+async def test_ask_loop_recovers_interrupted_asks_only_before_polling(env, config, monkeypatch):
+    """再起動時の回収は1回だけ行い、通常の poll では所有権を保つ。"""
+    assistant, _, _, _ = env
+    from kei_agent import ask
+    events = []
+
+    monkeypatch.setattr(ask, "recover_asks", lambda actual: events.append(("recover", actual)))
+
+    async def handle_asks():
+        events.append(("handle", config))
+        if len(events) == 3:
+            raise asyncio.CancelledError
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(assistant, "handle_asks", handle_asks)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await assistant.ask_loop()
+
+    assert events == [("recover", config), ("handle", config), ("handle", config)]
+
+
 async def test_note_from_outside_is_only_recorded(env, config):
     """決まったことは、作業させずにスレッドに残すだけ。"""
     assistant, slack, claude, _ = env
@@ -810,6 +875,37 @@ async def test_note_from_outside_is_only_recorded(env, config):
 
     assert "📌 声で決まったこと" in "\n".join(slack.texts())
     assert claude.calls == []
+
+
+async def test_note_from_outside_is_not_posted_again_when_completion_is_retried(env, config, monkeypatch):
+    """投稿後の完了に失敗しても、保存済みの Slack スレッドを再利用する。"""
+    assistant, slack, claude, _ = env
+    from kei_agent import ask
+    path = ask.write_ask(config, "vlm", "4条件の比較で進める", kind="note")
+    real_complete = ask.complete_ask
+    attempts = 0
+
+    def complete_once_retried(item):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary")
+        real_complete(item)
+
+    monkeypatch.setattr(ask, "complete_ask", complete_once_retried)
+
+    with pytest.raises(RuntimeError, match="temporary"):
+        await assistant.handle_asks()
+
+    assert path.exists()
+    assert ask.pending_asks(config)[0][1]["thread_ts"] == "1001.000"
+
+    await assistant.handle_asks()
+
+    notes = [text for text in slack.texts() if text.startswith("📌 声で決まったこと")]
+    assert len(notes) == 1
+    assert claude.calls == []
+    assert ask.pending_asks(config) == []
 
 
 async def test_ask_for_an_unknown_theme_is_reported(env, config):

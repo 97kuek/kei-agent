@@ -17,6 +17,20 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
+def test_a2a_app_refuses_to_start_without_a_password():
+    from kei_agent_course.app import build_app
+
+    with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
+        build_app("http://127.0.0.1:8787", "")
+
+
+def test_a2a_app_refuses_a_blank_password():
+    from kei_agent_course.app import build_app
+
+    with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
+        build_app("http://127.0.0.1:8787", "   ")
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

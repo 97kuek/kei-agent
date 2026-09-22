@@ -13,7 +13,7 @@ DEFAULT_PORT = 8787
 ENV_PREFIX = "KEI_AGENT_COURSE"
 
 
-def build_app(base_url: str, token: str = "") -> Starlette:
+def build_app(base_url: str, token: str) -> Starlette:
     return _build_app(build_card(base_url), CourseExecutor(), RPC_PATH, token)
 
 

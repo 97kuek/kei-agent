@@ -10,6 +10,9 @@ from contextlib import asynccontextmanager, suppress
 
 from starlette.applications import Starlette
 
+from kei_agent import settings
+from kei_agent.config import Config, load_config
+from kei_agent.store import Store
 from kei_agent_a2a.server import build_app as _build_app
 from kei_agent_a2a.server import serve
 from kei_agent_voice.card import RPC_PATH, build_card
@@ -20,7 +23,7 @@ DEFAULT_PORT = 8790
 ENV_PREFIX = "KEI_AGENT_VOICE"
 
 
-def build_app(base_url: str, token: str = "", executor: VoiceExecutor | None = None,
+def build_app(base_url: str, token: str, executor: VoiceExecutor | None = None,
               listen: bool = False) -> Starlette:
     executor = executor or VoiceExecutor()
     app = _build_app(build_card(base_url), executor, RPC_PATH, token)
@@ -30,7 +33,7 @@ def build_app(base_url: str, token: str = "", executor: VoiceExecutor | None = N
     return app
 
 
-def _ears(executor: VoiceExecutor):
+def _ears(executor: VoiceExecutor, config: Config | None = None, store: Store | None = None):
     """A2A サーバーと同じプロセスで、声でも話す。
 
     鍵が無い機械でも落とさない（`VoiceSession._talk` が握りつぶす）。
@@ -38,18 +41,25 @@ def _ears(executor: VoiceExecutor):
 
     @asynccontextmanager
     async def lifespan(app):
-        session = VoiceSession(executor.held)
-        # マイクの開け閉めは、本体が Slack（App Home）から押してくる
-        executor.session = session
-        # **既定では開けない。** 常に録らない（docs/voice.md の7節）
-        task = asyncio.create_task(session.run(listening=False))
+        runtime_config = config or load_config()
+        runtime_store = store or Store(runtime_config.db_path)
         try:
-            yield
+            initial_listening = settings.listening_enabled(runtime_store)
+            session = VoiceSession(executor.held, config=runtime_config)
+            # マイクの開け閉めは、本体が Slack（App Home）から押してくる
+            executor.session = session
+            # 保存済みの設定を初期値として使う（既定では開けない）
+            task = asyncio.create_task(session.run(listening=initial_listening))
+            try:
+                yield
+            finally:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                executor.session = None
         finally:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
-            executor.session = None
+            if store is None:
+                runtime_store.conn.close()
 
     return lifespan
 

@@ -837,6 +837,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     async def ask_loop(self) -> None:
         """同じ Mac に置かれた依頼を、数秒ごとに拾う。"""
         failing = False
+        ask.recover_asks(self.config)
         while True:
             try:
                 await self.handle_asks()
@@ -849,28 +850,44 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             await asyncio.sleep(ask.POLL_SECONDS)
 
     async def handle_asks(self) -> None:
-        pending = ask.pending_asks(self.config)
+        pending = ask.claim_asks(self.config)
         if not pending:
             return
         ids = await self.channel_ids()
-        for path, payload in pending:
-            path.unlink(missing_ok=True)
-            theme = str(payload.get("theme") or "")
-            text = str(payload.get("text") or "").strip()
-            kind = payload.get("kind", "request")
-            channel = ids.get(theme)
-            if not channel or not text:
-                await self.notify_trouble(
-                    f"外からの依頼を渡せませんでした（テーマ: {theme or '不明'}）: {text[:100] or '（空）'}")
-                continue
-            header = "📌 声で決まったこと" if kind == "note" else "🎤 声からの依頼"
-            resp = await self.slack.chat_postMessage(channel=channel, text=f"{header}\n{text}")
-            if kind == "note":
-                continue
-            await self.submit(Request(
-                channel=channel, channel_name=theme, thread_ts=resp["ts"], message_ts=None,
-                text=text, trigger="voice",
-            ))
+        for item in pending:
+            try:
+                theme = str(item.payload.get("theme") or "")
+                text = str(item.payload.get("text") or "").strip()
+                kind = item.payload.get("kind", "request")
+                channel = ids.get(theme)
+                if not channel or not text:
+                    await self.notify_trouble(
+                        f"外からの依頼を渡せませんでした（テーマ: {theme or '不明'}）: {text[:100] or '（空）'}")
+                    ask.complete_ask(item)
+                    continue
+                header = "📌 声で決まったこと" if kind == "note" else "🎤 声からの依頼"
+                thread_ts = item.payload.get("thread_ts")
+                if thread_ts is not None and (not isinstance(thread_ts, str) or not thread_ts.strip()):
+                    await self.notify_trouble(
+                        f"外からの依頼を渡せませんでした（テーマ: {theme}）: 保存された Slack スレッドが不正です")
+                    ask.complete_ask(item)
+                    continue
+                if thread_ts is None:
+                    resp = await self.slack.chat_postMessage(channel=channel, text=f"{header}\n{text}")
+                    thread_ts = resp["ts"]
+                if "thread_ts" not in item.payload:
+                    ask.record_thread(item, thread_ts)
+                if kind == "note":
+                    ask.complete_ask(item)
+                    continue
+                await self.submit(Request(
+                    channel=channel, channel_name=theme, thread_ts=thread_ts, message_ts=None,
+                    text=text, trigger="voice",
+                ))
+                ask.complete_ask(item)
+            except Exception:
+                ask.retry_ask(item)
+                raise
 
     # 契約の上限（Claude AI usage limit）
 

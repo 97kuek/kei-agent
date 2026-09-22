@@ -72,7 +72,7 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 | | 使う関数 | 何ができるか | 使うとき |
 |---|---|---|---|
-| **道具だけ** | `ask_connector()` | アカウントに付いている連携（Box・Notion・Microsoft 365）を読む。Bash もファイルも使えない | 外のサービスを読んで答える（大学・仕事の `ask`） |
+| **道具だけ** | `ask_connector()` | アカウントに付いている連携（Box・Notion・Microsoft 365）を使う。Bash もファイルも使えない | 外のサービスを使って答える（大学・仕事の `ask`） |
 | **sandbox** | `run()` | テーマのディレクトリでファイルを読み書きし、Bash を使う | 手元で作業する（研究の `run-claude`） |
 
 「道具だけ」のほうは、使ってよい道具を名指しで並べる（読むものだけ）。触れる先が連携に限られるので、
@@ -84,7 +84,10 @@ sandbox を締めるより結果的に狭い。連携はログイン（プロフ
 - 柵は `config.toml` から組む（`kei_agent.guard`）。接続先は**そのドメインに要るものだけ**を `Workspace.allowed_domains` に渡す
 - 指示書は `prompts/<agent>.md`（`Workspace.system_prompt`）。学期ごとに変わる前提は作業場の `CLAUDE.md` に置く
 - 上限時間は `Workspace.timeout_minutes`（大学は5分、研究は30分）
-- 書き込みできる鍵を claude に渡さない（Notion は読み取り専用のコネクトを渡し、書き込みは Python 側が行う）
+- Box は読み取り専用。大学の Notion は授業・課題の読み取り、課題の状態更新、課題ページ作成だけを許可し、
+  削除・移動・複製・データベース作成は許可しない
+- コネクタの道具だけでは対象ページを限定できない。大学は専用 Claude プロファイル、Notion 側の共有範囲、
+  `prompts/course.md` の3つで権限を狭める
 - ほかのドメインの鍵は、子プロセスに渡さない（`guard.strip_env`。Slack・Notion・Box・Moodle・Microsoft・Toggl）
 - **外部サービスを足すときは、まずコネクタ（アカウントに付いている連携）を見る。**
   すでに繋がっていれば、自前の登録は要らない（Outlook はこれで解決した）。ただし
