@@ -1,7 +1,7 @@
 # 声のレイヤと Stack-chan
 
 - 机上で声で相談し、作業は Slack の Kei Agent がやる
-- 図は [voice.svg](voice.svg)、仕組み全体は [`design.md`](design.md)、使い方は [`using.md`](using.md)、決まりは [`agents.md`](agents.md)を参照
+- 図は [voice.png](voice.png)、仕組み全体は [`design.md`](design.md)、使い方は [`using.md`](using.md)、決まりは [`agents.md`](agents.md)を参照
 
 - **声は OpenAI Realtime API に任せ、考えるのは手元の購読エージェントに任せる**
 
