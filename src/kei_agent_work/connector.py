@@ -19,6 +19,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from kei_agent.config import Config
+from kei_agent.store import Store
 from kei_agent_a2a import claude
 
 log = logging.getLogger(__name__)
@@ -33,13 +34,6 @@ ALLOWED = (CALENDAR_TOOL,)
 ALLOWED_ASK = (
     CALENDAR_TOOL,
     f"{_M365}outlook_email_search",
-    f"{_M365}sharepoint_search",
-    f"{_M365}sharepoint_folder_search",
-    f"{_M365}teams_list_chats",
-    f"{_M365}teams_list_teams",
-    f"{_M365}teams_list_channels",
-    f"{_M365}teams_list_channel_messages",
-    f"{_M365}chat_message_search",
     f"{_M365}search_people",
     f"{_M365}find_meeting_availability",
     # 見つけたものの本文を読む（読んで要約するため。貼り付けは prompts/work.md で止める）
@@ -79,14 +73,15 @@ class WorkCalendarError(RuntimeError):
     pass
 
 
-async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = None) -> list[dict]:
+async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = None,
+                 store: Store | None = None) -> list[dict]:
     """これから days 日ぶんの予定を、始まる順に。"""
     start = today or date.today()
     prompt = PROMPT.format(tool=CALENDAR_TOOL, since=start.isoformat(),
                            until=(start + timedelta(days=max(days, 1))).isoformat())
     try:
         text = await claude.ask_connector(config, prompt, ALLOWED, config.agent_plugin_dir(AGENT),
-                                          DENY, TIMEOUT_MINUTES)
+                                          DENY, TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT)
         found = claude.json_reply(text)
     except claude.ConnectorError as e:
         raise WorkCalendarError(str(e)) from None
@@ -109,13 +104,13 @@ def _event(item: dict) -> dict:
     }
 
 
-async def ask(config: Config, question: str, prompt_path: Path | None = None) -> str:
+async def ask(config: Config, question: str, prompt_path: Path | None = None, store: Store | None = None) -> str:
     """自由な質問に、連携を読んで答える（長さの加減は prompts/work.md が決める）。"""
     guide = (prompt_path or config.repo_root / "prompts" / "work.md")
     instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
     prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
     try:
         return await claude.ask_connector(config, prompt, ALLOWED_ASK, config.agent_plugin_dir(AGENT),
-                                          DENY, ASK_TIMEOUT_MINUTES)
+                                          DENY, ASK_TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT)
     except claude.ConnectorError as e:
         raise WorkCalendarError(str(e)) from None

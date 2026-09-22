@@ -20,6 +20,7 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent.config import Config, load_config
+from kei_agent.store import Store
 from kei_agent.notion import NotionError
 from kei_agent.timelog import TogglError
 from kei_agent_a2a import claude, envelope
@@ -73,8 +74,9 @@ def due_data(events: list[Event], days: int) -> dict:
 
 
 class CourseExecutor(AgentExecutor):
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: Config | None = None, store: Store | None = None):
         self.config = config or load_config()
+        self.store = store or Store(self.config.db_path)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -185,7 +187,7 @@ class CourseExecutor(AgentExecutor):
         try:
             answer = await claude.ask_connector(
                 self.config, prompt, tools.ALLOWED, self.config.agent_plugin_dir(tools.AGENT),
-                tools.DENY, tools.TIMEOUT_MINUTES)
+                tools.DENY, tools.TIMEOUT_MINUTES, store=self.store, agent=tools.AGENT)
         except claude.ConnectorError as e:
             await self._fail(updater, str(e))
             return

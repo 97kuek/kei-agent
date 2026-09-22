@@ -26,7 +26,9 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 
-from kei_agent import guard, runner
+from kei_agent import guard, runner, settings
+from kei_agent.agent_policy import policy_for
+from kei_agent.codex_app_server import AppServerClient
 from kei_agent.config import Config
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
@@ -129,8 +131,20 @@ def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str
     ]
 
 
+async def ask_codex_app(config: Config, agent: str, prompt: str, model: str,
+                        reasoning_effort: str, timeout_minutes: int) -> str:
+    """接続済み Codex App を agent policy の範囲だけで使う。"""
+    result = await AppServerClient(config.codex_bin, timeout_minutes * 60).run(
+        prompt, policy_for(agent), model, reasoning_effort)
+    if result.is_error:
+        # App Server の内部エラーや外部データは Slack へ出さない。
+        raise ConnectorError("Codex の接続を使えませんでした")
+    return result.text
+
+
 async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plugin_dir: Path,
-                        deny: Sequence[str] = (), timeout_minutes: int = 3) -> str:
+                        deny: Sequence[str] = (), timeout_minutes: int = 3, *, store=None,
+                        agent: str = "") -> str:
     """アカウントの連携を、道具を絞って使わせる（返事の文をそのまま返す）。
 
     会社の Microsoft 365 のように、Claude のアカウントに付いている連携は、ユーザー設定を
@@ -139,6 +153,11 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plu
 
     柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/agents.md）。
     """
+    profile = settings.agent_profile(config, store, agent) if store is not None and agent else None
+    if profile is not None and profile.provider == "codex":
+        # Codex の失敗を Claude で再試行すると、利用者が選んだ provider と権限境界を破る。
+        return await ask_codex_app(config, agent, prompt, profile.model, profile.reasoning_effort, timeout_minutes)
+
     command = connector_command(config, allowed, deny, plugin_dir)
     proc = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,

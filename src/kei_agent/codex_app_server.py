@@ -31,12 +31,14 @@ def resolve_apps(installed: Sequence[dict[str, Any]], policy: AppPolicy) -> tupl
     return tuple(ids)
 
 
-def build_command(codex_bin: str, app_ids: Sequence[str] = ()) -> list[str]:
+def build_command(codex_bin: str, app_ids: Sequence[str] = (), read_only: bool = False) -> list[str]:
     command = [codex_bin, "app-server", "--stdio"]
     if app_ids:
         command += ["-c", "apps._default.enabled=false"]
         for app_id in app_ids:
             command += ["-c", f"apps.{app_id}.enabled=true"]
+            if read_only:
+                command += ["-c", f"apps.{app_id}.destructive_enabled=false"]
     return command
 
 
@@ -54,9 +56,9 @@ class AppServerClient:
         self.timeout_seconds = timeout_seconds
         self._ids = itertools.count(1)
 
-    async def _start(self, app_ids: Sequence[str] = ()):
+    async def _start(self, app_ids: Sequence[str] = (), read_only: bool = False):
         proc = await asyncio.create_subprocess_exec(
-            *build_command(self.codex_bin, app_ids),
+            *build_command(self.codex_bin, app_ids, read_only),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -100,7 +102,7 @@ class AppServerClient:
                   on_activity: Callable[[str], Awaitable[None]] | None = None,
                   on_text: Callable[[str], Awaitable[None]] | None = None) -> RunResult:
         app_ids = resolve_apps(await self.installed(), policy)
-        proc = await self._start(app_ids)
+        proc = await self._start(app_ids, policy.read_only)
         result = RunResult()
         try:
             # 設定をかけた二つ目の process でも readiness を確認する。

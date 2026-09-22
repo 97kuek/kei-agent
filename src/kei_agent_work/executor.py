@@ -18,6 +18,7 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent.config import Config, load_config
+from kei_agent.store import Store
 from kei_agent_a2a import claude, envelope
 from kei_agent_work import connector
 from kei_agent_work.card import ASK, LIST_EVENTS
@@ -43,8 +44,9 @@ def asked_days(metadata: dict | None, default: int = connector.DEFAULT_DAYS) -> 
 
 
 class WorkExecutor(AgentExecutor):
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: Config | None = None, store: Store | None = None):
         self.config = config or load_config()
+        self.store = store or Store(self.config.db_path)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -63,7 +65,7 @@ class WorkExecutor(AgentExecutor):
             return
         days = asked_days(metadata)
         try:
-            events = await connector.events(self.config, days)
+            events = await connector.events(self.config, days, store=self.store)
         except connector.WorkCalendarError as e:
             await self._fail(updater, str(e))
             return
@@ -77,7 +79,7 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, "質問が空です")
             return
         try:
-            answer = await connector.ask(self.config, question)
+            answer = await connector.ask(self.config, question, store=self.store)
         except connector.WorkCalendarError as e:
             await self._fail(updater, str(e))
             return

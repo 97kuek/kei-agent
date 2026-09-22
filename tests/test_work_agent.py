@@ -60,7 +60,7 @@ async def server(config, monkeypatch):
 
     asked = []
 
-    async def events(cfg, days=7, today=None):
+    async def events(cfg, days=7, today=None, store=None):
         asked.append(days)
         return EVENTS
 
@@ -99,7 +99,7 @@ async def test_without_the_connection_it_says_so(server, monkeypatch):
     """連携が使えないときは、その理由を返す（黙って0件にしない）。"""
     from kei_agent_work import connector
 
-    async def broken(cfg, days=7, today=None):
+    async def broken(cfg, days=7, today=None, store=None):
         raise connector.WorkCalendarError("連携を使えませんでした")
 
     monkeypatch.setattr(connector, "events", broken)

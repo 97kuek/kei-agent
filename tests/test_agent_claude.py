@@ -7,6 +7,7 @@ import os
 
 import pytest
 
+from kei_agent import settings
 from kei_agent_a2a import claude, envelope
 
 
@@ -72,6 +73,31 @@ async def test_connector_reaps_the_process_after_a_timeout(config, monkeypatch):
 
     assert killed == [process.pid]
     assert process.waited
+
+
+async def test_connector_uses_codex_when_the_agent_profile_selects_it(config, store, monkeypatch):
+    settings.set_agent_profile(store, "course", "codex", "", "high")
+
+    async def codex(*_args, **_kwargs):
+        return "Boxを確認しました"
+
+    monkeypatch.setattr(claude, "ask_codex_app", codex)
+    assert await claude.ask_connector(
+        config, "資料は？", (), config.agent_plugin_dir("course"), store=store, agent="course"
+    ) == "Boxを確認しました"
+
+
+async def test_connector_does_not_fallback_to_claude_after_a_codex_error(config, store, monkeypatch):
+    settings.set_agent_profile(store, "work", "codex", "", "high")
+
+    async def broken(*_args, **_kwargs):
+        raise claude.ConnectorError("Outlook が未接続です")
+
+    monkeypatch.setattr(claude, "ask_codex_app", broken)
+    with pytest.raises(claude.ConnectorError, match="Outlook"):
+        await claude.ask_connector(
+            config, "会議は？", (), config.agent_plugin_dir("work"), store=store, agent="work"
+        )
 
 
 def test_json_reply_requires_a_json_array():
