@@ -1,5 +1,6 @@
 import pytest
 
+from kei_agent.agent_policy import policy_for
 from kei_agent import themes
 from kei_agent.themes import ChannelKind
 
@@ -137,6 +138,12 @@ def test_agent_profile_rejects_invalid_connector_declarations(tmp_path, connecto
 
     with pytest.raises(ConfigError, match="connectors"):
         load_config(path, env={})
+
+
+def test_course_policy_allows_only_box_and_notion():
+    policy = policy_for("course")
+    assert policy.app_names == frozenset({"Box", "Notion"})
+    assert policy.read_only is False
 
 
 # チャンネル名の先頭の番号（並び順のためのもの）

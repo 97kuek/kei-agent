@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from kei_agent import settings
 from kei_agent.config import MaintenanceConfig, ScheduleConfig
 
@@ -77,3 +79,18 @@ def test_schedule_time_can_be_overridden(config, store):
 def test_maintenance_disabled_in_config_stays_off(config, store):
     config = replace(config, maintenance=MaintenanceConfig(enabled=False, time="22:00"))
     assert settings.schedule_time(config, store, "maintenance") == ""
+
+
+def test_home_profile_override_changes_only_named_agent(config, store):
+    settings.set_agent_profile(store, "course", "codex", "gpt-5.6-terra", "high")
+    assert settings.agent_profile(config, store, "course").provider == "codex"
+    assert settings.agent_profile(config, store, "course").model == "gpt-5.6-terra"
+    assert settings.agent_profile(config, store, "work").provider == "claude"
+
+
+@pytest.mark.parametrize("provider, model, effort", [
+    ("unknown", "", "high"), ("codex", "x" * 121, "high"), ("codex", "", "maximum"),
+])
+def test_home_profile_override_rejects_invalid_values(config, store, provider, model, effort):
+    with pytest.raises(ValueError):
+        settings.set_agent_profile(store, "course", provider, model, effort)

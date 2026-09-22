@@ -11,7 +11,7 @@ import re
 import sqlite3
 import time
 
-from kei_agent.config import HHMM, Config
+from kei_agent.config import AGENT_PLUGINS, HHMM, AgentProfile, Config
 from kei_agent.guard import valid_domain
 from kei_agent.store import Store
 
@@ -197,3 +197,37 @@ def listening_enabled(store: Store) -> bool:
 
 def set_listening(store: Store, enabled: bool) -> None:
     _set(store, LISTEN_KEY, "1" if enabled else "0")
+
+
+# agent ごとの provider / model。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
+_PROFILE_PROVIDERS = frozenset({"claude", "codex"})
+_PROFILE_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def set_agent_profile(store: Store, agent: str, provider: str, model: str, reasoning_effort: str) -> None:
+    if agent not in AGENT_PLUGINS:
+        raise ValueError(f"未知のagentです: {agent}")
+    if provider not in _PROFILE_PROVIDERS:
+        raise ValueError("provider は claude または codex にしてください")
+    if len(model) > 120:
+        raise ValueError("model は120文字以内にしてください")
+    if reasoning_effort not in _PROFILE_EFFORTS:
+        raise ValueError("reasoning effort が不正です")
+    _set(store, f"agent.{agent}.provider", provider)
+    _set(store, f"agent.{agent}.model", model)
+    _set(store, f"agent.{agent}.reasoning_effort", reasoning_effort)
+
+
+def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
+    if agent not in AGENT_PLUGINS:
+        raise ValueError(f"未知のagentです: {agent}")
+    base = config.agent_profiles[agent]
+    provider = _get(store, f"agent.{agent}.provider") or base.provider
+    model = _get(store, f"agent.{agent}.model")
+    effort = _get(store, f"agent.{agent}.reasoning_effort") or base.reasoning_effort
+    return AgentProfile(
+        provider=provider,
+        model=base.model if model is None else model,
+        reasoning_effort=effort,
+        connectors=base.connectors,
+    )
