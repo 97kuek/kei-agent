@@ -65,6 +65,26 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
                   {"type": "context", "elements": [{"type": "mrkdwn", "text": "いまは何も動いていません"}]})
     blocks.append({"type": "actions", "elements": [_button("最新にする", REFRESH_ACTION, "refresh")]})
 
+    blocks += [{"type": "divider"}, _mrkdwn("*AI 実行器*")]
+    labels = {"research": "研究", "course": "大学", "work": "仕事"}
+    for agent, label in labels.items():
+        profile = settings.agent_profile(config, store, agent)
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{label}: {profile.provider.title()}*\n"
+                     + ("Box は読み取りのみ。Notion は大学ホーム内だけ" if agent == "course" else
+                        "Outlook は読み取りのみ。SharePoint と Teams は使わない" if agent == "work" else
+                        "研究ホームの Notion gateway と W&B を使う")},
+            "accessory": {
+                "type": "static_select", "action_id": f"kei_agent_home_provider:{agent}",
+                "initial_option": {"text": {"type": "plain_text", "text": profile.provider.title()}, "value": profile.provider},
+                "options": [
+                    {"text": {"type": "plain_text", "text": "Claude"}, "value": "claude"},
+                    {"text": {"type": "plain_text", "text": "Codex"}, "value": "codex"},
+                ],
+            },
+        })
+
     blocks += [
         {"type": "divider"},
         _mrkdwn("*接続先*"),

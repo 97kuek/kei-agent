@@ -82,6 +82,12 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -
         cmd += ["--model", model]
     if profile.reasoning_effort:
         cmd += ["--config", f"model_reasoning_effort={profile.reasoning_effort}"]
+    # 個人 Notion connector を読む余地を作らず、研究ホームを検査する gateway だけを渡す。
+    cmd += [
+        "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
+        "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="KEI_AGENT_NOTION_GATEWAY_AUTH"}}',
+        "--config", f"mcp_servers.{NOTION_MCP}.enabled=true",
+    ]
     if session_id:
         cmd += ["resume", session_id]
     # prompt は stdin から渡す。`-` を明示しないと、Codex CLI は引数のpromptを待つ。
@@ -147,6 +153,8 @@ def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
+    if token := env.get(GATEWAY_TOKEN_ENV):
+        env["KEI_AGENT_NOTION_GATEWAY_AUTH"] = f"Bearer {token}"
     return env
 
 

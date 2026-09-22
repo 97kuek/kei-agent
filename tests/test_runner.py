@@ -63,6 +63,16 @@ def test_codex_profile_builds_a_jsonl_workspace_write_command(config):
     assert cmd[-1] == "-"
 
 
+def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
+    ws = themes.resolve(config, "vlm")
+    config = replace(config, agent_profiles={"research": AgentProfile(provider="codex")})
+    command = runner.build_codex_command(config, ws, None)
+    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+    assert any("mcp_servers.research-notion.url" in item and config.notion_gateway_url in item for item in configs)
+    assert any("env_http_headers" in item and "KEI_AGENT_NOTION_GATEWAY_AUTH" in item for item in configs)
+    assert not any("NOTION_TOKEN" in item for item in configs)
+
+
 def test_codex_install_links_only_research_skills_into_theme_workspace(config):
     """Codex をテーマ直下から起動しても、研究 plugin の skill だけを発見できる。"""
     ws = themes.resolve(config, "vlm")
@@ -120,6 +130,11 @@ def test_env_strips_secrets_and_adds_thread(config):
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"
     assert env["KEI_AGENT_CHANNEL"] == "C1" and env["KEI_AGENT_THREAD_TS"] == "123.456"
     assert "KEI_AGENT_PLUGIN_DIR" not in env
+
+
+def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
+    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1")
+    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer gateway-secret"
 
 
 def test_apply_event_keeps_domains_claude_asked_for():

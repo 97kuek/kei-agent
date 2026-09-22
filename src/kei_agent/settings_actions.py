@@ -133,6 +133,10 @@ class SettingsActions:
             on = not settings.listening_enabled(self.store)
             settings.set_listening(self.store, on)
             self.notify_listening(on)
+        elif kind == "kei_agent_home_provider" and name in {"research", "course", "work"}:
+            profile = settings.agent_profile(self.config, self.store, name)
+            provider = ((action.get("selected_option") or {}).get("value") or "")
+            settings.set_agent_profile(self.store, name, provider, profile.model, profile.reasoning_effort)
         else:
             return
         await self.publish_home(user)

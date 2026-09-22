@@ -45,6 +45,14 @@ def test_home_lists_theme_domains_and_schedule(config, store):
     assert len(pickers) == len(settings.SCHEDULE_NAMES)
 
 
+def test_home_shows_agent_provider_controls(config, store):
+    view = home.build_home(config, store, [], is_owner=True)
+    text = _texts(view)
+    assert "大学: Claude" in text
+    controls = [block.get("accessory", {}) for block in view["blocks"]]
+    assert any(element.get("action_id") == "kei_agent_home_provider:course" for element in controls)
+
+
 def test_home_for_someone_else_changes_nothing(config, store):
     view = home.build_home(config, store, ["vlm"], is_owner=False)
     assert "依頼者だけ" in _texts(view)
@@ -80,6 +88,12 @@ async def test_change_time_and_toggle_from_home(env, config, store):
     assert settings.schedule_time(config, store, "daily") == ""
     await assistant.on_home_action(_action("kei_agent_home_toggle:daily", "daily"))
     assert settings.schedule_time(config, store, "daily") == "07:30"
+
+
+async def test_home_provider_action_changes_the_next_agent_run(env, store):
+    assistant, _ = env
+    await assistant.on_home_action(_action("kei_agent_home_provider:course", selected_option={"value": "codex"}))
+    assert settings.agent_profile(assistant.config, store, "course").provider == "codex"
 
 
 async def test_add_domain_through_modal(env, store):
