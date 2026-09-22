@@ -18,8 +18,9 @@ jobs:
         with:
           enable-cache: true
       - name: 依存関係を入れる
-        run: uv sync --frozen
+        # 束ねを全部入れる。既定だけだと a2a が無く、テストの収集で落ちる
+        run: uv sync --frozen --all-groups
       - name: 書き方を確かめる
-        run: uvx ruff check src tests plugin
+        run: uvx ruff check .
       - name: テストを実行する
-        run: uv run pytest
+        run: uv run python -m pytest
