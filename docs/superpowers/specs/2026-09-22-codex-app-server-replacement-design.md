@@ -14,9 +14,9 @@ Claude の利用上限や契約状態に依存せず、KeiAgent の研究・大�
 
 `src/kei_agent/codex_app_server.py` を App Server JSON-RPC の唯一の adapter とする。agent の各依頼で標準入出力の App Server 子プロセスを起動し、`initialize`、`thread/start`、`turn/start` の順に呼ぶ。入力は prompt と、許可した connector を指す `app://` mention だけである。thread と turn のイベントを既存 `RunResult` と A2A progress に変換する。
 
-設定は provider を選ぶ既存の `AgentProfile` を拡張するが、connector の選択は単なる MCP 名ではなく、agent policy に属する App の宣言として扱う。起動時に adapter は App Server へ `app/installed` を問い合わせ、宣言した App が `enabled` かつ `callable` でなければ prompt を実行せず明示的に失敗する。
+設定は provider を選ぶ既存の `AgentProfile` を拡張するが、connector の選択は単なる MCP 名ではなく、agent policy に属する App の論理名として扱う。App の内部 ID はアカウントごとに発行されるため、リポジトリには保存しない。起動時に adapter は App Server へ `app/installed` を問い合わせ、論理名を最新の内部 ID に読み取りで解決する。宣言した App が `enabled` かつ `callable` でなければ prompt を実行せず明示的に失敗する。
 
-アプリの有効化は一回の App Server 実行に渡す一時的な Codex 設定で閉じる。全アプリを既定で無効にし、その agent の許可 App だけを有効化する。常駐プロセスのグローバル設定や、ユーザーがデスクトップで使う有効設定を書き換えない。
+アプリの有効化は一回の App Server 実行に渡す一時的な Codex 設定で閉じる。最新の内部 ID を解決した後、全アプリを既定で無効にし、その agent の許可 App だけを有効化する別の App Server 子プロセスを起動する。常駐プロセスのグローバル設定や、ユーザーがデスクトップで使う有効設定を書き換えない。
 
 ## Agent policy
 
