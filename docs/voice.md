@@ -1,9 +1,14 @@
 # 声のレイヤと Stack-chan
 
 - 机上で声で相談し、作業は Slack の Kei Agent がやる
-- 図は [voice.png](voice.png)、仕組み全体は [`design.md`](design.md)、使い方は [`using.md`](using.md)、決まりは [`agents.md`](agents.md)を参照
+- 仕組み全体は [`design.md`](design.md)、使い方は [`using.md`](using.md)、決まりは [`agents.md`](agents.md)を参照
 
-- **声は OpenAI Realtime API に任せ、考えるのは手元の購読エージェントに任せる**
+**声は OpenAI Realtime API に任せ、考えるのは手元の購読エージェントに任せる**
+
+| 図 | 何を描いているか |
+|---|---|
+| [voice.png](voice.png) | **いまの形。** 音の出し入れは Mac。Stack-chan は身体と顔で、HTTP で指示するだけ |
+| [voice-future.png](voice-future.png) | **将来構想。** マイクとスピーカーも Stack-chan に移した形（2節の「完全 Stack-chan 化」） |
 
 | | 誰がやるか |
 |---|---|
@@ -13,10 +18,10 @@
 | 研究・授業・仕事の**中身**を調べる | **Codex**（購読。`think.py`）。声のセッションの外で動く |
 | 作業そのもの | **Slack の Kei Agent**（Claude の購読）。`asks/` 経由 |
 | 音の出し入れ | `ffmpeg`（手元。`audio.py`） |
-| 顔 | Stack-chan（**まだ買っていない**。`face.py`） |
+| 身体と顔 | Stack-chan（**まだ買っていない**。`face.py`） |
 
-- **お金がかかるのは声の分だけ**
-- 考えるところは購読のまま（Codex と Claude）なので、声で長く話しても、そこは増えない
+**お金がかかるのは声の分だけ。** 考えるところは購読のまま（Codex と Claude）なので、
+声で長く話しても、そこは増えない。
 
 ## 1. 何をどこでやるか
 
@@ -26,7 +31,7 @@
 | 音の出し入れ | **Mac**（`ffmpeg`） | マイクとスピーカーは手元にしかない |
 | 依頼者のことを答える | **Mac**（`tools.py`） | モデルは依頼者を何も知らない。渡さないかぎり何も答えられない |
 | 調べもの | **Mac** → Codex | 研究のファイルを読むのは、声のセッションの外の仕事（数秒かかる） |
-| 顔 | **Stack-chan** | 画面を見ていないときに気づけるのが、机に置く理由 |
+| 身体と顔 | **Stack-chan** | 画面を見ていないときに気づけるのが、机に置く理由。**音は通さない**（2節） |
 
 **本体（Stack-chan）だけではできないこと**
 
@@ -34,7 +39,7 @@
 - **日本語の音声合成** … ESP-SR の TTS は中国語・英語向け。日本語は実質 AquesTalk（有償）だけ
 - **カメラと音声の同時** … `GC0308` にハードウェア JPEG が無く、圧縮が CPU に乗る。
   I2S の録音・再生・WiFi・推論が同じ MCU に集中し、**最初に壊れるのは音**
-- いまは音が Realtime API と Mac の間を流れるので、Stack-chan に残る仕事は**顔**だけになった。
+- いまは音が Realtime API と Mac の間を流れるので、Stack-chan に残る仕事は**身体と顔**だけになった。
 
 ## 2. もの
 
@@ -46,6 +51,41 @@
 | 買い方 | 組立済みの M5 公式「M5StackChan」か、CoreS3 Lite からの自作 |
 
 **買う前に作る**（Q35）。声が Mac と API の間で完結した時点で、Stack-chan が要るのは目と顔だけになった。
+
+### Stack-chan は「音声端末」ではなく「身体と顔」
+
+**会話の音は Stack-chan を通さない。** 通したくなるが、いまのファームでは通せないし、
+通すと Realtime API に替えた利点が半分消える。
+
+| 描きたくなること | 実際 |
+|---|---|
+| Stack-chan のマイク → Mac に音声ストリーム | **入力の口が無い**（`stackchan-atama` は `/status` `/play_wav` `/face` `/setting` `/capture` だけ） |
+| Mac → Stack-chan のスピーカーに音声ストリーム | **ストリームではなくファイル**。`/play_wav` は wav を1つ投げる形で、40ms ずつ返る PCM を流し込めない |
+
+`/play_wav` を会話に使うと、**割り込みが死ぬ**。投げ切った wav は途中で止められず、
+「どこまで聞かれたか」も分からないので `conversation.item.truncate` に渡す値が作れない。
+使うとしても、知らせの音や短い固定音声のような**補助**に留める。
+
+ハードの側も重い。CoreS3 の内蔵マイクは弱く（外付け U089 が要る）、I2S の録音・再生・WiFi が
+同じ MCU に集中すると**最初に壊れるのは音**。24kHz を双方向で流すのは、その一番厳しい条件になる。
+
+### 完全 Stack-chan 化（将来構想。[voice-future.png](voice-future.png)）
+
+やるなら**ファームウェアを書く**ことになる。
+
+```text
+Stack-chan のマイク → I2S → CoreS3 → WebSocket/PCM → Mac（Realtime API）
+                                   ← PCM ← CoreS3 ← I2S → Stack-chan のスピーカー
+```
+
+`stackchan-atama` に乗る利点（PC を脳にする前提で作られている）を捨てる話なので、
+**買って、いまの形で動かしてから決める**。順番は次のとおり。
+
+| 段 | 形 | 状態 |
+|---|---|---|
+| 1 | 入出力とも Mac、Stack-chan は顔 | **いまここ**。割り込みが効く |
+| 2 | 知らせの音だけ Stack-chan（`/play_wav`） | 買ったら試す。会話には使わない |
+| 3 | 入出力とも Stack-chan | ファームを書く覚悟ができたら |
 
 ## 3. 3本の道
 
