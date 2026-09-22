@@ -1,4 +1,4 @@
-"""Daily と振り返りの材料（digest）を作る。Claude はこれと、ここに書いたファイルを読んで書く。"""
+"""Daily と Retro & Planning の材料（digest）を作る。Claude はこれと、ここに書いたファイルを読んで書く。"""
 
 from __future__ import annotations
 

@@ -22,7 +22,7 @@ SCHEDULE_NAMES = ("literature", "daily", "review", "night", "maintenance")
 SCHEDULE_LABELS = {
     "literature": "先行研究の新着",
     "daily": "Daily",
-    "review": "振り返りの材料",
+    "review": "Retro & Planning",
     "night": "🌙 をつけた Task",
     "maintenance": "毎晩の保守とバックアップ",
 }

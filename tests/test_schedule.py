@@ -312,7 +312,7 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
 
     assert "reviews/2026-09-18.md" in claude.calls[0]["prompt"]
     texts = slack.texts()
-    assert texts[0] == "🌙 振り返りの材料 9/18（金）" and texts[1] == "今日の要約と問い"
+    assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == "今日の要約と問い"
     note = assistant.notion.notes[-1]
     assert note.kind == "振り返り" and "## Codex での振り返り" in note.body
     assert "Codex App で" in texts[2] and note.url in texts[2]

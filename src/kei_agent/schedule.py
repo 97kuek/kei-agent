@@ -1,4 +1,4 @@
-"""決まった時刻の処理: 先行研究の新着、Daily、振り返りの材料、🌙 の夜間 Task、放置されたスレッドへの声かけ。"""
+"""決まった時刻の処理: 先行研究の新着、Daily、Retro & Planning、🌙 の夜間 Task、放置されたスレッドへの声かけ。"""
 
 from __future__ import annotations
 
@@ -267,7 +267,7 @@ class Scheduler:
     async def _write_digest(self, kind: str, day: str, since: float, ids: dict[str, str]) -> Path:
         path = self.overview_dir / ".kei-agent" / "digest" / f"{day}-{kind}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        title = {"daily": f"Daily の材料 {day}", "review": f"振り返りの材料 {day}"}[kind]
+        title = {"daily": f"Daily の材料 {day}", "review": f"Retro & Planning の材料 {day}"}[kind]
         text = await DigestBuilder(self.config, self.store, self.assistant).build(
             since, time.time(), title, set(ids), domains=kind == "review")
         path.write_text(text, encoding="utf-8")
@@ -340,27 +340,29 @@ class Scheduler:
         review_path = self.overview_dir / "reviews" / f"{day}.md"
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
-            f"[Kei Agent の定期処理: 振り返りの材料 {day}]\n"
+            f"[Kei Agent の定期処理: Retro & Planning {day}]\n"
             f"`{digest}` に今日の材料があります。材料と、そこに書かれたスレッドのログを読み、"
             f"Codex App で振り返るための材料を `reviews/{day}.md` に書いてください。形式:\n\n"
-            f"```markdown\n# 振り返り {day}\n\n## 今日やったこと\n（研究・大学・仕事ごとに、何をして何が分かったか）\n\n"
+            f"```markdown\n# Retro & Planning {day}\n\n## 今日やったこと\n"
+            "（研究・大学・仕事ごとに、何をして何が分かったか）\n\n"
             "## 振り返りの問い\n1. 今日分かったことは何か（〜について、など具体的に）\n2. 明日やることは何か\n\n"
             "## Codex での振り返り\n（ここに Codex で話した結論を書く）\n```\n\n"
-            "返答は Slack に投稿されるので、**研究・大学・仕事の3つを同じ形で並べて**ください。\n"
-            "1つの領域につき、`*研究*` のような見出しのあと、次の3行だけを書きます。\n"
-            "- `✅` 今日片付いたこと（材料に無ければ、その領域は「なし」と1行）\n"
-            "- `⏳` 途中のもの・残っている締切\n"
-            "- `→ 明日:` 明日あるもの（授業、会議、締切）\n"
-            "材料に大学や仕事の節が無い領域は、まるごと省いてください。そのあと `─` の行を挟み、"
-            "「振り返りの問い」を2つ書きます。問いは、3つの領域を見たうえでの問いにしてください"
-            "（例: 明日は授業が2コマあるので、研究にどこを充てるか）。ほかには何も書かないでください。\n"
+            "**Slack への返答は、次の2つの見出しと最後の1行だけ**にしてください。"
+            "ほかの見出しや説明を足さないでください。\n\n"
+            "*今日の成果*\n"
+            "材料の「今日が期日の Task」のうち**済みのもの**を1行ずつ。"
+            "Task になっていないが今日片付いたことがあれば、それも1行で足してよい。無ければ「なし」。\n\n"
+            "*未完了タスク*\n"
+            "同じ Task のうち**終わっていないもの**を1行ずつ。無ければ「なし」。\n\n"
+            "最後に、次の1行をそのまま書いてください。\n"
+            "夜間に実行したいタスクはありますか？\n\n"
             "このあと、このスレッドに振り返りの結論が貼られたら、その内容を "
             f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。"
         )
         result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "review")
-        title = f"振り返り {label(day)}"
+        title = f"Retro & Planning {label(day)}"
         thread_ts = await self.assistant.publish(
-            channel, self.overview_channel_name, ws, f"🌙 振り返りの材料 {label(day)}", result
+            channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result
         )
         note = None
         if not result.is_error:

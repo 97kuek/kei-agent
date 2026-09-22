@@ -121,10 +121,10 @@ launchctl print gui/$(id -u)/com.kei-agent.assistant | grep -E 'state|last exit'
 
 時刻は `config.toml` の `[schedule]` で変えられる。Mac がスリープしていて時刻を逃した処理は、起きたときに実行する（夜間の Task は12時間、それ以外は3時間以内）。
 
-夜間（01:30）にも Task を進めたいときは、一度だけ次を実行して、毎晩 01:25 に Mac を起こす（電源につないでおく）。
+夜間（00:00）にも Task を進めたいときは、一度だけ次を実行して、毎晩 23:55 に Mac を起こす（電源につないでおく）。
 
 ```zsh
-sudo pmset repeat wakeorpoweron MTWRFSU 01:25:00
+sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00
 pmset -g sched   # 確認
 sudo pmset repeat cancel   # やめるとき
 ```
@@ -245,7 +245,7 @@ uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップ�
 
 | 整理するもの | 残す日数 |
 |---|---|
-| Daily と振り返りの材料（`overview/.kei-agent/digest/`） | 30日 |
+| Daily と Retro & Planning の材料（`overview/.kei-agent/digest/`） | 30日 |
 | テーマのディレクトリで動かした Claude のセッションの記録（`~/.claude/projects/` のうち `~/research` の下に対応するものだけ） | 90日。消えたセッションのスレッドは、次に返信したときにスレッドの履歴から続きを始める |
 | Kei Agent が自分を直すのに使った worktree（`<state_dir>/worktrees/`）と、案を考えるときの一時ディレクトリ | 直している最中のもの以外は毎晩消す |
 
