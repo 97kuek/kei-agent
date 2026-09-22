@@ -4,8 +4,9 @@ Box（学部要項・過去問）と Notion（授業・課題）は、どちら�
 **すでに連携として繋がっている**。自前で API を書かず、その連携を使う（docs/agents.md）。
 
 - Box は読む道具だけ。アップロード・移動は名指しで断る
-- Notion は「課題」を直せるところまで（状態の更新、行の追加）。移動・複製・削除は名指しで断る。
-  連携はアカウント全体に届くので、**どこを触ってよいかは道具では絞れない**。範囲は prompts/course.md で縛る
+- Notion は授業ホームの中で**全部できる**（作成・更新・移動・複製・削除・DB作成）。
+  **範囲は道具では絞れない**ので、授業用のプロファイル（`CLAUDE_CONFIG_DIR`）に
+  授業ホームだけを共有し、Notion 側の権限で外へ届かないようにする（docs/agents.md）
 - 連携はログイン（プロファイル）に付いてくるので、仕事用と同じく `CLAUDE_CONFIG_DIR` で
   個人アカウントのプロファイルを指しておく（秘密情報のファイル）
 - 触れるのは連携だけ（Bash もファイルも使わせない）ので、作業用ディレクトリを持たない
@@ -21,7 +22,7 @@ AGENT = "course"
 _BOX = "mcp__claude_ai_Box__"
 _NOTION = "mcp__claude_ai_Notion__"
 
-# 使わせる道具。Box は読むだけ、Notion は「課題」を直せるところまで
+# 使わせる道具。Box は読むだけ、Notion は授業ホームの中で全部
 ALLOWED = (
     # Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）
     f"{_BOX}search_files_keyword",
@@ -31,17 +32,34 @@ ALLOWED = (
     f"{_BOX}get_file_content",
     f"{_BOX}get_file_preview",
     f"{_BOX}get_preview_page",
-    # Notion: 授業と課題を読む
+    # Notion: 探す・読む
     f"{_NOTION}notion-search",
     f"{_NOTION}notion-fetch",
+    f"{_NOTION}notion-ai-search",
     f"{_NOTION}notion-query-data-sources",
-    # Notion: 「課題」を直す（「提出済みにして」など）。
-    # 連携はアカウント全体に届くので、道具では授業ホームに絞れない。
-    # どこを触ってよいかは prompts/course.md で縛り、消す・移す道具は下で断る
-    f"{_NOTION}notion-update-page",
+    f"{_NOTION}notion-query-multiple-data-sources",
+    f"{_NOTION}notion-list-recent-pages",
+    f"{_NOTION}notion-list-shared-pages",
+    f"{_NOTION}notion-get-users",
+    f"{_NOTION}notion-get-teams",
+    # Notion: 作る・直す
     f"{_NOTION}notion-create-pages",
+    f"{_NOTION}notion-update-page",
+    f"{_NOTION}notion-create-database",
+    f"{_NOTION}notion-update-data-source",
+    f"{_NOTION}notion-create-view",
+    f"{_NOTION}notion-update-view",
+    f"{_NOTION}notion-create-folder",
+    f"{_NOTION}notion-update-folder",
+    # Notion: 移す・複製する（消すのは notion-update-page の in_trash）
+    f"{_NOTION}notion-move-pages",
+    f"{_NOTION}notion-duplicate-page",
+    f"{_NOTION}notion-get-async-task",
+    # Notion: コメント
+    f"{_NOTION}notion-create-comment",
+    f"{_NOTION}notion-get-comments",
 )
-# 名指しで断る道具（許可の一覧に入れていなくても、念のため）
+# 名指しで断る道具（許可の一覧に入れていなくても、念のため）。Box への書き込みだけ
 DENY = (
     f"{_BOX}upload_file",
     f"{_BOX}upload_file_version",
@@ -49,15 +67,26 @@ DENY = (
     f"{_BOX}move_file",
     f"{_BOX}move_folder",
     f"{_BOX}copy_file",
+    f"{_BOX}copy_folder",
     f"{_BOX}update_file_properties",
     f"{_BOX}update_folder_properties",
     f"{_BOX}set_file_metadata",
+    f"{_BOX}set_folder_metadata",
     f"{_BOX}create_file_comment",
-    f"{_NOTION}notion-create-database",
-    f"{_NOTION}notion-move-pages",
-    f"{_NOTION}notion-duplicate-page",
-    f"{_NOTION}notion-create-comment",
+    f"{_BOX}create_hub",
+    f"{_BOX}update_hub",
+    f"{_BOX}copy_hub",
+    f"{_BOX}add_items_to_hub",
+    f"{_BOX}create_metadata_template",
+    f"{_BOX}update_metadata_template",
+    # Notion の「別のエージェントを動かす」系。ページの操作ではないうえ、
+    # 何をしたかがこちらの記録に残らないので渡さない
     f"{_NOTION}notion-spawn-session",
+    f"{_NOTION}notion-stop-session",
+    f"{_NOTION}notion-send-message-to-session",
+    f"{_NOTION}notion-wait-session",
+    f"{_NOTION}notion-upload-skill",
+    f"{_NOTION}notion-convert-page-to-skill",
 )
 # claude 1回の上限時間（分）。探して読んで答えるだけなので短くする
 TIMEOUT_MINUTES = 5

@@ -4,7 +4,11 @@
 道具として渡す（`tools.py`）。音の出し入れだけ手元でやる（`audio.py`）。
 """
 
+import asyncio
+import base64
+import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +56,28 @@ def test_waiting_for_an_answer_is_announced():
 def test_an_unknown_event_is_ignored():
     assert events.reaction({"kind": "とつぜんの何か"}) is None
     assert events.reaction({}) is None
+
+
+async def test_voice_restores_listening_setting_on_start(config, store, monkeypatch):
+    from kei_agent import settings
+    from kei_agent_voice import app
+    from kei_agent_voice.executor import VoiceExecutor
+
+    settings.set_listening(store, True)
+    seen = []
+
+    class FakeSession:
+        async def run(self, listening=False):
+            seen.append(listening)
+            await asyncio.Event().wait()
+
+        def set_listening(self, on):
+            pass
+
+    monkeypatch.setattr(app, "VoiceSession", lambda held, config=None: FakeSession())
+    async with app._ears(VoiceExecutor(), config=config, store=store)(None):
+        await asyncio.sleep(0)
+    assert seen == [True]
 
 
 # A2A の受け口（executor.py）
@@ -252,6 +278,78 @@ def test_a_job_is_not_handed_over_until_it_was_confirmed(config):
     assert "渡すものが無い" in tools.send_request()
 
 
+def test_claiming_asks_recovers_an_interrupted_processing_file(config):
+    """再起動後、前回 claim 済みの依頼をもう一度処理できる。"""
+    from kei_agent import ask as asks
+
+    path = asks.write_ask(config, "amr-query", "学習曲線を描いて")
+    processing = path.with_name(f"{path.name}.processing")
+    path.rename(processing)
+
+    asks.recover_asks(config)
+    claimed = asks.claim_asks(config)
+
+    assert len(claimed) == 1
+    assert claimed[0].path == processing
+    assert claimed[0].payload["text"] == "学習曲線を描いて"
+    assert processing.exists() and not path.exists()
+
+
+def test_claiming_asks_does_not_reclaim_an_active_processing_file(config):
+    """通常の poll は、別の処理が所有している依頼を奪わない。"""
+    from kei_agent import ask as asks
+
+    asks.write_ask(config, "amr-query", "学習曲線を描いて")
+    claimed = asks.claim_asks(config)
+
+    assert len(claimed) == 1
+    assert asks.claim_asks(config) == []
+    assert claimed[0].path.exists()
+
+
+def test_writing_an_ask_fsyncs_a_temporary_file_before_exposing_json(config, monkeypatch):
+    """consumer には、完全に書けた JSON だけを原子的に公開する。"""
+    from kei_agent import ask as asks
+
+    real_fsync = asks.os.fsync
+    real_replace = asks.os.replace
+    events = []
+
+    def fsync(fd):
+        events.append("fsync")
+        return real_fsync(fd)
+
+    def replace(source, target):
+        source = Path(source)
+        target = Path(target)
+        assert events == ["fsync"]
+        assert source.parent == target.parent
+        assert source.suffix != ".json"
+        assert not target.exists()
+        assert json.loads(source.read_text(encoding="utf-8"))["text"] == "学習曲線を描いて"
+        events.append("replace")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(asks.os, "fsync", fsync)
+    monkeypatch.setattr(asks.os, "replace", replace)
+
+    path = asks.write_ask(config, "amr-query", "学習曲線を描いて")
+
+    assert events == ["fsync", "replace"]
+    assert json.loads(path.read_text(encoding="utf-8"))["text"] == "学習曲線を描いて"
+
+
+def test_claiming_asks_discards_a_non_object_payload(config):
+    """依頼の JSON がオブジェクトでなければ、処理せずに破棄する。"""
+    from kei_agent import ask as asks
+
+    path = asks.write_ask(config, "amr-query", "学習曲線を描いて")
+    path.write_text("[]", encoding="utf-8")
+
+    assert asks.claim_asks(config) == []
+    assert not path.exists()
+
+
 def test_a_broken_tool_does_not_stop_the_conversation(config):
     """道具でつまずいても、例外ではなく喋れる文で返す（会話が止まる方が悪い）。"""
     tools = _tools(config)
@@ -382,18 +480,215 @@ async def test_a_tool_call_is_answered_and_the_model_is_told_to_continue():
 
 # 繋ぎ目（session.py）
 
+class _NoticeSocket:
+    def __init__(self, events=()):
+        self.incoming = asyncio.Queue()
+        for event in events:
+            self.incoming.put_nowait(event)
+        self.sent = []
+        self.closed = False
+        self.receiving = asyncio.Event()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.closed = True
+
+    async def send_json(self, event):
+        self.sent.append(event)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        from types import SimpleNamespace
+
+        import aiohttp
+
+        self.receiving.set()
+        event = await self.incoming.get()
+        if event is None:
+            raise StopAsyncIteration
+        return SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=json.dumps(event))
+
+
+class _NoticeSpeaker:
+    def __init__(self):
+        self.pcm = []
+        self.stopped = False
+        self.playback_done = asyncio.Event()
+        self.playback_done.set()
+
+    def write(self, pcm):
+        self.pcm.append(pcm)
+
+    def stop(self):
+        self.stopped = True
+
+    async def wait_until_done(self):
+        await self.playback_done.wait()
+
+
+def _notice_connection(monkeypatch, socket, speaker):
+    from kei_agent_voice import live
+
+    class Http:
+        closed = False
+        headers = None
+        url = None
+
+        def __init__(self, headers):
+            self.headers = headers
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            self.closed = True
+
+        def ws_connect(self, url, heartbeat):
+            self.url = url
+            assert heartbeat == 20
+            return socket
+
+    http = Http({})
+
+    def connect(headers):
+        http.headers = headers
+        return http
+
+    monkeypatch.setattr(live.aiohttp, "ClientSession", connect)
+    monkeypatch.setattr(live.audio, "Speaker", lambda: speaker)
+    return http
+
+
+@pytest.mark.parametrize("done", ["response.output_audio.done", "response.done"])
+async def test_say_once_sends_one_notice_without_opening_microphone(monkeypatch, done):
+    from kei_agent_voice.live import Live
+
+    socket = _NoticeSocket([
+        {"type": "response.output_audio.delta", "delta": base64.b64encode(b"\0\0").decode()},
+        {"type": "response.output_audio_transcript.done", "transcript": "終わったよ。"},
+        {"type": done, "response": {"status": "completed", "output": []}},
+    ])
+    speaker = _NoticeSpeaker()
+    http = _notice_connection(monkeypatch, socket, speaker)
+    brain = Live(tools=None, key="test")
+
+    async def forbidden(*args):
+        pytest.fail("通知でマイクや道具を開始した")
+
+    monkeypatch.setattr(brain, "_send_microphone", forbidden)
+    monkeypatch.setattr(brain, "_answer_tools", forbidden)
+    said = []
+    await asyncio.wait_for(brain.say_once("終わったよ", lambda *args: said.append(args)), 1)
+
+    assert http.headers == {"Authorization": "Bearer test"}
+    assert http.url.endswith(f"?model={brain.model}")
+    assert [event["type"] for event in socket.sent] == [
+        "session.update", "conversation.item.create", "response.create"]
+    assert socket.sent[0]["session"]["tools"] == []
+    assert socket.sent[1]["item"]["content"][0]["text"] == "（お知らせ）終わったよ"
+    assert speaker.pcm == [b"\0\0"]
+    assert said == [("Kei", "終わったよ。")]
+    assert speaker.stopped and socket.closed and http.closed and brain._ws is None
+
+
+async def test_say_once_waits_for_playback_before_cleanup(monkeypatch):
+    from kei_agent_voice.live import Live
+
+    socket = _NoticeSocket([{"type": "response.output_audio.done"}])
+    speaker = _NoticeSpeaker()
+    speaker.playback_done.clear()
+    http = _notice_connection(monkeypatch, socket, speaker)
+    task = asyncio.create_task(Live(None, key="test").say_once("終わったよ"))
+    try:
+        await asyncio.wait_for(socket.receiving.wait(), 1)
+        await asyncio.sleep(0)
+        assert not task.done() and not speaker.stopped
+        speaker.playback_done.set()
+        await asyncio.wait_for(task, 1)
+        assert speaker.stopped and http.closed and socket.closed
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_say_once_cancellation_closes_all_resources(monkeypatch):
+    from kei_agent_voice.live import Live
+
+    socket, speaker = _NoticeSocket(), _NoticeSpeaker()
+    http = _notice_connection(monkeypatch, socket, speaker)
+    brain = Live(None, key="test")
+    task = asyncio.create_task(brain.say_once("終わったよ"))
+    await asyncio.wait_for(socket.receiving.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert speaker.stopped and http.closed and socket.closed and brain._ws is None
+
+
+@pytest.mark.parametrize("event", [
+    {"type": "error", "error": {"message": "denied"}},
+    {"type": "response.done", "response": {"status": "failed"}},
+    None,
+])
+async def test_say_once_failure_closes_all_resources(monkeypatch, event):
+    from kei_agent_voice.live import Live, Unavailable
+
+    socket, speaker = _NoticeSocket([event]), _NoticeSpeaker()
+    http = _notice_connection(monkeypatch, socket, speaker)
+    brain = Live(None, key="test")
+    with pytest.raises(Unavailable):
+        await asyncio.wait_for(brain.say_once("終わったよ"), 1)
+    assert speaker.stopped and http.closed and socket.closed and brain._ws is None
+
+
+async def test_say_once_requires_a_key():
+    from kei_agent_voice.live import Live, Unavailable
+
+    with pytest.raises(Unavailable, match="OPENAI_API_KEY"):
+        await Live(None, env={}).say_once("終わったよ")
+
 class _FakeBrain:
     def __init__(self):
         self.announced = []
+        self.said_once = []
+        self.notice_started = asyncio.Queue()
+        self.notice_release = asyncio.Event()
+        self.notice_release.set()
+        self.notice_finished = asyncio.Queue()
+        self.notice_cancelled = False
+        self.failure = None
+        self.on_said = None
         self.ran = 0
 
     async def run(self, on_said=None):
         import asyncio
         self.ran += 1
+        self.on_said = on_said
         await asyncio.Event().wait()
 
     def announce(self, text):
         self.announced.append(text)
+        if self.on_said:
+            self.on_said("Kei", text)
+
+    async def say_once(self, text, on_said=None):
+        self.said_once.append(text)
+        self.notice_started.put_nowait(text)
+        try:
+            await self.notice_release.wait()
+        except asyncio.CancelledError:
+            self.notice_cancelled = True
+            raise
+        if self.failure:
+            failure, self.failure = self.failure, None
+            raise failure
+        if on_said:
+            on_said("Kei", text)
+        self.notice_finished.put_nowait(text)
 
     def close(self):
         pass
@@ -414,15 +709,85 @@ def _session_for(config, brain=None, face=None):
                         face=face or _FakeFace())
 
 
-async def test_nothing_is_said_while_the_microphone_is_closed(config):
-    """既定では繋がない。知らせは顔だけになる（喋る口が無い）。"""
+async def test_notice_is_spoken_with_short_session_when_not_listening(config):
+    """非会話中の通知は受信順に鳴らし、呼び出し元を待たせない。"""
+    from kei_agent_voice import journal
+
     brain, face = _FakeBrain(), _FakeFace()
+    brain.notice_release.clear()
     s = _session_for(config, brain, face)
+    task = asyncio.create_task(s.run())
+    try:
+        s.announce("一件目", events.HAPPY)
+        s.announce("二件目", events.HAPPY)
+        assert face.shown == [events.HAPPY, events.HAPPY]
+        assert not s.listening and brain.ran == 0 and brain.announced == []
+        assert await asyncio.wait_for(brain.notice_started.get(), 1) == "一件目"
+        await asyncio.sleep(0)
+        assert brain.said_once == ["一件目"]
+        brain.notice_release.set()
+        assert await asyncio.wait_for(brain.notice_finished.get(), 1) == "一件目"
+        assert await asyncio.wait_for(brain.notice_finished.get(), 1) == "二件目"
+        assert brain.said_once == ["一件目", "二件目"]
+        body = next((config.overview_dir / journal.VOICE_DIR).glob("*.md")).read_text()
+        assert body.count("一件目") == body.count("二件目") == 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert s._notice_worker.done()
 
-    s.announce("終わったよ。", events.HAPPY)
 
-    assert s.listening is False and brain.announced == []
-    assert face.shown == [events.HAPPY]
+async def test_notice_uses_existing_connection_and_journals_once(config):
+    from kei_agent_voice import journal
+
+    brain = _FakeBrain()
+    s = _session_for(config, brain)
+    task = asyncio.create_task(s.run(listening=True))
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        s.announce("終わったよ。")
+        assert brain.announced == ["終わったよ。"] and brain.said_once == []
+        body = next((config.overview_dir / journal.VOICE_DIR).glob("*.md")).read_text()
+        assert body.count("終わったよ。") == 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_notice_worker_is_cancelled_and_awaited_on_shutdown(config):
+    brain = _FakeBrain()
+    brain.notice_release.clear()
+    s = _session_for(config, brain)
+    task = asyncio.create_task(s.run())
+    try:
+        s.announce("一件目")
+        s.announce("二件目")
+        await asyncio.wait_for(brain.notice_started.get(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert brain.notice_cancelled and s._notice_worker.done()
+    assert brain.said_once == ["一件目"]
+
+
+@pytest.mark.parametrize("unavailable", [True, False])
+async def test_notice_worker_continues_after_failure(config, caplog, unavailable):
+    from kei_agent_voice.live import Unavailable
+
+    brain = _FakeBrain()
+    brain.failure = Unavailable("繋がらない") if unavailable else RuntimeError("壊れた")
+    s = _session_for(config, brain)
+    task = asyncio.create_task(s.run())
+    try:
+        s.announce("一件目")
+        s.announce("二件目")
+        assert await asyncio.wait_for(brain.notice_finished.get(), 1) == "二件目"
+        assert brain.said_once == ["一件目", "二件目"]
+        assert "繋がらない" in caplog.text if unavailable else "壊れた" in caplog.text
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_turning_the_microphone_on_connects_and_off_disconnects(config):

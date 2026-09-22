@@ -13,7 +13,7 @@ DEFAULT_PORT = 8789
 ENV_PREFIX = "KEI_AGENT_WORK"
 
 
-def build_app(base_url: str, token: str = "", executor: WorkExecutor | None = None) -> Starlette:
+def build_app(base_url: str, token: str, executor: WorkExecutor | None = None) -> Starlette:
     return _build_app(build_card(base_url), executor or WorkExecutor(), RPC_PATH, token)
 
 

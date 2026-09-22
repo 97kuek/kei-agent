@@ -32,6 +32,12 @@ UNKNOWN_LIMIT_RESET = -1.0
 
 # claude が終わったあと、プロセスが消えるのを待つ秒数
 EXIT_GRACE_SECONDS = 5
+# このファイルが動かすのは研究の claude だけ。skill も MCP も研究のものに限る
+AGENT = "research"
+# 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）。合言葉は claude が環境変数から入れる
+NOTION_MCP = "research-notion"
+GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
+
 
 def system_prompt_text(config: Config) -> str:
     path = config.system_prompt_path
@@ -48,6 +54,15 @@ def run_timeout_seconds(config: Config, ws: Workspace) -> float:
     return (ws.timeout_minutes or config.run_timeout_minutes) * 60
 
 
+def notion_mcp_config(config: Config) -> dict:
+    """研究 Claude に渡す MCP の設定。生の Notion トークンではなく、入口の合言葉だけを載せる。"""
+    return {"mcpServers": {NOTION_MCP: {
+        "type": "http",
+        "url": config.notion_gateway_url,
+        "headers": {"Authorization": f"Bearer ${{{GATEWAY_TOKEN_ENV}}}"},
+    }}}
+
+
 def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
     cmd = [
         config.claude_bin,
@@ -58,7 +73,10 @@ def build_command(config: Config, ws: Workspace, session_id: str | None) -> list
         "--setting-sources", "",
         "--settings", json.dumps(guard.build_settings(config, ws), ensure_ascii=False),
         "--permission-mode", "dontAsk",
-        "--plugin-dir", str(config.plugin_dir),
+        "--plugin-dir", str(config.agent_plugin_dir(AGENT)),
+        # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
+        "--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False),
+        "--strict-mcp-config",
     ]
     prompt_path = ws.system_prompt or config.system_prompt_path
     if prompt_path.exists():
@@ -77,7 +95,6 @@ def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
-    env["KEI_AGENT_PLUGIN_DIR"] = str(config.plugin_dir)
     return env
 
 

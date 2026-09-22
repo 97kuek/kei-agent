@@ -216,16 +216,17 @@ def test_a_course_without_a_term_is_kept():
     assert [c["subject"] for c in found] == ["学期なし"]
 
 
-def test_course_tools_can_fix_notion_but_never_destroy():
-    """Box は読むだけ。Notion は「課題」を直せるが、消す・移す道具は渡さない。"""
+def test_course_tools_read_box_and_fully_manage_the_course_notion():
+    """Box は読むだけ。Notion は授業ホームの中で全部できる（範囲は Notion 側の共有で縛る）。"""
     from kei_agent_course import tools
 
     assert all(name.startswith(("mcp__claude_ai_Box__", "mcp__claude_ai_Notion__")) for name in tools.ALLOWED)
     box = [n for n in tools.ALLOWED if "Box" in n]
     assert not [n for n in box if any(w in n for w in ("upload", "create", "update", "move", "copy", "set_"))]
-    # 「提出済みにして」を頼めるように、Notion は直せる
-    assert "mcp__claude_ai_Notion__notion-update-page" in tools.ALLOWED
-    # 取り返しのつかないものは、許可の一覧に無いうえ、名指しでも断る
-    for name in ("mcp__claude_ai_Box__upload_file", "mcp__claude_ai_Notion__notion-move-pages",
-                 "mcp__claude_ai_Notion__notion-duplicate-page", "mcp__claude_ai_Notion__notion-spawn-session"):
+    # 「提出済みにして」も「このページを移して」も頼める
+    for name in ("mcp__claude_ai_Notion__notion-update-page", "mcp__claude_ai_Notion__notion-move-pages",
+                 "mcp__claude_ai_Notion__notion-duplicate-page", "mcp__claude_ai_Notion__notion-create-database"):
+        assert name in tools.ALLOWED
+    # Box への書き込みと、別のエージェントを動かす道具は、名指しでも断る
+    for name in ("mcp__claude_ai_Box__upload_file", "mcp__claude_ai_Notion__notion-spawn-session"):
         assert name in tools.DENY and name not in tools.ALLOWED

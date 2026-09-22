@@ -8,11 +8,12 @@
 #         deploy/install.sh research remove 研究エージェントの登録を外す
 #         deploy/install.sh work          仕事エージェント（A2A サーバー）を登録
 #         deploy/install.sh voice         声のレイヤ（A2A サーバー＋マイク）を登録
+#         deploy/install.sh notion-gateway 研究 Claude 用の Notion ゲートウェイを登録
 set -eu
 
-# 引数に course / research を付けると、そのエージェント（A2A サーバー）のほうを登録する
+# 引数に course / research などを付けると、そのプロセスのほうを登録する
 case "${1:-}" in
-  course|research|work|voice)
+  course|research|work|voice|notion-gateway)
     LABEL="com.kei-agent.${1}"
     shift
     ;;

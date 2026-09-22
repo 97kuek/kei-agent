@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from kei_agent.config import Config, load_config
@@ -22,8 +24,26 @@ POLL_SECONDS = 3.0
 KINDS = ("request", "note")
 
 
+@dataclass(frozen=True)
+class PendingAsk:
+    path: Path
+    payload: dict
+
+
 def ask_dir(config: Config) -> Path:
     return config.state_dir / ASK_DIR
+
+
+def _write_payload(path: Path, payload: dict) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def write_ask(config: Config, theme: str, text: str, kind: str = "request") -> Path:
@@ -33,9 +53,7 @@ def write_ask(config: Config, theme: str, text: str, kind: str = "request") -> P
     directory = ask_dir(config)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{time.time():.3f}-{uuid.uuid4().hex[:8]}.json"
-    path.write_text(json.dumps(
-        {"theme": theme, "text": text, "kind": kind, "created_at": time.time()}, ensure_ascii=False,
-    ), encoding="utf-8")
+    _write_payload(path, {"theme": theme, "text": text, "kind": kind, "created_at": time.time()})
     return path
 
 
@@ -51,6 +69,57 @@ def pending_asks(config: Config) -> list[tuple[Path, dict]]:
         except (json.JSONDecodeError, OSError):
             path.unlink(missing_ok=True)
     return asks
+
+
+def recover_asks(config: Config) -> None:
+    """前回のプロセスが残した claim を、起動時に限って回収する。"""
+    directory = ask_dir(config)
+    if not directory.is_dir():
+        return
+    for path in directory.glob("*.json.processing"):
+        try:
+            os.replace(path, path.with_name(path.name.removesuffix(".processing")))
+        except FileNotFoundError:
+            continue
+
+
+def claim_asks(config: Config) -> list[PendingAsk]:
+    """未処理の依頼を原子的に claim する。"""
+    directory = ask_dir(config)
+    if not directory.is_dir():
+        return []
+
+    asks = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            path.unlink(missing_ok=True)
+            continue
+        if not isinstance(payload, dict):
+            path.unlink(missing_ok=True)
+            continue
+        processing_path = path.with_name(f"{path.name}.processing")
+        try:
+            os.replace(path, processing_path)
+        except FileNotFoundError:
+            continue
+        asks.append(PendingAsk(processing_path, payload))
+    return asks
+
+
+def complete_ask(item: PendingAsk) -> None:
+    item.path.unlink(missing_ok=True)
+
+
+def retry_ask(item: PendingAsk) -> None:
+    os.replace(item.path, item.path.with_name(item.path.name.removesuffix(".processing")))
+
+
+def record_thread(item: PendingAsk, thread_ts: str) -> None:
+    payload = {**item.payload, "thread_ts": thread_ts}
+    _write_payload(item.path, payload)
+    item.payload["thread_ts"] = thread_ts
 
 
 def main() -> None:

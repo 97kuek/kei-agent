@@ -21,6 +21,7 @@ OpenAI Realtime API は音をそのままやりとりするので、文字起こ
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -139,6 +140,12 @@ class Speaker:
     @property
     def speaking(self) -> bool:
         return self.proc is not None and self.proc.poll() is None and self.played_ms < self._written_ms
+
+    async def wait_until_done(self) -> None:
+        """書き込んだPCMを鳴らし終えるまで待つ。"""
+        remaining_ms = max(self._written_ms - self.played_ms, 0)
+        if remaining_ms:
+            await asyncio.sleep(remaining_ms / 1000)
 
     def stop(self) -> int:
         """いま鳴っている音を捨てる。**鳴った長さ**を返す（モデルに伝えるため）。

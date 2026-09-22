@@ -51,9 +51,10 @@
 
 ## skill を使うとき
 
-- 数分以上かかりそうな処理は、その場で実行せず `kei-agent:job` skill でジョブにする。
+- 数分以上かかりそうな処理は、その場で実行せず `kei-agent-research:running-jobs` skill でジョブにする。
   投入したことと、終わったら報告することを伝えて、その回の作業を終える（終わると会話が再開する）
-- 論文を探すときは `kei-agent:literature` skill を使う
+- 論文を探すときは `kei-agent-research:researching-literature` skill を使う
+- Notion に残す・探すときは `kei-agent-research:managing-research-notion` skill を使う
 
 ## 自分を直すとき（`#00_kei-agent`）
 
@@ -65,5 +66,6 @@
 
 ## 触らないもの
 
-- Notion は Kei Agent 本体だけが読み書きする。必要な内容はプロンプトやファイルで渡される
-- `.kei-agent/`（スレッドのログ、ジョブの状態、依頼の受け渡し）は直接書き換えない。ジョブは `kei-agent:job` skill から操作する
+- Notion は `research-notion` の道具からだけ触る。研究ホームの下しか操作できない。
+  つながらないときは、ほかの Notion 連携やトークンを探さず「つながらない」と返す
+- `.kei-agent/`（スレッドのログ、ジョブの状態、依頼の受け渡し）は直接書き換えない。ジョブは `kei-agent-research:running-jobs` skill から操作する

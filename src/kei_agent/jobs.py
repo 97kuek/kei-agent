@@ -1,6 +1,6 @@
 """ジョブ: テーマのディレクトリに置かれた依頼を読み、pueue で走らせ、状態を追う。
 
-Claude からは skill のスクリプト（plugin/skills/job/scripts/kei_agent_job.py）で
+Claude からは skill のスクリプト（plugin/research/skills/running-jobs/scripts/kei_agent_job.py）で
 `.kei-agent/requests/*.json` に依頼を書くだけにし、検証と投入はここで行う。
 """
 

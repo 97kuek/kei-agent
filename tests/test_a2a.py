@@ -17,6 +17,20 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
+def test_a2a_app_refuses_to_start_without_a_password():
+    from kei_agent_course.app import build_app
+
+    with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
+        build_app("http://127.0.0.1:8787", "")
+
+
+def test_a2a_app_refuses_a_blank_password():
+    from kei_agent_course.app import build_app
+
+    with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
+        build_app("http://127.0.0.1:8787", "   ")
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -143,7 +157,7 @@ async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
 
     seen = {}
 
-    async def ask_connector(config, prompt, allowed, deny=(), timeout_minutes=3):
+    async def ask_connector(config, prompt, allowed, plugin_dir, deny=(), timeout_minutes=3):
         seen["prompt"] = prompt
         return "過去問は Box にあるよ"
 
@@ -162,3 +176,21 @@ async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
 async def test_unknown_skill_fails_with_a_reason(server):
     result = await Agent(server, TOKEN).ask("", text="よろしく")
     assert not result.ok and "どの仕事か分かりません" in json.loads(result.answer)["text"]
+
+
+def test_course_allows_every_notion_operation_but_no_box_write():
+    """授業ホームの中では Notion を自由に使える。Box は読むだけ。"""
+    from kei_agent_course import tools
+
+    assert "mcp__claude_ai_Notion__notion-create-database" in tools.ALLOWED
+    assert "mcp__claude_ai_Notion__notion-move-pages" in tools.ALLOWED
+    assert "mcp__claude_ai_Notion__notion-duplicate-page" in tools.ALLOWED
+    assert not any(name.endswith(("upload_file", "upload_file_version", "create_folder", "move_file",
+                                  "move_folder", "copy_file", "create_file_comment")) for name in tools.ALLOWED)
+
+
+def test_course_still_denies_box_writes_by_name():
+    from kei_agent_course import tools
+
+    assert "mcp__claude_ai_Box__upload_file" in tools.DENY
+    assert not set(tools.ALLOWED) & set(tools.DENY)

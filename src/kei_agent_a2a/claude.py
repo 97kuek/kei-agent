@@ -21,6 +21,7 @@ import signal
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import asdict
+from pathlib import Path
 
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
@@ -109,7 +110,26 @@ DENY_ALWAYS = ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit",
                "WebFetch", "WebSearch", "Task")
 
 
-async def ask_connector(config: Config, prompt: str, allowed: Sequence[str],
+def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str],
+                      plugin_dir: Path) -> list[str]:
+    """連携を使う claude の起動コマンド。
+
+    `plugin_dir` はそのエージェントの skill の置き場（`plugin/<agent>/`）。`plugin/` そのものを
+    渡すと中の plugin を全部読んでしまうので、必ず1つぶんを名指しする。skill を呼べるように
+    `Skill` を許可の一覧に足すが、外部の道具は呼び出し元が並べたものだけにする。
+    """
+    return [
+        config.claude_bin, "-p", "--output-format", "text",
+        # 連携はアカウント側にあるので、ユーザー設定を読み込む必要がある
+        "--setting-sources", "user",
+        "--permission-mode", "dontAsk",
+        "--plugin-dir", str(plugin_dir),
+        "--allowedTools", *allowed, "Skill",
+        "--disallowedTools", *DENY_ALWAYS, *deny,
+    ]
+
+
+async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plugin_dir: Path,
                         deny: Sequence[str] = (), timeout_minutes: int = 3) -> str:
     """アカウントの連携を、道具を絞って使わせる（返事の文をそのまま返す）。
 
@@ -119,14 +139,7 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str],
 
     柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/agents.md）。
     """
-    command = [
-        config.claude_bin, "-p", "--output-format", "text",
-        # 連携はアカウント側にあるので、ユーザー設定を読み込む必要がある
-        "--setting-sources", "user",
-        "--permission-mode", "dontAsk",
-        "--allowedTools", *allowed,
-        "--disallowedTools", *DENY_ALWAYS, *deny,
-    ]
+    command = connector_command(config, allowed, deny, plugin_dir)
     proc = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

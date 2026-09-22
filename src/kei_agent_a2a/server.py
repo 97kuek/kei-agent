@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import Callable
 
 from a2a.server.agent_execution import AgentExecutor
@@ -28,6 +27,12 @@ OPEN_PATHS = ("/.well-known/agent-card.json", "/.well-known/agent.json", "/healt
 TOKEN_ENV = "KEI_AGENT_A2A_TOKEN"
 
 
+def require_token(token: str) -> str:
+    if not token.strip():
+        raise RuntimeError(f"{TOKEN_ENV} がありません。A2A の仕事 API は合言葉なしでは起動できません")
+    return token
+
+
 class SharedTokenAuth(BaseHTTPMiddleware):
     """同じ Mac の中だけで使う、合言葉による受け付け。"""
 
@@ -43,11 +48,12 @@ class SharedTokenAuth(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def build_app(card: AgentCard, executor: AgentExecutor, rpc_path: str, token: str = "") -> Starlette:
+def build_app(card: AgentCard, executor: AgentExecutor, rpc_path: str, token: str) -> Starlette:
+    token = require_token(token)
     handler = DefaultRequestHandler(
         agent_executor=executor, task_store=InMemoryTaskStore(), agent_card=card)
     routes = [*create_agent_card_routes(card), *create_jsonrpc_routes(handler, rpc_path)]
-    middleware = [Middleware(SharedTokenAuth, token=token)] if token else []
+    middleware = [Middleware(SharedTokenAuth, token=token)]
     return Starlette(routes=routes, middleware=middleware)
 
 
@@ -65,9 +71,7 @@ def serve(name: str, build_card: Callable[[str], AgentCard], build_executor: Cal
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     host = os.environ.get(f"{env_prefix}_HOST", DEFAULT_HOST)
     port = int(os.environ.get(f"{env_prefix}_PORT", default_port))
-    token = os.environ.get(TOKEN_ENV, "")
-    if not token:
-        print(f"{TOKEN_ENV} がありません（合言葉なしで起動します）", file=sys.stderr)
+    token = require_token(os.environ.get(TOKEN_ENV, ""))
     base_url = f"http://{host}:{port}"
     logging.getLogger(env_prefix.lower()).info("%sを起動します（%s）", name, base_url)
     make = build_app or globals()["build_app"]

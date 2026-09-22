@@ -185,6 +185,56 @@ class Live:
                 self.speaker.stop()
                 self._ws = None
 
+    async def say_once(self, text: str,
+                       on_said: Callable[[str, str], None] | None = None) -> None:
+        """マイクを開かず、通知1件を読み上げて接続を閉じる。"""
+        if not self.key:
+            raise Unavailable(f"{KEY_ENV} が置かれていません（deploy/README.md を見てください）")
+        # 途中で「聞く」に切り替わっても、会話の接続と再生を上書きしない。
+        speaker = audio.Speaker()
+        transcript = ""
+        headers = {"Authorization": f"Bearer {self.key}"}
+        try:
+            async with (
+                aiohttp.ClientSession(headers=headers) as http,
+                http.ws_connect(f"{URL}?model={self.model}", heartbeat=20) as ws,
+            ):
+                await ws.send_json(_session(self.voice, []))
+                await ws.send_json({
+                    "type": "conversation.item.create",
+                    "item": {"type": "message", "role": "user",
+                             "content": [{"type": "input_text", "text": f"（お知らせ）{text}"}]},
+                })
+                await ws.send_json({"type": "response.create"})
+                async for message in ws:
+                    if message.type is not aiohttp.WSMsgType.TEXT:
+                        continue
+                    try:
+                        event = json.loads(message.data)
+                    except ValueError:
+                        continue
+                    kind = event.get("type", "")
+                    if kind == "response.output_audio.delta":
+                        speaker.write(base64.b64decode(event.get("delta") or ""))
+                    elif kind == "response.output_audio_transcript.delta":
+                        transcript += str(event.get("delta") or "")
+                    elif kind == "response.output_audio_transcript.done":
+                        transcript = str(event.get("transcript") or transcript)
+                    elif kind == "error":
+                        raise Unavailable("通知の音声応答が API に拒否されました")
+                    elif kind in {"response.output_audio.done", "response.done"}:
+                        response = event.get("response") or {}
+                        if response.get("status") in {"failed", "cancelled", "incomplete"}:
+                            raise Unavailable("通知の音声応答が完了しませんでした")
+                        # done は生成の完了。手元のバッファを鳴らし終えてから閉じる。
+                        await speaker.wait_until_done()
+                        if on_said:
+                            on_said("Kei", transcript.strip() or text)
+                        return
+                raise Unavailable("通知の音声応答が完了する前に接続が閉じました")
+        finally:
+            speaker.stop()
+
     @property
     def tools_definitions(self) -> list[dict]:
         from kei_agent_voice.tools import DEFINITIONS

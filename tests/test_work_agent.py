@@ -150,3 +150,12 @@ def test_calendar_text_escapes_values_from_outlook():
     assert "<!channel>" not in text and "<@U123>" not in text
     assert "&lt;!channel&gt;" in text and "&lt;@U123&gt;" in text
     assert "|&lt;!channel&gt;" not in text
+
+
+def test_work_connector_has_no_write_tools():
+    """仕事は読むだけ。送信・作成・更新の道具を許可の一覧に入れない。"""
+    from kei_agent_work import connector
+
+    forbidden = ("send", "create", "update", "delete", "move", "upload", "post")
+    assert not any(any(word in name.lower() for word in forbidden) for name in connector.ALLOWED_ASK)
+    assert not any(any(word in name.lower() for word in forbidden) for name in connector.ALLOWED)

@@ -1,5 +1,0 @@
-{
-  "name": "kei-agent",
-  "version": "0.1.0",
-  "description": "Kei Agent（研究支援の Slack Bot）が claude -p で使う skill"
-}

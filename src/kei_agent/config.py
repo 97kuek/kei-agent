@@ -18,6 +18,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # 決まった時刻の処理の時刻。空文字は「その処理を行わない」（settings.schedule_time と同じ形）
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
+# skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
+AGENT_PLUGINS = frozenset({"research", "course", "work"})
+
 
 def _expand(path: str) -> Path:
     return Path(os.path.expanduser(path)).resolve()
@@ -120,9 +123,20 @@ class Config:
     def db_path(self) -> Path:
         return self.state_dir / "kei-agent.db"
 
+    def agent_plugin_dir(self, agent: str) -> Path:
+        """そのエージェントの skill の置き場（`plugin/<agent>/`）。
+
+        `--plugin-dir` に `plugin/` そのものを渡すと、Claude Code は中の plugin を全部読む。
+        担当外の skill を同じ claude に見せないため、必ずエージェント1つぶんを名指しする。
+        """
+        if agent not in AGENT_PLUGINS:
+            raise ValueError(f"未知のagent: {agent}（使えるのは {', '.join(sorted(AGENT_PLUGINS))}）")
+        return self.repo_root / "plugin" / agent
+
     @property
-    def plugin_dir(self) -> Path:
-        return self.repo_root / "plugin"
+    def notion_gateway_url(self) -> str:
+        """研究 Claude がつなぐ Notion ゲートウェイ（src/kei_agent_notion_gateway）。"""
+        return "http://127.0.0.1:8791/mcp"
 
     @property
     def system_prompt_path(self) -> Path:

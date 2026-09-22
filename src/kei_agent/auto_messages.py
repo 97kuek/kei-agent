@@ -40,7 +40,7 @@ def job_resume_prompt(job: Job) -> str:
         f"{HEADER} ジョブ {job.id}「{job.name}」が終わりました。"
         f"結果: {job_status_label(job.status)}{elapsed}{detail}\n"
         f"実行したもの: {job.command}\nログ: logs/job-{job.id}.log{tail_block}\n\n"
-        "kei-agent:job skill の「ジョブが終わって会話が再開されたとき」に沿って、結果を確認して報告してください。"
+        "kei-agent-research:running-jobs skill の「ジョブが終わって会話が再開されたとき」に沿って、結果を確認して報告してください。"
     )
 
 
