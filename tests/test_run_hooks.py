@@ -16,6 +16,15 @@ def test_preflight_rejects_connectors_outside_the_agents_policy():
         run_hooks.preflight(context, frozenset({"wandb"}), frozenset({"wandb"}))
 
 
+def test_preflight_rejects_sharepoint_and_course_outlook():
+    work = run_hooks.RunContext(agent="work", provider="codex", workspace_kind="work", model="")
+    course = run_hooks.RunContext(agent="course", provider="codex", workspace_kind="course", model="")
+    with pytest.raises(run_hooks.ConnectorPolicyError):
+        run_hooks.preflight(work, frozenset({"sharepoint"}), frozenset({"sharepoint"}))
+    with pytest.raises(run_hooks.ConnectorPolicyError):
+        run_hooks.preflight(course, frozenset({"outlook_email"}), frozenset({"outlook_email"}))
+
+
 def test_preflight_rejects_declared_connectors_missing_from_codex():
     """未接続 W&B を接続済みとみなして Codex を起動する変更を捕捉する。"""
     context = run_hooks.RunContext(

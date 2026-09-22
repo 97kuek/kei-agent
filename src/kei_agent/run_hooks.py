@@ -8,7 +8,7 @@ from dataclasses import dataclass
 CONNECTOR_POLICY: dict[str, frozenset[str]] = {
     "research": frozenset({"research-notion", "wandb"}),
     "course": frozenset({"notion", "box"}),
-    "work": frozenset({"microsoft-365"}),
+    "work": frozenset({"outlook_email", "outlook_calendar"}),
 }
 
 
