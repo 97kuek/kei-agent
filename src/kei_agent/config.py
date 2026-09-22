@@ -42,7 +42,7 @@ class ScheduleConfig:
     literature: str = "07:00"
     daily: str = "08:00"
     review: str = "21:00"
-    night: str = "01:30"
+    night: str = "00:00"
     # Mac のスリープなどで逃した処理を、何時間後まで実行するか
     catch_up_hours: float = 3
     night_max_tasks: int = 5

@@ -26,8 +26,8 @@ handoff_after_turns = 8
 enabled = true
 literature = "07:00"  # 先行研究の新着（テーマごと）
 daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#01_overview）。締切24時間前の知らせは1時間ごと
-review = "21:00"      # 振り返りの材料（#01_overview）
-night = "01:30"       # 🌙 をつけた Task
+review = "21:00"      # Retro & Planning（#01_overview）
+night = "00:00"       # 🌙 をつけた Task
 # Mac のスリープなどで逃した処理を、何時間後まで実行するか
 catch_up_hours = 3
 night_max_tasks = 5

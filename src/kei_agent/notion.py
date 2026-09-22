@@ -132,7 +132,7 @@ THEMES = {
 
 TASKS = {
     "icon": "✅",
-    "description": "担当が Kei Agent で状態が「今夜やる」の Task は、Kei Agent が 01:30 に実行する。",
+    "description": "担当が Kei Agent で状態が「今夜やる」の Task は、Kei Agent が 00:00 に実行する。",
     "properties": {
         "タイトル": {"title": {}},
         "状態": {"status": {"options": [
