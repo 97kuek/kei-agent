@@ -34,6 +34,7 @@ NO_STATE = "授業用の Notion がまだありません（kei-agent-course-setu
 # 1回の取り込みで書き込む上限。ics を読み違えたときに、大量の行を作ってしまわないようにする
 MAX_WRITES = 50
 TITLE_LIMIT = 200
+REQUIRED_DATABASES = frozenset({"courses", "assignments", "study_logs", "grades", "requirements", "gpa"})
 
 
 class SyncError(RuntimeError):
@@ -82,10 +83,16 @@ def read_state(path: Path | None = None) -> dict:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise SyncError(NO_STATE) from None
-    databases = state.get("databases") or {}
-    if not {"courses", "assignments"} <= set(databases):
-        raise SyncError(NO_STATE)
+    require_course_databases(state)
     return state
+
+
+def require_course_databases(state: dict) -> dict[str, dict]:
+    """統一済みの授業ホーム state だけを受け入れる。"""
+    databases = state.get("databases") or {}
+    if not REQUIRED_DATABASES <= set(databases):
+        raise SyncError(NO_STATE)
+    return databases
 
 
 def _plain(prop: dict | None) -> str:
@@ -154,6 +161,19 @@ class CourseNotion:
     def current_courses(self, on: date | None = None) -> list[dict]:
         """時間カードの候補。曜日で絞らず、今学期に履修中の科目だけ返す。"""
         return self.courses_on(on=on)
+
+    def match_course(self, name: str, year: int, term: str) -> str | None:
+        """成績 record を過去を含む科目台帳へ安全に結ぶ。
+
+        同名の科目が複数ある場合や、年度・学期が記録されていない場合は推測しない。
+        """
+        normalized_term = {"春期": "春学期", "秋期": "秋学期"}.get(term, term)
+        matches = [row["id"] for row in self._rows(self.courses) if (
+            _plain(row.get("properties", {}).get("科目名")) == name
+            and (row.get("properties", {}).get("年度") or {}).get("number") == year
+            and _select(row.get("properties", {}).get("学期")) == normalized_term
+        )]
+        return matches[0] if len(matches) == 1 else None
 
     def record_study_time(self, entry_id: str, started_at: str, duration_minutes: int,
                           course_page_id: str = "", memo: str = "", slack_url: str = "") -> dict:

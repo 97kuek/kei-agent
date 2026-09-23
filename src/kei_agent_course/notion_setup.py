@@ -31,6 +31,7 @@ COURSES = {
     "properties": {
         "科目名": {"title": {}},
         "科目コード": {"rich_text": {}},
+        "年度": {"number": {"format": "number"}},
         "学期": {"select": {"options": [
             {"name": "春学期", "color": "green"},
             {"name": "秋学期", "color": "orange"},

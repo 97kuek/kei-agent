@@ -1,5 +1,7 @@
 """Moodle の締切を Notion の「課題」に取り込むところ。"""
 
+import json
+
 from datetime import datetime
 
 import pytest
@@ -138,6 +140,15 @@ def test_state_file_missing_says_what_to_run(tmp_path):
         notion_sync.read_state(tmp_path / "notion-course.json")
 
 
+def test_read_state_rejects_legacy_three_database_state(tmp_path):
+    state = {"databases": {key: {} for key in ("courses", "assignments", "study_logs")}}
+    path = tmp_path / "notion-course.json"
+    path.write_text(json.dumps(state))
+
+    with pytest.raises(notion_sync.SyncError, match="kei-agent-course-setup"):
+        notion_sync.read_state(path)
+
+
 # 履修中の科目（朝のまとめで、時限を時刻に直すのに使う）
 
 
@@ -183,6 +194,19 @@ def test_current_courses_returns_only_this_terms_enrolled_courses():
     found = notion_sync.CourseNotion(FakeNotion(courses=COURSE_ROWS_FULL), STATE).current_courses(date(2026, 9, 21))
 
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
+
+
+def test_match_course_keeps_finished_course_out_of_schedule_but_available_for_grades():
+    from datetime import date
+
+    rows = [*COURSE_ROWS_FULL, {"id": "math-page", "properties": {
+        "科目名": _title("数学"), "年度": {"number": 2025}, "学期": _select("春学期"),
+        "状態": _select("終了"),
+    }}]
+    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE)
+
+    assert "数学" not in [item["subject"] for item in course.current_courses(date(2026, 9, 21))]
+    assert course.match_course("数学", 2025, "春期") == "math-page"
 
 
 def test_study_time_log_is_idempotent_and_relates_the_course():
