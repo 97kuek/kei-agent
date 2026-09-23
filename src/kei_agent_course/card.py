@@ -11,6 +11,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
 LIST_CLASSES = "list-classes"
+LIST_CURRENT_COURSES = "list-current-courses"
 TIME_REPORT = "time-report"
 # 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
 ASK = "ask"
@@ -61,6 +62,13 @@ def build_card(base_url: str) -> AgentCard:
                             "既定は今日。metadata の weekday（月〜日）で変えられる",
                 tags=["notion"],
                 examples=["今日の授業は？", "金曜の時間割"],
+            ),
+            AgentSkill(
+                id=LIST_CURRENT_COURSES,
+                name="今学期の履修科目",
+                description="今学期に履修中の科目だけを JSON で返す（items: id/subject/weekday/period）",
+                tags=["notion", "course"],
+                examples=["履修中の授業", "今学期の科目"],
             ),
             AgentSkill(
                 id=ASK,

@@ -173,6 +173,14 @@ def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
 
 
+def test_current_courses_returns_only_this_terms_enrolled_courses():
+    from datetime import date
+
+    found = notion_sync.CourseNotion(FakeNotion(courses=COURSE_ROWS_FULL), STATE).current_courses(date(2026, 9, 21))
+
+    assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
+
+
 def test_waseda_periods_turn_into_times():
     from datetime import date
 

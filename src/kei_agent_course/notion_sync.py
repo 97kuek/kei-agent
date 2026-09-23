@@ -149,6 +149,10 @@ class CourseNotion:
         found.sort(key=lambda c: (c["period"] is None, c["period"] or 0, c["subject"]))
         return found
 
+    def current_courses(self, on: date | None = None) -> list[dict]:
+        """時間カードの候補。曜日で絞らず、今学期に履修中の科目だけ返す。"""
+        return self.courses_on(on=on)
+
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
         return {uid: row for row in self._rows(self.assignments)
@@ -228,6 +232,13 @@ def courses_on(weekday: str = "", on: date | None = None, token: str = "",
     if not token:
         raise SyncError(NO_TOKEN)
     return CourseNotion(Notion(token), state or read_state()).courses_on(weekday, on)
+
+
+def current_courses(on: date | None = None, token: str = "", state: dict | None = None) -> list[dict]:
+    token = token or os.environ.get(TOKEN_ENV, "")
+    if not token:
+        raise SyncError(NO_TOKEN)
+    return CourseNotion(Notion(token), state or read_state()).current_courses(on)
 
 
 def course_names(token: str = "", state: dict | None = None) -> set[str]:
