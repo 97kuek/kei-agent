@@ -79,3 +79,23 @@ async def test_runner_rejects_a_missing_codex_connector_before_starting(config, 
         await runner.run_claude(config, ws, "調べて", None, "C1", "1.1")
 
     assert not marker.exists()
+
+
+async def test_runner_accepts_the_scoped_research_notion_gateway(config, tmp_path, monkeypatch):
+    """実行時だけ注入する research-notion は preflight で許可する。"""
+    fake = tmp_path / "fake-codex.sh"
+    fake.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t1\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"OK\"}}'\n")
+    fake.chmod(0o755)
+    profile = SimpleNamespace(provider="codex", model="", reasoning_effort="high", connectors=frozenset({"research-notion"}))
+    config = replace(config, codex_bin=str(fake), agent_profiles={"research": profile})
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+
+    async def no_connectors(_: str) -> frozenset[str]:
+        return frozenset()
+
+    monkeypatch.setattr(runner, "discover_mcp_names", no_connectors)
+
+    result = await runner.run_claude(config, ws, "調べて", None, "C1", "1.1")
+
+    assert result.text == "OK"

@@ -326,6 +326,9 @@ async def run_claude(
     if is_codex:
         install_codex_skills(config, ws)
         configured_connectors = await discover_mcp_names(config.codex_bin)
+        # 研究用 Notion gateway はこの実行だけに --config で注入するため、
+        # グローバルな `codex mcp list` には現れない。
+        configured_connectors = configured_connectors | frozenset({NOTION_MCP})
         run_hooks.preflight(context, frozenset(getattr(profile, "connectors", ())), configured_connectors)
     started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(

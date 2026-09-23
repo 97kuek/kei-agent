@@ -22,24 +22,24 @@ model = ""
 handoff_after_turns = 8
 
 # agent ごとの実行器とモデル。skill は共通の内容を使い、ここだけで Claude/Codex を切り替える。
-# 既定は既存の Claude サブスクリプション。Codex に切り替える agent だけ provider = "codex" にする。
+# Slack App Home から個別に変更できる。既定は Codex で、Claude へのフォールバックはしない。
 [agents.research]
-provider = "claude"
-model = ""
+provider = "codex"
+model = "gpt-5.6-terra"
 reasoning_effort = "high"
-# Codexへ切り替えるときだけ、`codex mcp list --json` に有効として出た名前を列挙する
-connectors = []
+# 研究ホームだけに限定した Notion gateway を実行ごとに注入する
+connectors = ["research-notion"]
 
 [agents.course]
-provider = "claude"
-model = ""
+provider = "codex"
+model = "gpt-5.6-terra"
 reasoning_effort = "high"
 connectors = []
 
 [agents.work]
-provider = "claude"
-model = ""
-reasoning_effort = "high"
+provider = "codex"
+model = "gpt-5.6-terra"
+reasoning_effort = "medium"
 connectors = []
 
 [schedule]
