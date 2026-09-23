@@ -77,7 +77,22 @@ ASSIGNMENTS = {
     "relations": {"科目": ("courses", "課題")},
 }
 
-SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS)}
+STUDY_LOGS = {
+    "icon": "⏱️",
+    "description": "Kei Agent から記録した学習時間。記録IDで重複を防ぐ。",
+    "properties": {
+        "タイトル": {"title": {}},
+        "Kei Agent 記録ID": {"rich_text": {}},
+        "日付": {"date": {}},
+        "時間（分）": {"number": {"format": "number"}},
+        "メモ": {"rich_text": {}},
+        "Slack": {"url": {}},
+    },
+    "relations": {"科目": ("courses", "学習ログ")},
+}
+
+SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
+         "study_logs": ("学習ログ", STUDY_LOGS)}
 
 # 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
 AUTUMN_2026 = [

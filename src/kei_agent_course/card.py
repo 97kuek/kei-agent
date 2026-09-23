@@ -12,6 +12,7 @@ SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
 LIST_CLASSES = "list-classes"
 LIST_CURRENT_COURSES = "list-current-courses"
+RECORD_STUDY_TIME = "record-study-time"
 TIME_REPORT = "time-report"
 # 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
 ASK = "ask"
@@ -69,6 +70,12 @@ def build_card(base_url: str) -> AgentCard:
                 description="今学期に履修中の科目だけを JSON で返す（items: id/subject/weekday/period）",
                 tags=["notion", "course"],
                 examples=["履修中の授業", "今学期の科目"],
+            ),
+            AgentSkill(
+                id=RECORD_STUDY_TIME,
+                name="学習時間を記録する",
+                description="大学ホームの学習ログに、Kei Agent の確定済み時間を記録する",
+                tags=["notion", "time"], examples=[],
             ),
             AgentSkill(
                 id=ASK,

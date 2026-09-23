@@ -113,6 +113,8 @@ class CourseNotion:
         self.notion = notion
         self.courses = state["databases"]["courses"]["data_source_id"]
         self.assignments = state["databases"]["assignments"]["data_source_id"]
+        self.study_logs = (state["databases"].get("study_logs") or {}).get("data_source_id", "")
+        self._recorded_study_ids: set[str] = set()
 
     def _rows(self, data_source_id: str) -> list[dict]:
         return self.notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
@@ -152,6 +154,38 @@ class CourseNotion:
     def current_courses(self, on: date | None = None) -> list[dict]:
         """時間カードの候補。曜日で絞らず、今学期に履修中の科目だけ返す。"""
         return self.courses_on(on=on)
+
+    def record_study_time(self, entry_id: str, started_at: str, duration_minutes: int,
+                          course_page_id: str = "", memo: str = "", slack_url: str = "") -> dict:
+        """学習ログを記録IDで一度だけ作る。"""
+        if not self.study_logs:
+            raise SyncError("「学習ログ」がありません。kei-agent-course-setup をもう一度実行してください")
+        if entry_id in self._recorded_study_ids:
+            return {"entry_id": entry_id, "notion_url": ""}
+        for row in self._rows(self.study_logs):
+            if _plain(row.get("properties", {}).get("Kei Agent 記録ID")) == entry_id:
+                self._recorded_study_ids.add(entry_id)
+                return {"entry_id": entry_id, "notion_url": row.get("url", "")}
+        title = "大学の学習"
+        if course_page_id:
+            for row in self._rows(self.courses):
+                if row.get("id") == course_page_id:
+                    title = _plain(row.get("properties", {}).get("科目名")) or title
+                    break
+        props = {
+            "タイトル": {"title": [{"text": {"content": title}}]},
+            "Kei Agent 記録ID": {"rich_text": [{"text": {"content": entry_id}}]},
+            "日付": {"date": {"start": started_at}},
+            "時間（分）": {"number": duration_minutes},
+            "メモ": {"rich_text": [{"text": {"content": memo}}]} if memo else {"rich_text": []},
+            "Slack": {"url": slack_url} if slack_url else {"url": None},
+        }
+        if course_page_id:
+            props["科目"] = {"relation": [{"id": course_page_id}]}
+        page = self.notion.request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": self.study_logs}, "properties": props})
+        self._recorded_study_ids.add(entry_id)
+        return {"entry_id": entry_id, "notion_url": page.get("url", "")}
 
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
@@ -239,6 +273,24 @@ def current_courses(on: date | None = None, token: str = "", state: dict | None 
     if not token:
         raise SyncError(NO_TOKEN)
     return CourseNotion(Notion(token), state or read_state()).current_courses(on)
+
+
+def record_study_time(entry_id: str, started_at: str, duration_minutes: int, course_page_id: str = "",
+                      memo: str = "", slack_url: str = "", token: str = "", state: dict | None = None) -> dict:
+    token = token or os.environ.get(TOKEN_ENV, "")
+    if not token:
+        raise SyncError(NO_TOKEN)
+    current = state or read_state()
+    if "study_logs" not in current.get("databases", {}):
+        from kei_agent_course.notion_setup import CourseSetup
+
+        setup = CourseSetup(Notion(token), str(current.get("home_page_id") or ""), state_path())
+        if not setup.home:
+            raise SyncError(NO_STATE)
+        setup.run()
+        current = setup.state
+    return CourseNotion(Notion(token), current).record_study_time(
+        entry_id, started_at, duration_minutes, course_page_id, memo, slack_url)
 
 
 def course_names(token: str = "", state: dict | None = None) -> set[str]:
