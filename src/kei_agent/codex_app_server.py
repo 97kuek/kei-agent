@@ -11,6 +11,10 @@ from typing import Any
 from kei_agent.agent_policy import AppPolicy
 from kei_agent.runner import RunResult
 
+# App connector の検索結果は、Box のプレビューなどで標準の64KiBを超えることがある。
+# JSON-RPC 1行を十分に読める上限。これを超えた場合はメモリを使い続けず、利用者向けのエラーにする。
+APP_SERVER_LINE_LIMIT = 8 * 1024 * 1024
+
 
 class AppServerUnavailable(RuntimeError):
     """必要な接続が現在の Codex App Server から使えない。"""
@@ -61,6 +65,7 @@ class AppServerClient:
             *build_command(self.codex_bin, app_ids, read_only),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            limit=APP_SERVER_LINE_LIMIT,
         )
         await self._request(proc, "initialize", {
             "clientInfo": {"name": "kei_agent", "title": "Kei Agent", "version": "1"},
@@ -79,7 +84,7 @@ class AppServerClient:
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write((__import__("json").dumps({"method": method, "id": request_id, "params": params}) + "\n").encode())
         await proc.stdin.drain()
-        while raw := await asyncio.wait_for(proc.stdout.readline(), self.timeout_seconds):
+        while raw := await self._readline(proc):
             try:
                 event = __import__("json").loads(raw)
             except ValueError:
@@ -103,10 +108,11 @@ class AppServerClient:
     async def run(self, prompt: str, policy: AppPolicy, model: str, reasoning_effort: str,
                   on_activity: Callable[[str], Awaitable[None]] | None = None,
                   on_text: Callable[[str], Awaitable[None]] | None = None) -> RunResult:
-        app_ids = resolve_apps(await self.installed(), policy)
-        proc = await self._start(app_ids, policy.read_only)
         result = RunResult()
+        proc = None
         try:
+            app_ids = resolve_apps(await self.installed(), policy)
+            proc = await self._start(app_ids, policy.read_only)
             # 設定をかけた二つ目の process でも readiness を確認する。
             resolve_apps((await self._request(proc, "app/installed", {"forceRefresh": True})).get("apps") or [], policy)
             thread_params: dict[str, Any] = {"model": model} if model else {}
@@ -124,7 +130,7 @@ class AppServerClient:
                 if pending:
                     event = pending.pop(0)
                 else:
-                    raw = await asyncio.wait_for(proc.stdout.readline(), self.timeout_seconds)
+                    raw = await self._readline(proc)
                     if not raw:
                         break
                     try:
@@ -151,7 +157,18 @@ class AppServerClient:
             result.errors.append(str(exc))
             return result
         finally:
-            await self._stop(proc)
+            if proc is not None:
+                await self._stop(proc)
+
+    async def _readline(self, proc) -> bytes:
+        """JSON-RPCの1行を読み、上限超過を生のasyncio例外のまま出さない。"""
+        assert proc.stdout is not None
+        try:
+            return await asyncio.wait_for(proc.stdout.readline(), self.timeout_seconds)
+        except ValueError as exc:
+            if "chunk exceed the limit" in str(exc) or "chunk is longer than limit" in str(exc):
+                raise AppServerUnavailable("Codex の連携結果が大きすぎて読み取れません") from None
+            raise
 
     async def _stop(self, proc) -> None:
         if proc.returncode is None:

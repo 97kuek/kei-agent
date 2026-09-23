@@ -92,7 +92,7 @@ def workspace(config: Config) -> Workspace:
     """判定だけを動かす場所（何も書かないが、claude は作業場を要る）。"""
     cwd = config.state_dir / "router"
     cwd.mkdir(parents=True, exist_ok=True)
-    return Workspace("router", ChannelKind.COURSE, cwd, model=MODEL, timeout_minutes=TIMEOUT_MINUTES,
+    return Workspace("router", ChannelKind.COURSE, cwd, timeout_minutes=TIMEOUT_MINUTES,
                      # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
                      system_prompt=config.repo_root / "prompts" / "router.md")
 

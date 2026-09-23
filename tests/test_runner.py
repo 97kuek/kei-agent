@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import guard, runner, themes
+from kei_agent import guard, router, runner, themes
 from kei_agent.config import AgentProfile
 
 
@@ -71,6 +71,19 @@ def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
     assert any("mcp_servers.research-notion.url" in item and config.notion_gateway_url in item for item in configs)
     assert any("env_http_headers" in item and "KEI_AGENT_NOTION_GATEWAY_AUTH" in item for item in configs)
     assert not any("NOTION_TOKEN" in item for item in configs)
+
+
+def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(config):
+    """振り分けは非gitの状態DBで動き、Google等のAppや研究Notionを触らない。"""
+    config = replace(config, agent_profiles={"research": AgentProfile(provider="codex")})
+
+    command = runner.build_codex_command(config, router.workspace(config), None)
+
+    assert "--skip-git-repo-check" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+    assert "apps._default.enabled=false" in configs
+    assert not any("research-notion" in item for item in configs)
 
 
 def test_codex_install_links_only_research_skills_into_theme_workspace(config):

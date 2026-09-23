@@ -14,10 +14,9 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from kei_agent import guard
+from kei_agent import guard, run_hooks
 from kei_agent.codex_runtime import discover_mcp_names
 from kei_agent.config import AgentProfile, Config, path_without_venv
-from kei_agent import run_hooks
 from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -73,21 +72,28 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -
     """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
     assert ws.cwd is not None
     profile = _profile(config)
+    # ルーターは状態DBの下（Gitリポジトリ外）で、接続先も作業用MCPも不要な分類だけをする。
+    is_router = ws.system_prompt == config.repo_root / "prompts" / "router.md"
     cmd = [
-        config.codex_bin, "exec", "--json", "--sandbox", "workspace-write",
+        config.codex_bin, "exec", "--json", "--sandbox", "read-only" if is_router else "workspace-write",
         "--cd", str(ws.cwd),
     ]
+    if is_router:
+        cmd.append("--skip-git-repo-check")
     model = ws.model or profile.model or config.model
     if model:
         cmd += ["--model", model]
     if profile.reasoning_effort:
         cmd += ["--config", f"model_reasoning_effort={profile.reasoning_effort}"]
-    # 個人 Notion connector を読む余地を作らず、研究ホームを検査する gateway だけを渡す。
-    cmd += [
-        "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
-        "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="KEI_AGENT_NOTION_GATEWAY_AUTH"}}',
-        "--config", f"mcp_servers.{NOTION_MCP}.enabled=true",
-    ]
+    # 個人の App connector（Google Calendar等）は研究にもルーターにも渡さない。
+    cmd += ["--config", "apps._default.enabled=false"]
+    if not is_router:
+        # 研究ホームの外へ届く Notion を持ち込まず、検査済みgatewayだけを渡す。
+        cmd += [
+            "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
+            "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="KEI_AGENT_NOTION_GATEWAY_AUTH"}}',
+            "--config", f"mcp_servers.{NOTION_MCP}.enabled=true",
+        ]
     if session_id:
         cmd += ["resume", session_id]
     # prompt は stdin から渡す。`-` を明示しないと、Codex CLI は引数のpromptを待つ。
