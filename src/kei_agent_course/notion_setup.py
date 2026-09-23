@@ -91,8 +91,43 @@ STUDY_LOGS = {
     "relations": {"科目": ("courses", "学習ログ")},
 }
 
+GRADES = {
+    "icon": "📊",
+    "description": "成績 HTML から取り込んだ科目ごとの派生記録。",
+    "properties": {
+        "タイトル": {"title": {}}, "Kei Agent 成績ID": {"rich_text": {}},
+        "取得年度": {"number": {"format": "number"}}, "学期": {"select": {"options": []}},
+        "単位": {"number": {"format": "number"}}, "成績": {"select": {"options": []}},
+        "GP": {"number": {"format": "number"}}, "科目区分": {"rich_text": {}},
+    },
+    "relations": {"科目": ("courses", "成績履歴")},
+}
+
+REQUIREMENTS = {
+    "icon": "🎓",
+    "description": "卒業要件の集計。成績との対応は根拠がある場合だけ結ぶ。",
+    "properties": {
+        "名称": {"title": {}}, "Kei Agent 要件ID": {"rich_text": {}}, "区分": {"rich_text": {}},
+        "所定": {"number": {"format": "number"}}, "既得": {"number": {"format": "number"}},
+        "算入": {"number": {"format": "number"}}, "残り": {"number": {"format": "number"}},
+    },
+    "relations": {"算入成績": ("grades", "単位要件")},
+}
+
+GPA = {
+    "icon": "📈",
+    "description": "学期別と通算の GPA。",
+    "properties": {
+        "期間": {"title": {}}, "Kei Agent GPAID": {"rich_text": {}},
+        "年度": {"number": {"format": "number"}}, "種別": {"select": {"options": []}},
+        "GPA": {"number": {"format": "number"}},
+    },
+    "relations": {"対象成績": ("grades", "GPA推移")},
+}
+
 SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
-         "study_logs": ("学習ログ", STUDY_LOGS)}
+         "study_logs": ("学習ログ", STUDY_LOGS), "grades": ("📊 成績履歴", GRADES),
+         "requirements": ("🎓 単位要件", REQUIREMENTS), "gpa": ("📈 GPA推移", GPA)}
 
 # 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
 AUTUMN_2026 = [
@@ -108,7 +143,7 @@ AUTUMN_2026 = [
 
 
 class CourseSetup(Setup):
-    """授業ホームの下に3つのデータベースを作る（すでにあれば、足りない項目だけ足す）。"""
+    """授業ホームの下に正本6 DBを作る（すでにあれば、足りない項目だけ足す）。"""
 
     def run(self, courses: list[tuple[str, str, int | None]] | None = None) -> None:
         for key, (title, spec) in SPECS.items():
