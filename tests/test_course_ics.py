@@ -129,8 +129,8 @@ def test_due_reads_the_calendar(monkeypatch):
 # 授業用 Notion のセットアップ
 
 
-def test_course_setup_creates_two_databases(tmp_path):
-    """授業と課題の2つを作り、課題から科目へのリレーションを張る。"""
+def test_course_setup_creates_course_assignment_and_study_log_databases(tmp_path):
+    """授業・課題・学習ログを作り、科目からのリレーションを張る。"""
     from kei_agent_course import notion_setup
 
     calls = []
@@ -147,7 +147,8 @@ def test_course_setup_creates_two_databases(tmp_path):
                 return {"data_sources": [{"id": f"ds-{path.split('/')[-1]}"}], "url": "https://notion.so/x"}
             if method == "GET" and path.startswith("/data_sources/"):
                 name = path.split("ds-db-")[-1]
-                spec = notion_setup.COURSES if name == "授業" else notion_setup.ASSIGNMENTS
+                spec = {"授業": notion_setup.COURSES, "課題": notion_setup.ASSIGNMENTS,
+                        "学習ログ": notion_setup.STUDY_LOGS}[name]
                 props = {n: {"id": f"p{i}", "type": next(iter(v))} for i, (n, v) in enumerate(spec["properties"].items())}
                 props.update({n: {"id": "rel", "type": "relation"} for n in spec.get("relations", {})})
                 return {"properties": props}
@@ -162,9 +163,9 @@ def test_course_setup_creates_two_databases(tmp_path):
     assert [(p["曜日"]["select"]["name"], p["時限"]["number"]) for p in added] == [("月", 2), ("他", None)]
 
     created = [b["title"][0]["text"]["content"] for m, p, b in calls if m == "POST" and p == "/databases"]
-    assert created == ["授業", "課題"]
+    assert created == ["授業", "課題", "学習ログ"]
     assignments = next(b for m, p, b in calls if m == "POST" and p == "/databases"
                        and b["title"][0]["text"]["content"] == "課題")
     relation = assignments["initial_data_source"]["properties"]["科目"]["relation"]
     assert relation["data_source_id"] == "ds-db-授業" and relation["dual_property"]["synced_property_name"] == "課題"
-    assert set(setup.state["databases"]) == {"courses", "assignments"}
+    assert set(setup.state["databases"]) == {"courses", "assignments", "study_logs"}

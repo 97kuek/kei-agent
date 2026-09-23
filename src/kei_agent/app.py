@@ -89,6 +89,20 @@ async def serve() -> None:
     app.action(re.compile(r"^kei_agent_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
     app.action(re.compile(r"^kei_agent_home_"))(acked(assistant.on_home_action))
     app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
+    app.action(re.compile(r"^kei_agent_time_(start|stop)$"))(acked(assistant.on_time_action))
+    app.action(re.compile(r"^kei_agent_time_(memo|retry)$"))(acked(assistant.on_time_action))
+
+    @app.view(re.compile(r"^kei_agent_time_(memo|course)_submit$"))
+    async def time_card_view(ack, body):
+        try:
+            errors = await assistant.on_time_view(body)
+        except Exception:
+            log.exception("時間記録の入力を処理できませんでした")
+            errors = {"memo": "保存できませんでした。もう一度試してね"}
+        if errors:
+            await ack(response_action="errors", errors=errors)
+        else:
+            await ack()
 
     @app.view(home.ADD_DOMAIN_CALLBACK)
     async def add_domain(ack, body):

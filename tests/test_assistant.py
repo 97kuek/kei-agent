@@ -56,6 +56,22 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert "## 依頼者" in log and "図を作って" in log and "## Kei Agent" in log and "結果です" in log
 
 
+async def test_time_card_starts_stops_and_keeps_one_active_timer(env, store):
+    assistant, slack, _, _ = env
+    start = {"user": {"id": "UME"}, "trigger_id": "trigger", "channel": {"id": "C1", "name": "10_vlm"},
+             "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]}
+    await assistant.on_time_action(start)
+    entry = assistant.time_tracker.active("UME")
+    assert entry is not None and entry.description == "研究 / vlm"
+    assert store.time_card("C1") is not None
+    assert any(name == "chat_postMessage" for name, _ in slack.calls)
+
+    await assistant.on_time_action({**start, "actions": [{"action_id": "kei_agent_time_stop", "value": entry.id}]})
+    assert assistant.time_tracker.active("UME") is None
+    assert store.time_entry(entry.id)["ended_at"] is not None
+    assert any(name == "chat_update" for name, _ in slack.calls)
+
+
 async def test_mention_from_other_user_is_ignored(env):
     assistant, slack, claude, _ = env
     await assistant.on_mention({"channel": "C1", "user": "USOMEONE", "ts": "10.1", "text": "<@UBOT> hi"})

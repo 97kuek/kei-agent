@@ -108,7 +108,7 @@ AUTUMN_2026 = [
 
 
 class CourseSetup(Setup):
-    """授業ホームの下に、2つのデータベースを作る（すでにあれば、足りない項目だけ足す）。"""
+    """授業ホームの下に3つのデータベースを作る（すでにあれば、足りない項目だけ足す）。"""
 
     def run(self, courses: list[tuple[str, str, int | None]] | None = None) -> None:
         for key, (title, spec) in SPECS.items():

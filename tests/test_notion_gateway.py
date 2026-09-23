@@ -195,6 +195,16 @@ def test_audit_records_the_error_type_without_the_message(service, notion, caplo
     assert "NotionError" in caplog.text
 
 
+def test_record_time_writes_research_log_once(service, notion):
+    service._time_logs = "time-logs"
+    service.record_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "amr", "実装", "https://slack.example/p1")
+    service.record_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "amr", "実装", "https://slack.example/p1")
+
+    posts = [call for call in notion.calls if call[:2] == ("POST", "/pages")]
+    assert len(posts) == 1
+    assert posts[0][2]["parent"] == {"type": "data_source_id", "data_source_id": "time-logs"}
+
+
 # Task 4: MCP サーバーと Bearer 認証
 
 TOOLS = {
@@ -234,6 +244,15 @@ async def test_health_is_open_but_the_mcp_endpoint_needs_the_gateway_token(app):
         assert (await client.post("/mcp", json={})).status_code == 401
         wrong = await client.post("/mcp", json={}, headers={"Authorization": "Bearer nope"})
         assert wrong.status_code == 401
+
+
+async def test_time_logs_endpoint_needs_the_gateway_token(app):
+    import httpx
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://gateway") as client:
+        assert (await client.post("/time-logs", json={})).status_code == 401
+        response = await client.post("/time-logs", json={}, headers={"Authorization": "Bearer gateway-token"})
+        assert response.status_code == 400
 
 
 async def test_mcp_round_trip_creates_a_page_and_records_only_the_target(service, notion, caplog):

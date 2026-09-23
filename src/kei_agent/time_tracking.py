@@ -86,6 +86,10 @@ class TimeTracker:
         row = self.store.active_time_entry(user_id)
         return _entry(row) if row is not None else None
 
+    def entry(self, entry_id: str) -> TimeEntry | None:
+        row = self.store.time_entry(entry_id)
+        return _entry(row) if row is not None else None
+
     def add_memo(self, entry_id: str, memo: str) -> TimeEntry:
         if not entry_id:
             raise ValueError("時間記録を指定してください")

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
@@ -150,6 +151,23 @@ def build_app(settings: GatewayConfig, service: ResearchNotion) -> Starlette:
         return JSONResponse({"ok": True})
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, json_response=True, host=settings.host)
+
+    async def record_time(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+            allowed = {"entry_id", "started_at", "duration_minutes", "theme", "memo", "slack_url"}
+            if not isinstance(body, dict) or set(body) - allowed:
+                raise ValueError
+            result = await asyncio.to_thread(
+                service.record_time, str(body["entry_id"]), str(body["started_at"]), int(body["duration_minutes"]),
+                str(body["theme"]), str(body.get("memo") or ""), str(body.get("slack_url") or ""))
+        except (KeyError, TypeError, ValueError):
+            return JSONResponse({"error": "研究時間の記録内容が不正です"}, status_code=400)
+        except (NotionError, ScopeError):
+            return JSONResponse({"error": "研究ログを記録できませんでした"}, status_code=502)
+        return JSONResponse(result)
+
+    app.add_route("/time-logs", record_time, methods=["POST"])
     app.add_middleware(BearerAuth, token=settings.token)
     return app
 
