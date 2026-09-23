@@ -13,6 +13,15 @@ from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, due_day, search_keywords
 
 
+REVIEW_REPLY = """*今日の成果*
+なし
+
+*未完了タスク*
+なし
+
+夜間に実行したいタスクはありますか？"""
+
+
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
@@ -307,15 +316,16 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
         review.parent.mkdir(parents=True, exist_ok=True)
         review.write_text("# 振り返り 2026-09-18\n\n## Codex での振り返り\n")
 
-    claude.behaviors = [{"text": "今日の要約と問い", "side_effect": write_review}]
+    claude.behaviors = [{"text": REVIEW_REPLY, "side_effect": write_review}]
     await scheduler.run_review("2026-09-18")
 
     assert "reviews/2026-09-18.md" in claude.calls[0]["prompt"]
     texts = slack.texts()
-    assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == "今日の要約と問い"
+    assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == REVIEW_REPLY
     note = assistant.notion.notes[-1]
     assert note.kind == "振り返り" and "## Codex での振り返り" in note.body
-    assert "Codex App で" in texts[2] and note.url in texts[2]
+    assert "Codex App" not in texts[2] and "/reviews/" not in texts[2]
+    assert note.url in texts[2] and "このスレッド" in texts[2]
 
     await assistant.on_message({"channel": "C5", "user": "UME", "ts": "1001.5", "thread_ts": "1001.000",
                                 "text": "条件Bの差は質問の順番で説明できる"})
@@ -324,6 +334,28 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
         await asyncio.gather(*list(assistant.tasks))
     (page_id, md), = assistant.notion.appended
     assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in md
+
+
+async def test_review_never_posts_model_progress_narration(env):
+    scheduler, _assistant, slack, claude = env
+    claude.behaviors = [{"text": "まず材料を確認します。\n" + REVIEW_REPLY}]
+
+    result = await scheduler.run_review("2026-09-23")
+
+    assert result["status"] == "error"
+    assert all("まず材料を確認します" not in text for text in slack.texts())
+    assert any("指定形式" in text for text in slack.texts())
+
+
+async def test_review_footer_is_notion_native_without_local_path(env):
+    scheduler, _assistant, slack, claude = env
+    claude.behaviors = [{"text": REVIEW_REPLY}]
+
+    await scheduler.run_review("2026-09-23")
+
+    footer = slack.texts()[-1]
+    assert "Codex App" not in footer and "/reviews/" not in footer
+    assert "このスレッド" in footer and "Notion" in footer
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):

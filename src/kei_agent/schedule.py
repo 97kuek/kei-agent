@@ -15,12 +15,14 @@ from datetime import time as dtime
 from pathlib import Path
 
 from kei_agent import course, maintenance, morning, research, settings, themes, work
+from kei_agent.model_policy import UseCase
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
+from kei_agent.review_output import ReviewOutputError, review_footer, validate_review_reply
 from kei_agent.slack_text import AWAITING_MARKER, clean_text
 from kei_agent.store import Store
 
@@ -253,7 +255,8 @@ class Scheduler:
                 f"関係のある新着が1本もなければ、返答は `{NO_NEW_PAPERS}` の1行だけにしてください。"
                 "ジョブは投入しないでください。"
             )
-            result = await self.assistant.run_detached(ws, name, prompt, "literature")
+            result = await self.assistant.run_detached(
+                ws, name, prompt, "literature", use_case=UseCase.RESEARCH_COMPARE)
             # 「新着なし」の目印の前後に説明をつけることがあるので、目印が含まれていれば新着なしとみなす
             if not result.is_error and NO_NEW_PAPERS in result.text:
                 results[name] = {"status": "no_new"}
@@ -316,7 +319,9 @@ class Scheduler:
             "折れ線グラフを作り、`outputs/` に保存してください（月曜以外は作らなくてよい）。\n\n"
             f"同じ内容を `daily/{day}.md` に保存してください。返答が Slack と Notion にそのまま載ります。"
         )
-        result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "daily")
+        result = await self.assistant.run_detached(
+            ws, self.overview_channel_name, prompt, "daily", actor="router",
+            use_case=UseCase.OVERVIEW_DAILY)
         title = f"Daily {label(day)}"
         # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
         timeline, gathered, notices = await self.morning_text(datetime.now())
@@ -359,7 +364,16 @@ class Scheduler:
             "このあと、このスレッドに振り返りの結論が貼られたら、その内容を "
             f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。"
         )
-        result = await self.assistant.run_detached(ws, self.overview_channel_name, prompt, "review")
+        result = await self.assistant.run_detached(
+            ws, self.overview_channel_name, prompt, "review", actor="router",
+            use_case=UseCase.OVERVIEW_PLAN)
+        if not result.is_error:
+            try:
+                result.text = validate_review_reply(result.text)
+            except ReviewOutputError as e:
+                result.is_error = True
+                result.errors.append(str(e))
+                result.text = ""
         title = f"Retro & Planning {label(day)}"
         thread_ts = await self.assistant.publish(
             channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result
@@ -370,12 +384,10 @@ class Scheduler:
             note = await self._save_note(channel, thread_ts, title, "振り返り", day, markdown, f"reviews/{day}.md")
             if note:
                 self.store.link_notion(channel, thread_ts, note.id, "review")
-        where = f"Notion の <{note.url}|{title}> の「Codex での振り返り」" if note else "ファイルの「Codex での振り返り」"
-        footer = (
-            f"Codex App で `{review_path}` を開いて振り返ってください。"
-            f"結論はこのスレッドに貼るか、{where}に書くと、明日の Daily に反映されます。"
+        await self.assistant.post(
+            Request(channel, self.overview_channel_name, thread_ts, None, ""),
+            review_footer(note.url if note else None, title),
         )
-        await self.assistant.post(Request(channel, self.overview_channel_name, thread_ts, None, ""), footer)
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None}
 
