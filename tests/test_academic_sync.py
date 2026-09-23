@@ -1,3 +1,6 @@
+import pytest
+
+from kei_agent_course import academic_sync
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
 from kei_agent_course.academic_sync import AcademicSync, inspect_course_home
 
@@ -19,6 +22,22 @@ def test_inspect_reports_duplicates_without_mutating_notion():
     assert report.duplicates == ("授業",)
     assert report.unmanaged == ("雑記",)
     assert notion.writes == []
+
+
+def test_setup_refuses_to_choose_between_duplicate_canonical_databases(tmp_path):
+    from kei_agent.notion import NotionError
+    from kei_agent_course.notion_setup import CourseSetup
+
+    class Notion:
+        def children(self, _page_id):
+            return [
+                {"id": "course-a", "type": "child_database", "child_database": {"title": "授業"}},
+                {"id": "course-b", "type": "child_database", "child_database": {"title": "授業"}},
+            ]
+
+    setup = CourseSetup(Notion(), "home", tmp_path / "notion-course.json")
+    with pytest.raises(NotionError, match="重複"):
+        setup.run()
 
 
 def test_academic_sync_upserts_same_record_without_duplicate_pages():
@@ -77,3 +96,39 @@ def test_ambiguous_course_is_reported_without_grade_relation():
     ))
 
     assert result.ambiguous_relations == ("成績履歴: 数学 / 2025 / 春期",)
+
+
+def test_academic_sync_updates_an_existing_requirement_by_stable_key():
+    class Notion:
+        def __init__(self):
+            self.rows = {"courses": [], "grades": [], "requirements": [{
+                "id": "requirement-1", "properties": {
+                    "Kei Agent 要件ID": {"rich_text": [{"plain_text": "requirement::総合計"}]},
+                    "所定": {"number": 124}, "既得": {"number": 10}, "算入": {"number": 10}, "残り": {"number": 114},
+                },
+            }], "gpa": []}
+
+        def paginate(self, _method, path, _body=None):
+            return self.rows[path.split("/")[2]]
+
+        def request(self, method, path, body=None):
+            if method == "PATCH" and path == "/pages/requirement-1":
+                self.rows["requirements"][0]["properties"].update(body["properties"])
+                return self.rows["requirements"][0]
+            raise AssertionError((method, path, body))
+
+    state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
+    result = AcademicSync(Notion(), state).sync(AcademicRecord(
+        grades=(), requirements=(Requirement("総合計", "", 124, 12, 12, 112, "総合計"),), gpa=(),
+    ))
+
+    assert result.updated == {"grades": 0, "requirements": 1, "gpa": 0}
+
+
+def test_academic_import_cli_dry_run_never_reads_state_or_writes(tmp_path, monkeypatch):
+    record = AcademicRecord(grades=(), requirements=(), gpa=())
+    monkeypatch.setattr(academic_sync, "parse_academic_record", lambda *_paths: record)
+    monkeypatch.setattr(academic_sync, "read_state", lambda: (_ for _ in ()).throw(AssertionError("state")))
+
+    assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html"), "--dry-run"]) == 0
+    assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html")]) == 2

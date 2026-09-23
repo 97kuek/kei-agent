@@ -1,7 +1,7 @@
 """研究エージェント（A2A）に、claude の1回分を頼む。
 
 `[a2a.agents]` に `research` を書いたときだけ使う。書かなければ、今までどおり同じプロセスで
-`runner.run_claude` を動かす（docs/design.md の11章）。
+`runner.run_model` を動かす（docs/design.md の11章）。
 
 頼み方も返事も JSON。claude は数分〜数十分かかるので、流しながら返してもらう（A2A の
 SendStreamingMessage）。経過（使った道具と、返答の断片）が届くたびに、入力欄の下の1行に出す。
@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 
 from kei_agent import a2a, agents, jobs, runner
 from kei_agent.config import Config
+from kei_agent.model_policy import UseCase
 from kei_agent.themes import Workspace
 
 log = logging.getLogger(__name__)
@@ -29,42 +30,55 @@ FORGET_JOB = "forget-job"
 # RunResult のうち、相手から受け取る項目（知らない項目が増えても落ちないように、ここで絞る）
 FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
           "timed_out", "requested_domains", "limit_reset_at")
-_OVERRIDE = re.compile(r"^\s*\[\[(routine|standard|deep)\]\]\s*", re.IGNORECASE)
+_OVERRIDE = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
+_LABELS = {
+    "research-extract": UseCase.RESEARCH_EXTRACT,
+    "research-screen": UseCase.RESEARCH_SCREEN,
+    "research-compare": UseCase.RESEARCH_COMPARE,
+    "research-execute": UseCase.RESEARCH_EXECUTE,
+    "research-design": UseCase.RESEARCH_DESIGN,
+    # 依頼者が明示した例外。通常の分類器は絶対に選ばない。
+    "manual-astra": UseCase.MANUAL_ASTRA,
+    "manual-fable": UseCase.MANUAL_FABLE,
+}
 _DEEP_WORDS = ("研究設計", "仮説", "実験計画", "手法選択", "比較設計", "厳密なレビュー")
-_ROUTINE_WORDS = ("notion", "w&b", "wandb", "run", "metric", "artifact", "記録", "ログ", "一覧", "確認")
+_EXTRACT_WORDS = ("notion", "w&b", "wandb", "run", "metric", "artifact", "記録", "ログ", "一覧", "確認")
+_COMPARE_WORDS = ("比較", "結果", "考察", "差分", "レビュー")
 
 
-def recipe_for_prompt(prompt: str) -> tuple[str, str]:
-    """研究の定型操作と深い設計を分け、明示指定は本文から取り除く。"""
+def use_case_for_prompt(prompt: str) -> tuple[UseCase, str]:
+    """固定 skill の外から来た研究依頼を、安全な用途に分類する。"""
     match = _OVERRIDE.match(prompt)
-    if match:
-        return match.group(1).lower(), prompt[match.end():].strip()
+    if match and (case := _LABELS.get(match.group(1).lower())) is not None:
+        return case, prompt[match.end():].strip()
     text = prompt.strip()
     lowered = text.lower()
     if any(word in text for word in _DEEP_WORDS):
-        return "deep", text
-    if any(word in lowered or word in text for word in _ROUTINE_WORDS):
-        return "routine", text
-    return "standard", text
+        return UseCase.RESEARCH_DESIGN, text
+    if any(word in text for word in _COMPARE_WORDS):
+        return UseCase.RESEARCH_COMPARE, text
+    if any(word in lowered or word in text for word in _EXTRACT_WORDS):
+        return UseCase.RESEARCH_EXTRACT, text
+    return UseCase.RESEARCH_EXECUTE, text
 
 
-def with_recipe(config: Config, ws: Workspace, recipe_name: str) -> Workspace:
-    # 既存設定（レシピなし）との互換性。レシピを導入した環境では未知名を設定エラーにする。
-    if not config.model_recipes:
-        return ws
-    recipe = config.model_recipe(AGENT, recipe_name)
-    if recipe is None:
-        return ws
-    return Workspace(**{**ws.__dict__, "model": recipe.model, "reasoning_effort": recipe.reasoning_effort,
-                        "model_recipe": recipe_name})
+def has_explicit_use_case(prompt: str) -> bool:
+    match = _OVERRIDE.match(prompt)
+    return bool(match and match.group(1).lower() in _LABELS)
+
+
+def is_manual_use_case(use_case: UseCase) -> bool:
+    return use_case in {UseCase.MANUAL_ASTRA, UseCase.MANUAL_FABLE}
 
 
 def prepare(config: Config, ws: Workspace, prompt: str) -> tuple[Workspace, str]:
-    recipe_name, clean_prompt = recipe_for_prompt(prompt)
-    return with_recipe(config, ws, recipe_name), clean_prompt
+    # compatibility: caller now resolves use case separately; workspace に model を載せない。
+    _, clean_prompt = use_case_for_prompt(prompt)
+    return ws, clean_prompt
 
 
-def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str, thread_ts: str) -> str:
+def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str, thread_ts: str,
+                use_case: UseCase = UseCase.RESEARCH_EXECUTE, *, read_only: bool = False) -> str:
     return json.dumps({
         "channel_name": ws.channel_name,
         "prompt": prompt,
@@ -72,7 +86,8 @@ def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str
         "channel": channel,
         "thread_ts": thread_ts,
         "allowed_domains": list(ws.allowed_domains),
-        "model_recipe": ws.model_recipe,
+        "use_case": use_case.value,
+        "read_only": read_only,
     }, ensure_ascii=False)
 
 
@@ -86,8 +101,10 @@ def to_result(data: dict) -> runner.RunResult:
 
 async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | None,
               channel: str, thread_ts: str,
+              use_case: UseCase = UseCase.RESEARCH_EXECUTE,
               on_activity: Callable[[str], Awaitable[None]] | None = None,
-              on_text: Callable[[str], Awaitable[None]] | None = None) -> runner.RunResult:
+              on_text: Callable[[str], Awaitable[None]] | None = None,
+              *, read_only: bool = False) -> runner.RunResult:
     """研究エージェントに claude を1回動かしてもらう。"""
 
     async def on_progress(payload: str) -> None:
@@ -101,7 +118,7 @@ async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | No
             await on_text(event["text"])
 
     reply = await agents.ask(agent, RUN_CLAUDE, on_progress=on_progress,
-                             text=ask_payload(ws, prompt, session_id, channel, thread_ts))
+                             text=ask_payload(ws, prompt, session_id, channel, thread_ts, use_case, read_only=read_only))
     if not reply.data:
         # 封筒が開けなかった（つながらない、途中で切れた、形が違う）
         return runner.RunResult(is_error=True, errors=[reply.text or "研究エージェントが返事をしませんでした"])

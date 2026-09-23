@@ -47,10 +47,9 @@ log = logging.getLogger(__name__)
 
 URL = "wss://api.openai.com/v1/realtime"
 KEY_ENV = "OPENAI_API_KEY"
-MODEL_ENV = "KEI_AGENT_REALTIME_MODEL"
 VOICE_ENV = "KEI_AGENT_REALTIME_VOICE"
-# 廃止予定が無いもの。`mini` に落とすと安いが、道具の呼び分けが弱くなると公式が書いている
-DEFAULT_MODEL = "gpt-realtime-2.1"
+# 音声会話は通常 agent の recipe と分離し、依頼者が選んだ mini に固定する。
+DEFAULT_MODEL = "gpt-realtime-2.1-mini"
 # 公式が質のために薦めるのは marin と cedar。cedar のほうが低い声（依頼者の分身なので）
 DEFAULT_VOICE = "cedar"
 # 話し終わったかを意味で判断する。`high` は最大2秒待ち（`low` は8秒でもっさりする）
@@ -80,7 +79,7 @@ INSTRUCTIONS = """# Role and Objective
   「明日」「今週」「今日」のどれかを引数で渡す。分からなければ today。
 - Kei Agent が何をしているか聞かれたら `get_status` を呼ぶ。
 - 研究・授業・仕事の**中身**（テーマで何を確かめているか、結果がどうだったか）を聞かれたら
-  `ask_research` を呼ぶ。数秒かかるので、呼ぶ前に「ちょっと見てみるね」と一言だけ言う。
+  `ask_agent` を呼ぶ。数秒かかるので、呼ぶ前に「ちょっと見てみるね」と一言だけ言う。
 - 作業を頼まれたら `propose_request` を呼び、**返ってきた文をそのまま読み上げて確認する**。
   依頼者が「いいよ」と言ってから `send_request` を呼ぶ。確認していないのに送らない。
 
@@ -127,8 +126,6 @@ def _session(voice: str, tools: list[dict]) -> dict:
             },
             "tools": tools,
             "tool_choice": "auto",
-            # 声の返事なので、深く考えさせない
-            "reasoning": {"effort": "low"},
             # 履歴を毎回送るので、長い会話は後半が高い。余裕を持って切り詰める
             "truncation": {"type": "retention_ratio", "retention_ratio": 0.8},
         },
@@ -138,12 +135,12 @@ def _session(voice: str, tools: list[dict]) -> dict:
 class Live:
     """Realtime API との1本の繋がり。`run` を回している間だけ喋る。"""
 
-    def __init__(self, tools: Tools, key: str = "", model: str = "", voice: str = "",
+    def __init__(self, tools: Tools, key: str = "", voice: str = "",
                  env: dict | None = None):
         env = os.environ if env is None else env
         self.tools = tools
         self.key = key or env.get(KEY_ENV, "")
-        self.model = model or env.get(MODEL_ENV) or DEFAULT_MODEL
+        self.model = DEFAULT_MODEL
         self.voice = voice or env.get(VOICE_ENV) or DEFAULT_VOICE
         self.speaker = audio.Speaker()
         # いま鳴らしている返事（割り込みのときに「どこまで聞かれたか」を伝える相手）

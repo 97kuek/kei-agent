@@ -100,7 +100,7 @@ class WorkChannel:
         params = params or {}
         if not skill:
             skills = await self.skills_of(AGENT)
-            choice = await router.pick(self.config, skills, req.text) if skills else router.Choice()
+            choice = await router.pick(self.config, skills, req.text, store=self.store) if skills else router.Choice()
             skill, params = choice.skill or ASK, choice.params
         if skill == ASK:
             await self.work_ask(req)

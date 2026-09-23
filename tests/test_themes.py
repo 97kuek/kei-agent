@@ -104,17 +104,15 @@ def test_config_toml_in_repo_loads(tmp_path):
     load_config(REPO_ROOT / "config.toml", env={})
 
 
-def test_agent_profile_selects_codex_and_keeps_other_agents_on_claude(tmp_path):
+def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path):
     from kei_agent.config import load_config
     path = tmp_path / "config.toml"
-    path.write_text(
-        '[agents.research]\nprovider = "codex"\nmodel = "gpt-5.3-codex"\nreasoning_effort = "high"\n'
-    )
+    path.write_text('[agents.research]\nprovider = "codex"\n')
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"
     assert config.agent_profiles["research"].provider == "codex"
-    assert config.agent_profiles["research"].model == "gpt-5.3-codex"
-    assert config.agent_profiles["course"].provider == "claude"
+    assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider", "connectors"}
+    assert config.agent_profiles["course"].provider == ""
 
 
 def test_agent_profile_reads_unique_connector_declarations(tmp_path):
@@ -129,23 +127,15 @@ def test_agent_profile_reads_unique_connector_declarations(tmp_path):
     assert config.agent_profiles["course"].connectors == frozenset()
 
 
-def test_model_recipe_is_centralized_and_must_match_the_agent_provider(tmp_path):
+def test_old_model_recipe_configuration_is_rejected(tmp_path):
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
     path.write_text(
         '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\nreasoning_effort = "low"\n'
         '[agents.research]\nprovider = "codex"\ndefault_recipe = "routine"\n'
     )
-    config = load_config(path, env={})
-    recipe = config.model_recipe("research")
-    assert (recipe.model, recipe.reasoning_effort) == ("gpt-routine", "low")
-
-    path.write_text(
-        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\n'
-        '[agents.research]\nprovider = "claude"\ndefault_recipe = "routine"\n'
-    )
-    with pytest.raises(ConfigError, match="provider"):
-        load_config(path, env={}).model_recipe("research")
+    with pytest.raises(ConfigError, match="model_recipes"):
+        load_config(path, env={})
 
 
 @pytest.mark.parametrize("connectors", ['"wandb"', '["wandb", "wandb"]'])

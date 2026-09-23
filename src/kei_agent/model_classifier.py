@@ -78,8 +78,10 @@ async def _classify(config: Config, store, actor: str, prompt: str, allowed: fro
                          f"候補は {candidates}。\n{guidance}\n"
                          f"迷うときは {fallback.value} と confidence を 0.7 未満にしてください。\n\n依頼:\n{prompt[:1200]}")
     try:
-        result = await runner.run_model(config, workspace(config), classifier_prompt,
-                                        None, "", "", recipe)
+        result = await runner.run_model(
+            config, runner.ExecutionRequest(workspace(config), recipe, None, "", "", read_only=True),
+            classifier_prompt,
+        )
     except Exception:
         # 分類器の障害で利用者の依頼自体を落とさない。再試行・昇格はしない。
         return fallback

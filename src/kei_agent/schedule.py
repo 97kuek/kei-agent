@@ -15,10 +15,10 @@ from datetime import time as dtime
 from pathlib import Path
 
 from kei_agent import course, maintenance, morning, research, settings, themes, work
-from kei_agent.model_policy import UseCase
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
+from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request

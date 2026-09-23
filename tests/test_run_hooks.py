@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from kei_agent import run_hooks, runner, themes
+from kei_agent.model_policy import UseCase, resolve
 
 
 def test_preflight_rejects_connectors_outside_the_agents_policy():
@@ -76,7 +77,8 @@ async def test_runner_rejects_a_missing_codex_connector_before_starting(config, 
     monkeypatch.setattr(runner, "discover_mcp_names", no_connectors)
 
     with pytest.raises(run_hooks.ConnectorPolicyError, match="Codex MCP に見つかりません"):
-        await runner.run_claude(config, ws, "調べて", None, "C1", "1.1")
+        await runner.run_model(config, runner.ExecutionRequest(
+            ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
 
     assert not marker.exists()
 
@@ -96,6 +98,7 @@ async def test_runner_accepts_the_scoped_research_notion_gateway(config, tmp_pat
 
     monkeypatch.setattr(runner, "discover_mcp_names", no_connectors)
 
-    result = await runner.run_claude(config, ws, "調べて", None, "C1", "1.1")
+    result = await runner.run_model(config, runner.ExecutionRequest(
+        ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
 
     assert result.text == "OK"

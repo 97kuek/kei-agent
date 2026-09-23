@@ -10,6 +10,6 @@
 
 ## モデル方針
 
-`sync-assignments`、`list-due`、`list-classes`、成績・単位の定型計算はコードとNotion APIで処理し、モデルを呼ばない。Box資料とNotionを横断して説明する `ask` は `standard` を既定にする。卒業要件の重要な確認はApp Homeで一時的に強いレシピへ切り替えてから実行する。
+`sync-assignments`、`list-due`、`list-classes`、成績・単位の定型計算はコードとNotion APIで処理し、モデルを呼ばない。Box資料とNotionを横断する `ask` は、軽い説明を `course_explain`、要件整理を `course_requirements`、比較を `course_compare`、履修・卒業計画を `course_degree_plan` として model policy の recipe から選ぶ。
 
 モデル名を個別のskillへ埋め込まない。更新は [モデル運用](../model-policy.md) のレシピを変える。

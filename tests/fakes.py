@@ -150,15 +150,16 @@ class FakeSlack:
 
 
 class FakeClaude:
-    """runner.run_claude の代わり。呼ばれた内容を記録し、決めた結果を返す。"""
+    """runner.run_model の代わり。解決済み execution request を記録して返す。"""
 
     def __init__(self):
         self.calls = []
         self.behaviors = []
 
-    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None,
-                       profile=None):
-        self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id, "thread_ts": thread_ts})
+    async def __call__(self, config, request, prompt, on_activity=None, on_text=None):
+        ws = request.workspace
+        self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": request.session_id,
+                           "thread_ts": request.thread_ts})
         behavior = self.behaviors.pop(0) if self.behaviors else {}
         # 途中の独り言と道具の呼び出し。実物の claude と同じく、独り言は道具の直前に来る
         for kind, value in behavior.get("steps", [("tool", "Bash: テスト")]):

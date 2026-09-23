@@ -11,12 +11,4 @@
 
 ## モデル深度
 
-| 深度 | 対象 | 既定レシピ |
-|---|---|---|
-| routine | Notion/W&Bの検索・記録、run/metric/artifact確認、定型一覧 | `routine` |
-| standard | 実装、実験実行、通常の解析、論文調査 | `standard` |
-| deep | 研究設計、仮説、実験計画、手法選択、比較設計、厳密なレビュー | `deep` |
-
-深い設計語があればroutine語が含まれていても `deep` を優先する。先頭に `[[routine]]`、`[[standard]]`、`[[deep]]` を置けば明示的に選べる。記号は実行時に本文から取り除かれる。
-
-モデルレシピ名は安定させ、実モデル名は [モデル運用](../model-policy.md) と `config.toml` の `[model_recipes]` で更新する。
+研究 agent の provider は App Home で選ぶ。書誌・固定項目・ログの抽出は Luna/low または Haiku、通常の実装・実験・調査は Sol/high または Sonnet/high、仮説・研究設計・厳密レビューは Sol/xhigh または Opus/high を使う。`[[research-extract]]`、`[[research-screen]]`、`[[research-compare]]`、`[[research-execute]]`、`[[research-design]]` は明示上書きで、記号は実行時に本文から取り除かれる。自由文は軽量分類器が判定し、不明なら通常実行に落とす。詳細は [モデル運用](../model-policy.md) を参照する。

@@ -143,7 +143,7 @@ Kei Agent はデータベースとプロパティを名前で読むので、Noti
 Kei Agent 本体が Notion の API（コネクト「Kei Agent」のトークン）で読み書きする（`src/kei_agent/notion_store.py`）。
 研究の Claude には Notion を触らせない。コネクトに許可するのは「研究ホーム」の中だけ。
 
-授業用（「授業」「課題」）は別のコネクトと別のトークンで、`src/kei_agent_course/notion_sync.py` が書く。
+授業用は別のコネクトと別のトークンで、`src/kei_agent_course/notion_sync.py` が書く。授業ホームの正本は「授業」「課題」「学習ログ」と、以下の学業記録3 DB の計6つである。
 大学エージェントの claude が**読む**ぶんは、アカウントに付いている Notion 連携を使う。
 
 ### 授業ホームの学業記録
@@ -156,7 +156,9 @@ Kei Agent 本体が Notion の API（コネクト「Kei Agent」のトークン�
 | `🎓 単位要件` | 所定・既得・算入・残り単位。`総合計` 行で卒業要件の全体を答える |
 | `📈 GPA推移` | 春学期・秋学期・通算GPA。`通算` 行を現在値として答える |
 
-入力HTMLはNotionへ保存しない。登録と件数検証が成功した後に、ローカルの入力ファイルを削除する。Notionに無い卒業要件を推測しない。
+`授業` ← `課題`、`授業` ← `学習ログ`、`授業` ← `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。過去の同名科目は年度・学期まで一致したときだけ成績と結び、複数候補なら結ばず確認対象として報告する。
+
+入力HTMLはNotionへ保存しない。`kei-agent-course-academic-import --dry-run <grades.html> <credits.html>` で予定を確認し、`--apply` で反映する。入力を消すのは反映件数の検証後、`--delete-inputs` を明示したときだけである。Notionに無い卒業要件を推測しない。
 
 ### 研究ログとW&B
 

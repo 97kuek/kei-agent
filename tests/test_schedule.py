@@ -12,7 +12,6 @@ from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, due_day, search_keywords
 
-
 REVIEW_REPLY = """*今日の成果*
 なし
 
@@ -26,7 +25,7 @@ REVIEW_REPLY = """*今日の成果*
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
     claude = FakeClaude()
-    monkeypatch.setattr(runner, "run_claude", claude)
+    monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/")
     return Scheduler(config, store, assistant), assistant, slack, claude

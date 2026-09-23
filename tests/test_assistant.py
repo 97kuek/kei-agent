@@ -18,7 +18,7 @@ from kei_agent.slack_text import split_text
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C9": "00_kei-agent", "C5": "research-overview"})
     claude = FakeClaude()
-    monkeypatch.setattr(runner, "run_claude", claude)
+    monkeypatch.setattr(runner, "run_model", claude)
     pueue = FakePueue()
     assistant = Assistant(config, store, slack, JobManager(config, store, pueue), "xoxb-test", "UBOT")
     return assistant, slack, claude, pueue
@@ -233,13 +233,13 @@ async def test_run_uses_domains_allowed_for_the_theme(env, store, monkeypatch):
     from kei_agent import settings
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     seen = []
-    original = runner.run_claude
+    original = runner.run_model
 
-    async def spy(config, ws, *args, **kwargs):
-        seen.append(ws.allowed_domains)
-        return await original(config, ws, *args, **kwargs)
+    async def spy(config, request, *args, **kwargs):
+        seen.append(request.workspace.allowed_domains)
+        return await original(config, request, *args, **kwargs)
 
-    monkeypatch.setattr(runner, "run_claude", spy)
+    monkeypatch.setattr(runner, "run_model", spy)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
     assert seen == [("zenodo.org",)]
@@ -322,7 +322,7 @@ async def test_same_thread_requests_run_one_at_a_time(env, monkeypatch):
     gates = [asyncio.Event() for _ in range(3)]
     state = {"running": 0, "peak": 0, "calls": 0}
 
-    async def gated(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+    async def gated(config, request, prompt, on_activity=None, on_text=None):
         i = state["calls"]
         state["calls"] += 1
         state["running"] += 1
@@ -335,7 +335,7 @@ async def test_same_thread_requests_run_one_at_a_time(env, monkeypatch):
         for _ in range(n):
             await asyncio.sleep(0)
 
-    monkeypatch.setattr(runner, "run_claude", gated)
+    monkeypatch.setattr(runner, "run_model", gated)
     # 1件目を動かし、2件目をそのうしろに並ばせる
     for ts in ("10.1", "10.2"):
         await assistant.on_mention({"channel": "C1", "user": "UME", "ts": ts, "thread_ts": "10.1", "text": "<@UBOT> x"})
@@ -434,7 +434,7 @@ async def test_same_thread_runs_one_at_a_time(env, monkeypatch):
         running -= 1
         return await claude(*args, **kwargs)
 
-    monkeypatch.setattr(runner, "run_claude", slow)
+    monkeypatch.setattr(runner, "run_model", slow)
     assistant.store.upsert_thread("C1", "10.1", "vlm", "s")
     assistant.store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "a"})
@@ -702,14 +702,14 @@ async def test_connect_request_for_an_allowed_domain_asks_nothing(env, store):
 async def test_domains_asked_through_the_bash_tool_also_become_buttons(env, monkeypatch):
     """Claude が 🔒 の行を書かず、Bash の allowed_domains で頼んだときも、ボタンを出す。"""
     assistant, slack, claude, _ = env
-    original = runner.run_claude
+    original = runner.run_model
 
-    async def asks_with_tool(config, ws, *args, **kwargs):
-        result = await original(config, ws, *args, **kwargs)
+    async def asks_with_tool(config, request, *args, **kwargs):
+        result = await original(config, request, *args, **kwargs)
         result.requested_domains = [("huggingface.co", "重みを落とす")]
         return result
 
-    monkeypatch.setattr(runner, "run_claude", asks_with_tool)
+    monkeypatch.setattr(runner, "run_model", asks_with_tool)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 落として"})
     await settle(assistant)
     allow, post = _button_action(slack, "kei_agent_domain_allow")
@@ -986,7 +986,7 @@ async def test_request_is_recorded_while_it_runs(env, store, monkeypatch):
         seen.append([p["text"] for _, p in store.interrupted_requests()])
         return await claude(*args, **kw)
 
-    monkeypatch.setattr(runner, "run_claude", watching)
+    monkeypatch.setattr(runner, "run_model", watching)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
     await settle(assistant)
 
@@ -1004,7 +1004,7 @@ async def test_cancelled_request_stays_recorded_for_the_next_start(env, store, m
     async def slow(*args, **kwargs):
         await gate.wait()
 
-    monkeypatch.setattr(runner, "run_claude", slow)
+    monkeypatch.setattr(runner, "run_model", slow)
     req = Request("C1", "vlm", "10.1", "10.1", "図を作って")
     ws = themes.resolve(assistant.config, "vlm")
     themes.ensure_workspace(ws)
@@ -1059,11 +1059,11 @@ async def test_second_request_in_a_busy_thread_says_it_will_wait(env, monkeypatc
     assistant, slack, claude, _ = env
     gate = asyncio.Event()
 
-    async def slow(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+    async def slow(config, request, prompt, on_activity=None, on_text=None):
         await gate.wait()
-        return await claude(config, ws, prompt, session_id, channel, thread_ts, on_activity, on_text)
+        return await claude(config, request, prompt, on_activity, on_text)
 
-    monkeypatch.setattr(runner, "run_claude", slow)
+    monkeypatch.setattr(runner, "run_model", slow)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
     await asyncio.sleep(0)
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "図も"})
@@ -1082,11 +1082,11 @@ async def test_status_inquiry_during_busy_thread_answers_immediately_without_que
     assistant, slack, claude, _ = env
     gate = asyncio.Event()
 
-    async def slow(config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+    async def slow(config, request, prompt, on_activity=None, on_text=None):
         await gate.wait()
-        return await claude(config, ws, prompt, session_id, channel, thread_ts, on_activity, on_text)
+        return await claude(config, request, prompt, on_activity, on_text)
 
-    monkeypatch.setattr(runner, "run_claude", slow)
+    monkeypatch.setattr(runner, "run_model", slow)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
     await asyncio.sleep(0)
     await assistant.on_message(
@@ -1250,11 +1250,11 @@ async def test_overview_thread_keeps_asking_the_agent_that_answered(env, monkeyp
     assistant.agent_skills["work"] = [{"id": "list-events", "description": "予定"}]
     assistant.agent_skills_read_at["work"] = time.time()
 
-    async def fake_pick_across(config, by_agent, text):
+    async def fake_pick_across(config, by_agent, text, *, store=None):
         picked.append(text)
         return router.Choice(agent="work", skill="list-events")
 
-    async def fake_pick(config, skills, text):
+    async def fake_pick(config, skills, text, *, store=None):
         return router.Choice(skill="list-events")
 
     monkeypatch.setattr(router, "pick_across", fake_pick_across)
@@ -1441,7 +1441,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
 
     assistant.agents["course"] = _Agent()
 
-    async def fake_pick(config, skills, text):
+    async def fake_pick(config, skills, text, *, store=None):
         assert [s["id"] for s in skills] == ["list-due", "ask"]
         return router.Choice(skill="list-due", params={"days": 3})
 
@@ -1483,7 +1483,7 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch):
 
     assistant.agents["work"] = _Agent()
 
-    async def fake_pick(config, skills, text):
+    async def fake_pick(config, skills, text, *, store=None):
         return router.Choice(skill="list-events", params={"days": 1})
 
     monkeypatch.setattr(router, "pick", fake_pick)
@@ -1519,7 +1519,7 @@ async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
 
     assistant.agents["course"] = _Course()
 
-    async def fake_pick_across(config, by_agent, text):
+    async def fake_pick_across(config, by_agent, text, *, store=None):
         assert set(by_agent) == {"course"}
         return router.Choice(agent="course", skill="list-due", params={"days": 7})
 
@@ -1558,10 +1558,10 @@ async def test_overview_agent_requests_use_the_same_thread_lock(env, monkeypatch
     assistant.agent_skills["course"] = [{"id": "list-due", "description": "締切"}]
     assistant.agent_skills_read_at["course"] = time.time()
 
-    async def fake_pick_across(config, by_agent, text):
+    async def fake_pick_across(config, by_agent, text, *, store=None):
         return router.Choice(agent="course", skill="list-due", params={"days": 7})
 
-    async def fake_pick(config, skills, text):
+    async def fake_pick(config, skills, text, *, store=None):
         return router.Choice(skill="list-due", params={"days": 7})
 
     monkeypatch.setattr(router, "pick_across", fake_pick_across)
@@ -1593,7 +1593,7 @@ async def test_overview_channel_keeps_research_talk_in_house(env, monkeypatch):
 
     assistant.agents["course"] = _Course()
 
-    async def fake_pick_across(config, by_agent, text):
+    async def fake_pick_across(config, by_agent, text, *, store=None):
         return router.Choice()          # どのエージェントでもない
 
     monkeypatch.setattr(router, "pick_across", fake_pick_across)

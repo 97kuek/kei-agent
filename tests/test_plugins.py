@@ -77,6 +77,13 @@ def test_course_plugin_has_three_scoped_skills():
         "finding-course-materials", "managing-assignments", "managing-course-notion", "managing-academic-record"}
 
 
+def test_course_academic_skill_names_the_canonical_six_databases():
+    text = (PLUGIN / "course" / "skills" / "managing-academic-record" / "SKILL.md").read_text(encoding="utf-8")
+    course_schema = (PLUGIN / "course" / "skills" / "managing-course-notion" / "SKILL.md").read_text(encoding="utf-8")
+    for name in ("授業", "課題", "学習ログ", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"):
+        assert name in text or name in course_schema
+
+
 def test_work_plugin_has_three_scoped_skills():
     assert set(skill_metadata(PLUGIN / "work")) == {
         "researching-work-context", "preparing-meetings", "drafting-work-actions"}

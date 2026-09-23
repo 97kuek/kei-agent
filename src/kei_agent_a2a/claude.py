@@ -26,10 +26,11 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 
-from kei_agent import guard, runner, settings
+from kei_agent import guard, runner
 from kei_agent.agent_policy import policy_for
 from kei_agent.codex_app_server import AppServerClient
-from kei_agent.config import AgentProfile, Config
+from kei_agent.config import Config
+from kei_agent.model_policy import ModelPolicyError, ResolvedModel, UseCase, resolve_selected
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
 
@@ -81,8 +82,8 @@ async def progress(updater: TaskUpdater, payload: dict) -> None:
 
 
 async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
-              profile: AgentProfile | None = None) -> str:
-    """claude を1回動かして、封筒（JSON 文字列）を返す。"""
+              recipe: ResolvedModel) -> str:
+    """用途別 recipe を確定済みの agent 実行を、封筒にして返す。"""
     assert ws.cwd is not None
 
     async def on_activity(activity: str) -> None:
@@ -92,9 +93,14 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
         await progress(updater, {"text": chunk})
 
     log.info("claude を動かします: %s（%s）", ws.channel_name, ws.cwd)
-    result = await runner.run_claude(
-        config, ws, ask["prompt"], ask.get("session_id"), ask.get("channel", ""),
-        ask.get("thread_ts", ""), on_activity=on_activity, on_text=on_text, profile=profile)
+    result = await runner.run_model(
+        config,
+        runner.ExecutionRequest(
+            ws, recipe, ask.get("session_id"), ask.get("channel", ""), ask.get("thread_ts", ""),
+            read_only=bool(ask.get("read_only")),
+        ),
+        ask["prompt"], on_activity=on_activity, on_text=on_text,
+    )
     log.info("claude が終わりました: %s（エラー: %s）", ws.channel_name, result.is_error)
     return envelope.reply(
         text=result.text,
@@ -114,14 +120,14 @@ DENY_ALWAYS = ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit",
 
 
 def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str],
-                      plugin_dir: Path) -> list[str]:
+                      plugin_dir: Path, recipe: ResolvedModel | None = None) -> list[str]:
     """連携を使う claude の起動コマンド。
 
     `plugin_dir` はそのエージェントの skill の置き場（`plugin/<agent>/`）。`plugin/` そのものを
     渡すと中の plugin を全部読んでしまうので、必ず1つぶんを名指しする。skill を呼べるように
     `Skill` を許可の一覧に足すが、外部の道具は呼び出し元が並べたものだけにする。
     """
-    return [
+    command = [
         config.claude_bin, "-p", "--output-format", "text",
         # 連携はアカウント側にあるので、ユーザー設定を読み込む必要がある
         "--setting-sources", "user",
@@ -130,6 +136,11 @@ def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str
         "--allowedTools", *allowed, "Skill",
         "--disallowedTools", *DENY_ALWAYS, *deny,
     ]
+    if recipe is not None:
+        command += ["--model", recipe.model]
+        if recipe.reasoning_effort:
+            command += ["--effort", recipe.reasoning_effort]
+    return command
 
 
 async def ask_codex_app(config: Config, agent: str, prompt: str, model: str,
@@ -145,7 +156,7 @@ async def ask_codex_app(config: Config, agent: str, prompt: str, model: str,
 
 async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plugin_dir: Path,
                         deny: Sequence[str] = (), timeout_minutes: int = 3, *, store=None,
-                        agent: str = "") -> str:
+                        agent: str = "", use_case: UseCase | None = None) -> str:
     """アカウントの連携を、道具を絞って使わせる（返事の文をそのまま返す）。
 
     会社の Microsoft 365 のように、Claude のアカウントに付いている連携は、ユーザー設定を
@@ -154,12 +165,18 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plu
 
     柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/agents.md）。
     """
-    profile = settings.agent_profile(config, store, agent) if store is not None and agent else None
-    if profile is not None and profile.provider == "codex":
+    recipe = None
+    if store is not None and agent:
+        default_cases = {"course": UseCase.COURSE_EXPLAIN, "work": UseCase.WORK_SINGLE_SOURCE}
+        try:
+            recipe = resolve_selected(config, store, agent, use_case or default_cases[agent])
+        except (KeyError, ModelPolicyError) as e:
+            raise ConnectorError(str(e)) from e
+    if recipe is not None and recipe.provider == "codex":
         # Codex の失敗を Claude で再試行すると、利用者が選んだ provider と権限境界を破る。
-        return await ask_codex_app(config, agent, prompt, profile.model, profile.reasoning_effort, timeout_minutes)
+        return await ask_codex_app(config, agent, prompt, recipe.model, recipe.reasoning_effort, timeout_minutes)
 
-    command = connector_command(config, allowed, deny, plugin_dir)
+    command = connector_command(config, allowed, deny, plugin_dir, recipe)
     proc = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

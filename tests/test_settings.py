@@ -1,7 +1,5 @@
 from dataclasses import replace
 
-import pytest
-
 from kei_agent import settings
 from kei_agent.config import MaintenanceConfig, ScheduleConfig
 
@@ -81,53 +79,34 @@ def test_maintenance_disabled_in_config_stays_off(config, store):
     assert settings.schedule_time(config, store, "maintenance") == ""
 
 
-def test_home_profile_override_changes_only_named_agent(config, store):
-    settings.set_agent_profile(store, "course", "codex", "gpt-5.6-terra", "high")
+def test_home_provider_changes_only_named_agent(config, store):
+    settings.set_agent_provider(store, "course", "codex")
     assert settings.agent_profile(config, store, "course").provider == "codex"
-    assert settings.agent_profile(config, store, "course").model == "gpt-5.6-terra"
     assert settings.agent_profile(config, store, "work").provider == "claude"
 
 
-def test_effective_profile_uses_its_default_recipe_before_a_home_override(config, store):
-    from kei_agent.config import AgentProfile, ModelRecipe
-
-    config = replace(config,
-                     agent_profiles={"course": AgentProfile(provider="codex", default_recipe="standard")},
-                     model_recipes={"standard": ModelRecipe("codex", "gpt-standard", "medium")})
+def test_profile_has_only_provider_and_connectors(config, store):
+    settings.set_agent_provider(store, "course", "codex")
     profile = settings.agent_profile(config, store, "course")
-    assert (profile.provider, profile.model, profile.reasoning_effort) == ("codex", "gpt-standard", "medium")
+    assert profile.provider == "codex"
+    assert set(profile.__dataclass_fields__) == {"provider", "connectors"}
 
 
 def test_home_profile_override_is_detectable(config, store):
     assert not settings.has_agent_profile_override(store, "research")
-    settings.set_agent_profile(store, "research", "codex", "gpt-home", "high")
+    settings.set_agent_provider(store, "research", "codex")
     assert settings.has_agent_profile_override(store, "research")
 
 
-def test_changing_provider_clears_the_previous_provider_model(config, store):
-    settings.set_agent_profile(store, "research", "codex", "gpt-5.6-terra", "high")
+def test_changing_provider_updates_only_the_provider(config, store):
     settings.set_agent_provider(store, "research", "claude")
 
-    profile = settings.agent_profile(config, store, "research")
-    assert (profile.provider, profile.model) == ("claude", "")
+    assert settings.agent_profile(config, store, "research").provider == "claude"
 
 
-def test_resetting_a_profile_returns_to_the_config_recipe(config, store):
-    from kei_agent.config import AgentProfile, ModelRecipe
-
-    config = replace(config,
-                     agent_profiles={"research": AgentProfile(provider="codex", default_recipe="standard")},
-                     model_recipes={"standard": ModelRecipe("codex", "gpt-standard", "high")})
-    settings.set_agent_profile(store, "research", "claude", "custom", "low")
+def test_resetting_a_profile_returns_to_the_config_provider(config, store):
+    settings.set_agent_provider(store, "research", "codex")
     settings.clear_agent_profile(store, "research")
 
     profile = settings.agent_profile(config, store, "research")
-    assert (profile.provider, profile.model, profile.reasoning_effort) == ("codex", "gpt-standard", "high")
-
-
-@pytest.mark.parametrize("provider, model, effort", [
-    ("unknown", "", "high"), ("codex", "x" * 121, "high"), ("codex", "", "maximum"),
-])
-def test_home_profile_override_rejects_invalid_values(config, store, provider, model, effort):
-    with pytest.raises(ValueError):
-        settings.set_agent_profile(store, "course", provider, model, effort)
+    assert profile.provider == "claude"

@@ -87,14 +87,11 @@ def test_config_rejects_old_model_override_and_defaults_to_unselected_provider(t
     assert config.agent_profiles["router"].provider == ""
 
 
-def test_selected_provider_resolves_recipe_and_never_uses_a_model_override(config, store):
+def test_selected_provider_resolves_its_fixed_recipe(config, store):
     from kei_agent import settings
     from kei_agent.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
-    store.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
-                       ("agent.research.model", "gpt-5.6-terra"))
-
     recipe = resolve_selected(config, store, "research", UseCase.RESEARCH_EXECUTE)
 
     assert (recipe.provider, recipe.model, recipe.reasoning_effort) == ("codex", "gpt-6-sol", "high")
@@ -118,8 +115,7 @@ def test_lightweight_classifier_restricts_each_actor_to_its_own_cases():
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):
-    from kei_agent import model_classifier, settings
-    from kei_agent import runner
+    from kei_agent import model_classifier, runner, settings
 
     settings.set_agent_provider(store, "research", "claude")
 

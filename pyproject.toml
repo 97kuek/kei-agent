@@ -26,6 +26,7 @@ kei-agent-voice = "kei_agent_voice.app:main"
 kei-agent-course = "kei_agent_course.app:main"
 kei-agent-course-setup = "kei_agent_course.notion_setup:main"
 kei-agent-course-sync = "kei_agent_course.notion_sync:main"
+kei-agent-course-academic-import = "kei_agent_course.academic_sync:main"
 kei-agent-research = "kei_agent_research.app:main"
 kei-agent-work = "kei_agent_work.app:main"
 

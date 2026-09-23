@@ -11,7 +11,7 @@ import re
 import sqlite3
 import time
 
-from kei_agent.config import AGENT_PLUGINS, HHMM, AgentProfile, Config
+from kei_agent.config import HHMM, MODEL_ACTORS, AgentProfile, Config
 from kei_agent.guard import valid_domain
 from kei_agent.store import Store
 
@@ -199,77 +199,46 @@ def set_listening(store: Store, enabled: bool) -> None:
     _set(store, LISTEN_KEY, "1" if enabled else "0")
 
 
-# agent ごとの provider / model。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
+# actor ごとの provider。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
 _PROFILE_PROVIDERS = frozenset({"claude", "codex"})
-_PROFILE_EFFORTS = frozenset({"low", "medium", "high", "xhigh"})
-
-
-def set_agent_profile(store: Store, agent: str, provider: str, model: str, reasoning_effort: str) -> None:
-    if agent not in AGENT_PLUGINS:
-        raise ValueError(f"未知のagentです: {agent}")
-    if provider not in _PROFILE_PROVIDERS:
-        raise ValueError("provider は claude または codex にしてください")
-    if len(model) > 120:
-        raise ValueError("model は120文字以内にしてください")
-    if reasoning_effort not in _PROFILE_EFFORTS:
-        raise ValueError("reasoning effort が不正です")
-    _set(store, f"agent.{agent}.provider", provider)
-    _set(store, f"agent.{agent}.model", model)
-    _set(store, f"agent.{agent}.reasoning_effort", reasoning_effort)
 
 
 def set_agent_provider(store: Store, agent: str, provider: str) -> None:
-    """実行器を切り替え、前の実行器専用のモデル指定は捨てる。"""
-    if agent not in AGENT_PLUGINS:
+    """実行器を切り替える。model / effort は保存しない。"""
+    if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
     if provider not in _PROFILE_PROVIDERS:
         raise ValueError("provider は claude または codex にしてください")
-    with store.conn:
-        store.conn.execute("DELETE FROM settings WHERE key IN (?, ?)",
-                           (f"agent.{agent}.model", f"agent.{agent}.reasoning_effort"))
-        store.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                           "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                           (f"agent.{agent}.provider", provider))
+    _set(store, f"agent.{agent}.provider", provider)
 
 
 def clear_agent_profile(store: Store, agent: str) -> None:
-    """App Home の一時上書きをすべて外し、config.toml の既定へ戻す。"""
-    if agent not in AGENT_PLUGINS:
+    """App Home の provider 選択を外し、未選択へ戻す。"""
+    if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
     with store.conn:
-        store.conn.execute("DELETE FROM settings WHERE key IN (?, ?, ?)",
-                           tuple(f"agent.{agent}.{field}"
-                                 for field in ("provider", "model", "reasoning_effort")))
+        store.conn.execute("DELETE FROM settings WHERE key = ?", (f"agent.{agent}.provider",))
 
 
 def has_agent_profile_override(store: Store, agent: str) -> bool:
-    """App Home で明示した実行器設定があるか。
-
-    研究の深度レシピは通常時の自動選択であり、ここでの明示設定より優先してはいけない。
-    """
-    if agent not in AGENT_PLUGINS:
+    """App Home で provider を明示選択したか。"""
+    if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
-    return any(_get(store, f"agent.{agent}.{field}") is not None
-               for field in ("provider", "model", "reasoning_effort"))
+    return _get(store, f"agent.{agent}.provider") is not None
+
+
+def selected_provider(config: Config, store: Store, actor: str) -> str:
+    """actor が明示選択した provider。空なら実行しない。"""
+    if actor not in MODEL_ACTORS:
+        raise ValueError(f"未知のagentです: {actor}")
+    return _get(store, f"agent.{actor}.provider") or config.agent_profiles[actor].provider
 
 
 def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
-    if agent not in AGENT_PLUGINS:
+    if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
     base = config.agent_profiles[agent]
-    provider = _get(store, f"agent.{agent}.provider") or base.provider
-    model = _get(store, f"agent.{agent}.model")
-    effort = _get(store, f"agent.{agent}.reasoning_effort") or base.reasoning_effort
-    # Homeから個別に触られていない既定値だけ、用途名つきレシピで解決する。
-    # providerをHomeで変えた場合は別providerのレシピを混ぜず、明示設定を待つ。
-    if model is None and _get(store, f"agent.{agent}.reasoning_effort") is None and provider == base.provider:
-        recipe = config.model_recipe(agent)
-        if recipe is not None:
-            model, effort = recipe.model, recipe.reasoning_effort
     return AgentProfile(
-        provider=provider,
-        model=base.model if model is None else model,
-        reasoning_effort=effort,
-        default_recipe=base.default_recipe,
+        provider=selected_provider(config, store, agent),
         connectors=base.connectors,
     )

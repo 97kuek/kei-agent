@@ -16,12 +16,12 @@ from dataclasses import dataclass, field
 
 from kei_agent import runner
 from kei_agent.config import Config
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)
 
-# 判定に使うモデルと上限時間。短い分類なので軽いモデルで足りる
-MODEL = "haiku"
+# 判定の上限時間。モデルは provider 別 recipe から解決する。
 TIMEOUT_MINUTES = 2
 ASK = "ask"
 # 「どのエージェントでもない（本体が自分で答える）」を選ばせるための名前
@@ -97,15 +97,15 @@ def workspace(config: Config) -> Workspace:
                      system_prompt=config.repo_root / "prompts" / "router.md")
 
 
-async def pick(config: Config, skills: list[dict], text: str) -> Choice:
+async def pick(config: Config, skills: list[dict], text: str, *, store=None) -> Choice:
     """どの仕事かを選ぶ（相手が1人のとき）。選べなければ `ask`。"""
     allowed = {str(s.get("id")) for s in skills if s.get("id")}
     if not allowed:
         return Choice()
-    return await _choose(config, catalog(skills), allowed, text, ASK)
+    return await _choose(config, catalog(skills), allowed, text, ASK, store=store)
 
 
-async def pick_across(config: Config, by_agent: dict[str, list[dict]], text: str) -> Choice:
+async def pick_across(config: Config, by_agent: dict[str, list[dict]], text: str, *, store=None) -> Choice:
     """どのエージェントの、どの仕事かを選ぶ。どれでもなければ、本体が自分で答える（agent が空）。"""
     lines, allowed = [], {SELF}
     for agent, skills in by_agent.items():
@@ -119,12 +119,21 @@ async def pick_across(config: Config, by_agent: dict[str, list[dict]], text: str
     if len(allowed) == 1:
         return Choice()
     lines.append(f"- {SELF}: 上のどれでもないとき（研究全体の相談、雑談、考えごと）")
-    return await _choose(config, "\n".join(lines), allowed, text, SELF)
+    return await _choose(config, "\n".join(lines), allowed, text, SELF, store=store)
 
 
-async def _choose(config: Config, skills: str, allowed: set[str], text: str, fallback: str) -> Choice:
+async def _choose(config: Config, skills: str, allowed: set[str], text: str, fallback: str, *, store=None) -> Choice:
     prompt = PROMPT.format(skills=skills, text=(text or "").strip()[:TEXT_LIMIT], ask=fallback)
-    result = await runner.run_claude(config, workspace(config), prompt, None, "", "")
+    try:
+        recipe = (resolve_selected(config, store, "router", UseCase.ROUTING)
+                  if store is not None else resolve("router", config.agent_profiles["router"].provider,
+                                                    UseCase.ROUTING))
+    except ModelPolicyError as e:
+        log.warning("振り分けを実行しません: %s", e)
+        return Choice()
+    result = await runner.run_model(
+        config, runner.ExecutionRequest(workspace(config), recipe, None, "", "", read_only=True), prompt,
+    )
     if result.is_error:
         log.warning("振り分けに失敗しました: %s", "; ".join(result.errors)[:200])
         return Choice(cost_usd=result.cost_usd)

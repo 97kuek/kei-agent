@@ -76,19 +76,22 @@ async def test_connector_reaps_the_process_after_a_timeout(config, monkeypatch):
 
 
 async def test_connector_uses_codex_when_the_agent_profile_selects_it(config, store, monkeypatch):
-    settings.set_agent_profile(store, "course", "codex", "", "high")
+    settings.set_agent_provider(store, "course", "codex")
+    seen = {}
 
-    async def codex(*_args, **_kwargs):
+    async def codex(_config, _agent, _prompt, model, effort, _timeout):
+        seen.update(model=model, effort=effort)
         return "Boxを確認しました"
 
     monkeypatch.setattr(claude, "ask_codex_app", codex)
     assert await claude.ask_connector(
         config, "資料は？", (), config.agent_plugin_dir("course"), store=store, agent="course"
     ) == "Boxを確認しました"
+    assert seen == {"model": "gpt-6-luna", "effort": "medium"}
 
 
 async def test_connector_does_not_fallback_to_claude_after_a_codex_error(config, store, monkeypatch):
-    settings.set_agent_profile(store, "work", "codex", "", "high")
+    settings.set_agent_provider(store, "work", "codex")
 
     async def broken(*_args, **_kwargs):
         raise claude.ConnectorError("Outlook が未接続です")

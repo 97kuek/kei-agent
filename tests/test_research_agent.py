@@ -20,10 +20,22 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
-def test_research_recipe_prefers_deep_design_and_accepts_an_explicit_override():
-    assert research.recipe_for_prompt("W&Bのrunを確認して") == ("routine", "W&Bのrunを確認して")
-    assert research.recipe_for_prompt("W&Bの結果から実験計画を設計して") == ("deep", "W&Bの結果から実験計画を設計して")
-    assert research.recipe_for_prompt("[[routine]] 研究設計のメモを読む") == ("routine", "研究設計のメモを読む")
+def test_research_use_case_label_wins_and_is_removed_from_prompt():
+    from kei_agent.model_policy import UseCase
+
+    use_case, prompt = research.use_case_for_prompt("[[research-design]] 仮説の検証計画を作って")
+
+    assert use_case is UseCase.RESEARCH_DESIGN
+    assert prompt == "仮説の検証計画を作って"
+
+
+def test_research_unknown_label_uses_safe_execute_recipe():
+    from kei_agent.model_policy import UseCase
+
+    use_case, prompt = research.use_case_for_prompt("[[not-a-case]] 実験を回して")
+
+    assert use_case is UseCase.RESEARCH_EXECUTE
+    assert prompt == "[[not-a-case]] 実験を回して"
 
 
 def _free_port() -> int:
@@ -33,17 +45,17 @@ def _free_port() -> int:
 
 
 class FakeClaude:
-    """runner.run_claude の代わり。経過を流してから結果を返す。"""
+    """runner.run_model の代わり。経過を流してから結果を返す。"""
 
     def __init__(self, result: runner.RunResult):
         self.result = result
         self.calls: list[dict] = []
 
-    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts,
-                       on_activity=None, on_text=None, profile=None):
-        self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id,
-                           "channel": channel, "thread_ts": thread_ts,
-                           "allowed_domains": ws.allowed_domains})
+    async def __call__(self, config, request, prompt, on_activity=None, on_text=None):
+        ws = request.workspace
+        self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": request.session_id,
+                           "channel": request.channel, "thread_ts": request.thread_ts,
+                           "allowed_domains": ws.allowed_domains, "recipe": request.recipe})
         if on_activity:
             await on_activity("Bash: テスト")
         if on_text:
@@ -62,7 +74,7 @@ async def server(config, monkeypatch):
     claude = FakeClaude(runner.RunResult(
         session_id="sess-9", text="できたよ", cost_usd=0.12,
         requested_domains=[("example.com", "データを取るため")]))
-    monkeypatch.setattr(runner, "run_claude", claude)
+    monkeypatch.setattr(runner, "run_model", claude)
 
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
@@ -110,6 +122,19 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     assert call["allowed_domains"] == ("example.com",)
     # 経過は流れてくるので、順番どおりに全部届く
     assert activities == ["Bash: テスト"] and texts == ["途中まで書けたよ"]
+
+
+async def test_remote_research_honors_an_explicit_manual_recipe(server, config):
+    from kei_agent import themes
+    from kei_agent.model_policy import UseCase
+
+    base, claude = server
+    await research.run(
+        Agent(base, TOKEN, timeout=30), themes.resolve(config, "vlm"), "難問を設計して", None, "", "",
+        UseCase.MANUAL_FABLE,
+    )
+
+    assert claude.calls[-1]["recipe"].model == "claude-fable-5"
 
 
 async def test_a_channel_without_a_directory_is_refused(server, config):

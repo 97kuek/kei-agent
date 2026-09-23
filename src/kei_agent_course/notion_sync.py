@@ -90,7 +90,7 @@ def read_state(path: Path | None = None) -> dict:
 def require_course_databases(state: dict) -> dict[str, dict]:
     """統一済みの授業ホーム state だけを受け入れる。"""
     databases = state.get("databases") or {}
-    if not REQUIRED_DATABASES <= set(databases):
+    if not set(databases) >= REQUIRED_DATABASES:
         raise SyncError(NO_STATE)
     return databases
 

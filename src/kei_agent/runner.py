@@ -16,7 +16,8 @@ from datetime import datetime, timedelta
 
 from kei_agent import guard, run_hooks
 from kei_agent.codex_runtime import discover_mcp_names
-from kei_agent.config import AgentProfile, Config, path_without_venv
+from kei_agent.config import Config, path_without_venv
+from kei_agent.model_policy import ResolvedModel, UseCase, validate_resolved
 from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -64,32 +65,25 @@ def notion_mcp_config(config: Config) -> dict:
     }}}
 
 
-def _profile(config: Config, profile: AgentProfile | None = None) -> AgentProfile:
-    return profile or config.agent_profiles.get(AGENT, AgentProfile())
-
-
 def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
-                        profile: AgentProfile | None = None) -> list[str]:
+                        recipe: ResolvedModel, *, actor: str = AGENT,
+                        read_only: bool = False) -> list[str]:
     """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
     assert ws.cwd is not None
-    profile = _profile(config, profile)
     # ルーターは状態DBの下（Gitリポジトリ外）で、接続先も作業用MCPも不要な分類だけをする。
-    is_router = ws.system_prompt == config.repo_root / "prompts" / "router.md"
+    is_router = actor == "router" or ws.system_prompt == config.repo_root / "prompts" / "router.md"
     cmd = [
-        config.codex_bin, "exec", "--json", "--sandbox", "read-only" if is_router else "workspace-write",
+        config.codex_bin, "exec", "--json", "--sandbox", "read-only" if is_router or read_only else "workspace-write",
         "--cd", str(ws.cwd),
     ]
     if is_router:
         cmd.append("--skip-git-repo-check")
-    model = ws.model or profile.model or config.model
-    if model:
-        cmd += ["--model", model]
-    effort = ws.reasoning_effort or profile.reasoning_effort
-    if effort:
-        cmd += ["--config", f"model_reasoning_effort={effort}"]
+    cmd += ["--model", recipe.model]
+    if recipe.reasoning_effort:
+        cmd += ["--config", f"model_reasoning_effort={recipe.reasoning_effort}"]
     # 個人の App connector（Google Calendar等）は研究にもルーターにも渡さない。
     cmd += ["--config", "apps._default.enabled=false"]
-    if not is_router:
+    if actor == "research" and not read_only and not is_router:
         # 研究ホームの外へ届く Notion を持ち込まず、検査済みgatewayだけを渡す。
         cmd += [
             "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
@@ -104,8 +98,8 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
 
 
 def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
-                          profile: AgentProfile | None = None) -> list[str]:
-    profile = _profile(config, profile)
+                          recipe: ResolvedModel, *, actor: str = AGENT,
+                          read_only: bool = False) -> list[str]:
     cmd = [
         config.claude_bin,
         "-p",
@@ -113,32 +107,68 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
         "--verbose",
         # ユーザー設定（フックやプラグイン、広い許可ルール）を持ち込まない
         "--setting-sources", "",
-        "--settings", json.dumps(guard.build_settings(config, ws), ensure_ascii=False),
+        "--settings", json.dumps(guard.build_settings(config, ws, read_only=read_only), ensure_ascii=False),
         "--permission-mode", "dontAsk",
-        "--plugin-dir", str(config.agent_plugin_dir(AGENT)),
-        # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
-        "--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False),
-        "--strict-mcp-config",
     ]
+    if actor in {"research", "course", "work"}:
+        cmd += ["--plugin-dir", str(config.agent_plugin_dir(actor))]
+    if actor == "research" and not read_only:
+        # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
+        cmd += ["--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False), "--strict-mcp-config"]
     prompt_path = ws.system_prompt or config.system_prompt_path
     if prompt_path.exists():
         # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
         cmd += ["--append-system-prompt", prompt_path.read_text(encoding="utf-8")]
-    model = ws.model or profile.model or config.model
-    if model:
-        cmd += ["--model", model]
+    cmd += ["--model", recipe.model]
+    if recipe.reasoning_effort:
+        cmd += ["--effort", recipe.reasoning_effort]
     if session_id:
         cmd += ["--resume", session_id]
     return cmd
 
 
-def build_command(config: Config, ws: Workspace, session_id: str | None,
-                  profile: AgentProfile | None = None) -> list[str]:
-    """agent profile に従い、Claude または Codex のコマンドを作る。"""
-    profile = _profile(config, profile)
-    if profile.provider == "codex":
-        return build_codex_command(config, ws, session_id, profile)
-    return _build_claude_command(config, ws, session_id, profile)
+def build_command(config: Config, request: ExecutionRequest) -> list[str]:
+    """解決済み recipe だけで Claude/Codex の command を組み立てる。"""
+    validate_resolved(request.recipe)
+    ws = _execution_workspace(request)
+    read_only = _is_read_only(request)
+    if request.recipe.provider == "codex":
+        return build_codex_command(config, ws, request.session_id, request.recipe,
+                                   actor=request.recipe.actor, read_only=read_only)
+    return _build_claude_command(config, ws, request.session_id, request.recipe,
+                                 actor=request.recipe.actor, read_only=read_only)
+
+
+@dataclass(frozen=True)
+class ExecutionRequest:
+    """解決済み recipe で一回だけ実行するための入力。
+
+    model と reasoning effort は policy が解決済みの ``recipe`` だけから取り、
+    workspace や設定値による上書きを許さない。
+    """
+
+    workspace: Workspace
+    recipe: ResolvedModel
+    session_id: str | None
+    channel: str
+    thread_ts: str
+    read_only: bool = False
+
+
+def _execution_workspace(request: ExecutionRequest) -> Workspace:
+    """workspace は場所だけを表す。権限は ExecutionRequest から決める。"""
+    return request.workspace
+
+
+def _is_read_only(request: ExecutionRequest) -> bool:
+    """呼び出し元が取り落としても、分類 recipe は書込み実行にしない。"""
+    return request.read_only or request.recipe.actor == "router" or request.recipe.use_case is UseCase.ROUTING
+
+
+def build_model_command(config: Config, ws: Workspace, session_id: str | None,
+                        recipe: ResolvedModel) -> list[str]:
+    """用途別 recipe から実行コマンドを組み立てる。"""
+    return build_command(config, ExecutionRequest(ws, recipe, session_id, "", ""))
 
 
 def install_codex_skills(config: Config, ws: Workspace) -> None:
@@ -160,13 +190,17 @@ def install_codex_skills(config: Config, ws: Workspace) -> None:
         target.symlink_to(os.path.relpath(source, target_root), target_is_directory=True)
 
 
-def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str) -> dict[str, str]:
+def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str,
+              *, include_gateway_auth: bool = True) -> dict[str, str]:
     env = guard.strip_env(base)
+    token = env.pop(GATEWAY_TOKEN_ENV, "")
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
-    if token := env.get(GATEWAY_TOKEN_ENV):
+    if include_gateway_auth and token:
         env["KEI_AGENT_NOTION_GATEWAY_AUTH"] = f"Bearer {token}"
+    else:
+        env.pop("KEI_AGENT_NOTION_GATEWAY_AUTH", None)
     return env
 
 
@@ -316,38 +350,44 @@ def _kill_group(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
-async def run_claude(
+async def run_model(
     config: Config,
-    ws: Workspace,
+    request: ExecutionRequest,
     prompt: str,
-    session_id: str | None,
-    channel: str,
-    thread_ts: str,
     on_activity: Callable[[str], Awaitable[None]] | None = None,
     on_text: Callable[[str], Awaitable[None]] | None = None,
-    profile: AgentProfile | None = None,
 ) -> RunResult:
+    """用途別 recipe を解決済みの実行要求を一度だけ走らせる。
+
+    この関数だけが CLI を起動する。呼び出し元は provider / model / effort を個別に
+    指定できず、``ExecutionRequest.recipe`` を model policy で解決して渡す。
+    """
+    ws = _execution_workspace(request)
     assert ws.cwd is not None
-    profile = _profile(config, profile)
-    is_codex = profile.provider == "codex"
+    recipe = request.recipe
+    validate_resolved(recipe)
+    is_codex = recipe.provider == "codex"
     context = run_hooks.RunContext(
-        agent=AGENT,
-        provider=profile.provider,
+        agent=recipe.actor,
+        provider=recipe.provider,
         workspace_kind=ws.kind.value,
-        model=ws.model or profile.model or config.model,
+        model=recipe.model,
     )
     if is_codex:
-        install_codex_skills(config, ws)
+        if recipe.actor == AGENT and not _is_read_only(request):
+            install_codex_skills(config, ws)
         configured_connectors = await discover_mcp_names(config.codex_bin)
         # 研究用 Notion gateway はこの実行だけに --config で注入するため、
         # グローバルな `codex mcp list` には現れない。
         configured_connectors = configured_connectors | frozenset({NOTION_MCP})
-        run_hooks.preflight(context, frozenset(getattr(profile, "connectors", ())), configured_connectors)
+        connectors = config.agent_profiles.get(recipe.actor)
+        run_hooks.preflight(context, frozenset(getattr(connectors, "connectors", ())), configured_connectors)
     started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
-        *build_command(config, ws, session_id, profile),
+        *build_command(config, request),
         cwd=ws.cwd,
-        env=build_env(config, dict(os.environ), channel, thread_ts),
+        env=build_env(config, dict(os.environ), request.channel, request.thread_ts,
+                      include_gateway_auth=recipe.actor == AGENT and not _is_read_only(request)),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

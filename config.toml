@@ -15,44 +15,32 @@ run_timeout_minutes = 30
 job_poll_seconds = 60
 # pueue の kei-agent グループで同時に走らせるジョブ数
 job_parallel = 1
-# 空なら Claude Code の既定のモデル
-model = ""
 # 依頼者の依頼がこの回数たまったスレッドでは、[新しいスレッドで続ける] ボタンを出す。0 なら回数では出さない
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
-# モデル名と推論強度は用途名ごとのレシピで一元管理する。新世代へ移行するときは、この3か所だけを
-# 代表依頼で評価してから置き換える。provider は暗黙に切り替えず、agentと一致しないレシピは起動しない。
-[model_recipes.routine]
-provider = "codex"
-model = "gpt-5.6-luna"
-reasoning_effort = "low"
-
-[model_recipes.standard]
-provider = "codex"
-model = "gpt-5.6-terra"
-reasoning_effort = "high"
-
-[model_recipes.deep]
-provider = "codex"
-model = "gpt-6-astra"
-reasoning_effort = "xhigh"
-
-# agent ごとの実行器と既定レシピ。Slack App Home から個別に変更できる。Claudeへの自動フォールバックはしない。
+# agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
+# model と effort は用途別の固定方針（src/kei_agent/model_policy.py）で決まり、ここには書かない。
+# Claude / Codex の間、または上位 model への自動フォールバックはしない。
 [agents.research]
-provider = "codex"
-default_recipe = "standard"
+provider = ""
 # 研究ホームだけに限定した Notion gateway を実行ごとに注入する
 connectors = ["research-notion"]
 
 [agents.course]
-provider = "codex"
-default_recipe = "standard"
+provider = ""
 connectors = []
 
 [agents.work]
-provider = "codex"
-default_recipe = "standard"
+provider = ""
+connectors = []
+
+[agents.router]
+provider = ""
+connectors = []
+
+[agents.self_fix]
+provider = ""
 connectors = []
 
 [schedule]

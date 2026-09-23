@@ -11,7 +11,7 @@
 |---|---|---|
 | `get_schedule` | 予定と締切（日をまたげる） | 本体が押しておいたもの（`executor.held`） |
 | `get_status` | いま動いている依頼・終わった数・上限 | 同じ |
-| `ask_research` | 研究・授業・仕事の中身を調べる | Codex（`think.py`）。数秒かかる |
+| `ask_agent` | 研究・授業・仕事の中身を調べる | 選択済み provider の担当 agent。数秒かかる |
 | `propose_request` | 作業の依頼を**下書きする**（まだ渡さない） | — |
 | `send_request` | 下書きを Kei Agent に渡す | `<state_dir>/asks/` |
 
@@ -27,7 +27,8 @@ from datetime import date, datetime, timedelta
 
 from kei_agent import ask as asks
 from kei_agent.config import Config
-from kei_agent_voice import think
+from kei_agent.store import Store
+from kei_agent_voice.handoff import Handoff
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ DEFINITIONS = [
     },
     {
         "type": "function",
-        "name": "ask_research",
+        "name": "ask_agent",
         "description": ("依頼者の研究・授業・仕事の中身を調べて答える。ファイルを読むので数秒かかる。"
                         "調べている間、依頼者には「ちょっと見てみるね」と言っておくこと。"
                         "**調べる相手はこの会話を聞いていない**ので、question は"
@@ -74,9 +75,12 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
+                "agent": {"type": "string", "enum": ["research", "course", "work"],
+                          "description": "調べる担当"},
                 "question": {"type": "string", "description": "調べてほしいことを、一文で"},
+                "theme": {"type": "string", "description": "研究ならテーマ名（例 amr-query）"},
             },
-            "required": ["question"],
+            "required": ["agent", "question"],
         },
     },
     {
@@ -111,10 +115,10 @@ class Draft:
 class Tools:
     """道具の中身。`held` は本体が押してきたもの（`executor.held`）。"""
 
-    def __init__(self, held: dict, config: Config, codex: think.Codex | None = None):
+    def __init__(self, held: dict, config: Config, handoff: Handoff | None = None):
         self.held = held
         self.config = config
-        self.codex = codex or think.Codex(config.research_root, config.state_dir / "voice")
+        self.handoff = handoff or Handoff(config, Store(config.db_path))
         self.draft: Draft | None = None
 
     def call(self, name: str, arguments: dict, now: datetime | None = None) -> str:
@@ -129,8 +133,10 @@ class Tools:
                                           str(arguments.get("kind") or "all"), now)
             if name == "get_status":
                 return self.get_status()
-            if name == "ask_research":
-                return self.ask_research(str(arguments.get("question") or ""))
+            if name == "ask_agent":
+                return self.ask_agent(str(arguments.get("agent") or "research"),
+                                      str(arguments.get("question") or ""),
+                                      str(arguments.get("theme") or ""))
             if name == "propose_request":
                 return self.propose_request(str(arguments.get("theme") or ""),
                                              str(arguments.get("text") or ""))
@@ -177,13 +183,12 @@ class Tools:
 
     # 調べる（時間がかかる）
 
-    def ask_research(self, question: str) -> str:
+    def ask_agent(self, actor: str, question: str, theme: str = "") -> str:
         if not question.strip():
             return "何を調べるか分からなかった。"
-        turn = self.codex.ask(question)
-        if turn.failed:
-            return f"調べられなかった（{turn.failed}）。"
-        return turn.text or "何も返ってこなかった。"
+        # Live はこの同期関数を worker thread で呼ぶため、Realtime の受信を止めない。
+        import asyncio
+        return asyncio.run(self.handoff.ask(actor, question, theme))
 
     # 依頼（下書き → 渡す）
 

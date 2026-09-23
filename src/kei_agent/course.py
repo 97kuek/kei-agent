@@ -163,7 +163,7 @@ class CourseChannel:
         if skills:
             ui = self.thread_ui(req)
             await ui.activity(router.STATUS_TEXT)
-            choice = await router.pick(self.config, skills, req.text)
+            choice = await router.pick(self.config, skills, req.text, store=self.store)
             if choice.skill:
                 return choice.skill, choice.params
         return pick_skill(req.text) or ASK, {}

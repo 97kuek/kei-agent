@@ -30,9 +30,10 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
-from kei_agent import research, settings, themes
+from kei_agent import research, themes
 from kei_agent.config import Config, load_config
 from kei_agent.jobs import Pueue
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.store import Store
 from kei_agent_a2a import claude, envelope
 from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, RUN_CLAUDE, SUBMIT_JOB
@@ -86,11 +87,11 @@ class ResearchExecutor(AgentExecutor):
             await self._fail(updater, str(e))
             return
         if skill == RUN_CLAUDE:
-            await self._run_claude(updater, ask)
+            await self._run_agent(updater, ask)
             return
         await self._job(updater, skill, ask)
 
-    async def _run_claude(self, updater: TaskUpdater, ask: dict) -> None:
+    async def _run_agent(self, updater: TaskUpdater, ask: dict) -> None:
         try:
             ws = themes.resolve(self.config, str(ask.get("channel_name") or ""))
         except ValueError as e:
@@ -99,20 +100,19 @@ class ResearchExecutor(AgentExecutor):
         if ws.cwd is None:
             await self._fail(updater, f"#{ws.channel_name} には作業用ディレクトリがありません")
             return
-        recipe_name = str(ask.get("model_recipe") or self.config.agent_profiles[research.AGENT].default_recipe)
-        if recipe_name and not settings.has_agent_profile_override(self.store, research.AGENT):
-            try:
-                ws = research.with_recipe(self.config, ws, recipe_name)
-            except ValueError as e:
-                await self._fail(updater, str(e))
-                return
+        try:
+            use_case = UseCase(str(ask.get("use_case") or UseCase.RESEARCH_EXECUTE))
+            recipe = resolve_selected(self.config, self.store, research.AGENT, use_case,
+                                      manual=research.is_manual_use_case(use_case))
+        except (ModelPolicyError, ValueError) as e:
+            await self._fail(updater, str(e))
+            return
+        read_only = bool(ask.get("read_only"))
         ws = replace(ws, allowed_domains=tuple(ask.get("allowed_domains") or ()))
-        themes.ensure_workspace(ws)
+        if not read_only:
+            themes.ensure_workspace(ws)
         # claude が失敗したときは、封筒の ok が false になる。A2A のタスクも failed にする
-        profile = settings.agent_profile(self.config, self.store, research.AGENT)
-        effective_config = replace(
-            self.config, agent_profiles={**self.config.agent_profiles, research.AGENT: profile})
-        await claude.finish(updater, await claude.run(effective_config, ws, ask, updater))
+        await claude.finish(updater, await claude.run(self.config, ws, ask, updater, recipe=recipe))
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""

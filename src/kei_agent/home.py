@@ -25,20 +25,6 @@ def _mrkdwn(text: str) -> dict:
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
 
-def _model_options(config: Config, current_model: str) -> list[dict]:
-    """App Home の候補を config.toml のレシピから作る。
-
-    固定リストを持つと、モデル世代の更新時に実行設定と画面が食い違う。
-    """
-    models = [recipe.model for recipe in config.model_recipes.values() if recipe.model]
-    if current_model and current_model not in models:
-        models.append(current_model)
-    return [
-        {"text": {"type": "plain_text", "text": label}, "value": value}
-        for value, label in [("__default__", "既定"), *[(model, model) for model in dict.fromkeys(models)]]
-    ]
-
-
 def _button(text: str, action_id: str, value: str, style: str | None = None) -> dict:
     button = {"type": "button", "action_id": action_id, "value": value,
               "text": {"type": "plain_text", "text": text}}
@@ -80,34 +66,36 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     blocks.append({"type": "actions", "elements": [_button("最新にする", REFRESH_ACTION, "refresh")]})
 
     blocks += [{"type": "divider"}, _mrkdwn("*AI 実行器*")]
-    labels = {"research": "研究", "course": "大学", "work": "仕事"}
+    labels = {
+        "research": "研究", "course": "大学", "work": "仕事",
+        "router": "ルーティング・全体計画", "self_fix": "自己改善",
+    }
     for agent, label in labels.items():
         profile = settings.agent_profile(config, store, agent)
+        provider = profile.provider.title() if profile.provider else "未選択"
+        selector = {
+            "type": "static_select", "action_id": f"kei_agent_home_provider:{agent}",
+            "placeholder": {"type": "plain_text", "text": "provider を選ぶ"},
+            "options": [
+                {"text": {"type": "plain_text", "text": "Claude"}, "value": "claude"},
+                {"text": {"type": "plain_text", "text": "Codex"}, "value": "codex"},
+            ],
+        }
+        if profile.provider:
+            selector["initial_option"] = {"text": {"type": "plain_text", "text": provider},
+                                          "value": profile.provider}
+        description = (
+            "Box は読み取りのみ。Notion は大学ホーム内だけ" if agent == "course" else
+            "Outlook は読み取りのみ。SharePoint と Teams は使わない" if agent == "work" else
+            "研究ホームの Notion gateway と W&B を使う" if agent == "research" else
+            "分類と Daily/Retro を用途別の軽量・標準 recipe で処理する" if agent == "router" else
+            "設計・実装・レビューを用途別 recipe で処理する"
+        )
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*{label}: {profile.provider.title()}*\n"
-                     + ("Box は読み取りのみ。Notion は大学ホーム内だけ" if agent == "course" else
-                        "Outlook は読み取りのみ。SharePoint と Teams は使わない" if agent == "work" else
-                        "研究ホームの Notion gateway と W&B を使う")},
-            "accessory": {
-                "type": "static_select", "action_id": f"kei_agent_home_provider:{agent}",
-                "initial_option": {"text": {"type": "plain_text", "text": profile.provider.title()}, "value": profile.provider},
-                "options": [
-                    {"text": {"type": "plain_text", "text": "Claude"}, "value": "claude"},
-                    {"text": {"type": "plain_text", "text": "Codex"}, "value": "codex"},
-                ],
-            },
+            "text": {"type": "mrkdwn", "text": f"*{label}: {provider}*\n{description}"},
+            "accessory": selector,
         })
-        blocks.append({"type": "actions", "elements": [
-            {"type": "static_select", "action_id": f"kei_agent_home_model:{agent}",
-             "placeholder": {"type": "plain_text", "text": "モデル"},
-             "initial_option": {"text": {"type": "plain_text", "text": profile.model or "既定"}, "value": profile.model or "__default__"},
-             "options": _model_options(config, profile.model)},
-            {"type": "static_select", "action_id": f"kei_agent_home_effort:{agent}",
-             "initial_option": {"text": {"type": "plain_text", "text": profile.reasoning_effort}, "value": profile.reasoning_effort},
-             "options": [{"text": {"type": "plain_text", "text": value}, "value": value}
-                         for value in ("low", "medium", "high", "xhigh")]},
-        ]})
 
     blocks += [
         {"type": "divider"},

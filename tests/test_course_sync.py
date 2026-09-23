@@ -1,7 +1,6 @@
 """Moodle の締切を Notion の「課題」に取り込むところ。"""
 
 import json
-
 from datetime import datetime
 
 import pytest

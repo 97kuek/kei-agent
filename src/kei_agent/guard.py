@@ -88,7 +88,8 @@ def read_roots(config: Config, ws: Workspace) -> tuple[Path, ...]:
     return (ws.cwd,)                  # テーマと、自分を直すときの worktree
 
 
-def build_settings(config: Config, ws: Workspace) -> dict:
+def build_settings(config: Config, ws: Workspace, *, read_only: bool = False) -> dict:
+    """実行境界で確定した read-only 権限だけを Claude に渡す。"""
     assert ws.cwd is not None
     return {
         "sandbox": {
@@ -109,16 +110,16 @@ def build_settings(config: Config, ws: Workspace) -> dict:
         "permissions": {
             "allow": [
                 *[_abs_rule("Read", root) for root in read_roots(config, ws)],
-                _abs_rule("Edit", ws.cwd),
+                *([] if read_only else [_abs_rule("Edit", ws.cwd)]),
                 "Glob",
                 "Grep",
-                "Bash",
+                *([] if read_only else ["Bash"]),
                 "WebSearch",
                 "WebFetch",
                 "Skill",
                 "TodoWrite",
                 # 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）
-                "mcp__research-notion",
+                *([] if read_only else ["mcp__research-notion"]),
             ],
         },
     }

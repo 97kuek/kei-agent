@@ -91,42 +91,6 @@ def test_the_event_can_come_in_the_body_or_the_metadata():
     assert event_of("{こわれてる", {"kind": "done"}) == {"kind": "done"}
 
 
-def test_the_conversation_is_cut_at_a_date_change_or_a_long_gap(tmp_path):
-    """離席から戻ると話題も変わっている。前の文脈を引きずると的外れになる（docs/voice.md の6節）。"""
-    import time
-
-    from kei_agent_voice.think import GAP_SECONDS, Codex
-
-    codex = Codex(tmp_path, tmp_path / "voice")
-    now = time.time()
-    codex.remember("01a0-thread", now)
-
-    assert codex.session_id(now + 60) == "01a0-thread"          # 続きは続き
-    assert codex.session_id(now + GAP_SECONDS + 1) is None      # 長く離席したら切る
-    # 日付が変わったら切る（2時間経っていなくても）
-    midnight = time.mktime(time.strptime(
-        time.strftime("%Y-%m-%d", time.localtime(now + 86400)), "%Y-%m-%d"))
-    assert codex.session_id(midnight + 60) is None
-
-
-
-def test_codex_is_only_allowed_to_read(tmp_path):
-    """実行するのは Slack の Kei Agent だけ。相談相手には読ませるだけ。"""
-    from kei_agent_voice.think import Codex
-
-    codex = Codex(tmp_path, tmp_path / "voice")
-
-    resumed = codex.build_command("01a0", out=tmp_path / "o")
-    assert resumed[:4] == ["codex", "exec", "resume", "01a0"]
-    assert 'sandbox_mode="read-only"' in resumed
-    assert "model_reasoning_effort=low" in resumed
-    # `resume` は -s と -C を断る（`error: unexpected argument '-s' found` で即座に終わる）
-    assert "-s" not in resumed and "-C" not in resumed
-
-    fresh = codex.build_command(None, tmp_path / "o")
-    assert "resume" not in fresh and fresh[fresh.index("-C") + 1] == str(tmp_path)
-
-
 # 音の出し入れ（audio.py）。GPT-Live は音をそのままやりとりする
 
 def test_the_length_of_a_chunk_is_counted_in_milliseconds():
@@ -209,20 +173,19 @@ def _held():
     ]}}
 
 
-def _tools(config, codex=None):
+def _tools(config, handoff=None):
     from kei_agent_voice.tools import Tools
-    return Tools(_held(), config, codex=codex or _FakeCodex())
+    return Tools(_held(), config, handoff=handoff or _FakeHandoff())
 
 
-class _FakeCodex:
-    def __init__(self, text="条件Bだけ落ちてるね。", failed=""):
-        from kei_agent_voice.think import Turn
-        self.turn = Turn(text=text, failed=failed)
+class _FakeHandoff:
+    def __init__(self, text="条件Bだけ落ちてるね。"):
+        self.text = text
         self.asked = []
 
-    def ask(self, text, **kw):
-        self.asked.append(text)
-        return self.turn
+    async def ask(self, actor, question, theme=""):
+        self.asked.append((actor, question, theme))
+        return self.text
 
 
 def test_tomorrow_is_not_answered_with_today(config):
@@ -363,15 +326,16 @@ def test_a_broken_tool_does_not_stop_the_conversation(config):
     assert "うまくいかなかった" in tools.call("get_status", {})
 
 
-def test_the_research_question_goes_to_codex(config):
-    codex = _FakeCodex()
-    tools = _tools(config, codex)
+def test_the_research_question_goes_to_the_selected_agent(config):
+    handoff = _FakeHandoff()
+    tools = _tools(config, handoff)
 
-    assert tools.call("ask_research", {"question": "amr-query は何を確かめていたか"}) \
+    assert tools.call("ask_agent", {"agent": "research", "theme": "amr-query",
+                                     "question": "amr-query は何を確かめていたか"}) \
         == "条件Bだけ落ちてるね。"
-    assert codex.asked == ["amr-query は何を確かめていたか"]
+    assert handoff.asked == [("research", "amr-query は何を確かめていたか", "amr-query")]
 
-    assert "調べられなかった" in _tools(config, _FakeCodex(failed="上限に当たった")).ask_research("ねえ")
+    assert _tools(config, _FakeHandoff("上限に当たった")).ask_agent("research", "ねえ") == "上限に当たった"
 
 
 # Realtime API とのやりとり（live.py）
@@ -399,13 +363,15 @@ def test_the_session_is_set_up_the_way_the_api_wants_it():
 
 
 def test_the_key_is_read_from_the_environment():
-    from kei_agent_voice.live import DEFAULT_MODEL, DEFAULT_VOICE, KEY_ENV, MODEL_ENV, Live
+    from kei_agent_voice.live import DEFAULT_MODEL, DEFAULT_VOICE, KEY_ENV, Live
 
     plain = Live(tools=None, env={})
     assert plain.key == "" and plain.model == DEFAULT_MODEL and plain.voice == DEFAULT_VOICE
 
-    swapped = Live(tools=None, env={KEY_ENV: "sk-test", MODEL_ENV: "gpt-realtime-2.1-mini"})
-    assert swapped.key == "sk-test" and swapped.model == "gpt-realtime-2.1-mini"
+    fixed = Live(tools=None, env={KEY_ENV: "sk-test", "KEI_AGENT_REALTIME_MODEL": "other"})
+    assert fixed.key == "sk-test" and fixed.model == DEFAULT_MODEL
+    with pytest.raises(TypeError):
+        Live(tools=None, model="other")
 
 
 async def test_without_a_key_it_says_so_instead_of_hanging():

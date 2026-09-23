@@ -16,6 +16,7 @@ from pathlib import Path
 
 from kei_agent import guard, improve, runner
 from kei_agent.auto_messages import history_prompt
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.request import Request
 from kei_agent.slack_text import FAILED_PREFIX
 from kei_agent.themes import ChannelKind, Workspace
@@ -87,9 +88,17 @@ class SelfFix:
         ui = self.thread_ui(req)
         await ui.start()
         await ui.activity("改善中…")
+        try:
+            recipe = resolve_selected(self.config, self.store, "self_fix", UseCase.SELF_FIX_IMPLEMENTATION)
+        except ModelPolicyError as e:
+            await ui.finish("")
+            await self._fix_failed(req, str(e), str(e))
+            return
         with self.claude_running():
-            result = await runner.run_claude(self.config, ws, prompt, None, req.channel, req.thread_ts,
-                                             ui.activity, ui.text)
+            result = await runner.run_model(
+                self.config, runner.ExecutionRequest(ws, recipe, None, req.channel, req.thread_ts), prompt,
+                ui.activity, ui.text,
+            )
         await ui.finish(result.text, awaiting=True)
         if result.is_error:
             errors = "; ".join(result.errors)[:500]

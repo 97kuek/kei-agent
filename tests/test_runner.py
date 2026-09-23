@@ -6,7 +6,13 @@ from dataclasses import replace
 import pytest
 
 from kei_agent import guard, router, runner, themes
-from kei_agent.config import AgentProfile
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
+
+
+def request(config, *, actor="research", provider="claude", use_case=UseCase.RESEARCH_EXECUTE,
+            session_id=None, read_only=False):
+    ws = router.workspace(config) if actor == "router" else themes.resolve(config, "vlm")
+    return runner.ExecutionRequest(ws, resolve(actor, provider, use_case), session_id, "C1", "1.1", read_only)
 
 
 def test_settings_limit_theme_to_its_directory(config):
@@ -36,58 +42,112 @@ def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
 
 
 def test_command_resumes_session_and_ignores_user_settings(config):
-    ws = themes.resolve(config, "vlm")
-    cmd = runner.build_command(config, ws, "sess-1")
+    cmd = runner.build_command(config, request(config, session_id="sess-1"))
     assert cmd[cmd.index("--resume") + 1] == "sess-1"
     assert cmd[cmd.index("--setting-sources") + 1] == ""
     assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
     json.loads(cmd[cmd.index("--settings") + 1])
-    assert "--resume" not in runner.build_command(config, ws, None)
+    assert "--resume" not in runner.build_command(config, request(config))
 
 
-def test_codex_profile_builds_a_jsonl_workspace_write_command(config):
-    ws = themes.resolve(config, "vlm")
-    config = replace(
-        config,
-        codex_bin="codex-test",
-        agent_profiles={"research": AgentProfile(provider="codex", model="gpt-5.3-codex", reasoning_effort="high")},
-    )
-
-    cmd = runner.build_command(config, ws, "thread-1")
+def test_codex_recipe_builds_a_jsonl_workspace_write_command(config):
+    config = replace(config, codex_bin="codex-test")
+    cmd = runner.build_command(config, request(config, provider="codex", session_id="thread-1"))
 
     assert cmd[:4] == ["codex-test", "exec", "--json", "--sandbox"]
     assert "workspace-write" in cmd
-    assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-5.3-codex"
+    assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-6-sol"
     assert "--config" in cmd and "model_reasoning_effort=high" in cmd
     assert "--plugin-dir" not in cmd
     assert cmd[-1] == "-"
 
 
-def test_codex_workspace_recipe_overrides_the_default_effort(config):
-    ws = replace(themes.resolve(config, "vlm"), model="gpt-deep", reasoning_effort="xhigh")
-    config = replace(config, codex_bin="codex-test", agent_profiles={"research": AgentProfile(provider="codex")})
-
-    cmd = runner.build_command(config, ws, None)
-
-    assert cmd[cmd.index("--model") + 1] == "gpt-deep"
-    assert "model_reasoning_effort=xhigh" in cmd
+def test_execution_request_has_no_model_or_effort_override_fields(config):
+    assert {"model", "reasoning_effort"}.isdisjoint(request(config).__dataclass_fields__)
 
 
-def test_codex_effective_profile_from_app_home_overrides_the_config_profile(config):
+def test_resolved_recipe_is_the_only_model_and_effort_sent_to_codex(config):
+    command = runner.build_model_command(config, themes.resolve(config, "vlm"), None,
+                                         resolve("research", "codex", UseCase.RESEARCH_EXECUTE))
+
+    assert command.count("gpt-6-sol") == 1
+    assert "model_reasoning_effort=high" in command
+    assert "gpt-5.6-terra" not in command
+
+
+def test_execution_request_uses_resolved_recipe_without_model_override_fields(config):
+    workspace = themes.resolve(config, "vlm")
+    execution = runner.ExecutionRequest(
+        workspace, resolve("research", "codex", UseCase.RESEARCH_DESIGN), None, "C1", "1.1",
+    )
+
+    command = runner.build_command(config, execution)
+    assert command[command.index("--model") + 1] == "gpt-6-sol"
+    assert "model_reasoning_effort=xhigh" in command
+
+
+def test_execution_request_rejects_a_forged_manual_recipe(config):
+    forged = runner.ResolvedModel(
+        "research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-astra", "xhigh",
+    )
+
+    with pytest.raises(ModelPolicyError, match="recipe"):
+        runner.build_command(config, runner.ExecutionRequest(
+            themes.resolve(config, "vlm"), forged, None, "C1", "1.1"))
+
+
+def test_router_execution_request_has_no_research_plugin_or_notion(config):
+    execution = runner.ExecutionRequest(
+        router.workspace(config), resolve("router", "claude", UseCase.OVERVIEW_PLAN), None, "", "",
+    )
+
+    command = runner.build_command(config, execution)
+    assert "research-notion" not in " ".join(command)
+    assert str(config.agent_plugin_dir("research")) not in command
+
+
+def test_read_only_execution_removes_claude_write_tools_and_notion_gateway(config):
+    execution = request(config, read_only=True)
+    command = runner.build_command(config, execution)
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    assert "Bash" not in settings["permissions"]["allow"]
+    assert not any(item.startswith("Edit(") for item in settings["permissions"]["allow"])
+    assert "mcp__research-notion" not in settings["permissions"]["allow"]
+    assert "--mcp-config" not in command
+
+
+def test_read_only_execution_has_no_codex_notion_gateway(config):
+    command = runner.build_command(config, request(config, provider="codex", read_only=True))
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "research-notion" not in " ".join(command)
+
+
+def test_classifier_recipe_is_always_read_only_even_if_the_caller_omits_it(config, store):
+    recipe = resolve_classifier(config, store, "research")
+    command = runner.build_command(config, runner.ExecutionRequest(
+        themes.resolve(config, "vlm"), recipe, None, "C1", "1.1"))
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    assert "Bash" not in settings["permissions"]["allow"]
+    assert "--mcp-config" not in command
+
+
+def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
+    from kei_agent.model_policy import UseCase, resolve
+
     ws = themes.resolve(config, "vlm")
-    config = replace(config, codex_bin="codex-test", agent_profiles={"research": AgentProfile(provider="codex")})
-    profile = AgentProfile(provider="codex", model="gpt-home", reasoning_effort="high")
+    thinking = runner.build_model_command(config, ws, None, resolve("research", "claude", UseCase.RESEARCH_EXECUTE))
+    no_thinking = runner.build_model_command(config, ws, None, resolve("router", "claude", UseCase.ROUTING))
 
-    cmd = runner.build_command(config, ws, None, profile)
-
-    assert cmd[cmd.index("--model") + 1] == "gpt-home"
-    assert "model_reasoning_effort=high" in cmd
+    assert thinking[thinking.index("--model"):thinking.index("--model") + 2] == ["--model", "claude-sonnet-5"]
+    assert thinking[thinking.index("--effort"):thinking.index("--effort") + 2] == ["--effort", "high"]
+    assert "--effort" not in no_thinking
 
 
 def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
-    ws = themes.resolve(config, "vlm")
-    config = replace(config, agent_profiles={"research": AgentProfile(provider="codex")})
-    command = runner.build_codex_command(config, ws, None)
+    execution = request(config, provider="codex")
+    command = runner.build_codex_command(config, execution.workspace, None, execution.recipe)
     configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
     assert any("mcp_servers.research-notion.url" in item and config.notion_gateway_url in item for item in configs)
     assert any("env_http_headers" in item and "KEI_AGENT_NOTION_GATEWAY_AUTH" in item for item in configs)
@@ -96,9 +156,8 @@ def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
 
 def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(config):
     """振り分けは非gitの状態DBで動き、Google等のAppや研究Notionを触らない。"""
-    config = replace(config, agent_profiles={"research": AgentProfile(provider="codex")})
-
-    command = runner.build_codex_command(config, router.workspace(config), None)
+    execution = request(config, actor="router", provider="codex", use_case=UseCase.ROUTING)
+    command = runner.build_codex_command(config, execution.workspace, None, execution.recipe, actor="router")
 
     assert "--skip-git-repo-check" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
@@ -169,6 +228,14 @@ def test_env_strips_secrets_and_adds_thread(config):
 def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
     env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1")
     assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer gateway-secret"
+    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
+
+
+def test_read_only_env_exposes_no_gateway_credentials(config):
+    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"},
+                           "C1", "1", include_gateway_auth=False)
+    assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env
+    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
 
 
 def test_apply_event_keeps_domains_claude_asked_for():
@@ -252,7 +319,11 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
 
-    result = await asyncio.wait_for(runner.run_claude(config, ws, "hi", None, "C1", "1.1"), timeout=10)
+    result = await asyncio.wait_for(
+        runner.run_model(config, runner.ExecutionRequest(
+            ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "hi"),
+        timeout=10,
+    )
 
     assert result.text == "ok" and not result.is_error and not result.timed_out
     pid = int((ws.cwd / "left-over.pid").read_text())
@@ -279,11 +350,7 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
         "'{\"type\":\"turn.completed\"}'\n"
     )
     fake.chmod(0o755)
-    config = replace(
-        config,
-        codex_bin=str(fake),
-        agent_profiles={"research": AgentProfile(provider="codex")},
-    )
+    config = replace(config, codex_bin=str(fake))
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
     seen_text: list[str] = []
@@ -295,8 +362,9 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
     async def on_activity(activity: str) -> None:
         seen_activity.append(activity)
 
-    result = await runner.run_claude(
-        config, ws, "調べて", None, "C1", "1.1",
+    result = await runner.run_model(
+        config, runner.ExecutionRequest(
+            ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて",
         on_activity=on_activity,
         on_text=on_text,
     )
@@ -367,7 +435,8 @@ def test_parse_limit_moves_to_tomorrow_when_the_time_has_passed():
 def test_research_runner_loads_only_the_research_plugin(config):
     """担当外の plugin（大学・仕事）を、同じ claude に読ませない。"""
     ws = themes.resolve(config, "vlm")
-    cmd = runner.build_command(config, ws, None)
+    cmd = runner.build_command(config, runner.ExecutionRequest(
+        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
 
     loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
     assert loaded == [str(config.repo_root / "plugin" / "research")]
@@ -382,7 +451,8 @@ def test_agent_plugin_dir_refuses_an_unknown_agent(config):
 def test_research_runner_uses_only_the_scoped_notion_mcp(config):
     """研究の Notion は、研究ホームだけを操作できるゲートウェイ経由。ほかの MCP は読み込まない。"""
     ws = themes.resolve(config, "vlm")
-    cmd = runner.build_command(config, ws, None)
+    cmd = runner.build_command(config, runner.ExecutionRequest(
+        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
 
     mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["research-notion"]
     assert mcp["url"] == config.notion_gateway_url
@@ -405,4 +475,5 @@ def test_research_env_carries_the_gateway_token_but_not_the_notion_token(config)
     }, "C1", "1.2")
 
     assert "NOTION_TOKEN" not in env
-    assert env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "scoped"
+    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
+    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer scoped"

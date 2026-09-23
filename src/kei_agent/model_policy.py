@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-
 ACTORS = frozenset({"research", "course", "work", "router", "self_fix"})
 PROVIDERS = frozenset({"codex", "claude"})
 
@@ -189,3 +188,23 @@ def resolve_classifier(config, store, actor: str) -> ResolvedModel:
     if not is_allowed_model(provider, model):
         raise ModelPolicyError(f"許可されていない model です: {model}")
     return ResolvedModel(actor, UseCase.ROUTING, provider, model, effort)
+
+
+def validate_resolved(recipe: ResolvedModel) -> None:
+    """runner に渡る recipe が policy から作られた値と完全一致するか確認する。
+
+    ``ResolvedModel`` は dataclass なので、呼び出し元が直接作ること自体は Python では防げない。
+    CLI 起動直前に再解決して比べることで、allowlist 内の手動例外を通常用途へ偽装する経路を閉じる。
+    plugin actor の ``routing`` だけは分類器専用の軽量例外として同じ固定値を検証する。
+    """
+    if recipe.use_case is UseCase.ROUTING and recipe.actor in {"research", "course", "work"}:
+        expected_values = _RECIPES.get((recipe.provider, UseCase.ROUTING))
+        expected = (ResolvedModel(recipe.actor, UseCase.ROUTING, recipe.provider, *expected_values)
+                    if expected_values is not None else None)
+    else:
+        try:
+            expected = resolve(recipe.actor, recipe.provider, recipe.use_case, manual=recipe.manual_only)
+        except ModelPolicyError as e:
+            raise ModelPolicyError(f"許可されない recipe です: {e}") from e
+    if expected != recipe:
+        raise ModelPolicyError(f"許可されない recipe です: {recipe.actor}/{recipe.use_case.value}")

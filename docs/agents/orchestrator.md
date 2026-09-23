@@ -15,4 +15,4 @@
 
 ## 設定
 
-App Homeはprovider、モデル、推論強度の一時上書きに使う。providerを切り替えると前のproviderのモデル指定は捨てる。「既定」を選ぶと一時上書き全体を外して設定ファイルのレシピへ戻る。恒久的なモデル世代更新は `config.toml` の `model_recipes` と [モデル運用](../model-policy.md) に従う。
+App Home は agent ごとの provider 選択に使う。model と推論強度を agent 単位で上書きしない。実行時のユースケース別 recipe とその評価手順は [モデル運用](../model-policy.md) に従う。

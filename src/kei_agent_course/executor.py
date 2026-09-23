@@ -221,10 +221,17 @@ class CourseExecutor(AgentExecutor):
         prompt = (f"{guide.read_text(encoding='utf-8') if guide.exists() else ''}\n\n---\n\n"
                   f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
                   f"次の質問に答えてください。\n\n{question}")
+        from kei_agent.model_classifier import UsageLimited, classify_course
+        try:
+            use_case = await classify_course(self.config, self.store, question)
+        except UsageLimited as e:
+            await self._fail(updater, str(e))
+            return
         try:
             answer = await claude.ask_connector(
                 self.config, prompt, tools.ALLOWED, self.config.agent_plugin_dir(tools.AGENT),
-                tools.DENY, tools.TIMEOUT_MINUTES, store=self.store, agent=tools.AGENT)
+                tools.DENY, tools.TIMEOUT_MINUTES, store=self.store, agent=tools.AGENT,
+                use_case=use_case)
         except claude.ConnectorError as e:
             await self._fail(updater, str(e))
             return

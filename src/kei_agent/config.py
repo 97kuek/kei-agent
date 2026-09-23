@@ -20,35 +20,26 @@ HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
 AGENT_PLUGINS = frozenset({"research", "course", "work"})
+# provider を選ぶ実行役。router は Daily/Retro の横断的な計画も担う。
+MODEL_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
 
 
 @dataclass(frozen=True)
 class AgentProfile:
-    """実行するCLIと、そのCLIに渡すモデルの方針。
+    """agent が使う provider と connector。
 
     skill は手順、profile は実行器を決める。skill の中にモデル名を埋め込まないため、
     Claude と Codex を同じ agent から切り替えられる。
     """
 
-    provider: str = "claude"
-    model: str = ""
-    reasoning_effort: str = "high"
-    # 作業種別ごとのモデルレシピ。空なら従来どおり model / reasoning_effort を直接使う。
-    default_recipe: str = ""
+    # provider は App Home で明示選択する。空文字は「まだ選んでいない」。
+    provider: str = ""
     # Codex に切り替えるとき、実際に使う MCP 名だけを明示する。空なら外部 connector は渡さない。
     connectors: frozenset[str] = field(default_factory=frozenset)
 
 
-@dataclass(frozen=True)
-class ModelRecipe:
-    """将来のモデル名を一か所で差し替えるための、用途名つきの実行設定。"""
-    provider: str
-    model: str
-    reasoning_effort: str = "medium"
-
-
 def _default_agent_profiles() -> dict[str, AgentProfile]:
-    return {agent: AgentProfile() for agent in AGENT_PLUGINS}
+    return {agent: AgentProfile() for agent in MODEL_ACTORS}
 
 
 def _expand(path: str) -> Path:
@@ -134,9 +125,7 @@ class Config:
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
     job_parallel: int = 1
-    model: str = ""
     agent_profiles: dict[str, AgentProfile] = field(default_factory=_default_agent_profiles)
-    model_recipes: dict[str, ModelRecipe] = field(default_factory=dict)
     # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
     handoff_after_turns: int = 8
     allowed_domains: tuple[str, ...] = ()
@@ -164,20 +153,6 @@ class Config:
         if agent not in AGENT_PLUGINS:
             raise ValueError(f"未知のagent: {agent}（使えるのは {', '.join(sorted(AGENT_PLUGINS))}）")
         return self.repo_root / "plugin" / agent
-
-    def model_recipe(self, agent: str, name: str = "") -> ModelRecipe | None:
-        """agentの既定または指定名のレシピ。provider不一致は静かに混ぜない。"""
-        if agent not in AGENT_PLUGINS:
-            raise ConfigError(f"未知のagent: {agent}")
-        recipe_name = name or self.agent_profiles[agent].default_recipe
-        if not recipe_name:
-            return None
-        recipe = self.model_recipes.get(recipe_name)
-        if recipe is None:
-            raise ConfigError(f"モデルレシピがありません: {recipe_name}")
-        if recipe.provider != self.agent_profiles[agent].provider:
-            raise ConfigError(f"モデルレシピ {recipe_name} の provider が {agent} と一致しません")
-        return recipe
 
     @property
     def notion_gateway_url(self) -> str:
@@ -210,12 +185,11 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "model", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a", "model_recipes",
+    "job_poll_seconds", "job_parallel", "agents", "handoff_after_turns", "channels", "sandbox",
+    "schedule", "maintenance", "a2a",
 }
-AGENTS_KEYS = AGENT_PLUGINS
-AGENT_PROFILE_KEYS = {"provider", "model", "reasoning_effort", "default_recipe", "connectors"}
-MODEL_RECIPE_KEYS = {"provider", "model", "reasoning_effort"}
+AGENTS_KEYS = MODEL_ACTORS
+AGENT_PROFILE_KEYS = {"provider", "connectors"}
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 # [schedule] のうち、時刻（HH:MM）を書くキー
 SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
@@ -263,7 +237,7 @@ def _a2a(data: dict) -> A2AConfig:
 
 
 def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
-    """[agents.<name>] を読み、未指定の agent は Claude の既定値にする。"""
+    """[agents.<name>] を読み、未指定の actor は provider 未選択にする。"""
     if not isinstance(data, dict):
         raise ConfigError("config.toml の [agents] はテーブルにしてください")
     unknown = sorted(set(data) - AGENTS_KEYS)
@@ -274,9 +248,9 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
         if not isinstance(raw, dict):
             raise ConfigError(f"config.toml の [agents.{name}] はテーブルにしてください")
         _check_keys(raw, AGENT_PROFILE_KEYS, f"[agents.{name}]")
-        provider = str(raw.get("provider", "claude"))
-        if provider not in {"claude", "codex"}:
-            raise ConfigError(f"config.toml の [agents.{name}].provider は claude または codex にしてください")
+        provider = str(raw.get("provider", ""))
+        if provider not in {"", "claude", "codex"}:
+            raise ConfigError(f"config.toml の [agents.{name}].provider は claude、codex、または空文字にしてください")
         connectors = raw.get("connectors", [])
         if (
             not isinstance(connectors, list)
@@ -288,28 +262,9 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
             )
         profiles[name] = AgentProfile(
             provider=provider,
-            model=str(raw.get("model", "")),
-            reasoning_effort=str(raw.get("reasoning_effort", "high")),
-            default_recipe=str(raw.get("default_recipe", "")),
             connectors=frozenset(connectors),
         )
     return profiles
-
-
-def _model_recipes(data: dict) -> dict[str, ModelRecipe]:
-    if not isinstance(data, dict):
-        raise ConfigError("config.toml の [model_recipes] はテーブルにしてください")
-    recipes: dict[str, ModelRecipe] = {}
-    for name, raw in data.items():
-        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", str(name)) or not isinstance(raw, dict):
-            raise ConfigError("モデルレシピ名または内容が不正です")
-        _check_keys(raw, MODEL_RECIPE_KEYS, f"[model_recipes.{name}]")
-        provider, model = str(raw.get("provider", "")), str(raw.get("model", ""))
-        effort = str(raw.get("reasoning_effort", "medium"))
-        if provider not in {"claude", "codex"} or not model or effort not in {"low", "medium", "high", "xhigh"}:
-            raise ConfigError(f"モデルレシピ {name} の provider / model / reasoning_effort が不正です")
-        recipes[str(name)] = ModelRecipe(provider, model, effort)
-    return recipes
 
 
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
@@ -342,9 +297,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
-        model=data.get("model", ""),
         agent_profiles=_agent_profiles(data.get("agents", {})),
-        model_recipes=_model_recipes(data.get("model_recipes", {})),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),

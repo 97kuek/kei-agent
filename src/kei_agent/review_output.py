@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import re
 
 HEADINGS = ("*今日の成果*", "*未完了タスク*")
 NIGHT_QUESTION = "夜間に実行したいタスクはありますか？"
+_LOCAL_PATH = re.compile(r"(?:file://\S+|~/(?:\S+)|(?:^|[\s([{\"])\/(?:\S+))")
+_WEB_URL = re.compile(r"https?://\S+")
+_RELATIVE_LOCAL_PATH = re.compile(
+    r"(?:\b(?:reviews|overview|outputs|inputs|logs|\.kei-agent|\.config|\.local)/\S+"
+    r"|\b(?:[\w.-]+/)+[\w.-]+\.(?:md|txt|json|csv|py|html|pdf|xlsx?|docx?))"
+)
+_INTERNAL_PROGRESS = re.compile(
+    r"\b(?:Bash|Read|Glob|Grep|WebSearch|WebFetch|Skill|Codex App|Claude Code|apply_patch|pytest|ruff)\b"
+    r"|(?:材料|参照スレッド|スレッド).{0,24}(?:確認|読[みむ])"
+    r"|(?:まず|次に|最後に).{0,32}(?:確認|調査|作成|実装|実行|進め)"
+    r"|(?:調査|作業|処理).{0,12}(?:中です|します|を開始)",
+    re.IGNORECASE,
+)
 
 
 class ReviewOutputError(ValueError):
@@ -13,6 +27,12 @@ class ReviewOutputError(ValueError):
 
 def _invalid() -> ReviewOutputError:
     return ReviewOutputError("Retro の返答が指定形式ではありません")
+
+
+def _contains_local_path(text: str) -> bool:
+    """通常の Web URL を残し、ローカルの絶対・相対パスだけを拒否する。"""
+    local_candidate = _WEB_URL.sub("", text)
+    return bool(_LOCAL_PATH.search(local_candidate) or _RELATIVE_LOCAL_PATH.search(local_candidate))
 
 
 def validate_review_reply(text: str) -> str:
@@ -31,7 +51,7 @@ def validate_review_reply(text: str) -> str:
     if any(not value.strip() for value in content):
         raise _invalid()
     lines = normalized.splitlines()
-    if any(line.startswith("#") or "Codex App" in line or line.startswith("/Users/") for line in lines):
+    if any(line.startswith("#") for line in lines) or _contains_local_path(normalized) or _INTERNAL_PROGRESS.search(normalized):
         raise _invalid()
     return normalized
 

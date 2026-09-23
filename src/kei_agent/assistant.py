@@ -49,6 +49,7 @@ from kei_agent.config import Config
 from kei_agent.course import CourseChannel
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
@@ -653,36 +654,65 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         except NotionError as e:
             await self.notify_trouble(f"🌙 を外した Task を Notion で取り消せませんでした: {e}")
 
-    async def run_claude(self, ws: Workspace, prompt: str, session_id: str | None = None,
+    async def run_agent(self, ws: Workspace, prompt: str, session_id: str | None = None,
                          channel: str = "", thread_ts: str = "",
                          on_activity=None, on_text=None) -> runner.RunResult:
         """claude を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
 
         どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
         """
-        agent = self.agents.get(research.AGENT)
-        profile = settings.agent_profile(self.config, self.store, research.AGENT)
-        # App Home の明示選択は、本文から推測する通常時の深度レシピより強い。
-        if not settings.has_agent_profile_override(self.store, research.AGENT):
-            ws, prompt = research.prepare(self.config, ws, prompt)
-        effective_config = replace(
-            self.config, agent_profiles={**self.config.agent_profiles, research.AGENT: profile})
+        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else research.AGENT
+        agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
+        if actor == "self_fix":
+            use_case = UseCase.SELF_FIX_DESIGN
+        else:
+            explicit_use_case = research.has_explicit_use_case(prompt)
+            use_case, prompt = research.use_case_for_prompt(prompt)
+            if not explicit_use_case:
+                from kei_agent.model_classifier import UsageLimited, classify_research
+                try:
+                    use_case = await classify_research(self.config, self.store, prompt)
+                except UsageLimited as e:
+                    return runner.RunResult(is_error=True, errors=[str(e)], limit_reset_at=e.reset_at)
+        try:
+            recipe = resolve_selected(self.config, self.store, actor, use_case,
+                                      manual=actor == research.AGENT and research.is_manual_use_case(use_case))
+        except ModelPolicyError as e:
+            return runner.RunResult(is_error=True, errors=[str(e)])
         with self.claude_running():
             if agent is not None:
                 return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
-                                          on_activity, on_text)
-            return await runner.run_claude(effective_config, ws, prompt, session_id, channel, thread_ts,
-                                           on_activity, on_text)
+                                          use_case, on_activity, on_text)
+            return await runner.run_model(
+                self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts), prompt,
+                on_activity, on_text,
+            )
 
     # 決まった時刻の処理から使う（schedule.py）
 
-    async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str) -> runner.RunResult:
+    async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str,
+                           *, actor: str = research.AGENT,
+                           use_case: UseCase | None = None) -> runner.RunResult:
         """スレッドを作らずに claude -p を動かす（定期処理用）。結果を見てから投稿先を決める。"""
         assert ws.cwd is not None
         themes.ensure_workspace(ws)
         async with self.semaphore:
             run_id = self.store.start_run("", "", channel_name, trigger)
-            result = await self.run_claude(ws, prompt)
+            if use_case is None:
+                result = await self.run_agent(ws, prompt)
+            else:
+                try:
+                    recipe = resolve_selected(self.config, self.store, actor, use_case)
+                except ModelPolicyError as e:
+                    result = runner.RunResult(is_error=True, errors=[str(e)])
+                else:
+                    agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
+                    if agent is not None:
+                        result = await research.run(agent, ws, prompt, None, "", "", use_case)
+                    else:
+                        result = await runner.run_model(
+                            self.config, runner.ExecutionRequest(ws, recipe, None, "", ""), prompt,
+                        )
             self.store.end_run(run_id, result.is_error, result.cost_usd)
         return result
 
@@ -780,7 +810,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if not catalog:
             return False
         await self.thread_ui(req).activity(router.STATUS_TEXT)
-        choice = await router.pick_across(self.config, catalog, req.text)
+        choice = await router.pick_across(self.config, catalog, req.text, store=self.store)
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
     async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
@@ -942,7 +972,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         on_activity, on_text = (ui.activity, ui.text) if ui is not None else (None, None)
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
-            return await self.run_claude(ws, prompt, session_id, req.channel, req.thread_ts,
+            return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
                                          on_activity, on_text)
 
         result = await attempt(prompt, session_id)

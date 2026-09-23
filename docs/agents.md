@@ -82,21 +82,15 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 ### CLIとモデルの選択
 
-`config.toml` の `[agents.<agent>]` が実行器と既定レシピの正であり、`[model_recipes.<name>]` が実モデル名と推論強度の正である。skill は手順を定義し、モデル名を埋め込まない。更新手順は [model-policy.md](model-policy.md) を参照する。
+`config.toml` の `[agents.<agent>]` は provider 選択だけを持つ。model と effort は、実行時にユースケース別の provider 固有レシピから解決する。skill は agent のレシピを継承し、モデル名を埋め込まない。例外的な明示ラベルだけが専用レシピを選べる。
 
 ```toml
 [agents.research]
-provider = "claude"       # または "codex"
-default_recipe = "standard"
+provider = ""             # App Home で "claude" または "codex" を選ぶ
 connectors = []            # Codexで使う有効なMCP名だけを明示する
-
-[model_recipes.standard]
-provider = "codex"
-model = "gpt-5.6-terra"
-reasoning_effort = "high"
 ```
 
-agent単位でClaude/Codexへ切り替えられる。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。レシピのproviderとagentのproviderが一致しなければ起動しない。暗黙のモデル切り替えや、契約上限時の別モデルへの自動フォールバックはしない。
+agent単位でClaude/Codexへ切り替えられる。通常実行の allowlist は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` のみ。Astra/Fable は依頼者が明示指定した例外だけに使い、通常レシピには割り当てない。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。provider 未選択・connector 不足・契約上限では理由を出して停止し、暗黙のモデル切り替えや別 provider への自動フォールバックはしない。
 
 Codexで外部 connector を使うときは、`connectors` に名前を明示し、`codex mcp list --json` で有効と確認できるものだけを列挙する。実行前には agent ごとの許可範囲と照合し、未接続・担当外なら起動しない。許可範囲は研究が `research-notion` と `wandb`、大学が `notion` と `box`、仕事が読み取り専用の `microsoft-365`。SharePoint はこの経路に含めない。connector の自動インストール、OAuth、認証情報・URLの移行はしない。
 

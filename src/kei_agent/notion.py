@@ -282,10 +282,11 @@ class Setup:
 
     def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
         """(database_id, data_source_id, property_ids) を返す。同名のデータベースがあれば使う。"""
-        db_id = None
-        for block in self.notion.children(parent):
-            if block["type"] == "child_database" and block["child_database"]["title"] == title:
-                db_id = block["id"]
+        matches = [block["id"] for block in self.notion.children(parent)
+                   if block["type"] == "child_database" and block["child_database"]["title"] == title]
+        if len(matches) > 1:
+            raise NotionError(f"{title} という同名のデータベースが重複しています。正本を確認してから整理してください")
+        db_id = matches[0] if matches else None
         properties = dict(spec["properties"])
         if db_id is None:
             for name, (target, synced) in spec.get("relations", {}).items():

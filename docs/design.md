@@ -19,7 +19,7 @@
 | 実行する | 研究・大学・仕事の3エージェント（同じ Mac の別プロセス、A2A） |
 | ファイルを置く | `~/research/` |
 | 知見を残す | Notion |
-| 声で相談する | Codex App（ChatGPT Voice） |
+| 声で相談する | Kei Agent Voice（OpenAI Realtime API） |
 
 ## 2. Slack
 
@@ -43,12 +43,12 @@
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
 | 言語 | Python（uv）+ Slack Bolt for Python | 研究のスクリプトと同じ言語でそろう |
-| 実行エンジン | Claude Code CLI（`claude -p`）。サブスクリプションで動かす | 今の skill や設定をそのまま使える |
+| 実行エンジン | 選択済み provider の Claude Code CLI（`claude -p`）または Codex CLI（`codex exec`）。agent ごとに選び、用途別 recipe が model / effort を固定する | Claude と Codex を同格に扱いつつ、上位 model への自動切替を防ぐ |
 | スレッドと会話 | 1スレッド = 1セッション（`--resume`）。セッションが失われたら、スレッドの履歴をプロンプトに入れて新しいセッションで復元する（200件ずつ読み、新しいほうから600件まで。落とした分は件数を書いて渡す） | ふだんは文脈がそのまま残り、サーバーを移したときも止まらない |
 | 途中で止まった依頼 | claude に渡している間は「処理中」の控えを残し、起動時に残っていたものを「入れ替えで止まった」と断ってやり直す | 入れ替えや強制終了のたびに、動いていた作業が黙って消えて 👀 だけが残っていた |
 | 動かす場所 | 自分の Mac。`launchd` に登録し、ログイン時に起動して落ちたら再起動する | 開発中は手元の方が直しやすい。Mac mini に移すときも同じ設定を使える |
 | 秘密情報 | `~/.config/zsh/local/kei-agent*.zsh`。起動用のシェルスクリプトが読み込んでから起動する | `launchd` からは `~/.zshrc` が読まれない |
-| 契約の上限 | `claude -p` が `Claude AI usage limit reached|<エポック秒>` を返したら、その依頼を「明けてからやり直すもの」として覚え、明ける時刻をスレッドに書く。返ってきた時刻が過去のときは30分待つ | 上限は必ず来る。人が気づいて頼み直すまで止まるのを避ける |
+| 契約の上限 | provider が利用上限を返したら、その依頼を「明けてからやり直すもの」として覚え、明ける時刻をスレッドに書く。返ってきた時刻が過去のときは30分待つ | 上限は必ず来る。人が気づいて頼み直すまで止まるのを避ける |
 | 名前 | Kei Agent。声では「Kei」、自分のことは「僕」 | Keitaroの名前から |
 
 ## 4. テーマと作業用ディレクトリ
@@ -152,8 +152,10 @@
 | 置き場所 | Task の正は Notion。論文は `papers/`、テーマの前提は `CLAUDE.md`。Daily と振り返りは Notion のノートにもページを作り、ファイルも残す | 状態や期日を見渡せるのは Notion。Kei Agent と Codex が読むものはファイルのまま |
 | 🌙 | Slack で 🌙 を付けると Notion に Task ができる。外すと「未着手」に戻す | Notion で直接「今夜やる」にした Task も同じ流れで動く |
 | Claude と Notion | 研究の Claude には Notion を触らせない。本体が API で取ってきてファイルにして渡す | sandbox の方針（通信先を絞る、トークンを渡さない）を保つ |
-| 授業の Notion | 別のコネクトを作り、「授業」「課題」の2つだけを共有する | 研究のデータベースと事故で混ざらない |
+| 授業の Notion | 別のコネクトを作り、「授業」「課題」「学習ログ」「📊 成績履歴」「🎓 単位要件」「📈 GPA推移」の6 DBだけを共有する | 研究のデータベースと事故で混ざらず、課題・学習時間・成績・卒業要件を relation で一貫して扱える |
 | ビュー | 並び替え・絞り込み・列の順番は公開 API で作れないので、Claude の Notion 連携から整えてある | 作ったばかりのデータベースは英語の `Default view` に全列が作成順で並ぶ。作り直したらそこも直す |
+
+LLM の起動は actor と use case から解決した recipe だけで行う。資料確認だけの `read-only` request には編集、Bash、書込 MCP を渡さず、provider や上位モデルへの自動切替もしない。
 
 ## 9. Slack から変更できる設定
 
@@ -193,8 +195,8 @@
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
 | 役割の分け方 | 本体がオーケストレーター。エージェントは頼まれた仕事だけをして返す | 柵と鍵が1か所に残る |
-| LLM の持ち方 | **エージェントごとに自分の claude を持つ**。ただし依頼者への約束（上限で待つ・やり直す）と、どのエージェントに振るかの判定はオーケストレータが行う。 | ドメインの知識はそのエージェントに閉じたほうが速い。いっぽう契約の枠は1つなので、枠の使い方を分散させると二重にやり直すことになるため。 |
-| 振り分け | 名刺からスキルの一覧を作り、軽いモデル（Haiku）に選ばせる。選べなければそのドメインの `ask` に回す | エージェントが増えても振り分けのコードを変えなくてよい。キーワードでは「先週どのくらい進んだ？」を取りこぼす |
+| LLM の持ち方 | **agent ごとに選んだ provider の CLI** を持つ。model / effort は actor と use case から recipe で解決し、skill は agent の recipe を継承する。依頼者への約束（上限で待つ・やり直す）と、どの agent に振るかの判定はオーケストレータが行う。 | Claude と Codex のどちらも既定にせず、domain と作業の重さに合わせつつ、権限と料金の境界を一か所で確定できる。 |
+| 振り分け | 名刺からスキルの一覧を作り、選択済み provider の lightweight routing recipe（Claude は Haiku、Codex は Luna）に選ばせる。選べなければそのドメインの `ask` に回す | エージェントが増えても振り分けのコードを変えなくてよい。キーワードでは「先週どのくらい進んだ？」を取りこぼす |
 | 版と使う機能 | A2A v1.0。`/.well-known/agent-card.json` に名刺、JSON-RPC で `SendMessage` / `GetTask`、`A2A-Version: 1.0` のヘッダ。数秒で終わる仕事はそのまま待ち、数分かかる仕事は `SendStreamingMessage`（SSE）で経過を受け取る | `SendMessage` は相手が終わるまで返ってこないので、長い仕事では途中の様子が出せない |
 | 実装 | サーバー側は公式の `a2a-sdk`（土台は `src/kei_agent_a2a/server.py`）。クライアントは aiohttp で薄く自前（`src/kei_agent/a2a.py`） | 仕様の追従は SDK に任せる。本体に FastAPI などを持ち込まない |
 | 置き場所と合言葉 | 同じ Mac の別プロセス（launchd、`127.0.0.1` のみ）。共有の Bearer トークン（`KEI_AGENT_A2A_TOKEN`）。名刺は誰でも読めるが、仕事を頼むには合言葉が要る | 外に出さないので、証明書や利用者の管理を持ち込まなくてよい |
@@ -238,7 +240,7 @@
 
 | 項目 | 決めたこと | 理由 |
 |---|---|---|
-| 役割の分け方 | **声は OpenAI Realtime API**、調べものは Codex、作業は Claude（Slack）。人格はどれも Kei Agent | お金がかかるのは声の分だけ。考えるところは購読のままにする |
+| 役割の分け方 | **声は固定 Realtime API**、内容確認は選択済み provider の担当 agent、作業は Slack の Kei Agent。人格はどれも Kei Agent | 音声の即応性と、agent ごとの provider 選択を両立する |
 | 本体 → 声（状態を伝える） | A2A の `notify` を投げっぱなしで送る（`voice.py`）。渡すのは出来事だけで、言い方と顔は声のレイヤが決める | 机の上のロボットの再生時間に Slack を引きずらせない。顔の対応表を2か所に置かない |
 | 声 → 本体（依頼を渡す） | `<state_dir>/asks/` にファイルを置き、本体が数秒ごとに拾ってスレッドを立てる（`ask.py`、`kei-agent-ask`） | Slack の窓口を2つにすると、柵と権限の判定が2か所に散る |
 | 依頼を渡す前 | 下書き（`propose_request`）と渡す（`send_request`）を分け、読み上げて確認してから渡す | 1回の聞き間違いで作業が動き出さないようにする |
@@ -284,7 +286,8 @@ Stack-chan には HTTP で顔だけ指示する（`/play_wav` はファイル単
 |---|---|
 | `assistant.py` | 依頼の受け付けから返信までの本筋 |
 | `themes.py` | チャンネル → テーマ → 作業用ディレクトリの対応 |
-| `runner.py` | `claude -p` の起動、sandbox と権限、stream-json の読み取り |
+| `model_policy.py` | actor / use case / provider から許可 model と effort を解決する recipe。Astra / Fable は明示指定だけ |
+| `runner.py` | 解決済み `ExecutionRequest` による Claude / Codex CLI の起動、sandbox と権限、stream-json / JSONL の読み取り |
 | `guard.py` | 柵。**Kei Agent 自身に直させない** |
 | `store.py` | SQLite（スレッドとセッション、ジョブ、Task、定期処理、実行時間、接続先、改善） |
 | `agents.py` / `a2a.py` / `router.py` | ほかのエージェントに頼む口と、どこに振るかの判定 |
@@ -295,7 +298,7 @@ Stack-chan には HTTP で顔だけ指示する（`/play_wav` はファイル単
 ## 15. これからの展望
 
 - **計算先を増やす**（研究室の GPU サーバ、大学の HPC）… 使える機械がまだないので未実装
-  増やすときも **Claude から見える形は変えない**（`submit / status / cancel` の3つのまま）。
+  増やすときも **担当 agent から見える形は変えない**（`submit / status / cancel` の3つのまま）。
   ジョブに `--host <名前>` を足し、名前は `config.toml` の `[compute.<名前>]` に書いたものだけにする。
   大きい入力は計算先に置いたままにし、持ち帰るのは `outputs/` とログだけ。
   クラウドの従量課金と Colab は使わない（止め忘れと、無人で走らないため）

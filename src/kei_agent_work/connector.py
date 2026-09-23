@@ -109,8 +109,15 @@ async def ask(config: Config, question: str, prompt_path: Path | None = None, st
     guide = (prompt_path or config.repo_root / "prompts" / "work.md")
     instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
     prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
+    from kei_agent.model_classifier import UsageLimited, classify_work
+    actual_store = store or Store(config.db_path)
+    try:
+        use_case = await classify_work(config, actual_store, question)
+    except UsageLimited as e:
+        raise WorkCalendarError(str(e)) from None
     try:
         return await claude.ask_connector(config, prompt, ALLOWED_ASK, config.agent_plugin_dir(AGENT),
-                                          DENY, ASK_TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT)
+                                          DENY, ASK_TIMEOUT_MINUTES, store=actual_store, agent=AGENT,
+                                          use_case=use_case)
     except claude.ConnectorError as e:
         raise WorkCalendarError(str(e)) from None
