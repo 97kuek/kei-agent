@@ -53,9 +53,9 @@ def parse_probe_events(lines: Iterable[str]) -> ProbeResult:
         if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
             thread_id = event["thread_id"]
         item = event.get("item")
-        if event.get("type") == "item.completed" and isinstance(item, dict):
-            if item.get("type") == "agent_message" and item.get("text") == PROBE_ACKNOWLEDGEMENT:
-                acknowledged = True
+        if (event.get("type") == "item.completed" and isinstance(item, dict)
+                and item.get("type") == "agent_message" and item.get("text") == PROBE_ACKNOWLEDGEMENT):
+            acknowledged = True
         if event.get("type") in {"error", "turn.failed"}:
             failure = "Codex の固定プローブが失敗しました"
     if failure:

@@ -1,7 +1,7 @@
 import pytest
 
-from kei_agent.agent_policy import policy_for
 from kei_agent import themes
+from kei_agent.agent_policy import policy_for
 from kei_agent.themes import ChannelKind
 
 

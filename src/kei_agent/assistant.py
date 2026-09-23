@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections import defaultdict
 from collections.abc import Coroutine
@@ -19,6 +20,8 @@ from contextlib import contextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+
+import aiohttp
 
 from kei_agent import (
     a2a,
@@ -73,6 +76,21 @@ from kei_agent.theme_files import (
 )
 from kei_agent.themes import ChannelKind, Workspace
 from kei_agent.thread_ui import ThreadUI
+from kei_agent.time_cards import (
+    COURSE_CALLBACK,
+    MEMO,
+    MEMO_CALLBACK,
+    RETRY,
+    START,
+    STOP,
+    course_view,
+    memo_view,
+    retry_blocks,
+)
+from kei_agent.time_cards import blocks as time_blocks
+from kei_agent.time_cards import fallback_text as time_fallback
+from kei_agent.time_tracking import TimeEntry, TimerContext, TimeTracker
+from kei_agent.timelog import TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.work import WorkChannel
 
 log = logging.getLogger(__name__)
@@ -164,6 +182,165 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         # しばらくたったら読み直す（本体の再起動を待たない）
         self.agent_skills: dict[str, list[dict]] = {}
         self.agent_skills_read_at: dict[str, float] = {}
+        self.time_tracker = TimeTracker(store)
+
+    async def on_time_action(self, body: dict) -> None:
+        if not self.is_allowed(body.get("user", {}).get("id")):
+            return
+        action = (body.get("actions") or [{}])[0]
+        channel = body.get("channel") or {}
+        channel_id, name = str(channel.get("id") or ""), str(channel.get("name") or "")
+        if not channel_id:
+            return
+        if not name:
+            name = await self.channel_name(channel_id)
+        domain = "course" if name.startswith("20_") else "work" if name.startswith("30_") else "research"
+        user_id = str(body["user"]["id"])
+        action_id = action.get("action_id")
+        if action_id == START:
+            if domain == "course" and themes.theme_name(name) == "course":
+                reply = await self.ask_course("list-current-courses")
+                items = reply.data.get("items") if reply.ok else None
+                if not items:
+                    await self._time_notice(channel_id, "今学期の履修科目を読み出せなかったよ。Notion の「授業」を確認してね。")
+                    return
+                await self.slack.views_open(trigger_id=body["trigger_id"], view=course_view(channel_id, items))
+                return
+            binding = self.time_tracker.course_binding(channel_id)
+            entry, previous = self.time_tracker.start(TimerContext(user_id, domain, channel_id, themes.theme_name(name),
+                binding.course_page_id if binding else "", binding.course_name if binding else ""))
+            if previous:
+                await self._sync_time_entry(previous)
+                await self._update_time_card(previous.channel_id, None)
+            await self._update_time_card(channel_id, entry)
+        elif action_id == STOP:
+            entry = self.time_tracker.stop(user_id)
+            if entry:
+                await self._sync_time_entry(entry)
+                await self._update_time_card(entry.channel_id, None)
+        elif action_id == MEMO:
+            entry = self.time_tracker.entry(str(action.get("value") or ""))
+            if entry and entry.user_id == user_id:
+                await self.slack.views_open(trigger_id=body["trigger_id"], view=memo_view(entry))
+        elif action_id == RETRY:
+            entry = self.time_tracker.entry(str(action.get("value") or ""))
+            if entry and entry.user_id == user_id:
+                await self._sync_time_entry(entry, force=True)
+
+    async def on_time_view(self, body: dict) -> dict[str, str] | None:
+        """時間カードのモーダルを受ける。Slack には ack 前に返すエラーだけを返す。"""
+        if not self.is_allowed(body.get("user", {}).get("id")):
+            return {"course": "この操作は利用できません"}
+        view = body.get("view") or {}
+        callback = view.get("callback_id")
+        values = view.get("state", {}).get("values", {})
+        if callback == MEMO_CALLBACK:
+            entry = self.time_tracker.entry(str(view.get("private_metadata") or ""))
+            if entry is None or entry.user_id != str(body["user"]["id"]):
+                return {"memo": "この記録はもうありません"}
+            memo = str(values.get("memo", {}).get("text", {}).get("value") or "")
+            self.time_tracker.add_memo(entry.id, memo)
+            return None
+        if callback == COURSE_CALLBACK:
+            channel_id = str(view.get("private_metadata") or "")
+            raw = str(values.get("course", {}).get("select", {}).get("selected_option", {}).get("value") or "")
+            try:
+                import json
+                picked = json.loads(raw)
+                course_id, course_name = str(picked["id"]), str(picked["name"])
+            except (ValueError, KeyError, TypeError):
+                return {"course": "科目を選び直してね"}
+            name = await self.channel_name(channel_id)
+            self.time_tracker.bind_course_channel(channel_id, course_id, course_name)
+            entry, previous = self.time_tracker.start(TimerContext(str(body["user"]["id"]), "course", channel_id,
+                themes.theme_name(name), course_id, course_name))
+            if previous:
+                await self._sync_time_entry(previous)
+                await self._update_time_card(previous.channel_id, None)
+            await self._update_time_card(channel_id, entry)
+        return None
+
+    async def _update_time_card(self, channel: str, entry) -> None:
+        card = self.store.time_card(channel)
+        if card is None:
+            posted = await self.slack.chat_postMessage(channel=channel, text=time_fallback(entry), blocks=time_blocks(entry))
+            self.store.upsert_time_card(channel, str(posted["ts"]))
+        else:
+            await self.slack.chat_update(channel=channel, ts=card["message_ts"], text=time_fallback(entry), blocks=time_blocks(entry))
+
+    async def _time_notice(self, channel: str, text: str) -> None:
+        await self.slack.chat_postMessage(channel=channel, text=f"⚠️ {text}")
+
+    async def _sync_time_entry(self, entry: TimeEntry, force: bool = False) -> None:
+        if entry.ended_at is None:
+            return
+        if entry.toggl_state == "needs_review" and not force:
+            return
+        if entry.toggl_state != "done":
+            toggl = load_toggl()
+            if toggl is None:
+                self.store.set_time_delivery(entry.id, toggl_state="pending")
+                return
+            try:
+                await asyncio.to_thread(toggl.record_completed, entry.description, entry.description,
+                                        datetime.fromtimestamp(entry.started_at).astimezone(),
+                                        max(1, int(entry.ended_at - entry.started_at)))
+            except TogglAmbiguousWrite:
+                self.store.set_time_delivery(entry.id, toggl_state="needs_review")
+                await self.slack.chat_postMessage(channel=entry.channel_id, text="Toggl の確認が必要です",
+                                                   blocks=retry_blocks(entry))
+                return
+            except TogglError:
+                self.store.set_time_delivery(entry.id, toggl_state="pending")
+                return
+            else:
+                self.store.set_time_delivery(entry.id, toggl_state="done")
+        entry = self.time_tracker.entry(entry.id) or entry
+        if entry.domain == "work":
+            self.store.set_time_delivery(entry.id, notion_state="not_required")
+            return
+        card = self.store.time_card(entry.channel_id)
+        slack_url = ""
+        if card is not None:
+            with suppress(Exception):
+                slack_url = await self.permalink(entry.channel_id, card["message_ts"])
+        minutes = max(1, int((entry.ended_at - entry.started_at + 59) // 60))
+        started_at = datetime.fromtimestamp(entry.started_at).astimezone().isoformat()
+        try:
+            if entry.domain == "course":
+                reply = await self.ask_course("record-study-time", entry_id=entry.id, started_at=started_at,
+                                              duration_minutes=minutes, course_page_id=entry.course_page_id,
+                                              memo=entry.memo, slack_url=slack_url)
+                if not reply.ok:
+                    raise RuntimeError("大学エージェントが学習ログを記録できませんでした")
+            else:
+                await self._record_research_time(entry, started_at, minutes, slack_url)
+        except Exception:
+            log.warning("Notion の時間記録は後で再試行します", exc_info=True)
+            self.store.set_time_delivery(entry.id, notion_state="pending")
+        else:
+            self.store.set_time_delivery(entry.id, notion_state="done")
+
+    async def _record_research_time(self, entry: TimeEntry, started_at: str, minutes: int, slack_url: str) -> None:
+        token = os.environ.get("KEI_AGENT_NOTION_GATEWAY_TOKEN", "")
+        if not token:
+            raise RuntimeError("研究 Notion gateway の合言葉がありません")
+        async with (aiohttp.ClientSession() as session,
+                    session.post(f"{self.config.notion_gateway_url.rstrip('/')}/time-logs", headers={
+                        "Authorization": f"Bearer {token}"}, json={
+                            "entry_id": entry.id, "started_at": started_at, "duration_minutes": minutes,
+                            "theme": themes.theme_name(entry.channel_name), "memo": entry.memo,
+                            "slack_url": slack_url,
+                        }, timeout=aiohttp.ClientTimeout(total=30)) as response):
+            if response.status // 100 != 2:
+                raise RuntimeError(f"研究 Notion gateway: HTTP {response.status}")
+
+    async def retry_time_entries(self) -> None:
+        """ネットワーク切断などで保留になった記録だけを、次の定期確認で再送する。"""
+        for row in self.store.pending_time_entries():
+            entry = self.time_tracker.entry(row["id"])
+            if entry is not None and entry.toggl_state != "needs_review":
+                await self._sync_time_entry(entry)
 
     @contextmanager
     def claude_running(self):
@@ -1003,6 +1180,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             try:
                 await self.poll_jobs()
                 await self.retry_deferred()
+                await self.retry_time_entries()
                 failing = False
             except Exception as e:
                 log.exception("ジョブの確認に失敗しました")

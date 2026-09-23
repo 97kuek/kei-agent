@@ -40,6 +40,14 @@ def test_only_the_courses_in_notion_are_counted():
     assert set(by_course) == {"データベース", "情報セキュリティB"}
 
 
+def test_totals_normalizes_a_university_project_prefix():
+    entries = [{"duration": 1800, "type": "activity", "project": {"name": "大学 / データベース"}}]
+
+    by_course = toggl_report.totals(entries, courses={"データベース"})
+
+    assert by_course == {"データベース": {toggl_report.NO_NAME: 1800.0}}
+
+
 def test_lines_put_the_longest_course_first():
     text = "\n".join(toggl_report.lines(
         toggl_report.totals(ENTRIES, courses={"データベース", "情報セキュリティB"}),

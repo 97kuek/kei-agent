@@ -101,7 +101,7 @@ async def test_card_tells_what_the_agent_can_do(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"].startswith("Kei Agent")
     assert [s["id"] for s in card["skills"]] == [
-        "sync-assignments", "list-due", "list-classes", "ask", "time-report"]
+        "sync-assignments", "list-due", "list-classes", "list-current-courses", "record-study-time", "ask", "time-report"]
     # 自由な質問（ask）は claude を動かすので、流しながら返す
     assert card["capabilities"].get("streaming") is True
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"

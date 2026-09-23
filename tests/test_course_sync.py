@@ -9,8 +9,11 @@ pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っ�
 from kei_agent_course import notion_sync
 from kei_agent_course.ics import Event
 
-STATE = {"databases": {"courses": {"data_source_id": "ds-courses"},
-                       "assignments": {"data_source_id": "ds-assignments"}}}
+STATE = {"home_page_id": "course-home", "databases": {
+    "courses": {"data_source_id": "ds-courses"},
+    "assignments": {"data_source_id": "ds-assignments"},
+    "study_logs": {"data_source_id": "ds-study-logs"},
+}}
 
 REPORT = Event(uid="2345678@moodle", summary="第3回レポート の 提出期限",
                starts_at=datetime(2026, 9, 25, 23, 59), course="データベース(2019ZZ26)",
@@ -36,8 +39,9 @@ def _row(event, page_id="row-1", course_page="page-db", when=None):
 
 
 class FakeNotion:
-    def __init__(self, courses=(), assignments=()):
-        self.rows = {"ds-courses": list(courses), "ds-assignments": list(assignments)}
+    def __init__(self, courses=(), assignments=(), study_logs=()):
+        self.rows = {"ds-courses": list(courses), "ds-assignments": list(assignments),
+                     "ds-study-logs": list(study_logs)}
         self.calls = []
 
     def paginate(self, method, path, body=None):
@@ -171,6 +175,31 @@ def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
     found = notion_sync.CourseNotion(notion, STATE).courses_on(on=date(2026, 9, 21))
     # 時限の早い順。時限のないもの（集中講義など）は最後
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
+
+
+def test_current_courses_returns_only_this_terms_enrolled_courses():
+    from datetime import date
+
+    found = notion_sync.CourseNotion(FakeNotion(courses=COURSE_ROWS_FULL), STATE).current_courses(date(2026, 9, 21))
+
+    assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
+
+
+def test_study_time_log_is_idempotent_and_relates_the_course():
+    notion = FakeNotion(courses=COURSE_ROWS)
+    course = notion_sync.CourseNotion(notion, STATE)
+
+    first = course.record_study_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "page-db", "復習",
+                                     "https://slack.example/p1")
+    second = course.record_study_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "page-db", "復習",
+                                      "https://slack.example/p1")
+
+    assert first == second == {"entry_id": "entry-1", "notion_url": ""}
+    posts = [call for call in notion.calls if call[:2] == ("POST", "/pages")]
+    assert len(posts) == 1
+    props = posts[0][2]["properties"]
+    assert props["科目"]["relation"] == [{"id": "page-db"}]
+    assert props["Kei Agent 記録ID"]["rich_text"][0]["text"]["content"] == "entry-1"
 
 
 def test_waseda_periods_turn_into_times():

@@ -25,6 +25,8 @@ class ResearchNotion:
         self.notion = notion
         self.scope = scope
         self.audit = audit
+        self._time_logs: str | None = None
+        self._recorded_time_ids: set[str] = set()
 
     # 読む
 
@@ -115,6 +117,63 @@ class ResearchNotion:
             "title": [{"text": {"content": title}}],
             "initial_data_source": {"properties": properties},
         }, parent_id)
+
+    def record_time(self, entry_id: str, started_at: str, duration_minutes: int, theme: str,
+                    memo: str = "", slack_url: str = "") -> dict:
+        """研究ホーム内の「研究ログ」に、同じ記録IDを一度だけ入れる。"""
+        if not entry_id or not theme.strip() or not 1 <= duration_minutes <= 24 * 60:
+            raise ValueError("研究時間の記録内容が不正です")
+        data_source = self._research_time_logs()
+        if entry_id in self._recorded_time_ids:
+            return {"entry_id": entry_id, "notion_url": ""}
+        found = self.query(data_source, {
+            "property": "Kei Agent 記録ID", "rich_text": {"equals": entry_id},
+        })
+        if found:
+            self._recorded_time_ids.add(entry_id)
+            return {"entry_id": entry_id, "notion_url": found[0].get("url", "")}
+        props = {
+            "タイトル": {"title": [{"text": {"content": f"研究 / {theme.strip()}"}}]},
+            "Kei Agent 記録ID": {"rich_text": [{"text": {"content": entry_id}}]},
+            "日付": {"date": {"start": started_at}}, "時間（分）": {"number": duration_minutes},
+            "テーマ": {"rich_text": [{"text": {"content": theme.strip()}}]},
+            "メモ": {"rich_text": [{"text": {"content": memo[:1000]}}]} if memo else {"rich_text": []},
+            "Slack": {"url": slack_url} if slack_url else {"url": None},
+        }
+        page = self._call("record_time", "POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": data_source}, "properties": props},
+            self.scope.root_id)
+        self._recorded_time_ids.add(entry_id)
+        return {"entry_id": entry_id, "notion_url": page.get("url", "")}
+
+    def _research_time_logs(self) -> str:
+        """既存の研究ログを再利用し、なければ一度だけ作る。"""
+        if self._time_logs:
+            return self._time_logs
+        # gateway が再起動しても同名DBを増やさない。検索結果も必ず scope で絞る。
+        for item in self.search("研究ログ"):
+            if item.get("object") != "database":
+                continue
+            database_id = str(item.get("id") or "")
+            if not database_id:
+                continue
+            detail = self._call("read_time_logs", "GET", f"/databases/{database_id}", None,
+                                self.scope.root_id)
+            sources = detail.get("data_sources") or []
+            source_id = str((sources[0] if sources else {}).get("id") or database_id)
+            if source_id:
+                self._time_logs = source_id
+                return source_id
+        db = self.create_database(self.scope.root_id, "研究ログ", {
+                "タイトル": {"title": {}}, "Kei Agent 記録ID": {"rich_text": {}}, "日付": {"date": {}},
+                "時間（分）": {"number": {"format": "number"}}, "テーマ": {"rich_text": {}},
+                "メモ": {"rich_text": {}}, "Slack": {"url": {}},
+            })
+        sources = db.get("data_sources") or []
+        self._time_logs = str((sources[0] if sources else {}).get("id") or db.get("id") or "")
+        if not self._time_logs:
+            raise NotionError("研究ログのデータソースIDを取得できませんでした")
+        return self._time_logs
 
     def update_database(self, data_source_id: str, properties: dict) -> dict:
         """データベースの列（スキーマ）を足す・直す。"""
