@@ -47,7 +47,20 @@ sed -e "s|__REPO__|$REPO|g" -e "s|__LOG_DIR__|$LOG_DIR|g" "$REPO/deploy/$LABEL.p
 plutil -lint "$PLIST" >/dev/null
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST"
+# bootout の完了は非同期になることがあり、直後の bootstrap は
+# "Input/output error (5)" で競合する。短く再試行してから失敗を返す。
+bootstrapped=false
+for _ in {1..5}; do
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+    bootstrapped=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$bootstrapped" != true ]]; then
+  echo "LaunchAgent の登録に失敗しました: $LABEL" >&2
+  exit 1
+fi
 launchctl kickstart -k "$DOMAIN/$LABEL"
 echo "登録しました（$LABEL）。ログ: $LOG_DIR/"
 echo "状態の確認: launchctl print $DOMAIN/$LABEL | grep -E 'state|last exit'"
