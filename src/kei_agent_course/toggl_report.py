@@ -42,6 +42,8 @@ def totals(entries: list[dict], courses: Iterable[str] | None = None) -> dict[st
         if entry.get("type") == "break" or entry.get("deleted_at"):
             continue
         course = (entry.get("project") or {}).get("name") or "-"
+        if course.startswith("大学 / "):
+            course = course.removeprefix("大学 / ").strip() or "-"
         if known is not None and course not in known:
             continue
         out[course][(entry.get("description") or "").strip() or NO_NAME] += float(duration)

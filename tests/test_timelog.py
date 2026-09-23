@@ -84,6 +84,27 @@ def test_toggl_entries_reads_every_page():
     assert query["date_from"].endswith("Z") and query["date_to"].endswith("Z")
 
 
+def test_toggl_records_one_completed_taskless_entry():
+    toggl = timelog.Toggl("key", organization_id=7, workspace_id=8)
+    posted = []
+
+    def get(path, query):
+        assert path == "/organizations/7/workspaces/8/projects"
+        return {"data": [{"id": 41, "name": "大学 / マルチメディア工学A"}]}
+
+    toggl._request = get
+    toggl._post = lambda path, body: posted.append((path, body)) or {}
+    started = datetime(2026, 9, 23, 10, 0, tzinfo=UTC)
+
+    toggl.record_completed("大学 / マルチメディア工学A", "大学 / マルチメディア工学A", started, 1500)
+
+    assert posted == [(
+        "/organizations/7/workspaces/8/time-entries/bulk",
+        {"items": [{"project_id": 41, "description": "大学 / マルチメディア工学A",
+                    "start": "2026-09-23T10:00:00+00:00", "duration": 1500, "type": "activity"}]},
+    )]
+
+
 class FakeToggl:
     def __init__(self, entries):
         self._entries = entries

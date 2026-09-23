@@ -46,6 +46,10 @@ class TogglError(RuntimeError):
     pass
 
 
+class TogglAmbiguousWrite(TogglError):
+    """送信後に接続が切れた可能性があり、二重送信を避けるべき失敗。"""
+
+
 def week_start(day: date) -> date:
     """その日を含む週の月曜。"""
     return day - timedelta(days=day.weekday())
@@ -86,6 +90,7 @@ class Toggl:
         self.token = token
         self.organization_id = organization_id
         self.workspace_id = workspace_id
+        self._project_ids: dict[str, int] = {}
 
     def _request(self, path: str, query: dict) -> dict:
         url = f"{TOGGL_API}{path}?{urllib.parse.urlencode(query)}"
@@ -97,6 +102,59 @@ class Toggl:
             raise TogglError(f"GET {path}: {e.code} {e.read().decode('utf-8', 'replace')[:200]}") from None
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
             raise TogglError(f"GET {path}: {e}") from None
+
+    def _post(self, path: str, body: dict) -> dict:
+        req = urllib.request.Request(
+            f"{TOGGL_API}{path}", method="POST", data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                text = resp.read().decode("utf-8", "replace")
+                return json.loads(text) if text.strip() else {}
+        except urllib.error.HTTPError as e:
+            raise TogglError(f"POST {path}: {e.code} {e.read().decode('utf-8', 'replace')[:200]}") from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise TogglAmbiguousWrite(f"POST {path}: {type(e).__name__}") from None
+        except json.JSONDecodeError as e:
+            raise TogglError(f"POST {path}: JSONDecodeError: {e}") from None
+
+    def _project_id(self, name: str) -> int:
+        if name in self._project_ids:
+            return self._project_ids[name]
+        path = f"/organizations/{self.organization_id}/workspaces/{self.workspace_id}/projects"
+        for page in range(1, MAX_PAGES + 1):
+            projects = self._request(path, {"page": page, "per_page": PER_PAGE}).get("data") or []
+            for project in projects:
+                if project.get("name") == name and isinstance(project.get("id"), int):
+                    self._project_ids[name] = project["id"]
+                    return project["id"]
+            if len(projects) < PER_PAGE:
+                break
+        created = self._post(path, {"name": name})
+        project = created.get("data") if isinstance(created.get("data"), dict) else created
+        project_id = project.get("id") if isinstance(project, dict) else None
+        if not isinstance(project_id, int):
+            raise TogglError("Toggl が作ったプロジェクトIDを返しませんでした")
+        self._project_ids[name] = project_id
+        return project_id
+
+    def record_completed(self, project_name: str, description: str, started_at: datetime,
+                         duration_seconds: int) -> None:
+        """止めた時点で確定した、タスクなしの時間を1件だけ入れる。"""
+        if not project_name.strip() or not description.strip() or duration_seconds <= 0:
+            raise ValueError("プロジェクト、説明、正の時間を指定してください")
+        if started_at.tzinfo is None:
+            raise ValueError("開始時刻にはタイムゾーンが必要です")
+        project_id = self._project_id(project_name.strip())
+        path = f"/organizations/{self.organization_id}/workspaces/{self.workspace_id}/time-entries/bulk"
+        self._post(path, {"items": [{
+            "project_id": project_id,
+            "description": description.strip(),
+            "start": started_at.isoformat(),
+            "duration": int(duration_seconds),
+            "type": "activity",
+        }]})
 
     def entries(self, since: date, until: date) -> list[dict]:
         """since 〜 until（両端を含む、手元の日付）の記録。"""
