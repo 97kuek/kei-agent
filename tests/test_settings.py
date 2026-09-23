@@ -88,6 +88,43 @@ def test_home_profile_override_changes_only_named_agent(config, store):
     assert settings.agent_profile(config, store, "work").provider == "claude"
 
 
+def test_effective_profile_uses_its_default_recipe_before_a_home_override(config, store):
+    from kei_agent.config import AgentProfile, ModelRecipe
+
+    config = replace(config,
+                     agent_profiles={"course": AgentProfile(provider="codex", default_recipe="standard")},
+                     model_recipes={"standard": ModelRecipe("codex", "gpt-standard", "medium")})
+    profile = settings.agent_profile(config, store, "course")
+    assert (profile.provider, profile.model, profile.reasoning_effort) == ("codex", "gpt-standard", "medium")
+
+
+def test_home_profile_override_is_detectable(config, store):
+    assert not settings.has_agent_profile_override(store, "research")
+    settings.set_agent_profile(store, "research", "codex", "gpt-home", "high")
+    assert settings.has_agent_profile_override(store, "research")
+
+
+def test_changing_provider_clears_the_previous_provider_model(config, store):
+    settings.set_agent_profile(store, "research", "codex", "gpt-5.6-terra", "high")
+    settings.set_agent_provider(store, "research", "claude")
+
+    profile = settings.agent_profile(config, store, "research")
+    assert (profile.provider, profile.model) == ("claude", "")
+
+
+def test_resetting_a_profile_returns_to_the_config_recipe(config, store):
+    from kei_agent.config import AgentProfile, ModelRecipe
+
+    config = replace(config,
+                     agent_profiles={"research": AgentProfile(provider="codex", default_recipe="standard")},
+                     model_recipes={"standard": ModelRecipe("codex", "gpt-standard", "high")})
+    settings.set_agent_profile(store, "research", "claude", "custom", "low")
+    settings.clear_agent_profile(store, "research")
+
+    profile = settings.agent_profile(config, store, "research")
+    assert (profile.provider, profile.model, profile.reasoning_effort) == ("codex", "gpt-standard", "high")
+
+
 @pytest.mark.parametrize("provider, model, effort", [
     ("unknown", "", "high"), ("codex", "x" * 121, "high"), ("codex", "", "maximum"),
 ])

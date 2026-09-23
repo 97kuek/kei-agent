@@ -661,11 +661,17 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
         """
         agent = self.agents.get(research.AGENT)
+        profile = settings.agent_profile(self.config, self.store, research.AGENT)
+        # App Home の明示選択は、本文から推測する通常時の深度レシピより強い。
+        if not settings.has_agent_profile_override(self.store, research.AGENT):
+            ws, prompt = research.prepare(self.config, ws, prompt)
+        effective_config = replace(
+            self.config, agent_profiles={**self.config.agent_profiles, research.AGENT: profile})
         with self.claude_running():
             if agent is not None:
                 return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
                                           on_activity, on_text)
-            return await runner.run_claude(self.config, ws, prompt, session_id, channel, thread_ts,
+            return await runner.run_claude(effective_config, ws, prompt, session_id, channel, thread_ts,
                                            on_activity, on_text)
 
     # 決まった時刻の処理から使う（schedule.py）

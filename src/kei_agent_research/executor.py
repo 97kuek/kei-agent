@@ -30,9 +30,10 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
-from kei_agent import themes
+from kei_agent import research, settings, themes
 from kei_agent.config import Config, load_config
 from kei_agent.jobs import Pueue
+from kei_agent.store import Store
 from kei_agent_a2a import claude, envelope
 from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, RUN_CLAUDE, SUBMIT_JOB
 
@@ -62,6 +63,7 @@ class ResearchExecutor(AgentExecutor):
     def __init__(self, config: Config | None = None, pueue: Pueue | None = None):
         self.config = config or load_config()
         self.pueue = pueue or Pueue(self.config)
+        self.store = Store(self.config.db_path)
         # pueue のグループは最初に使うときだけ用意する
         self._group_ready = False
 
@@ -97,10 +99,20 @@ class ResearchExecutor(AgentExecutor):
         if ws.cwd is None:
             await self._fail(updater, f"#{ws.channel_name} には作業用ディレクトリがありません")
             return
+        recipe_name = str(ask.get("model_recipe") or self.config.agent_profiles[research.AGENT].default_recipe)
+        if recipe_name and not settings.has_agent_profile_override(self.store, research.AGENT):
+            try:
+                ws = research.with_recipe(self.config, ws, recipe_name)
+            except ValueError as e:
+                await self._fail(updater, str(e))
+                return
         ws = replace(ws, allowed_domains=tuple(ask.get("allowed_domains") or ()))
         themes.ensure_workspace(ws)
         # claude が失敗したときは、封筒の ok が false になる。A2A のタスクも failed にする
-        await claude.finish(updater, await claude.run(self.config, ws, ask, updater))
+        profile = settings.agent_profile(self.config, self.store, research.AGENT)
+        effective_config = replace(
+            self.config, agent_profiles={**self.config.agent_profiles, research.AGENT: profile})
+        await claude.finish(updater, await claude.run(effective_config, ws, ask, updater))
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""

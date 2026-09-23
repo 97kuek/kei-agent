@@ -129,6 +129,25 @@ def test_agent_profile_reads_unique_connector_declarations(tmp_path):
     assert config.agent_profiles["course"].connectors == frozenset()
 
 
+def test_model_recipe_is_centralized_and_must_match_the_agent_provider(tmp_path):
+    from kei_agent.config import ConfigError, load_config
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\nreasoning_effort = "low"\n'
+        '[agents.research]\nprovider = "codex"\ndefault_recipe = "routine"\n'
+    )
+    config = load_config(path, env={})
+    recipe = config.model_recipe("research")
+    assert (recipe.model, recipe.reasoning_effort) == ("gpt-routine", "low")
+
+    path.write_text(
+        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\n'
+        '[agents.research]\nprovider = "claude"\ndefault_recipe = "routine"\n'
+    )
+    with pytest.raises(ConfigError, match="provider"):
+        load_config(path, env={}).model_recipe("research")
+
+
 @pytest.mark.parametrize("connectors", ['"wandb"', '["wandb", "wandb"]'])
 def test_agent_profile_rejects_invalid_connector_declarations(tmp_path, connectors):
     """非配列や重複を黙って許可して、意図しない connector を有効にする変更を捕捉する。"""

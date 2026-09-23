@@ -218,6 +218,41 @@ def set_agent_profile(store: Store, agent: str, provider: str, model: str, reaso
     _set(store, f"agent.{agent}.reasoning_effort", reasoning_effort)
 
 
+def set_agent_provider(store: Store, agent: str, provider: str) -> None:
+    """実行器を切り替え、前の実行器専用のモデル指定は捨てる。"""
+    if agent not in AGENT_PLUGINS:
+        raise ValueError(f"未知のagentです: {agent}")
+    if provider not in _PROFILE_PROVIDERS:
+        raise ValueError("provider は claude または codex にしてください")
+    with store.conn:
+        store.conn.execute("DELETE FROM settings WHERE key IN (?, ?)",
+                           (f"agent.{agent}.model", f"agent.{agent}.reasoning_effort"))
+        store.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                           "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                           (f"agent.{agent}.provider", provider))
+
+
+def clear_agent_profile(store: Store, agent: str) -> None:
+    """App Home の一時上書きをすべて外し、config.toml の既定へ戻す。"""
+    if agent not in AGENT_PLUGINS:
+        raise ValueError(f"未知のagentです: {agent}")
+    with store.conn:
+        store.conn.execute("DELETE FROM settings WHERE key IN (?, ?, ?)",
+                           tuple(f"agent.{agent}.{field}"
+                                 for field in ("provider", "model", "reasoning_effort")))
+
+
+def has_agent_profile_override(store: Store, agent: str) -> bool:
+    """App Home で明示した実行器設定があるか。
+
+    研究の深度レシピは通常時の自動選択であり、ここでの明示設定より優先してはいけない。
+    """
+    if agent not in AGENT_PLUGINS:
+        raise ValueError(f"未知のagentです: {agent}")
+    return any(_get(store, f"agent.{agent}.{field}") is not None
+               for field in ("provider", "model", "reasoning_effort"))
+
+
 def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
     if agent not in AGENT_PLUGINS:
         raise ValueError(f"未知のagentです: {agent}")
@@ -225,9 +260,16 @@ def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
     provider = _get(store, f"agent.{agent}.provider") or base.provider
     model = _get(store, f"agent.{agent}.model")
     effort = _get(store, f"agent.{agent}.reasoning_effort") or base.reasoning_effort
+    # Homeから個別に触られていない既定値だけ、用途名つきレシピで解決する。
+    # providerをHomeで変えた場合は別providerのレシピを混ぜず、明示設定を待つ。
+    if model is None and _get(store, f"agent.{agent}.reasoning_effort") is None and provider == base.provider:
+        recipe = config.model_recipe(agent)
+        if recipe is not None:
+            model, effort = recipe.model, recipe.reasoning_effort
     return AgentProfile(
         provider=provider,
         model=base.model if model is None else model,
         reasoning_effort=effort,
+        default_recipe=base.default_recipe,
         connectors=base.connectors,
     )

@@ -63,6 +63,27 @@ def test_codex_profile_builds_a_jsonl_workspace_write_command(config):
     assert cmd[-1] == "-"
 
 
+def test_codex_workspace_recipe_overrides_the_default_effort(config):
+    ws = replace(themes.resolve(config, "vlm"), model="gpt-deep", reasoning_effort="xhigh")
+    config = replace(config, codex_bin="codex-test", agent_profiles={"research": AgentProfile(provider="codex")})
+
+    cmd = runner.build_command(config, ws, None)
+
+    assert cmd[cmd.index("--model") + 1] == "gpt-deep"
+    assert "model_reasoning_effort=xhigh" in cmd
+
+
+def test_codex_effective_profile_from_app_home_overrides_the_config_profile(config):
+    ws = themes.resolve(config, "vlm")
+    config = replace(config, codex_bin="codex-test", agent_profiles={"research": AgentProfile(provider="codex")})
+    profile = AgentProfile(provider="codex", model="gpt-home", reasoning_effort="high")
+
+    cmd = runner.build_command(config, ws, None, profile)
+
+    assert cmd[cmd.index("--model") + 1] == "gpt-home"
+    assert "model_reasoning_effort=high" in cmd
+
+
 def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
     ws = themes.resolve(config, "vlm")
     config = replace(config, agent_profiles={"research": AgentProfile(provider="codex")})

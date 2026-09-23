@@ -156,7 +156,8 @@ class FakeClaude:
         self.calls = []
         self.behaviors = []
 
-    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None):
+    async def __call__(self, config, ws, prompt, session_id, channel, thread_ts, on_activity=None, on_text=None,
+                       profile=None):
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id, "thread_ts": thread_ts})
         behavior = self.behaviors.pop(0) if self.behaviors else {}
         # 途中の独り言と道具の呼び出し。実物の claude と同じく、独り言は道具の直前に来る

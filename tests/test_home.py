@@ -53,6 +53,25 @@ def test_home_shows_agent_provider_controls(config, store):
     assert any(element.get("action_id") == "kei_agent_home_provider:course" for element in controls)
 
 
+def test_home_model_choices_come_from_configured_recipes(config, store):
+    from dataclasses import replace
+
+    from kei_agent.config import ModelRecipe
+
+    config = replace(config, model_recipes={
+        "routine": ModelRecipe("codex", "gpt-routine", "low"),
+        "standard": ModelRecipe("codex", "gpt-standard", "high"),
+        "deep": ModelRecipe("codex", "gpt-deep", "xhigh"),
+    })
+    view = home.build_home(config, store, [], is_owner=True)
+    model_picker = next(
+        element for block in view["blocks"] for element in block.get("elements", [])
+        if element.get("action_id") == "kei_agent_home_model:research")
+
+    assert [option["value"] for option in model_picker["options"]] == [
+        "__default__", "gpt-routine", "gpt-standard", "gpt-deep"]
+
+
 def test_home_for_someone_else_changes_nothing(config, store):
     view = home.build_home(config, store, ["vlm"], is_owner=False)
     assert "依頼者だけ" in _texts(view)
@@ -94,6 +113,23 @@ async def test_home_provider_action_changes_the_next_agent_run(env, store):
     assistant, _ = env
     await assistant.on_home_action(_action("kei_agent_home_provider:course", selected_option={"value": "codex"}))
     assert settings.agent_profile(assistant.config, store, "course").provider == "codex"
+
+
+async def test_research_home_override_wins_over_the_automatic_deep_recipe(config, store, monkeypatch):
+    slack = FakeSlack({"C1": "vlm"})
+    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    settings.set_agent_profile(store, "research", "codex", "gpt-home", "high")
+    seen = {}
+
+    async def fake_run(run_config, ws, _prompt, *_args, on_activity=None, on_text=None):
+        seen.update(model=ws.model, effort=ws.reasoning_effort, profile=run_config.agent_profiles["research"])
+        return runner.RunResult(text="ok")
+
+    monkeypatch.setattr(runner, "run_claude", fake_run)
+    await assistant.run_claude(themes.resolve(config, "vlm"), "実験計画を設計して")
+
+    assert (seen["model"], seen["effort"]) == ("", "")
+    assert (seen["profile"].model, seen["profile"].reasoning_effort) == ("gpt-home", "high")
 
 
 async def test_add_domain_through_modal(env, store):

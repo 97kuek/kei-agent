@@ -84,6 +84,10 @@ class Workspace:
     timeout_minutes: int | None = None
     # 使うモデル。既定は config.model（振り分けのような短い判定では軽いモデルにする）
     model: str = ""
+    # Codexの推論強度。空ならagent profileの既定を使う。
+    reasoning_effort: str = ""
+    # モデルレシピ名。研究A2Aへ渡すときに、相手側でも同じ設定から復元する。
+    model_recipe: str = ""
 
 
 # Slack のチャンネル名は日本語も使えるので、パスとして危ない形だけを弾く

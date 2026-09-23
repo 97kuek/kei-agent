@@ -64,14 +64,15 @@ def notion_mcp_config(config: Config) -> dict:
     }}}
 
 
-def _profile(config: Config) -> AgentProfile:
-    return config.agent_profiles.get(AGENT, AgentProfile())
+def _profile(config: Config, profile: AgentProfile | None = None) -> AgentProfile:
+    return profile or config.agent_profiles.get(AGENT, AgentProfile())
 
 
-def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
+                        profile: AgentProfile | None = None) -> list[str]:
     """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
     assert ws.cwd is not None
-    profile = _profile(config)
+    profile = _profile(config, profile)
     # ルーターは状態DBの下（Gitリポジトリ外）で、接続先も作業用MCPも不要な分類だけをする。
     is_router = ws.system_prompt == config.repo_root / "prompts" / "router.md"
     cmd = [
@@ -83,8 +84,9 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -
     model = ws.model or profile.model or config.model
     if model:
         cmd += ["--model", model]
-    if profile.reasoning_effort:
-        cmd += ["--config", f"model_reasoning_effort={profile.reasoning_effort}"]
+    effort = ws.reasoning_effort or profile.reasoning_effort
+    if effort:
+        cmd += ["--config", f"model_reasoning_effort={effort}"]
     # 個人の App connector（Google Calendar等）は研究にもルーターにも渡さない。
     cmd += ["--config", "apps._default.enabled=false"]
     if not is_router:
@@ -101,7 +103,9 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None) -
     return cmd
 
 
-def _build_claude_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
+                          profile: AgentProfile | None = None) -> list[str]:
+    profile = _profile(config, profile)
     cmd = [
         config.claude_bin,
         "-p",
@@ -120,7 +124,7 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None)
     if prompt_path.exists():
         # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
         cmd += ["--append-system-prompt", prompt_path.read_text(encoding="utf-8")]
-    model = ws.model or config.model
+    model = ws.model or profile.model or config.model
     if model:
         cmd += ["--model", model]
     if session_id:
@@ -128,11 +132,13 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None)
     return cmd
 
 
-def build_command(config: Config, ws: Workspace, session_id: str | None) -> list[str]:
+def build_command(config: Config, ws: Workspace, session_id: str | None,
+                  profile: AgentProfile | None = None) -> list[str]:
     """agent profile に従い、Claude または Codex のコマンドを作る。"""
-    if _profile(config).provider == "codex":
-        return build_codex_command(config, ws, session_id)
-    return _build_claude_command(config, ws, session_id)
+    profile = _profile(config, profile)
+    if profile.provider == "codex":
+        return build_codex_command(config, ws, session_id, profile)
+    return _build_claude_command(config, ws, session_id, profile)
 
 
 def install_codex_skills(config: Config, ws: Workspace) -> None:
@@ -319,9 +325,10 @@ async def run_claude(
     thread_ts: str,
     on_activity: Callable[[str], Awaitable[None]] | None = None,
     on_text: Callable[[str], Awaitable[None]] | None = None,
+    profile: AgentProfile | None = None,
 ) -> RunResult:
     assert ws.cwd is not None
-    profile = _profile(config)
+    profile = _profile(config, profile)
     is_codex = profile.provider == "codex"
     context = run_hooks.RunContext(
         agent=AGENT,
@@ -338,7 +345,7 @@ async def run_claude(
         run_hooks.preflight(context, frozenset(getattr(profile, "connectors", ())), configured_connectors)
     started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
-        *build_command(config, ws, session_id),
+        *build_command(config, ws, session_id, profile),
         cwd=ws.cwd,
         env=build_env(config, dict(os.environ), channel, thread_ts),
         stdin=asyncio.subprocess.PIPE,

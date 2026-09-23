@@ -33,8 +33,18 @@ class AgentProfile:
     provider: str = "claude"
     model: str = ""
     reasoning_effort: str = "high"
+    # 作業種別ごとのモデルレシピ。空なら従来どおり model / reasoning_effort を直接使う。
+    default_recipe: str = ""
     # Codex に切り替えるとき、実際に使う MCP 名だけを明示する。空なら外部 connector は渡さない。
     connectors: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class ModelRecipe:
+    """将来のモデル名を一か所で差し替えるための、用途名つきの実行設定。"""
+    provider: str
+    model: str
+    reasoning_effort: str = "medium"
 
 
 def _default_agent_profiles() -> dict[str, AgentProfile]:
@@ -126,6 +136,7 @@ class Config:
     job_parallel: int = 1
     model: str = ""
     agent_profiles: dict[str, AgentProfile] = field(default_factory=_default_agent_profiles)
+    model_recipes: dict[str, ModelRecipe] = field(default_factory=dict)
     # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
     handoff_after_turns: int = 8
     allowed_domains: tuple[str, ...] = ()
@@ -153,6 +164,20 @@ class Config:
         if agent not in AGENT_PLUGINS:
             raise ValueError(f"未知のagent: {agent}（使えるのは {', '.join(sorted(AGENT_PLUGINS))}）")
         return self.repo_root / "plugin" / agent
+
+    def model_recipe(self, agent: str, name: str = "") -> ModelRecipe | None:
+        """agentの既定または指定名のレシピ。provider不一致は静かに混ぜない。"""
+        if agent not in AGENT_PLUGINS:
+            raise ConfigError(f"未知のagent: {agent}")
+        recipe_name = name or self.agent_profiles[agent].default_recipe
+        if not recipe_name:
+            return None
+        recipe = self.model_recipes.get(recipe_name)
+        if recipe is None:
+            raise ConfigError(f"モデルレシピがありません: {recipe_name}")
+        if recipe.provider != self.agent_profiles[agent].provider:
+            raise ConfigError(f"モデルレシピ {recipe_name} の provider が {agent} と一致しません")
+        return recipe
 
     @property
     def notion_gateway_url(self) -> str:
@@ -186,10 +211,11 @@ class ConfigError(ValueError):
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "model", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a",
+    "schedule", "maintenance", "a2a", "model_recipes",
 }
 AGENTS_KEYS = AGENT_PLUGINS
-AGENT_PROFILE_KEYS = {"provider", "model", "reasoning_effort", "connectors"}
+AGENT_PROFILE_KEYS = {"provider", "model", "reasoning_effort", "default_recipe", "connectors"}
+MODEL_RECIPE_KEYS = {"provider", "model", "reasoning_effort"}
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 # [schedule] のうち、時刻（HH:MM）を書くキー
 SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
@@ -264,9 +290,26 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
             provider=provider,
             model=str(raw.get("model", "")),
             reasoning_effort=str(raw.get("reasoning_effort", "high")),
+            default_recipe=str(raw.get("default_recipe", "")),
             connectors=frozenset(connectors),
         )
     return profiles
+
+
+def _model_recipes(data: dict) -> dict[str, ModelRecipe]:
+    if not isinstance(data, dict):
+        raise ConfigError("config.toml の [model_recipes] はテーブルにしてください")
+    recipes: dict[str, ModelRecipe] = {}
+    for name, raw in data.items():
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", str(name)) or not isinstance(raw, dict):
+            raise ConfigError("モデルレシピ名または内容が不正です")
+        _check_keys(raw, MODEL_RECIPE_KEYS, f"[model_recipes.{name}]")
+        provider, model = str(raw.get("provider", "")), str(raw.get("model", ""))
+        effort = str(raw.get("reasoning_effort", "medium"))
+        if provider not in {"claude", "codex"} or not model or effort not in {"low", "medium", "high", "xhigh"}:
+            raise ConfigError(f"モデルレシピ {name} の provider / model / reasoning_effort が不正です")
+        recipes[str(name)] = ModelRecipe(provider, model, effort)
+    return recipes
 
 
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
@@ -301,6 +344,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         job_parallel=int(data.get("job_parallel", 1)),
         model=data.get("model", ""),
         agent_profiles=_agent_profiles(data.get("agents", {})),
+        model_recipes=_model_recipes(data.get("model_recipes", {})),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),

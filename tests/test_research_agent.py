@@ -20,6 +20,12 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
+def test_research_recipe_prefers_deep_design_and_accepts_an_explicit_override():
+    assert research.recipe_for_prompt("W&Bのrunを確認して") == ("routine", "W&Bのrunを確認して")
+    assert research.recipe_for_prompt("W&Bの結果から実験計画を設計して") == ("deep", "W&Bの結果から実験計画を設計して")
+    assert research.recipe_for_prompt("[[routine]] 研究設計のメモを読む") == ("routine", "研究設計のメモを読む")
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -34,7 +40,7 @@ class FakeClaude:
         self.calls: list[dict] = []
 
     async def __call__(self, config, ws, prompt, session_id, channel, thread_ts,
-                       on_activity=None, on_text=None):
+                       on_activity=None, on_text=None, profile=None):
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": session_id,
                            "channel": channel, "thread_ts": thread_ts,
                            "allowed_domains": ws.allowed_domains})

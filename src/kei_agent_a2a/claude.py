@@ -29,7 +29,7 @@ from a2a.types import Part, TaskState
 from kei_agent import guard, runner, settings
 from kei_agent.agent_policy import policy_for
 from kei_agent.codex_app_server import AppServerClient
-from kei_agent.config import Config
+from kei_agent.config import AgentProfile, Config
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
 
@@ -80,7 +80,8 @@ async def progress(updater: TaskUpdater, payload: dict) -> None:
         message=updater.new_agent_message([Part(text=json.dumps(short, ensure_ascii=False))]))
 
 
-async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater) -> str:
+async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
+              profile: AgentProfile | None = None) -> str:
     """claude を1回動かして、封筒（JSON 文字列）を返す。"""
     assert ws.cwd is not None
 
@@ -93,7 +94,7 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater) ->
     log.info("claude を動かします: %s（%s）", ws.channel_name, ws.cwd)
     result = await runner.run_claude(
         config, ws, ask["prompt"], ask.get("session_id"), ask.get("channel", ""),
-        ask.get("thread_ts", ""), on_activity, on_text)
+        ask.get("thread_ts", ""), on_activity=on_activity, on_text=on_text, profile=profile)
     log.info("claude が終わりました: %s（エラー: %s）", ws.channel_name, result.is_error)
     return envelope.reply(
         text=result.text,

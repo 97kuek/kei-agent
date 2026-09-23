@@ -21,25 +21,38 @@ model = ""
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
-# agent ごとの実行器とモデル。skill は共通の内容を使い、ここだけで Claude/Codex を切り替える。
-# Slack App Home から個別に変更できる。既定は Codex で、Claude へのフォールバックはしない。
-[agents.research]
+# モデル名と推論強度は用途名ごとのレシピで一元管理する。新世代へ移行するときは、この3か所だけを
+# 代表依頼で評価してから置き換える。provider は暗黙に切り替えず、agentと一致しないレシピは起動しない。
+[model_recipes.routine]
+provider = "codex"
+model = "gpt-5.6-luna"
+reasoning_effort = "low"
+
+[model_recipes.standard]
 provider = "codex"
 model = "gpt-5.6-terra"
 reasoning_effort = "high"
+
+[model_recipes.deep]
+provider = "codex"
+model = "gpt-6-astra"
+reasoning_effort = "xhigh"
+
+# agent ごとの実行器と既定レシピ。Slack App Home から個別に変更できる。Claudeへの自動フォールバックはしない。
+[agents.research]
+provider = "codex"
+default_recipe = "standard"
 # 研究ホームだけに限定した Notion gateway を実行ごとに注入する
 connectors = ["research-notion"]
 
 [agents.course]
 provider = "codex"
-model = "gpt-5.6-terra"
-reasoning_effort = "high"
+default_recipe = "standard"
 connectors = []
 
 [agents.work]
 provider = "codex"
-model = "gpt-5.6-terra"
-reasoning_effort = "medium"
+default_recipe = "standard"
 connectors = []
 
 [schedule]

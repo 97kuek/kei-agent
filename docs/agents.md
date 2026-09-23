@@ -1,4 +1,16 @@
-# エージェントを増やすときの決まり
+# Kei Agent のエージェント体系
+
+Kei Agent は、Slackの入口を持つオーケストレーターと、研究・大学・仕事のドメインエージェントで構成する。この文書は全体の共通契約と増設時の決まりを定める。日常運用と責務の詳細は次を正とする。
+
+| 担当 | 文書 | 一言でいうと |
+|---|---|---|
+| オーケストレーター | [orchestrator.md](agents/orchestrator.md) | Slack、振り分け、状態、再試行 |
+| 研究 | [research.md](agents/research.md) | 研究作業、研究ホーム、W&B、実験 |
+| 大学 | [course.md](agents/course.md) | 授業・成績・単位・Moodle・Box |
+| 仕事 | [work.md](agents/work.md) | 会社の予定・メール・資料を読む |
+| モデル運用 | [model-policy.md](model-policy.md) | レシピ、評価、更新、ロールバック |
+
+以下は、新しいエージェントを足す場合にも全員が守る共通契約である。
 
 - Kei Agent は「オーケストレーター＋ドメインごとのエージェント」の形で増えていく（構成は `architecture.png`、
 決めた経緯は `design.md` の11章を参照）
@@ -70,21 +82,25 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 ### CLIとモデルの選択
 
-`config.toml` の `[agents.<agent>]` が実行器とモデルの正である。skill は手順を定義し、モデル名を埋め込まない。
+`config.toml` の `[agents.<agent>]` が実行器と既定レシピの正であり、`[model_recipes.<name>]` が実モデル名と推論強度の正である。skill は手順を定義し、モデル名を埋め込まない。更新手順は [model-policy.md](model-policy.md) を参照する。
 
 ```toml
 [agents.research]
 provider = "claude"       # または "codex"
-model = ""                # Codexなら例: gpt-5.3-codex
-reasoning_effort = "high" # Codexの推論強度。Claudeでは記録用の方針値
+default_recipe = "standard"
 connectors = []            # Codexで使う有効なMCP名だけを明示する
+
+[model_recipes.standard]
+provider = "codex"
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
 ```
 
-既定はClaudeで、agent単位でCodexへ切り替えられる。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。暗黙のモデル切り替えや、契約上限時の別モデルへの自動フォールバックはしない。
+agent単位でClaude/Codexへ切り替えられる。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。レシピのproviderとagentのproviderが一致しなければ起動しない。暗黙のモデル切り替えや、契約上限時の別モデルへの自動フォールバックはしない。
 
 Codexで外部 connector を使うときは、`connectors` に名前を明示し、`codex mcp list --json` で有効と確認できるものだけを列挙する。実行前には agent ごとの許可範囲と照合し、未接続・担当外なら起動しない。許可範囲は研究が `research-notion` と `wandb`、大学が `notion` と `box`、仕事が読み取り専用の `microsoft-365`。SharePoint はこの経路に含めない。connector の自動インストール、OAuth、認証情報・URLの移行はしない。
 
-2026-09-22 時点でこの Mac の Codex CLI が有効として検出した MCP は `drawio`、`node_repl`、`openaiDeveloperDocs`。上記の agent 用 connector は検出されていないため、研究・大学・仕事の provider は Claude のまま保つ。必要な connector が有効になった後にだけ、該当 agent の `provider = "codex"` と `connectors` を同時に設定する。
+Codexの接続可否は環境ごと・時期ごとに変わるため、この文書へ検出結果を固定しない。起動時のpreflightで、`connectors` に宣言したものがagentの許可範囲と実際の接続一覧の両方を満たすことを確認する。満たさない場合はそのproviderで起動せず、別providerへ自動で切り替えない。
 
 この切り替えが現時点で直接適用されるのは、研究のsandbox実行器である。研究テーマの作業場はリポジトリ外なので、Codex起動前に `plugin/research/skills` だけを `<テーマ>/.agents/skills` へ相対シンボリックリンクとして公開する。既存の利用者skillは上書きしない。大学・仕事の `ask` は、Notion／Box／Microsoft 365のアカウント連携を使うため、Codex側の同等MCPコネクタを確認するまではClaude connectorを正とする。
 

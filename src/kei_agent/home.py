@@ -25,6 +25,20 @@ def _mrkdwn(text: str) -> dict:
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
 
+def _model_options(config: Config, current_model: str) -> list[dict]:
+    """App Home の候補を config.toml のレシピから作る。
+
+    固定リストを持つと、モデル世代の更新時に実行設定と画面が食い違う。
+    """
+    models = [recipe.model for recipe in config.model_recipes.values() if recipe.model]
+    if current_model and current_model not in models:
+        models.append(current_model)
+    return [
+        {"text": {"type": "plain_text", "text": label}, "value": value}
+        for value, label in [("__default__", "既定"), *[(model, model) for model in dict.fromkeys(models)]]
+    ]
+
+
 def _button(text: str, action_id: str, value: str, style: str | None = None) -> dict:
     button = {"type": "button", "action_id": action_id, "value": value,
               "text": {"type": "plain_text", "text": text}}
@@ -88,8 +102,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
             {"type": "static_select", "action_id": f"kei_agent_home_model:{agent}",
              "placeholder": {"type": "plain_text", "text": "モデル"},
              "initial_option": {"text": {"type": "plain_text", "text": profile.model or "既定"}, "value": profile.model or "__default__"},
-             "options": [{"text": {"type": "plain_text", "text": label}, "value": value}
-                         for value, label in (("__default__", "既定"), ("gpt-5.6-terra", "gpt-5.6-terra"), ("gpt-6-astra", "gpt-6-astra"))]},
+             "options": _model_options(config, profile.model)},
             {"type": "static_select", "action_id": f"kei_agent_home_effort:{agent}",
              "initial_option": {"text": {"type": "plain_text", "text": profile.reasoning_effort}, "value": profile.reasoning_effort},
              "options": [{"text": {"type": "plain_text", "text": value}, "value": value}
