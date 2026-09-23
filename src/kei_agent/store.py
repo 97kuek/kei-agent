@@ -126,6 +126,38 @@ CREATE TABLE IF NOT EXISTS notices (
     key TEXT PRIMARY KEY,
     at REAL NOT NULL
 );
+-- Slack の時間記録。人の計測は runs（Kei Agent 自身の実行時間）と混ぜない
+CREATE TABLE IF NOT EXISTS time_cards (
+    channel TEXT PRIMARY KEY,
+    message_ts TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS course_channel_bindings (
+    channel TEXT PRIMARY KEY,
+    course_page_id TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS time_entries (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    domain TEXT NOT NULL CHECK(domain IN ('research', 'course', 'work')),
+    channel TEXT NOT NULL,
+    channel_name TEXT NOT NULL,
+    course_page_id TEXT NOT NULL DEFAULT '',
+    course_name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    memo TEXT NOT NULL DEFAULT '',
+    started_at REAL NOT NULL,
+    ended_at REAL,
+    toggl_state TEXT NOT NULL DEFAULT 'pending',
+    notion_state TEXT NOT NULL DEFAULT 'pending'
+);
+CREATE TABLE IF NOT EXISTS active_timers (
+    user_id TEXT PRIMARY KEY,
+    entry_id TEXT NOT NULL UNIQUE,
+    FOREIGN KEY(entry_id) REFERENCES time_entries(id)
+);
 """
 
 
@@ -602,6 +634,105 @@ class Store:
                 "UPDATE runs SET ended_at = ?, is_error = ?, cost_usd = ? WHERE id = ?",
                 (time.time(), int(is_error), cost_usd, run_id),
             )
+
+    # 人の時間記録（Toggl と Notion の同期前の正本）
+
+    def start_time_entry(self, entry_id: str, user_id: str, domain: str, channel: str, channel_name: str,
+                         course_page_id: str, course_name: str, description: str, started_at: float,
+                         notion_state: str) -> tuple[sqlite3.Row, sqlite3.Row | None]:
+        """開始と、前の計測の確定を1つのトランザクションで行う。"""
+        with self.conn:
+            previous = self.conn.execute(
+                """SELECT e.* FROM time_entries e JOIN active_timers a ON a.entry_id = e.id
+                   WHERE a.user_id = ?""", (user_id,)).fetchone()
+            if previous is not None:
+                self.conn.execute(
+                    "UPDATE time_entries SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+                    (started_at, previous["id"]),
+                )
+                self.conn.execute("DELETE FROM active_timers WHERE user_id = ?", (user_id,))
+            self.conn.execute(
+                """INSERT INTO time_entries
+                   (id, user_id, domain, channel, channel_name, course_page_id, course_name, description,
+                    started_at, toggl_state, notion_state)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (entry_id, user_id, domain, channel, channel_name, course_page_id, course_name, description,
+                 started_at, notion_state),
+            )
+            self.conn.execute("INSERT INTO active_timers (user_id, entry_id) VALUES (?, ?)", (user_id, entry_id))
+        return self.time_entry(entry_id), self.time_entry(previous["id"]) if previous is not None else None
+
+    def finish_time_entry(self, user_id: str, ended_at: float) -> sqlite3.Row | None:
+        """この利用者の計測を閉じる。二度目の停止は何もしない。"""
+        with self.conn:
+            row = self.active_time_entry(user_id)
+            if row is None:
+                return None
+            self.conn.execute("UPDATE time_entries SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+                              (ended_at, row["id"]))
+            self.conn.execute("DELETE FROM active_timers WHERE user_id = ?", (user_id,))
+        return self.time_entry(row["id"])
+
+    def time_entry(self, entry_id: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone()
+
+    def active_time_entry(self, user_id: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT e.* FROM time_entries e JOIN active_timers a ON a.entry_id = e.id WHERE a.user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+    def set_time_memo(self, entry_id: str, memo: str) -> sqlite3.Row:
+        with self.conn:
+            self.conn.execute("UPDATE time_entries SET memo = ? WHERE id = ?", (memo, entry_id))
+        row = self.time_entry(entry_id)
+        if row is None:
+            raise ValueError("時間記録がありません")
+        return row
+
+    def set_time_delivery(self, entry_id: str, *, toggl_state: str | None = None,
+                          notion_state: str | None = None) -> sqlite3.Row:
+        values = {"toggl_state": toggl_state, "notion_state": notion_state}
+        values = {key: value for key, value in values.items() if value is not None}
+        if values:
+            sets = ", ".join(f"{key} = ?" for key in values)
+            with self.conn:
+                self.conn.execute(f"UPDATE time_entries SET {sets} WHERE id = ?", (*values.values(), entry_id))
+        row = self.time_entry(entry_id)
+        if row is None:
+            raise ValueError("時間記録がありません")
+        return row
+
+    def pending_time_entries(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT * FROM time_entries WHERE ended_at IS NOT NULL
+               AND (toggl_state = 'pending' OR notion_state = 'pending') ORDER BY started_at"""
+        ).fetchall()
+
+    def upsert_time_card(self, channel: str, message_ts: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO time_cards (channel, message_ts, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(channel) DO UPDATE SET message_ts = excluded.message_ts, updated_at = excluded.updated_at""",
+                (channel, message_ts, time.time()),
+            )
+
+    def time_card(self, channel: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM time_cards WHERE channel = ?", (channel,)).fetchone()
+
+    def bind_course_channel(self, channel: str, course_page_id: str, course_name: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO course_channel_bindings (channel, course_page_id, course_name, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(channel) DO UPDATE SET course_page_id = excluded.course_page_id,
+                       course_name = excluded.course_name, updated_at = excluded.updated_at""",
+                (channel, course_page_id, course_name, time.time()),
+            )
+
+    def course_channel_binding(self, channel: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM course_channel_bindings WHERE channel = ?", (channel,)).fetchone()
 
 
 def dumps(obj) -> str:
