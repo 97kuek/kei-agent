@@ -137,6 +137,16 @@ class SettingsActions:
             profile = settings.agent_profile(self.config, self.store, name)
             provider = ((action.get("selected_option") or {}).get("value") or "")
             settings.set_agent_profile(self.store, name, provider, profile.model, profile.reasoning_effort)
+        elif kind in {"kei_agent_home_model", "kei_agent_home_effort"} and name in {"research", "course", "work"}:
+            profile = settings.agent_profile(self.config, self.store, name)
+            value = ((action.get("selected_option") or {}).get("value") or "")
+            if kind == "kei_agent_home_model" and value == "__default__":
+                value = ""
+            settings.set_agent_profile(
+                self.store, name, profile.provider,
+                value if kind == "kei_agent_home_model" else profile.model,
+                value if kind == "kei_agent_home_effort" else profile.reasoning_effort,
+            )
         else:
             return
         await self.publish_home(user)

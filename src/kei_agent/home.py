@@ -84,6 +84,17 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
                 ],
             },
         })
+        blocks.append({"type": "actions", "elements": [
+            {"type": "static_select", "action_id": f"kei_agent_home_model:{agent}",
+             "placeholder": {"type": "plain_text", "text": "モデル"},
+             "initial_option": {"text": {"type": "plain_text", "text": profile.model or "既定"}, "value": profile.model or "__default__"},
+             "options": [{"text": {"type": "plain_text", "text": label}, "value": value}
+                         for value, label in (("__default__", "既定"), ("gpt-5.6-terra", "gpt-5.6-terra"), ("gpt-6-astra", "gpt-6-astra"))]},
+            {"type": "static_select", "action_id": f"kei_agent_home_effort:{agent}",
+             "initial_option": {"text": {"type": "plain_text", "text": profile.reasoning_effort}, "value": profile.reasoning_effort},
+             "options": [{"text": {"type": "plain_text", "text": value}, "value": value}
+                         for value in ("low", "medium", "high", "xhigh")]},
+        ]})
 
     blocks += [
         {"type": "divider"},

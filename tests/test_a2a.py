@@ -157,7 +157,7 @@ async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
 
     seen = {}
 
-    async def ask_connector(config, prompt, allowed, plugin_dir, deny=(), timeout_minutes=3):
+    async def ask_connector(config, prompt, allowed, plugin_dir, deny=(), timeout_minutes=3, **_kwargs):
         seen["prompt"] = prompt
         return "過去問は Box にあるよ"
 

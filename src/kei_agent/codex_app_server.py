@@ -74,7 +74,7 @@ class AppServerClient:
         proc.stdin.write((__import__("json").dumps({"method": method, "params": params}) + "\n").encode())
         await proc.stdin.drain()
 
-    async def _request(self, proc, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _request(self, proc, method: str, params: dict[str, Any], pending: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         request_id = next(self._ids)
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write((__import__("json").dumps({"method": method, "id": request_id, "params": params}) + "\n").encode())
@@ -85,6 +85,8 @@ class AppServerClient:
             except ValueError:
                 continue
             if event.get("id") != request_id:
+                if pending is not None:
+                    pending.append(event)
                 continue
             if event.get("error"):
                 raise AppServerUnavailable(f"Codex App Server の {method} に失敗しました")
@@ -108,26 +110,38 @@ class AppServerClient:
             # 設定をかけた二つ目の process でも readiness を確認する。
             resolve_apps((await self._request(proc, "app/installed", {"forceRefresh": True})).get("apps") or [], policy)
             thread_params: dict[str, Any] = {"model": model} if model else {}
-            thread = await self._request(proc, "thread/start", thread_params)
+            pending: list[dict[str, Any]] = []
+            thread = await self._request(proc, "thread/start", thread_params, pending)
             thread_id = str((thread.get("thread") or {}).get("id") or "")
             if not thread_id:
                 raise AppServerUnavailable("Codex thread を開始できません")
             result.session_id = thread_id
             turn = await self._request(proc, "turn/start", {"threadId": thread_id, "input": build_turn_input(prompt, app_ids),
-                                                               "reasoningEffort": reasoning_effort})
+                                                               "reasoningEffort": reasoning_effort}, pending)
             turn_id = str((turn.get("turn") or {}).get("id") or "")
             assert proc.stdout is not None
-            while raw := await asyncio.wait_for(proc.stdout.readline(), self.timeout_seconds):
-                try:
-                    event = __import__("json").loads(raw)
-                except ValueError:
-                    continue
-                item = event.get("item") or {}
-                if event.get("method") == "item/completed" and item.get("type") == "agent_message":
+            while True:
+                if pending:
+                    event = pending.pop(0)
+                else:
+                    raw = await asyncio.wait_for(proc.stdout.readline(), self.timeout_seconds)
+                    if not raw:
+                        break
+                    try:
+                        event = __import__("json").loads(raw)
+                    except ValueError:
+                        continue
+                payload = event.get("params") or event
+                item = payload.get("item") or {}
+                if event.get("method") == "item/agentMessage/delta":
+                    result.text += str(payload.get("delta") or "")
+                    if on_text and result.text:
+                        await on_text(result.text)
+                if event.get("method") == "item/completed" and item.get("type") in {"agent_message", "agentMessage"}:
                     result.text = str(item.get("text") or result.text)
                     if on_text and result.text:
                         await on_text(result.text)
-                if event.get("method") == "turn/completed" and (event.get("params") or {}).get("turn", {}).get("id") == turn_id:
+                if event.get("method") == "turn/completed" and (payload.get("turn") or {}).get("id") == turn_id:
                     return result
             result.is_error = True
             result.errors.append("Codex App Server の実行が終了しました")
