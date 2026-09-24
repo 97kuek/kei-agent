@@ -20,6 +20,7 @@ from pathlib import Path
 
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError, Setup
+from kei_agent_course.course_identity import normalize_course_name
 
 # 科目の台帳。学期のあいだ変わらないもの
 COURSES = {
@@ -29,6 +30,16 @@ COURSES = {
         "科目名": {"title": {}},
         "科目コード": {"rich_text": {}},
         "年度": {"number": {"format": "number"}},
+        "履修年次": {"number": {"format": "number"}},
+        "単位": {"number": {"format": "number"}},
+        "科目群": {"select": {"options": [
+            {"name": "A群", "color": "blue"}, {"name": "B群", "color": "green"},
+            {"name": "C群", "color": "purple"}, {"name": "その他", "color": "gray"},
+        ]}},
+        "必選区分": {"select": {"options": [
+            {"name": "必修", "color": "red"}, {"name": "選択必修", "color": "orange"},
+            {"name": "選択", "color": "blue"}, {"name": "その他", "color": "gray"},
+        ]}},
         "学期": {"select": {"options": [
             {"name": "春学期", "color": "green"},
             {"name": "秋学期", "color": "orange"},
@@ -93,10 +104,10 @@ GRADES = {
     "icon": "📊",
     "description": "成績 HTML から取り込んだ科目ごとの派生記録。",
     "properties": {
-        "科目名": {"title": {}}, "Kei Agent 成績ID": {"rich_text": {}},
+        "授業名": {"title": {}}, "Kei Agent 成績ID": {"rich_text": {}},
         "取得年度": {"number": {"format": "number"}}, "学期": {"select": {"options": []}},
         "単位": {"number": {"format": "number"}}, "成績": {"rich_text": {}},
-        "GP": {"number": {"format": "number"}}, "科目区分": {"rich_text": {}},
+        "GP": {"number": {"format": "number"}}, "科目群": {"rich_text": {}}, "科目区分": {"rich_text": {}},
     },
     "relations": {"授業": ("courses", "成績履歴")},
 }
@@ -128,8 +139,8 @@ SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
          "study_logs": ("学習ログ", STUDY_LOGS), "grades": ("📊 成績履歴", GRADES),
          "requirements": ("🎓 単位要件", REQUIREMENTS), "gpa": ("📈 GPA推移", GPA)}
 
-# 既存の課題 DB だけはユーザー表示名を変える。title property を追加せず、既存 property ID を改名する。
-TITLE_ALIASES = {"assignments": {"課題": "タイトル"}}
+# 既存の title property は増やさず、同じ property ID の表示名を改める。
+TITLE_ALIASES = {"assignments": {"課題": "タイトル"}, "grades": {"授業名": "科目名"}}
 
 # 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
 AUTUMN_2026 = [
@@ -187,10 +198,11 @@ class CourseSetup(Setup):
                    term: str = "秋学期") -> None:
         """科目を1つ足す（同じ名前があれば何もしない）。曜日と時限は別の列に入れる。"""
         db = self.state["databases"]["courses"]
-        found = self.notion.request("POST", f"/data_sources/{db['data_source_id']}/query", {
-            "filter": {"property": "科目名", "title": {"equals": name}}, "page_size": 1})
-        if found.get("results"):
-            return
+        for row in self.notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
+            title = "".join(part.get("plain_text") or part.get("text", {}).get("content", "")
+                            for part in row.get("properties", {}).get("科目名", {}).get("title") or [])
+            if normalize_course_name(title) == normalize_course_name(name):
+                return
         self.notion.request("POST", "/pages", {
             "parent": {"type": "data_source_id", "data_source_id": db["data_source_id"]},
             "properties": {

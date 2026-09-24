@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from kei_agent.notion import Notion, NotionError
 from kei_agent_course import moodle, notion_sync
+from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.ics import Event
 
 
@@ -23,9 +24,9 @@ class CourseCatalog:
 def compare_course_catalog(events: Sequence[Event], known_names: Iterable[str]) -> CourseCatalog:
     """ICS にある科目名を重複なく集め、既存の授業 DB と比較する。"""
     registered = tuple(sorted({event.course_name for event in events if event.course_name}))
-    known_set = {name.strip() for name in known_names if name.strip()}
-    known = tuple(name for name in registered if name in known_set)
-    missing = tuple(name for name in registered if name not in known_set)
+    known_set = {normalize_course_name(name) for name in known_names if name.strip()}
+    known = tuple(name for name in registered if normalize_course_name(name) in known_set)
+    missing = tuple(name for name in registered if normalize_course_name(name) not in known_set)
     return CourseCatalog(registered, known, missing)
 
 

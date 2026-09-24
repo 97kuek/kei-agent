@@ -139,6 +139,9 @@ def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
         def children(self, page_id):
             return []
 
+        def paginate(self, _method, _path, _body):
+            return []
+
         def request(self, method, path, body=None):
             calls.append((method, path, body))
             if method == "POST" and path == "/databases":

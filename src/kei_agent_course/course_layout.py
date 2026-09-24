@@ -11,6 +11,9 @@ from kei_agent.notion import MAX_PAGES, Notion, NotionError
 from kei_agent_course.notion_sync import TOKEN_ENV, assignment_template_blocks, assignment_title, read_state
 
 _ASSIGNMENT_COLUMNS = ("科目", "課題", "締切", "状態")
+_GRADE_COLUMNS = ("科目群", "科目区分", "授業名", "成績", "GP", "単位", "取得年度", "取得済")
+_REQUIREMENT_COLUMNS = ("大区分", "要件名", "所定単位", "既得単位", "算入単位", "残り単位", "集計種別")
+_COURSE_COLUMNS = ("科目名", "科目群", "必選区分", "年度", "学期", "曜日", "時限", "単位", "状態")
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,32 @@ def assignment_view_payload(state: dict) -> dict:
     }
 
 
+def _table_view_payload(state: dict, key: str, name: str, columns: tuple[str, ...]) -> dict:
+    properties = state["databases"][key]["properties"]
+    ordered = (*columns, *(item for item in properties if item not in columns))
+    return {
+        "name": name,
+        "type": "table",
+        "configuration": {"type": "table", "properties": [
+            {"property_id": properties[item], "visible": item in columns} for item in ordered
+        ]},
+    }
+
+
+def grade_view_payload(state: dict) -> dict:
+    return _table_view_payload(state, "grades", "成績一覧", _GRADE_COLUMNS)
+
+
+def requirement_view_payload(state: dict) -> dict:
+    return _table_view_payload(state, "requirements", "要件一覧", _REQUIREMENT_COLUMNS)
+
+
+def course_view_payload(state: dict) -> dict:
+    return _table_view_payload(state, "courses", "授業一覧", _COURSE_COLUMNS)
+
+
 def gpa_view_payload(state: dict) -> dict:
-    """既存の GPA 記録を補完せず、そのまま期間順の line chart にする。"""
+    """学期別 GPA だけを時系列で示す line chart にする。"""
     properties = state["databases"]["gpa"]["properties"]
     return {
         "name": "GPA推移",
@@ -67,20 +94,27 @@ def gpa_view_payload(state: dict) -> dict:
             "smooth_line": False,
             "hide_line_fill_area": False,
         },
+        "filter": {"property": properties["種別"], "select": {"does_not_equal": "通算"}},
         "sorts": [{"property": properties["年度"], "direction": "ascending"}],
     }
 
 
-def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool) -> str:
+def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool,
+                 rename_default: bool = False) -> str:
     """同じ名前の view があれば更新し、なければ作る。dry-run では GET 以外を送らない。"""
     found = _views(notion, database["database_id"])
     existing = None
+    default = None
     for view in found:
         # List views の応答は name を省略するため、個別取得した完全な view で照合する。
         full_view = view if view.get("name") else notion.request("GET", f"/views/{view['id']}")
         if full_view.get("name") == payload["name"]:
             existing = full_view
             break
+        if full_view.get("name") == "Default view":
+            default = full_view
+    if existing is None and rename_default:
+        existing = default
     action = "update" if existing else "create"
     if apply:
         if existing:

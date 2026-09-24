@@ -1,4 +1,11 @@
-from kei_agent_course.course_layout import apply_layout, assignment_view_payload, gpa_view_payload
+from kei_agent_course.course_layout import (
+    apply_layout,
+    assignment_view_payload,
+    course_view_payload,
+    gpa_view_payload,
+    grade_view_payload,
+    requirement_view_payload,
+)
 
 
 def full_state():
@@ -12,6 +19,15 @@ def full_state():
             "database_id": "gpa-db", "data_source_id": "gpa-source",
             "properties": {"期間": "g-period", "年度": "g-year", "種別": "g-kind", "GPA": "g-value"},
         },
+        "grades": {"database_id": "grade-db", "data_source_id": "grade-source", "properties": {
+            name: f"grade-{name}" for name in ("授業名", "科目群", "科目区分", "成績", "GP", "単位",
+                                             "取得年度", "取得済", "Kei Agent 成績ID")}},
+        "requirements": {"database_id": "requirement-db", "data_source_id": "requirement-source", "properties": {
+            name: f"req-{name}" for name in ("大区分", "要件名", "所定単位", "既得単位", "算入単位",
+                                             "残り単位", "集計種別", "Kei Agent 要件ID")}},
+        "courses": {"database_id": "course-db", "data_source_id": "course-source", "properties": {
+            name: f"course-{name}" for name in ("科目名", "科目群", "必選区分", "学期", "曜日", "時限",
+                                             "年度", "単位", "状態", "課題")}},
     }}
 
 
@@ -33,6 +49,24 @@ def test_gpa_view_is_a_line_chart_of_raw_period_and_gpa_values():
     assert config["x_axis_property_id"] == "g-period"
     assert config["y_axis_property_id"] == "g-value"
     assert config["sort"] == "x_ascending"
+    assert payload["filter"] == {"property": "g-kind", "select": {"does_not_equal": "通算"}}
+
+
+def test_academic_and_course_tables_show_editable_columns_in_requested_order():
+    state = full_state()
+    grade = grade_view_payload(state)["configuration"]["properties"]
+    requirement = requirement_view_payload(state)["configuration"]["properties"]
+    course = course_view_payload(state)["configuration"]["properties"]
+
+    def shown(columns):
+        return [x["property_id"] for x in columns if x["visible"]]
+
+    assert shown(grade) == [f"grade-{name}" for name in (
+        "科目群", "科目区分", "授業名", "成績", "GP", "単位", "取得年度", "取得済")]
+    assert shown(requirement) == [f"req-{name}" for name in (
+        "大区分", "要件名", "所定単位", "既得単位", "算入単位", "残り単位", "集計種別")]
+    assert shown(course) == [f"course-{name}" for name in (
+        "科目名", "科目群", "必選区分", "年度", "学期", "曜日", "時限", "単位", "状態")]
 
 
 class FakeNotion:

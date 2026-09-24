@@ -24,6 +24,7 @@ from pathlib import Path
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError
 from kei_agent_course import periods
+from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.ics import Event
 
 log = logging.getLogger(__name__)
@@ -145,8 +146,15 @@ class CourseNotion:
 
     def course_ids(self) -> dict[str, str]:
         """科目名 → 「授業」のページ ID。"""
-        return {name: row["id"] for row in self._rows(self.courses)
-                if (name := _plain(row["properties"].get("科目名")))}
+        found: dict[str, str] = {}
+        for row in self._rows(self.courses):
+            name = normalize_course_name(_plain(row["properties"].get("科目名")))
+            if not name:
+                continue
+            if name in found:
+                raise SyncError(f"授業 DB に同じ科目が重複しています: {name}")
+            found[name] = row["id"]
+        return found
 
     def courses_on(self, weekday: str = "", on: date | None = None) -> list[dict]:
         """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。
@@ -244,7 +252,7 @@ class CourseNotion:
         for event in events:
             if event.starts_at is None or not event.uid:
                 continue
-            course_id = courses.get(event.course_name)
+            course_id = courses.get(normalize_course_name(event.course_name))
             if not course_id:
                 if event.course_name and event.course_name not in result.other_courses:
                     result.other_courses.append(event.course_name)

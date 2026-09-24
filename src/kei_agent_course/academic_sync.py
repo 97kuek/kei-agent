@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kei_agent.notion import Notion
+from kei_agent_course.academic_layout import gpa_display_label
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
 from kei_agent_course.notion_setup import SPECS
 from kei_agent_course.notion_sync import TOKEN_ENV, read_state
@@ -33,7 +34,7 @@ class AcademicImportResult:
 
 
 def grade_key(grade: Grade) -> str:
-    return f"grade:{grade.year}:{grade.term}:{grade.course_name}:{grade.credits:g}:{grade.grade}"
+    return f"grade:{grade.year}:{grade.term}:{grade.course_name}"
 
 
 def requirement_key(requirement: Requirement) -> str:
@@ -117,11 +118,15 @@ class AcademicSync:
         ambiguous: list[str] = []
         for grade in record.grades:
             identity = grade_key(grade)
+            category_parts = grade.category.split(" / ", 1)
+            group = category_parts[0] if len(category_parts) == 2 else grade.category
+            subcategory = category_parts[1] if len(category_parts) == 2 else ""
             properties = {
-                "科目名": {"title": [{"text": {"content": grade.course_name}}]}, "Kei Agent 成績ID": _text(identity),
+                "授業名": {"title": [{"text": {"content": grade.course_name}}]}, "Kei Agent 成績ID": _text(identity),
                 "取得年度": {"number": grade.year}, "学期": {"select": {"name": grade.term}},
                 "単位": {"number": grade.credits}, "成績": _text(grade.grade),
-                "GP": {"number": grade.gp}, "科目区分": _text(grade.category),
+                "GP": {"number": grade.gp}, "科目群": _text(group) if group else {"rich_text": []},
+                "科目区分": _text(subcategory) if subcategory else {"rich_text": []},
             }
             matches = self._course_matches(grade)
             if len(matches) == 1:
@@ -144,7 +149,8 @@ class AcademicSync:
         for entry in record.gpa:
             identity = gpa_key(entry)
             outcome, _ = self._upsert("gpa", "Kei Agent GPAID", identity, {
-                "期間": {"title": [{"text": {"content": entry.period}}]}, "Kei Agent GPAID": _text(identity),
+                "期間": {"title": [{"text": {"content": gpa_display_label(entry.year, entry.kind) or entry.period}}]},
+                "Kei Agent GPAID": _text(identity),
                 "年度": {"number": entry.year}, "種別": {"select": {"name": entry.kind}}, "GPA": {"number": entry.gpa},
             })
             ({"created": created, "updated": updated, "unchanged": unchanged}[outcome])["gpa"] += 1

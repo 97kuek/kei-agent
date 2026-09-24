@@ -4,7 +4,7 @@ import pytest
 
 from kei_agent_course import academic_sync
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
-from kei_agent_course.academic_sync import AcademicSync, inspect_course_home
+from kei_agent_course.academic_sync import AcademicSync, grade_key, inspect_course_home
 
 
 def _property(property_id: str, kind: str = "rich_text") -> dict:
@@ -123,6 +123,29 @@ def test_setup_renames_existing_assignment_title_without_creating_another_title(
     assert notion.title_property_count("assignments") == 1
 
 
+def test_setup_renames_grade_title_and_adds_group_without_losing_rows(tmp_path):
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion()
+    CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
+
+    assert notion.property_renamed("grades", "科目名", "授業名")
+    assert notion.title_property_count("grades") == 1
+    assert "科目群" in notion.data_sources["grades"]["properties"]
+
+
+def test_setup_keeps_course_group_and_requirement_selectors_available(tmp_path):
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion()
+    CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
+
+    props = notion.data_sources["courses"]["properties"]
+    assert props["科目群"]["type"] == "select"
+    assert props["必選区分"]["type"] == "select"
+    assert props["単位"]["type"] == "number"
+
+
 def test_setup_adds_only_missing_grade_relations(tmp_path):
     from kei_agent_course.notion_setup import CourseSetup
 
@@ -162,9 +185,42 @@ def test_academic_sync_writes_existing_property_names():
     ))
 
     properties = notion.rows["grades"][0]["properties"]
-    assert set(properties) >= {"科目名", "Kei Agent 成績ID", "授業"}
+    assert set(properties) >= {"授業名", "科目群", "Kei Agent 成績ID", "授業"}
+    assert properties["科目群"]["rich_text"][0]["text"]["content"] == "基礎"
     assert "タイトル" not in properties
     assert properties["授業"] == {"relation": [{"id": "course-1"}]}
+
+
+def test_grade_identity_survives_a_corrected_grade_or_credit_value():
+    before = Grade("数学", 2025, "春期", 2, "B", 2, "Ｂ群 / 数学")
+    corrected = Grade("数学", 2025, "春期", 3, "A", 4, "Ｂ群 / 数学")
+
+    assert grade_key(before) == grade_key(corrected) == "grade:2025:春期:数学"
+
+
+def test_academic_sync_keeps_separate_grade_category_and_chronological_gpa_label():
+    class Notion:
+        def __init__(self):
+            self.rows = {key: [] for key in ("courses", "grades", "requirements", "gpa")}
+
+        def paginate(self, _method, path, _body=None):
+            return self.rows[path.split("/")[2]]
+
+        def request(self, _method, _path, body=None):
+            key = body["parent"]["data_source_id"]
+            self.rows[key].append({"id": f"{key}-1", "properties": body["properties"]})
+            return self.rows[key][-1]
+
+    state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
+    notion = Notion()
+    AcademicSync(notion, state).sync(AcademicRecord(
+        grades=(Grade("数学", 2024, "春期", 2, "A", 4, "Ｂ群 / 数学"),),
+        requirements=(), gpa=(GPAEntry("2024年度（春学期）", 2024, 3.06, "春学期"),),
+    ))
+
+    assert notion.rows["grades"][0]["properties"]["科目群"]["rich_text"][0]["text"]["content"] == "Ｂ群"
+    assert notion.rows["grades"][0]["properties"]["科目区分"]["rich_text"][0]["text"]["content"] == "数学"
+    assert notion.rows["gpa"][0]["properties"]["期間"]["title"][0]["text"]["content"] == "2024 1 春学期"
 
 
 def test_inspect_reports_duplicates_without_mutating_notion():
@@ -310,11 +366,12 @@ def test_academic_sync_preserves_an_existing_grade_course_relation():
                     "学期": {"select": {"name": "春学期"}},
                 }}],
                 "grades": [{"id": "grade-1", "properties": {
-                    "科目名": {"title": [{"plain_text": "数学"}]},
-                    "Kei Agent 成績ID": {"rich_text": [{"plain_text": "grade:2025:春期:数学:2:A"}]},
+                    "授業名": {"title": [{"plain_text": "数学"}]},
+                    "Kei Agent 成績ID": {"rich_text": [{"plain_text": "grade:2025:春期:数学"}]},
                     "取得年度": {"number": 2025}, "学期": {"select": {"name": "春期"}},
                     "単位": {"number": 2}, "成績": {"rich_text": [{"plain_text": "A"}]},
-                    "GP": {"number": 4}, "科目区分": {"rich_text": [{"plain_text": "基礎"}]},
+                    "GP": {"number": 4}, "科目群": {"rich_text": [{"plain_text": "基礎"}]},
+                    "科目区分": {"rich_text": []},
                     "授業": {"relation": [{"id": "manually-linked-course"}]},
                 }}],
                 "requirements": [], "gpa": [],
