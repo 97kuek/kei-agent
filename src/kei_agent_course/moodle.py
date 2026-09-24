@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from kei_agent_course.ics import Event, due_events
+from kei_agent_course.ics import Event, due_events, parse
 
 log = logging.getLogger(__name__)
 
@@ -45,3 +45,8 @@ def fetch(url: str, timeout: float = TIMEOUT_SECONDS) -> str:
 def due(url: str, since: date | None = None, days: int = WINDOW_DAYS) -> list[Event]:
     """締切の近い課題を、近い順に。"""
     return due_events(fetch(url), since=since, days=days)
+
+
+def events(url: str) -> list[Event]:
+    """ICS に載る全予定を読む。科目台帳の照合だけに使い、書き込みはしない。"""
+    return parse(fetch(url))

@@ -8,6 +8,8 @@
 - Boxは大学アカウントの資料を読むだけ。アップロードや共有設定変更は行わない。
 - Moodleは課題・締切の同期に使う。学習時間はToggl確定後に授業ホームへ記録する。
 
+Moodle の秋冬科目を確かめるときは `kei-agent-course-inspect` を使う。このコマンドは ICS と既存の「授業」DBを読むだけで、新しい授業・課題・relation は作らない。曜日、時限、履修状態は ICS だけでは確定しないため、確認が必要な科目として報告する。
+
 ## モデル方針
 
 `sync-assignments`、`list-due`、`list-classes`、成績・単位の定型計算はコードとNotion APIで処理し、モデルを呼ばない。Box資料とNotionを横断する `ask` は、軽い説明を `course_explain`、要件整理を `course_requirements`、比較を `course_compare`、履修・卒業計画を `course_degree_plan` として model policy の recipe から選ぶ。

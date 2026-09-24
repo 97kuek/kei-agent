@@ -321,6 +321,19 @@ def course_names(token: str = "", state: dict | None = None) -> set[str]:
     return set(CourseNotion(Notion(token), state or read_state()).course_ids())
 
 
+def course_token(env: dict[str, str] | None = None) -> str:
+    """授業ホーム用トークンを読む。値は返すだけで表示しない。"""
+    return (dict(os.environ) if env is None else env).get(TOKEN_ENV, "")
+
+
+def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
+    """授業 DB の科目名だけを読み出す。ページ・relation・DB は一切変更しない。"""
+    data_source_id = state["databases"]["courses"]["data_source_id"]
+    rows = notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
+    return tuple(sorted({_plain(row.get("properties", {}).get("科目名")) for row in rows}
+                        - {""}))
+
+
 def sync(events: list[Event], known_only: bool = True, token: str = "", state: dict | None = None) -> Result:
     """締切を Notion に反映する。トークンと状態は、省くと環境変数とファイルから読む。"""
     token = token or os.environ.get(TOKEN_ENV, "")
