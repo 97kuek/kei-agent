@@ -71,7 +71,7 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 {"ok": true, "text": "人が読む文", "data": {}, "limit_reset_at": null, "cost_usd": 0.02}
 ```
 
-- `text` … 本体がそのまま Slack に出せる文
+- `text` … agent が返す raw output。自由回答は final marker を含む。**Slack に出す形へ検証・整形するのはオーケストレーターだけ**で、agent は直接投稿しない
 - `data` … 組み立て直すための中身（締切の一覧、`RunResult` など）。見せ方は本体が決める
 - `limit_reset_at` … Claude の上限に当たったときの明ける時刻。**待つ・やり直すの約束は本体**（`Assistant.note_limit`）
 - `cost_usd` … 分かるときだけ
