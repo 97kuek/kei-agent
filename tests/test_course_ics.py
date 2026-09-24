@@ -169,7 +169,7 @@ def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
     assert relation["data_source_id"] == "ds-db-授業" and relation["dual_property"]["synced_property_name"] == "課題"
     grades = next(b for m, p, b in calls if m == "POST" and p == "/databases"
                   and b["title"][0]["text"]["content"] == "📊 成績履歴")
-    assert grades["initial_data_source"]["properties"]["科目"]["relation"]["data_source_id"] == "ds-db-授業"
+    assert grades["initial_data_source"]["properties"]["授業"]["relation"]["data_source_id"] == "ds-db-授業"
     requirements = next(b for m, p, b in calls if m == "POST" and p == "/databases"
                         and b["title"][0]["text"]["content"] == "🎓 単位要件")
     assert requirements["initial_data_source"]["properties"]["算入成績"]["relation"]["data_source_id"] == "ds-db-📊 成績履歴"

@@ -1,8 +1,166 @@
+import copy
+
 import pytest
 
 from kei_agent_course import academic_sync
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
 from kei_agent_course.academic_sync import AcademicSync, inspect_course_home
+
+
+def _property(property_id: str, kind: str = "rich_text") -> dict:
+    return {"id": property_id, "type": kind, kind: {}}
+
+
+class ExistingCourseHomeNotion:
+    """実在の授業ホームと同じ title / relation 名を返す Notion 境界の fake。"""
+
+    def __init__(self, assignment_title: str = "タイトル"):
+        names = {
+            "courses": {
+                "科目名": "title", "科目コード": "rich_text", "年度": "number", "学期": "select",
+                "曜日": "select", "時限": "number", "Moodle": "url", "状態": "select",
+                "課題": "relation", "学習ログ": "relation", "成績履歴": "relation",
+                "単位要件": "relation", "GPA推移": "relation",
+            },
+            "assignments": {
+                assignment_title: "title", "締切": "date", "状態": "status", "Moodle": "url",
+                "見積時間": "number", "実績時間": "number", "出どころ": "select", "Moodle ID": "rich_text",
+                "最終同期": "last_edited_time", "科目": "relation",
+            },
+            "study_logs": {
+                "タイトル": "title", "Kei Agent 記録ID": "rich_text", "日付": "date", "時間（分）": "number",
+                "メモ": "rich_text", "Slack": "url", "科目": "relation",
+            },
+            "grades": {
+                "科目名": "title", "取得年度": "number", "学期": "select", "単位": "number", "成績": "rich_text",
+                "GP": "number", "科目区分": "rich_text", "取り込み元": "rich_text", "授業": "relation",
+            },
+            "requirements": {
+                "要件名": "title", "所定単位": "number", "既得単位": "number", "算入単位": "number",
+                "残り単位": "number", "取り込み元": "rich_text", "大区分": "rich_text", "集計種別": "select",
+                "対象授業": "relation",
+            },
+            "gpa": {
+                "期間": "title", "年度": "number", "種別": "select", "GPA": "number", "対象授業": "relation",
+            },
+        }
+        self.data_sources = {
+            key: {"properties": {name: _property(f"{key}:{name}", kind) for name, kind in props.items()}}
+            for key, props in names.items()
+        }
+        self.calls: list[tuple[str, str, dict | None]] = []
+        self.deleted: list[str] = []
+
+    def children(self, _page_id):
+        return [
+            {"id": key, "type": "child_database", "child_database": {"title": title}}
+            for key, title in (("courses", "授業"), ("assignments", "課題"), ("study_logs", "学習ログ"),
+                               ("grades", "📊 成績履歴"), ("requirements", "🎓 単位要件"), ("gpa", "📈 GPA推移"))
+        ]
+
+    def request(self, method, path, body=None):
+        self.calls.append((method, path, copy.deepcopy(body)))
+        if method == "GET" and path.startswith("/databases/"):
+            database_id = path.rsplit("/", 1)[-1]
+            return {"id": database_id, "data_sources": [{"id": database_id}], "url": f"https://notion.so/{database_id}"}
+        if method == "GET" and path.startswith("/data_sources/"):
+            return copy.deepcopy(self.data_sources[path.rsplit("/", 1)[-1]])
+        if method == "PATCH" and path.startswith("/data_sources/"):
+            key = path.rsplit("/", 1)[-1]
+            properties = self.data_sources[key]["properties"]
+            for name, definition in (body or {}).get("properties", {}).items():
+                if name in properties:
+                    properties[name].update(definition)
+                    continue
+                if name.startswith(f"{key}:"):
+                    old_name = next(old for old, prop in properties.items() if prop["id"] == name)
+                    new_name = definition["name"]
+                    properties[new_name] = properties.pop(old_name) | {"name": new_name}
+                    continue
+                kind = next(iter(definition))
+                properties[name] = _property(f"{key}:{name}", kind)
+            return copy.deepcopy(self.data_sources[key])
+        raise AssertionError((method, path, body))
+
+    def property_renamed(self, key: str, old: str, new: str) -> bool:
+        return old not in self.data_sources[key]["properties"] and new in self.data_sources[key]["properties"]
+
+    def title_property_count(self, key: str) -> int:
+        return sum(prop["type"] == "title" for prop in self.data_sources[key]["properties"].values())
+
+    def added_relation_names(self) -> set[str]:
+        return {
+            name for source in self.data_sources.values() for name, prop in source["properties"].items()
+            if prop["type"] == "relation" and name in {"算入成績", "対象成績"}
+        }
+
+
+def test_setup_uses_existing_grade_title_instead_of_adding_a_second_title(tmp_path):
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion()
+    CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
+
+    patched_names = {
+        name for method, path, body in notion.calls if method == "PATCH" and path == "/data_sources/grades"
+        for name in (body or {}).get("properties", {})
+    }
+    assert "タイトル" not in patched_names
+    assert "Kei Agent 成績ID" in notion.data_sources["grades"]["properties"]
+
+
+def test_setup_renames_existing_assignment_title_without_creating_another_title(tmp_path):
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion(assignment_title="タイトル")
+    CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
+
+    assert notion.property_renamed("assignments", "タイトル", "課題")
+    assert notion.title_property_count("assignments") == 1
+
+
+def test_setup_adds_only_missing_grade_relations(tmp_path):
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion()
+    CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
+
+    assert {"算入成績", "対象成績"} <= notion.added_relation_names()
+    assert notion.deleted == []
+
+
+def test_academic_sync_writes_existing_property_names():
+    class Notion:
+        def __init__(self):
+            self.rows = {
+                "courses": [{"id": "course-1", "properties": {
+                    "科目名": {"title": [{"plain_text": "数学"}]}, "年度": {"number": 2025},
+                    "学期": {"select": {"name": "春学期"}},
+                }}],
+                "grades": [], "requirements": [], "gpa": [],
+            }
+
+        def paginate(self, _method, path, _body=None):
+            return self.rows[path.split("/")[2]]
+
+        def request(self, method, path, body=None):
+            if method == "POST" and path == "/pages":
+                source = body["parent"]["data_source_id"]
+                row = {"id": f"{source}-1", "properties": body["properties"]}
+                self.rows[source].append(row)
+                return row
+            raise AssertionError((method, path, body))
+
+    state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
+    notion = Notion()
+    AcademicSync(notion, state).sync(AcademicRecord(
+        grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=(),
+    ))
+
+    properties = notion.rows["grades"][0]["properties"]
+    assert set(properties) >= {"科目名", "Kei Agent 成績ID", "授業"}
+    assert "タイトル" not in properties
+    assert properties["授業"] == {"relation": [{"id": "course-1"}]}
 
 
 def test_inspect_reports_duplicates_without_mutating_notion():

@@ -108,14 +108,14 @@ class AcademicSync:
         for grade in record.grades:
             identity = grade_key(grade)
             properties = {
-                "タイトル": {"title": [{"text": {"content": grade.course_name}}]}, "Kei Agent 成績ID": _text(identity),
+                "科目名": {"title": [{"text": {"content": grade.course_name}}]}, "Kei Agent 成績ID": _text(identity),
                 "取得年度": {"number": grade.year}, "学期": {"select": {"name": grade.term}},
-                "単位": {"number": grade.credits}, "成績": {"select": {"name": grade.grade}},
+                "単位": {"number": grade.credits}, "成績": _text(grade.grade),
                 "GP": {"number": grade.gp}, "科目区分": _text(grade.category),
             }
             matches = self._course_matches(grade)
             if len(matches) == 1:
-                properties["科目"] = {"relation": [{"id": matches[0]}]}
+                properties["授業"] = {"relation": [{"id": matches[0]}]}
             elif len(matches) > 1:
                 ambiguous.append(f"成績履歴: {grade.course_name} / {grade.year} / {grade.term}")
             outcome = self._upsert("grades", "Kei Agent 成績ID", identity, properties)
@@ -123,9 +123,10 @@ class AcademicSync:
         for requirement in record.requirements:
             identity = requirement_key(requirement)
             outcome = self._upsert("requirements", "Kei Agent 要件ID", identity, {
-                "名称": {"title": [{"text": {"content": requirement.name}}]}, "Kei Agent 要件ID": _text(identity),
-                "区分": _text(requirement.group), "所定": {"number": requirement.required},
-                "既得": {"number": requirement.earned}, "算入": {"number": requirement.included}, "残り": {"number": requirement.remaining},
+                "要件名": {"title": [{"text": {"content": requirement.name}}]}, "Kei Agent 要件ID": _text(identity),
+                "大区分": _text(requirement.group), "所定単位": {"number": requirement.required},
+                "既得単位": {"number": requirement.earned}, "算入単位": {"number": requirement.included},
+                "残り単位": {"number": requirement.remaining}, "集計種別": {"select": {"name": requirement.kind}},
             })
             ({"created": created, "updated": updated, "unchanged": unchanged}[outcome])["requirements"] += 1
         for entry in record.gpa:

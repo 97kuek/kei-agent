@@ -1,4 +1,4 @@
-"""授業用の Notion（「授業」と「課題」の2つのデータベース）を作る。
+"""授業ホームの正本 DB を作り、既存 schema の不足だけを補う。
 
 研究ホームとは別のコネクト（トークン）で動かし、授業のページだけに接続する。
 研究のデータベースには触れない（docs/design.md の11章）。
@@ -6,11 +6,7 @@
 使い方:
     NOTION_COURSE_TOKEN=... uv run --group course kei-agent-course-setup <授業ホームのページID>
 
-**ビューはここでは作れない。** Notion の公開 API はビュー（並び替え・絞り込み・列の順番）を
-扱えないので、作ったばかりのデータベースは英語の `Default view` に全列が作成順で並んだ状態になる。
-人が見て使える形（「時間割」を曜日→時限で並べる、「締切が近い順」で機械向けの列を右に送る、
-授業ホームに表を埋め込む）は、Claude の Notion 連携から整えてある。
-作り直したときは、そこも合わせて直すこと。
+ビューの作成と表示列の統一は `kei-agent-course-layout` が担う。
 """
 
 from __future__ import annotations
@@ -56,7 +52,7 @@ ASSIGNMENTS = {
     "icon": "📝",
     "description": "課題と締切。出どころが Moodle の行は取り込みで更新し、手で足した行は消さない。",
     "properties": {
-        "タイトル": {"title": {}},
+        "課題": {"title": {}},
         "締切": {"date": {}},
         "状態": {"status": {"options": [
             {"name": "未着手", "color": "gray", "group": "To-do"},
@@ -96,21 +92,22 @@ GRADES = {
     "icon": "📊",
     "description": "成績 HTML から取り込んだ科目ごとの派生記録。",
     "properties": {
-        "タイトル": {"title": {}}, "Kei Agent 成績ID": {"rich_text": {}},
+        "科目名": {"title": {}}, "Kei Agent 成績ID": {"rich_text": {}},
         "取得年度": {"number": {"format": "number"}}, "学期": {"select": {"options": []}},
-        "単位": {"number": {"format": "number"}}, "成績": {"select": {"options": []}},
+        "単位": {"number": {"format": "number"}}, "成績": {"rich_text": {}},
         "GP": {"number": {"format": "number"}}, "科目区分": {"rich_text": {}},
     },
-    "relations": {"科目": ("courses", "成績履歴")},
+    "relations": {"授業": ("courses", "成績履歴")},
 }
 
 REQUIREMENTS = {
     "icon": "🎓",
     "description": "卒業要件の集計。成績との対応は根拠がある場合だけ結ぶ。",
     "properties": {
-        "名称": {"title": {}}, "Kei Agent 要件ID": {"rich_text": {}}, "区分": {"rich_text": {}},
-        "所定": {"number": {"format": "number"}}, "既得": {"number": {"format": "number"}},
-        "算入": {"number": {"format": "number"}}, "残り": {"number": {"format": "number"}},
+        "要件名": {"title": {}}, "Kei Agent 要件ID": {"rich_text": {}}, "大区分": {"rich_text": {}},
+        "所定単位": {"number": {"format": "number"}}, "既得単位": {"number": {"format": "number"}},
+        "算入単位": {"number": {"format": "number"}}, "残り単位": {"number": {"format": "number"}},
+        "集計種別": {"select": {"options": []}},
     },
     "relations": {"算入成績": ("grades", "単位要件")},
 }
@@ -129,6 +126,9 @@ GPA = {
 SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
          "study_logs": ("学習ログ", STUDY_LOGS), "grades": ("📊 成績履歴", GRADES),
          "requirements": ("🎓 単位要件", REQUIREMENTS), "gpa": ("📈 GPA推移", GPA)}
+
+# 既存の課題 DB だけはユーザー表示名を変える。title property を追加せず、既存 property ID を改名する。
+TITLE_ALIASES = {"assignments": {"課題": "タイトル"}}
 
 # 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
 AUTUMN_2026 = [
@@ -151,6 +151,28 @@ class CourseSetup(Setup):
             self.database(key, self.home, title, spec)
         for name, weekday, period in courses or []:
             self.add_course(name, weekday, period)
+
+    def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
+        """正本 schema に不足を補い、既存 title alias は同じ property ID で改名する。"""
+        # Setup.database() が missing を算出する前に、既存 title property を安全に正規名へ寄せる。
+        # DB が存在しない場合は親実装が title を含めて作成するので、ここでは何もしない。
+        matches = [block["id"] for block in self.notion.children(parent)
+                   if block["type"] == "child_database" and block["child_database"]["title"] == title]
+        if len(matches) == 1 and (aliases := TITLE_ALIASES.get(key)):
+            db = self.notion.request("GET", f"/databases/{matches[0]}")
+            data_source_id = db["data_sources"][0]["id"]
+            source = self.notion.request("GET", f"/data_sources/{data_source_id}")
+            renames = {
+                source["properties"][old]["id"]: {"name": canonical}
+                for canonical, old in aliases.items()
+                if canonical not in source["properties"]
+                and old in source["properties"]
+                and source["properties"][old].get("type") == "title"
+            }
+            if renames:
+                self.notion.request("PATCH", f"/data_sources/{data_source_id}", {"properties": renames})
+                self.log.append(f"タイトルを改名: {title} {list(aliases.values())} → {list(aliases)}")
+        return super().database(key, parent, title, spec)
 
     def add_course(self, name: str, weekday: str, period: int | None = None,
                    term: str = "秋学期") -> None:
