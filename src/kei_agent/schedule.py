@@ -22,7 +22,7 @@ from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
-from kei_agent.review_output import ReviewOutputError, review_footer, validate_review_reply
+from kei_agent.review_output import review_footer
 from kei_agent.slack_text import AWAITING_MARKER, clean_text
 from kei_agent.store import Store
 
@@ -219,10 +219,11 @@ class Scheduler:
 
         if result is None or result.is_error:
             status = "確認待ち"
-            summary = "エラーで止まりました: " + ("; ".join(result.errors) if result else "内部エラー")
+            summary = "エラーで止まりました"
         else:
-            status = "確認待ち" if AWAITING_MARKER in result.text else "完了"
-            summary = summarize(result.text)
+            shown, contract_failed = self.assistant.render_reply(result)
+            status = "確認待ち" if contract_failed or AWAITING_MARKER in result.text else "完了"
+            summary = "返答を利用者向けの形に整えられませんでした" if contract_failed else summarize(shown)
         await asyncio.to_thread(notion.update_task, task.id, status, summary)
         if status == "完了" and message_ts:
             await self.assistant.react_done(channel, message_ts)
@@ -303,21 +304,23 @@ class Scheduler:
             "Notion のノートと Task を読み、今日の議論の起点になる Daily を書いてください。\n\n"
             "**次の4つを、この順と見出しで書いてください。**ほかの見出しは足さないでください。\n"
             "スマホでも読めるように、全体を1画面に収めます。\n\n"
-            "*今日のタスク*\n"
+            "**今日のタスク**\n"
             "材料の「今日が期日の Task」を1行ずつ。**済みのものは `~取り消し線~` にする**"
             "（やったことも見えるように）。1件も無ければ「なし」の1行。\n\n"
-            "*夜間処理の結果*\n"
+            "**夜間処理の結果**\n"
             "夜間に終わったジョブと Task。無ければ1行で。\n\n"
-            "*確認待ち・期日・止まっているテーマ・返事待ち*\n"
+            "**確認待ち・期日・止まっているテーマ・返事待ち**\n"
             "確認待ちの Task、期日が近い Task とマイルストーン、止まっているテーマ、返事待ちのスレッド、"
             "研究時間の気になる点。**何も無いものはまとめて1行にする**（「いずれもなし」）。\n\n"
-            "*今日考えるとよい問い*\n"
+            "**今日考えるとよい問い**\n"
             "2〜3個。番号を振る。前日のスレッドの結果と、振り返り・考察のノートを踏まえる。\n\n"
             "**前日の動きの説明と、先行研究の新着は書かないでください。**前者は長くなって読み飛ばすため、"
             "後者はテーマのチャンネルに別で流れているためです（朝の予定に「どのテーマに新着があったか」だけ出ます）。\n\n"
             "月曜なら、材料に書かれている研究時間の CSV から、人の時間と Kei Agent の稼働時間を重ねた"
             "折れ線グラフを作り、`outputs/` に保存してください（月曜以外は作らなくてよい）。\n\n"
-            f"同じ内容を `daily/{day}.md` に保存してください。返答が Slack と Notion にそのまま載ります。"
+            f"同じ内容を `daily/{day}.md` に保存してください。Slack に出す本文は、次の marker の間にだけ書いてください。"
+            "marker の外には何も書かず、作業手順・tool 名・ファイル名は本文に入れません。\n"
+            "<<kei-agent-final>>\n（ここに4 section）\n<<kei-agent-final-end>>"
         )
         result = await self.assistant.run_detached(
             ws, self.overview_channel_name, prompt, "daily", actor="router",
@@ -326,7 +329,7 @@ class Scheduler:
         # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
         timeline, gathered, notices = await self.morning_text(datetime.now())
         thread_ts = await self.assistant.publish(
-            channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result)
+            channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result, output_kind="daily")
         for key in notices:
             self.store.record_notice(key)
         note = None
@@ -354,29 +357,26 @@ class Scheduler:
             "## Codex での振り返り\n（ここに Codex で話した結論を書く）\n```\n\n"
             "**Slack への返答は、次の2つの見出しと最後の1行だけ**にしてください。"
             "ほかの見出しや説明を足さないでください。\n\n"
-            "*今日の成果*\n"
+            "**今日の成果**\n"
             "材料の「今日が期日の Task」のうち**済みのもの**を1行ずつ。"
             "Task になっていないが今日片付いたことがあれば、それも1行で足してよい。無ければ「なし」。\n\n"
-            "*未完了タスク*\n"
+            "**未完了タスク**\n"
             "同じ Task のうち**終わっていないもの**を1行ずつ。無ければ「なし」。\n\n"
             "最後に、次の1行をそのまま書いてください。\n"
             "夜間に実行したいタスクはありますか？\n\n"
             "このあと、このスレッドに振り返りの結論が貼られたら、その内容を "
-            f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。"
+            f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。\n\n"
+            "Slack に出す本文は次の marker の間にだけ書いてください。marker の外には何も書かず、"
+            "作業手順・tool 名・ファイル名・provider 名は本文に入れません。\n"
+            "<<kei-agent-final>>\n（ここに指定の3 block）\n<<kei-agent-final-end>>"
         )
         result = await self.assistant.run_detached(
             ws, self.overview_channel_name, prompt, "review", actor="router",
             use_case=UseCase.OVERVIEW_PLAN)
-        if not result.is_error:
-            try:
-                result.text = validate_review_reply(result.text)
-            except ReviewOutputError as e:
-                result.is_error = True
-                result.errors.append(str(e))
-                result.text = ""
         title = f"Retro & Planning {label(day)}"
         thread_ts = await self.assistant.publish(
-            channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result
+            channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result,
+            output_kind="review",
         )
         note = None
         if not result.is_error:

@@ -53,7 +53,7 @@ from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
-from kei_agent.response_output import OutputError, finalize_conversation, safe_failure
+from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_daily, validate_review
 from kei_agent.self_fix import SelfFix
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
@@ -718,7 +718,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         return result
 
     async def publish(self, channel: str, channel_name: str, ws: Workspace, header: str,
-                      result: runner.RunResult, footer: str = "") -> str:
+                      result: runner.RunResult, footer: str = "", output_kind: str = "conversation") -> str:
         """見出しをチャンネルに投稿し、結果をそのスレッドに返す。スレッドで続きを話せるようにする。"""
         assert ws.cwd is not None
         resp = await self.slack.chat_postMessage(channel=channel, text=header)
@@ -726,12 +726,25 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         req = Request(channel, channel_name, thread_ts, None, "")
         # セッションが作れなかった日でも、このスレッドへの返信には反応できるようにする
         self.store.upsert_thread(channel, thread_ts, channel_name, result.session_id)
-        if result.text:
-            append_thread_log(ws.cwd, channel_name, thread_ts, "Kei Agent", result.text)
-            for chunk in split_text(result.text):
+        shown = ""
+        if not result.is_error:
+            try:
+                shown = finalize_conversation(result.text)
+                if output_kind == "daily":
+                    shown = validate_daily(shown)
+                elif output_kind == "review":
+                    shown = validate_review(shown)
+            except OutputError:
+                result.is_error = True
+                result.errors.append(f"invalid {output_kind} output")
+        if shown:
+            result.text = shown
+            append_thread_log(ws.cwd, channel_name, thread_ts, "Kei Agent", shown)
+            for chunk in split_text(shown):
                 await self.post(req, chunk, markdown=True)
         if result.is_error:
-            await self.post(req, f"{FAILED_PREFIX} エラーで止まっちゃった: {'; '.join(result.errors)[:1500] or '原因不明'}")
+            failure_kind = output_kind if output_kind in {"daily", "review"} else "connection"
+            await self.post(req, safe_failure(failure_kind))
         if footer:
             await self.post(req, footer)
         return thread_ts

@@ -12,13 +12,25 @@ from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, due_day, search_keywords
 
-REVIEW_REPLY = """*今日の成果*
+REVIEW_REPLY = """**今日の成果**
 なし
 
-*未完了タスク*
+**未完了タスク**
 なし
 
 夜間に実行したいタスクはありますか？"""
+
+DAILY_REPLY = """**今日のタスク**
+なし
+
+**夜間処理の結果**
+なし
+
+**確認待ち・期日・止まっているテーマ・返事待ち**
+なし
+
+**今日考えるとよい問い**
+1. 僕は何から進めよう？"""
 
 
 @pytest.fixture
@@ -245,7 +257,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
     assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
     assistant.notion.create_note("条件Bの考察", "考察", "2026-09-17", "質問を先に見せると精度が上がる")
-    claude.behaviors = [{"text": "今日の Daily", "session_id": "daily-sess"}]
+    claude.behaviors = [{"text": DAILY_REPLY, "session_id": "daily-sess"}]
 
     detail = await scheduler.run_daily("2026-09-18")
 
@@ -266,8 +278,29 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert header["channel"] == "C5" and header["text"].endswith("🌅 Daily 9/18（金）")
     assert header["text"].startswith("☀️")
     note = assistant.notion.notes[-1]
-    assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", "今日の Daily")
+    assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
     assert detail["notion_url"] == note.url
+
+
+async def test_daily_posts_only_four_bold_sections(env):
+    scheduler, _assistant, slack, claude = env
+    claude.behaviors = [{"text": "手順を確認します\n<<kei-agent-final>>\n" + DAILY_REPLY + "\n<<kei-agent-final-end>>"}]
+
+    result = await scheduler.run_daily("2026-09-24")
+
+    assert result["status"] == "posted"
+    assert "手順を確認" not in "\n".join(slack.texts())
+    assert slack.texts()[1] == DAILY_REPLY
+
+
+async def test_invalid_daily_is_not_saved_to_notion(env):
+    scheduler, assistant, _slack, claude = env
+    claude.behaviors = [{"text": "<<kei-agent-final>>\n*今日のタスク*\nなし\n<<kei-agent-final-end>>"}]
+
+    result = await scheduler.run_daily("2026-09-24")
+
+    assert result["status"] == "error"
+    assert assistant.notion.notes == []
 
 
 async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
@@ -343,7 +376,7 @@ async def test_review_never_posts_model_progress_narration(env):
 
     assert result["status"] == "error"
     assert all("まず材料を確認します" not in text for text in slack.texts())
-    assert any("指定形式" in text for text in slack.texts())
+    assert any("振り返りを利用者向けの形に整えられなかったよ" in text for text in slack.texts())
 
 
 async def test_review_footer_is_notion_native_without_local_path(env):
