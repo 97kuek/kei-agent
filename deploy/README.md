@@ -310,8 +310,7 @@ uv run kei-agent-schedule maintenance   # 今すぐ整理とバックアップ�
 # 声を替えたいとき（既定は cedar）。使えるのは alloy / ash / ballad / coral / echo /
 # sage / shimmer / verse / marin / cedar。公式が薦めるのは marin と cedar
 export KEI_AGENT_REALTIME_VOICE="cedar"
-# 安いモデルに落としたいとき（道具を正しく呼べるかを確かめてから）
-export KEI_AGENT_REALTIME_MODEL="gpt-realtime-2.1-mini"
+# 音声モデルは gpt-realtime-2.1-mini に固定（変更用の環境変数はない）
 # 既定以外のマイクを使いたいとき（`ffmpeg -f avfoundation -list_devices true -i ""` で一覧）
 export KEI_AGENT_MIC=":1"
 ```

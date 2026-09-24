@@ -22,7 +22,7 @@ Kei Agent は、Slackの入口を持つオーケストレーターと、研究�
 | 層 | いまあるもの | LLM | 役目 |
 |---|---|---|---|
 | 判断 | Kei Agent 本体（`src/kei_agent/`） | 持つ | Slack の受け口、意図の判定、返事の組み立て、柵、Notion（研究）、決まった時刻の処理、上限の管理 |
-| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で `claude -p` または `codex exec` を1回動かし、経過と結果を返す。長い処理（pueue の待ち行列）もこちらが持つ |
+| 実行 | 研究エージェント（`src/kei_agent_research/`） | 動かすが考えない | 渡された依頼文で選択済み provider の CLI を1回動かし、最終結果だけを返す。長い処理（pueue の待ち行列）もこちらが持つ |
 | 道具＋自分の判断 | 大学エージェント（`src/kei_agent_course/`） | 自分の claude を持つ | ドメインの外部サービス（Moodle・Box・Toggl・Notion の授業）を触り、そのドメインの質問に答える |
 
 - **ドメイン1つ＝エージェント1つ** 研究・大学・仕事（予定）。ドメインの中をさらに割らない。
@@ -80,7 +80,7 @@ JSON-RPC の `metadata` に `skill` と、細かい指定（`days` など）を�
 
 ## 4. claude を持たせるとき
 
-### CLIとモデルの選択
+### CLI とモデルの選択
 
 `config.toml` の `[agents.<agent>]` は provider 選択だけを持つ。model と effort は、実行時にユースケース別の provider 固有レシピから解決する。skill は agent のレシピを継承し、モデル名を埋め込まない。例外的な明示ラベルだけが専用レシピを選べる。
 
@@ -98,12 +98,12 @@ Codexの接続可否は環境ごと・時期ごとに変わるため、この文
 
 この切り替えが現時点で直接適用されるのは、研究のsandbox実行器である。研究テーマの作業場はリポジトリ外なので、Codex起動前に `plugin/research/skills` だけを `<テーマ>/.agents/skills` へ相対シンボリックリンクとして公開する。既存の利用者skillは上書きしない。大学・仕事の `ask` は、Notion／Box／Microsoft 365のアカウント連携を使うため、Codex側の同等MCPコネクタを確認するまではClaude connectorを正とする。
 
-動かし方は2つある。**どちらも `src/kei_agent_a2a/claude.py` を使い、自分で `claude` を起動する処理は書かない。**
+動かし方は2つある。**どちらも共通の agent 実行器を使い、provider 固有の CLI 呼び出しを個別の skill に書かない。**
 
 | | 使う関数 | 何ができるか | 使うとき |
 |---|---|---|---|
-| **道具だけ** | `ask_connector()` | アカウントに付いている連携（Box・Notion・Microsoft 365）を使う。Bash もファイルも使えない | 外のサービスを使って答える（大学・仕事の `ask`） |
-| **sandbox** | `run()` | テーマのディレクトリでファイルを読み書きし、Bash を使う | 手元で作業する（研究の `run-claude`） |
+| **道具だけ** | `ask_connector()` | 選択済み provider のアカウント連携（Box・Notion・Microsoft 365）を使う。Bash もファイルも使えない | 外のサービスを使って答える（大学・仕事の `ask`） |
+| **sandbox** | `run()` | テーマのディレクトリでファイルを読み書きし、Bash を使う | 手元で作業する（研究の互換用 skill `run-claude`） |
 
 「道具だけ」のほうは、使ってよい道具を名指しで並べる（読むものだけ）。触れる先が連携に限られるので、
 sandbox を締めるより結果的に狭い。連携はログイン（プロファイル）に付いてくるので、

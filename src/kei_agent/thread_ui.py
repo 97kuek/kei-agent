@@ -2,7 +2,7 @@
 
 - `agents.sessions.setStatus`: スレッドの状態。processing（作業中。Slack が「Working...」を出す）、
   active（次の依頼待ち）、suspended（依頼者の返事待ち）のどれか
-- `assistant.threads.setStatus`: 入力欄の下に出る1行。いま何をしているか（道具の名前や途中の独り言）は、ここだけに出す
+- `assistant.threads.setStatus`: 入力欄の下に出る1行。固定の利用者向け状態だけを出す
 - `chat.startStream` / `appendStream` / `stopStream`: 返事を流して見せる。出すのは最後のまとめだけ
 
 作業の手順を返事の中に1行ずつ並べると、長い作業ほどメッセージが伸びて、結論を読むのにスクロールが要る。

@@ -29,6 +29,7 @@ _INTERNAL_PROGRESS = re.compile(
     r"|(?:調査|作業|処理).{0,12}(?:中です|します|を開始)",
     re.IGNORECASE,
 )
+_INTERNAL_EXCEPTION = re.compile(r"\b(?:Traceback|[A-Za-z][\w.]*(?:Error|Exception))\b")
 
 
 class OutputError(ValueError):
@@ -55,6 +56,20 @@ def finalize_conversation(text: str) -> str:
     if not close or tail.strip() or not body.strip() or _forbidden(body):
         raise OutputError("conversation contract")
     return body.strip()
+
+
+def validate_structured_response(text: str) -> str:
+    """定型 A2A の、コードで組み立てた返答を Slack に出せる形か確かめる。
+
+    自由文のモデル応答は ``finalize_conversation`` を必ず通す。一方、締切や
+    同期結果のような定型処理は A2A の ``data`` と固定の整形で表示するため、
+    marker を要求せず、内部経過・例外・パスだけを拒否する。
+    """
+    normalized = text.strip().replace("\r\n", "\n")
+    if (not normalized or FINAL_OPEN in normalized or FINAL_CLOSE in normalized
+            or _forbidden(normalized) or _INTERNAL_EXCEPTION.search(normalized)):
+        raise OutputError("structured response contract")
+    return normalized
 
 
 def _validate_sections(text: str, headings: tuple[str, ...], message: str) -> str:

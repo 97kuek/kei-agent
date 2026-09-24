@@ -1,10 +1,10 @@
-"""研究エージェント（A2A）に、claude の1回分を頼む。
+"""研究エージェント（A2A）に、選択済み provider の1回分を頼む。
 
 `[a2a.agents]` に `research` を書いたときだけ使う。書かなければ、今までどおり同じプロセスで
 `runner.run_model` を動かす（docs/design.md の11章）。
 
-頼み方も返事も JSON。claude は数分〜数十分かかるので、流しながら返してもらう（A2A の
-SendStreamingMessage）。経過（使った道具と、返答の断片）が届くたびに、入力欄の下の1行に出す。
+頼み方も返事も JSON。数分〜数十分かかることがあるため、A2A の SendStreamingMessage を使う。
+入力欄の下に出すのは固定の利用者向け状態だけで、道具名や返答の断片は出さない。
 """
 
 from __future__ import annotations

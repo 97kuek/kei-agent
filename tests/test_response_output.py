@@ -1,6 +1,6 @@
 import pytest
 
-from kei_agent.response_output import OutputError, finalize_conversation, validate_daily
+from kei_agent.response_output import OutputError, finalize_conversation, validate_daily, validate_structured_response
 
 
 def test_finalizer_keeps_only_the_marked_user_facing_answer():
@@ -20,6 +20,12 @@ def test_finalizer_allows_a_normal_web_link():
     text = "<<kei-agent-final>>\n資料は https://example.com/notes にあるよ。\n<<kei-agent-final-end>>"
 
     assert finalize_conversation(text) == "資料は https://example.com/notes にあるよ。"
+
+
+def test_structured_response_rejects_exception_details_and_local_paths():
+    assert validate_structured_response("新しい課題を 2 件取り込んだよ") == "新しい課題を 2 件取り込んだよ"
+    with pytest.raises(OutputError):
+        validate_structured_response("RuntimeError: /private/secret")
 
 
 def test_daily_requires_four_bold_sections_in_order():

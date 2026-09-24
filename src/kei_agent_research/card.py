@@ -28,17 +28,17 @@ def build_card(base_url: str) -> AgentCard:
             protocol_binding="JSONRPC",
             protocol_version="1.0",
         )],
-        # 経過を流しながら返す（claude は数分〜数十分かかるので、終わるまで黙っていられない）
+        # 固定の利用者向け状態を流しながら返す（数分〜数十分かかることがある）
         capabilities=AgentCapabilities(streaming=True, push_notifications=False),
         default_input_modes=["application/json"],
         default_output_modes=["application/json"],
         skills=[
             AgentSkill(
                 id=RUN_CLAUDE,
-                name="claude を1回動かす",
+                name="研究用 provider を1回動かす",
                 description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、"
-                            "そのテーマのディレクトリで設定された claude または codex を1回動かして、結果を JSON で返す。"
-                            "途中の経過（使った道具と、返答の断片）はタスクの状態に流す",
+                            "そのテーマのディレクトリで選択済み provider を1回動かして、結果を JSON で返す。"
+                            "途中の状態は固定の利用者向け文だけをタスクの状態に流す",
                 tags=["claude", "sandbox"],
                 examples=['{"channel_name": "amr-query", "prompt": "図を作って"}'],
             ),

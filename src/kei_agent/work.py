@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 
 from kei_agent import agents, router, runner
 from kei_agent.request import Request
-from kei_agent.slack_text import FAILED_PREFIX, escape
+from kei_agent.response_output import safe_failure
+from kei_agent.slack_text import escape
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class WorkChannel:
             return
         reply = await self.ask_work(skill, **params)
         if not reply.ok:
-            await self.post(req, f"{FAILED_PREFIX} {reply.text or '仕事エージェントが止まったよ'}")
+            await self.post(req, safe_failure("connection"))
             await self.mark_answered(req, failed=True)
             return
         await self.post(req, events_text(events_of(reply.data), datetime.now()))

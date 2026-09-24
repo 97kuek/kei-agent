@@ -1189,6 +1189,71 @@ async def test_course_channel_asks_the_university_agent(env):
     assert ("reactions_add", {"channel": "C7", "timestamp": "11.1", "name": "white_check_mark"}) in slack.calls
 
 
+async def test_course_channel_hides_a2a_failure_details(env):
+    """定型 A2A の例外やローカルパスは Slack に中継しない。"""
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            return a2a.TaskResult(state="TASK_STATE_FAILED", text="RuntimeError: /private/secret")
+
+    assistant.agents["course"] = _Agent()
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.1", "text": "<@UBOT> 課題を取り込んで"})
+    await settle(assistant)
+
+    shown = "\n".join(slack.texts())
+    assert "接続に失敗したよ" in shown
+    assert "RuntimeError" not in shown and "/private/secret" not in shown
+
+
+async def test_course_channel_hides_invalid_a2a_success_text(env):
+    """completed でも、定型処理に混ざった例外は Slack に出さない。"""
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def ask(self, skill, text="", params=None):
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="RuntimeError: /private/secret")
+
+    assistant.agents["course"] = _Agent()
+    await assistant.course(Request("C7", "20_course", "11.1", "11.1", "取り込んで"), skill="sync-assignments")
+
+    shown = "\n".join(slack.texts())
+    assert "返答を利用者向けの形に整えられなかったよ" in shown
+    assert "RuntimeError" not in shown and "/private/secret" not in shown
+
+
+async def test_work_channel_hides_a2a_failure_details(env):
+    """仕事の定型 A2A でも同じ出力境界を通す。"""
+    from kei_agent import a2a
+
+    assistant, slack, _, _ = env
+    slack.channels["C8"] = "30_work"
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8788"
+
+        async def ask(self, skill, text="", params=None):
+            return a2a.TaskResult(state="TASK_STATE_FAILED", text="RuntimeError: /private/secret")
+
+    assistant.agents["work"] = _Agent()
+
+    await assistant.work(Request("C8", "30_work", "11.1", "11.1", "今日の予定は？"), skill="list-events")
+
+    shown = "\n".join(slack.texts())
+    assert "接続に失敗したよ" in shown
+    assert "RuntimeError" not in shown and "/private/secret" not in shown
+
+
 async def test_course_channel_sends_free_questions_to_ask(env, store):
     """定型に当てはまらない質問は ask に回し、大学エージェント自身の claude が答える。"""
     import json as _json
@@ -1350,8 +1415,8 @@ async def test_course_channel_tells_when_the_agent_is_down(env):
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.2", "text": "<@UBOT> 締切を教えて"})
     await settle(assistant)
 
-    assert any("頼めなかった" in (t or "") for t in slack.texts())
-    assert any("HTTP 502" in (t or "") for t in slack.texts())
+    assert any("接続に失敗したよ" in (t or "") for t in slack.texts())
+    assert any("Kei Agent で確認が必要な問題が起きたよ" in (t or "") for t in slack.texts())
     assert ("reactions_add", {"channel": "C7", "timestamp": "12.2", "name": "warning"}) in slack.calls
 
 

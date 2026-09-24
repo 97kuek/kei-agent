@@ -201,7 +201,7 @@ class CourseExecutor(AgentExecutor):
             courses = await asyncio.to_thread(notion_sync.course_names)
         except (notion_sync.SyncError, NotionError) as e:
             # 科目が読めないだけで集計をやめるより、全部数えて、そう言ったほうが役に立つ
-            courses, note = None, f"\n（「授業」を読めなかったので、Toggl のプロジェクト全部を数えたよ: {e}）"
+            courses, note = None, "\n（「授業」を読めなかったので、Toggl のプロジェクト全部を数えたよ）"
             log.warning("「授業」を読めませんでした: %s", e)
         try:
             text = await asyncio.to_thread(

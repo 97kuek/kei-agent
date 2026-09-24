@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 
 from kei_agent import agents, router, runner
 from kei_agent.request import Request
-from kei_agent.slack_text import FAILED_PREFIX, escape
+from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
+from kei_agent.slack_text import escape
 
 log = logging.getLogger(__name__)
 
@@ -147,14 +148,19 @@ class CourseChannel:
             return
         reply = await self.ask_course(skill, **params)
         if not reply.ok:
-            await self.post(req, f"{FAILED_PREFIX} {reply.text or '大学エージェントが止まったよ'}")
+            await self.post(req, safe_failure("connection"))
             await self.mark_answered(req, failed=True)
             return
         if skill == LIST_DUE:
             items, more = due_items(reply.data)
             await self.post(req, due_text(items, more, datetime.now()))
         else:
-            await self.post(req, reply.text or "（返事が空だったよ）")
+            try:
+                await self.post(req, validate_structured_response(reply.text))
+            except OutputError:
+                await self.post(req, safe_failure("conversation"))
+                await self.mark_answered(req, failed=True)
+                return
         await self.mark_answered(req, failed=False)
 
     async def course_skill(self, req: Request) -> tuple[str, dict]:
