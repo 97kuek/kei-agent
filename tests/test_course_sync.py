@@ -31,7 +31,7 @@ def _rich(text):
 
 def _row(event, page_id="row-1", course_page="page-db", when=None):
     return {"id": page_id, "properties": {
-        "タイトル": _title(event.summary),
+        "課題": _title(event.summary),
         "Moodle ID": _rich(event.uid),
         "締切": {"date": {"start": when or event.starts_at.astimezone().isoformat()}},
         "Moodle": {"url": event.url},
@@ -40,17 +40,29 @@ def _row(event, page_id="row-1", course_page="page-db", when=None):
 
 
 class FakeNotion:
-    def __init__(self, courses=(), assignments=(), study_logs=()):
+    def __init__(self, courses=(), assignments=(), study_logs=(), page_children=None):
         self.rows = {"ds-courses": list(courses), "ds-assignments": list(assignments),
                      "ds-study-logs": list(study_logs)}
         self.calls = []
+        self.page_children = dict(page_children or {})
 
     def paginate(self, method, path, body=None):
         return self.rows[path.split("/")[2]]
 
     def request(self, method, path, body=None):
         self.calls.append((method, path, body))
+        if method == "GET" and path.startswith("/blocks/") and path.endswith("/children"):
+            page_id = path.split("/")[2]
+            return {"results": self.page_children.get(page_id, [])}
+        if method == "PATCH" and path.startswith("/blocks/") and path.endswith("/children"):
+            page_id = path.split("/")[2]
+            self.page_children.setdefault(page_id, []).extend(body["children"])
+            return {"results": body["children"]}
         return {"id": "new-row"}
+
+    def appended_children(self, page_id):
+        return [block["heading_2"]["rich_text"][0]["text"]["content"]
+                for block in self.page_children.get(page_id, []) if block.get("type") == "heading_2"]
 
 
 COURSE_ROWS = [{"id": "page-db", "properties": {"科目名": _title("データベース")}}]
@@ -60,14 +72,18 @@ def _sync(notion, events, known_only=True):
     return notion_sync.CourseNotion(notion, STATE).sync(events, known_only=known_only)
 
 
+def _page_writes(notion):
+    return [call for call in notion.calls if call[:2] == ("POST", "/pages")]
+
+
 def test_a_new_deadline_becomes_a_row():
     notion = FakeNotion(courses=COURSE_ROWS)
     result = _sync(notion, [REPORT])
 
-    (method, path, body), = notion.calls
+    (method, path, body), = _page_writes(notion)
     assert (method, path) == ("POST", "/pages")
     props = body["properties"]
-    assert props["タイトル"]["title"][0]["text"]["content"] == "第3回レポート の 提出期限"
+    assert props["課題"]["title"][0]["text"]["content"] == "第3回レポート の 提出期限"
     # 手元の時刻に時差を付けて渡す（Notion 側でずれない）
     assert props["締切"]["date"]["start"] == REPORT.starts_at.astimezone().isoformat()
     assert props["出どころ"]["select"]["name"] == "Moodle"
@@ -76,6 +92,22 @@ def test_a_new_deadline_becomes_a_row():
     assert props["科目"]["relation"] == [{"id": "page-db"}]
     assert props["状態"]["status"]["name"] == "未着手"
     assert len(result.added) == 1 and result.unchanged == 0
+
+
+def test_assignment_title_removes_only_quoted_submission_suffix():
+    assert notion_sync.assignment_title("「Assignment A」の提出期限") == "Assignment A"
+    assert notion_sync.assignment_title("【ミニテスト】PC の受験可能期間の終了") == "【ミニテスト】PC の受験可能期間の終了"
+
+
+def test_new_assignment_gets_sections_but_existing_page_body_is_preserved():
+    notion = FakeNotion(courses=COURSE_ROWS, page_children={"new-row": []})
+    _sync(notion, [REPORT])
+
+    assert notion.appended_children("new-row") == ["やること", "提出物", "進捗メモ", "資料・リンク"]
+
+    notion.page_children["existing-row"] = [{"type": "paragraph"}]
+    notion_sync.CourseNotion(notion, STATE).ensure_assignment_template("existing-row")
+    assert notion.appended_children("existing-row") == []
 
 
 def test_the_same_deadline_is_left_alone():
@@ -117,7 +149,7 @@ def test_all_courses_can_be_taken_with_an_empty_relation():
     notion = FakeNotion(courses=COURSE_ROWS)
     result = _sync(notion, [OTHER], known_only=False)
 
-    (_, _, body), = notion.calls
+    (_, _, body), = _page_writes(notion)
     assert "科目" not in body["properties"]
     assert len(result.added) == 1 and result.other_courses == ["新入生セミナー"]
 
@@ -130,7 +162,7 @@ def test_it_stops_before_writing_too_many_rows(monkeypatch):
     notion = FakeNotion(courses=COURSE_ROWS)
     result = _sync(notion, events)
 
-    assert len(notion.calls) == 2 and result.stopped
+    assert len(_page_writes(notion)) == 2 and result.stopped
     assert "止めた" in result.summary()
 
 

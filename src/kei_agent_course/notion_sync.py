@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -35,10 +36,27 @@ NO_STATE = "授業用の Notion がまだありません（kei-agent-course-setu
 MAX_WRITES = 50
 TITLE_LIMIT = 200
 REQUIRED_DATABASES = frozenset({"courses", "assignments", "study_logs", "grades", "requirements", "gpa"})
+_QUOTED_DUE = re.compile(r"^「(?P<title>.+)」の提出期限$")
+_ASSIGNMENT_SECTIONS = ("やること", "提出物", "進捗メモ", "資料・リンク")
 
 
 class SyncError(RuntimeError):
     pass
+
+
+def assignment_title(summary: str) -> str:
+    """利用者が読める Moodle 課題名にする。厳密に一致する提出期限だけを短縮する。"""
+    clean = summary.strip()
+    match = _QUOTED_DUE.fullmatch(clean)
+    return match.group("title").strip() if match else clean
+
+
+def assignment_template_blocks() -> list[dict]:
+    """新規かつ空の課題ページだけに置く、課題ごとの整理見出し。"""
+    return [{
+        "object": "block", "type": "heading_2",
+        "heading_2": {"rich_text": [{"type": "text", "text": {"content": title}}]},
+    } for title in _ASSIGNMENT_SECTIONS]
 
 
 @dataclass
@@ -212,6 +230,14 @@ class CourseNotion:
         return {uid: row for row in self._rows(self.assignments)
                 if (uid := _plain(row["properties"].get("Moodle ID")))}
 
+    def ensure_assignment_template(self, page_id: str) -> bool:
+        """本文がまだ空の課題ページにだけ、整理用の見出しを一度追加する。"""
+        children = self.notion.request("GET", f"/blocks/{page_id}/children").get("results") or []
+        if children:
+            return False
+        self.notion.request("PATCH", f"/blocks/{page_id}/children", {"children": assignment_template_blocks()})
+        return True
+
     def sync(self, events: list[Event], known_only: bool = True) -> Result:
         courses, taken = self.course_ids(), self.taken()
         result = Result(known_only=known_only)
@@ -235,9 +261,10 @@ class CourseNotion:
             props = self._properties(event, course_id)
             if row is None:
                 props["状態"] = {"status": {"name": "未着手"}}
-                self.notion.request("POST", "/pages", {
+                page = self.notion.request("POST", "/pages", {
                     "parent": {"type": "data_source_id", "data_source_id": self.assignments},
                     "properties": props})
+                self.ensure_assignment_template(page["id"])
                 result.added.append(self._label(event))
             else:
                 self.notion.request("PATCH", f"/pages/{row['id']}", {"properties": props})
@@ -249,7 +276,7 @@ class CourseNotion:
 
     def _properties(self, event: Event, course_id: str | None) -> dict:
         props = {
-            "タイトル": {"title": [{"text": {"content": event.summary[:TITLE_LIMIT]}}]},
+            "課題": {"title": [{"text": {"content": assignment_title(event.summary)[:TITLE_LIMIT]}}]},
             # ics は手元の時刻に直してあるので、時差を付けて渡す（Notion 側でずれない）
             "締切": {"date": {"start": event.starts_at.astimezone().isoformat()}},
             "出どころ": {"select": {"name": "Moodle"}},
@@ -264,7 +291,7 @@ class CourseNotion:
     def _differs(self, row: dict, event: Event, course_id: str | None) -> bool:
         """Moodle 側と食い違っているか（状態や見積時間は見ない）。"""
         props = row.get("properties") or {}
-        if _plain(props.get("タイトル")) != event.summary[:TITLE_LIMIT]:
+        if _plain(props.get("課題")) != assignment_title(event.summary)[:TITLE_LIMIT]:
             return True
         when = _when(props.get("締切"))
         if when is None or when != event.starts_at.astimezone():
