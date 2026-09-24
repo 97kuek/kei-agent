@@ -148,6 +148,8 @@ class CourseNotion:
         """科目名 → 「授業」のページ ID。"""
         found: dict[str, str] = {}
         for row in self._rows(self.courses):
+            if _select(row["properties"].get("状態")) == "終了":
+                continue
             name = normalize_course_name(_plain(row["properties"].get("科目名")))
             if not name:
                 continue

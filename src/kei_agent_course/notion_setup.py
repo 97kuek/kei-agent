@@ -34,8 +34,10 @@ COURSES = {
         "単位": {"number": {"format": "number"}},
         "科目群": {"select": {"options": [
             {"name": "A群", "color": "blue"}, {"name": "B群", "color": "green"},
-            {"name": "C群", "color": "purple"}, {"name": "その他", "color": "gray"},
+            {"name": "C群", "color": "purple"}, {"name": "他箇所聴講科目", "color": "yellow"},
+            {"name": "その他", "color": "gray"},
         ]}},
+        "科目区分": {"select": {"options": []}},
         "必選区分": {"select": {"options": [
             {"name": "必修", "color": "red"}, {"name": "選択必修", "color": "orange"},
             {"name": "選択", "color": "blue"}, {"name": "その他", "color": "gray"},
@@ -44,6 +46,10 @@ COURSES = {
             {"name": "春学期", "color": "green"},
             {"name": "秋学期", "color": "orange"},
             {"name": "通年", "color": "blue"},
+            {"name": "夏ク", "color": "green"},
+            {"name": "秋ク", "color": "orange"},
+            {"name": "冬ク", "color": "purple"},
+            {"name": "その他", "color": "gray"},
         ]}},
         "曜日": {"select": {"options": [
             {"name": day, "color": color} for day, color in
@@ -199,6 +205,8 @@ class CourseSetup(Setup):
         """科目を1つ足す（同じ名前があれば何もしない）。曜日と時限は別の列に入れる。"""
         db = self.state["databases"]["courses"]
         for row in self.notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
+            if (row.get("properties", {}).get("状態", {}).get("select") or {}).get("name") == "終了":
+                continue
             title = "".join(part.get("plain_text") or part.get("text", {}).get("content", "")
                             for part in row.get("properties", {}).get("科目名", {}).get("title") or [])
             if normalize_course_name(title) == normalize_course_name(name):

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kei_agent.notion import Notion
-from kei_agent_course.academic_layout import gpa_display_label
+from kei_agent_course.academic_layout import gpa_display_label, reconcile_academic_history
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
 from kei_agent_course.notion_setup import SPECS
 from kei_agent_course.notion_sync import TOKEN_ENV, read_state
@@ -196,9 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     if not token:
         raise SystemExit(f"{TOKEN_ENV} が設定されていません")
     state = read_state()
-    result = AcademicSync(Notion(token), state).sync(record)
+    notion = Notion(token)
+    result = AcademicSync(notion, state).sync(record)
+    links = reconcile_academic_history(notion, state, apply=True)
     print("作成 " + "・".join(f"{key} {count} 件" for key, count in result.created.items()))
     print("更新 " + "・".join(f"{key} {count} 件" for key, count in result.updated.items()))
+    print("連携 " + "・".join(f"{key} {count} 件" for key, count in links.items()))
     if result.ambiguous_relations:
         print("手で確認が必要な relation: " + "、".join(result.ambiguous_relations))
     total = sum(result.created.values()) + sum(result.updated.values()) + sum(result.unchanged.values())
