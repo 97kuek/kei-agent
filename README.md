@@ -1,32 +1,20 @@
 # Kei Agent
 
-> Slackから頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進める個人用アシスタント
+> Slackから頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進めるパーソナルアシスタント
 
 ![Kei Agent の構成](docs/architecture.png)
 
 ## 概要
-
-- Slackチャンネルの推奨構成は以下の通り
-
-```text
-00_kei-agent
-01_overview
-02_research-strategy
-10_amr-query
-20_course
-30_work
-```
 
 - Slackの決まったチャンネルに、依頼文を流すとオーケストレータ（Haiku）が担当のエージェントに振り分ける
 
 ### 研究エージェント
 
 - Slackの`10_〇〇`チャンネルで動作する
-- 研究室のサーバやGPU・Slack・arXivと連携している
-- 研究室のSlackの教授・先輩からのアドバイスやarXivから取得した先行研究を確認できる
+- 研究室のサーバやGPU・Slack・arXiv・Notionと連携している
+- 研究室Slackの教授・先輩からのアドバイスやarXivから取得した先行研究を確認可能
 - 計算資源を研究室のGPUなどにSSH接続することで、Slack上でも話し合った内容を研究エージェントが実装・実行まで行ってくれる
-- Notionは「研究ホーム」の下だけを操作できる。トークンは手元の小さなサーバ（`kei-agent-notion-gateway`）が持ち、
-  エージェントには渡らない
+- 作業ログ・進捗・データなどをnotionで管理
 
 ### 大学エージェント
 
@@ -35,7 +23,7 @@
 
 ```text
 @Kei Agent マルチメディア工学Aの過去問で頻出のテーマってなに？
-@Kei Agent 大学を卒業するのに必要な単位数って何単位？
+@Kei Agent 今日締め切りの課題ってある？
 ```
 
 ### 仕事エージェント
@@ -50,14 +38,16 @@
 
 ### 定期実行
 
-- 朝になると`#01_overview`に今日の予定とDailyが届く
+- 朝（デフォルトは8:00）になると`#01_overview`に今日の予定とDailyが届く
+- 夜（デフォルトは9:00）になると`#01_overview`に今日やったことと残タスクが届く
 
 ### 自己改善
 
-- `#00_kei-agent`に本システムのバグや不具合などを報告すると、案・実装・取り込みをそれぞれ確認し、
-  承認された変更だけをテストして`push`する
+- `#00_kei-agent`に本システムのバグや不具合などを報告すると、案・実装・取り込みをそれぞれ確認し、承認された変更だけをテストして`push`する
 
 ## ドキュメント
+
+- 細かい設計仕様は以下のドキュメントを参照
 
 | 読みたいこと | 場所 |
 |---|---|
@@ -69,17 +59,6 @@
 | Notion の構成 | [`docs/notion-layout.md`](docs/notion-layout.md) |
 | Codex App 側の使い方、依頼文のテンプレート | [`docs/codex.md`](docs/codex.md) |
 | 変更の手順、コミットメッセージの書き方 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-
-## 開発
-
-```zsh
-brew install pueue && brew services start pueue
-uv sync
-uv run --group work pytest
-uvx ruff check .
-```
-
-コードの地図は [`docs/design.md`](docs/design.md#14-コードの地図)。
 
 ## ライセンス
 

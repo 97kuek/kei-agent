@@ -505,7 +505,7 @@ async def test_job_loop_notifies_once_while_failing(env, config, monkeypatch):
     object.__setattr__(assistant.config, "job_poll_seconds", 0)  # Config は frozen なので直接書き換える
     with pytest.raises(asyncio.CancelledError):
         await assistant.job_loop()
-    notices = [t for t in slack.texts() if "pueue" in t]
+    notices = [t for t in slack.texts() if "確認が必要な問題" in t]
     assert len(notices) == 1 and slack.posted()[-1]["channel"] == "C9"
 
 
@@ -522,7 +522,8 @@ async def test_crash_before_the_run_is_reported_to_the_thread(env, monkeypatch):
     await settle(assistant)
 
     texts = slack.texts()
-    assert any("依頼の処理が落ちました" in t and "ディスクが一杯です" in t for t in texts)
+    assert "⚠️ 接続に失敗したよ。少し時間を置いてもう一度頼んでね。" in texts
+    assert not any("ディスクが一杯です" in t for t in texts)
     assert claude.calls == []
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
 
@@ -964,7 +965,7 @@ async def test_ask_for_an_unknown_theme_is_reported(env, config):
     await settle(assistant)
 
     assert claude.calls == []
-    assert "渡せませんでした" in "\n".join(slack.texts())
+    assert "確認が必要な問題" in "\n".join(slack.texts())
     assert ask.pending_asks(config) == []
 
 

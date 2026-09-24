@@ -171,9 +171,9 @@ class FakeClaude:
             behavior["side_effect"](ws.cwd)
         # 実物と同じく、最後の result のイベントから組み立てる（上限の読み取りなども同じ道を通る）
         text = behavior.get("text", "結果です")
-        if text and not behavior.get("is_error", False) and not behavior.get("raw", False):
-            if "<<kei-agent-final>>" not in text and "<<kei-agent-final-end>>" not in text:
-                text = f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
+        if (text and not behavior.get("is_error", False) and not behavior.get("raw", False)
+                and "<<kei-agent-final>>" not in text and "<<kei-agent-final-end>>" not in text):
+            text = f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
         result = runner.RunResult()
         runner.apply_event(result, {
             "type": "result",

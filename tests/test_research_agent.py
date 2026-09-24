@@ -120,8 +120,8 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     assert call["prompt"] == "図を作って" and call["session_id"] == "sess-1"
     assert call["channel"] == "C1" and call["thread_ts"] == "10.1"
     assert call["allowed_domains"] == ("example.com",)
-    # 経過は流れてくるので、順番どおりに全部届く
-    assert activities == ["Bash: テスト"] and texts == ["途中まで書けたよ"]
+    # tool activity だけを流す。モデルの途中 text はオーケストレーターへも渡さない
+    assert activities == ["Bash: テスト"] and texts == []
 
 
 async def test_remote_research_honors_an_explicit_manual_recipe(server, config):

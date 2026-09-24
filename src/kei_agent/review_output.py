@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kei_agent.response_output import NIGHT_QUESTION, OutputError, validate_review
+from kei_agent.response_output import OutputError, validate_review
 
 ReviewOutputError = OutputError
 

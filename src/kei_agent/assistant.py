@@ -467,13 +467,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             log.warning("依頼者への通知を投稿できません", exc_info=True)
 
     async def notify_trouble(self, text: str) -> None:
-        """うまくいかなかったことを、Kei Agent の改善のチャンネルに知らせる。"""
+        """詳細はログに残し、改善チャンネルには安全な状態だけを知らせる。"""
         log.warning(text)
         try:
             ids = await self.channel_ids()
             channel = next((ids[n] for n in self.config.improve_channels if n in ids), None)
             if channel:
-                await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {text[:2500]}")
+                await self.slack.chat_postMessage(
+                    channel=channel, text=f"{FAILED_PREFIX} Kei Agent で確認が必要な問題が起きたよ。")
         except Exception:
             log.exception("Kei Agent の改善のチャンネルに知らせられません")
 
@@ -592,8 +593,9 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             return []
         try:
             problems = await asyncio.to_thread(self.notion.schema_problems)
-        except Exception as e:
-            await self.notify_trouble(f"Notion の設定を確かめられませんでした: {type(e).__name__}: {e}")
+        except Exception:
+            log.exception("Notion の設定を確かめられませんでした")
+            await self.notify_trouble("Notion の設定を確かめられませんでした")
             return []
         if problems:
             await self.notify_trouble(
@@ -775,7 +777,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         """process() が落ちても、👀 がついたまま黙って終わらないようにする。"""
         try:
             await self.process(req)
-        except Exception as e:
+        except Exception:
             log.exception("依頼の処理が落ちました")
             try:
                 await self.post(req, safe_failure("connection"))
@@ -783,7 +785,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 await self.mark_answered(req, failed=True)
             except Exception:
                 log.exception("落ちたことをスレッドに伝えられません")
-            await self.notify_trouble(f"#{req.channel_name} の依頼の処理が落ちました: {type(e).__name__}: {e}")
+            await self.notify_trouble(f"#{req.channel_name} の依頼の処理が落ちました")
 
     async def process(self, req: Request) -> runner.RunResult | None:
         try:
@@ -1036,7 +1038,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             if new_files and overlapped:
                 # 時刻では自分の図と隣の図を区別できないので、混ざりうることを黙って隠さない
                 notes.append("このテーマで別のスレッドも動いていたので、別のスレッドの図が混ざっているかもしれない。")
-        except Exception as e:
+        except Exception:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")
             notes.append("結果のファイルを添付できなかったよ。もう一度頼んでね。")

@@ -1,8 +1,8 @@
 from datetime import datetime
 
+from kei_agent_course import notion_sync
 from kei_agent_course.catalog import compare_course_catalog
 from kei_agent_course.ics import Event
-from kei_agent_course import notion_sync
 
 
 def _title(text: str) -> dict:

@@ -152,7 +152,7 @@ async def test_moon_reaction_reports_notion_failure(env):
     await assistant.on_reaction_added(MOON)
     posted = slack.posted()
     assert posted[0]["text"] == "⚠️ Notion に Task を作れなかったよ"
-    assert posted[1]["channel"] == "C9" and "503" in posted[1]["text"]
+    assert posted[1]["channel"] == "C9" and "確認が必要な問題" in posted[1]["text"]
 
 
 async def test_night_runs_slack_task_in_its_thread(env, config):
@@ -216,7 +216,7 @@ async def test_night_skips_when_notion_is_down(env, config):
     assistant.notion.fail = True
     detail = await scheduler.run_night("2026-09-18")
     assert detail["status"] == "error" and claude.calls == []
-    assert slack.posted()[-1]["channel"] == "C9" and "今夜は実行しません" in slack.posted()[-1]["text"]
+    assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
 
 # 先行研究
@@ -445,7 +445,7 @@ async def test_maintenance_reports_backup_failure(env, config):
     config.research_root.mkdir(parents=True, exist_ok=True)  # Git のリポジトリではない
     detail = await scheduler.run_maintenance("2026-09-18")
     assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0, "thread_logs": 0, "worktrees": 0}
-    assert slack.posted()[-1]["channel"] == "C9" and "バックアップに失敗" in slack.posted()[-1]["text"]
+    assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
 
 async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatch):
