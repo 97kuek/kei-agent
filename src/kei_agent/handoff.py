@@ -125,11 +125,12 @@ class Handoff:
                 raise
             self.store.end_run(run_id, result.is_error, result.cost_usd)
             self.store.finish_deferred(in_flight)
-            if result.is_error or not result.text.strip():
+            memo, contract_failed = self.render_reply(result)
+            if result.is_error or contract_failed:
                 await self.post(req, f"{FAILED_PREFIX} 引き継ぎのまとめを作れなかったよ。"
                                      "もう一度区切りたいときは「新しいスレッドにして」と書いてね。")
                 return None
-            title, body = split_memo(result.text)
+            title, body = split_memo(memo)
             old_link = await self.permalink(req.channel, req.thread_ts)
             resp = await self.slack.chat_postMessage(channel=req.channel, markdown_text=(
                 f"🧵 **{title}**\n\n{body}\n\n[前のスレッド]({old_link})"
@@ -137,10 +138,10 @@ class Handoff:
             new_ts = resp["ts"]
             previous_log = thread_log_path(ws.cwd, req.thread_ts).relative_to(ws.cwd)
             self.store.upsert_thread(req.channel, new_ts, req.channel_name, None)
-            self.store.update_thread(req.channel, new_ts, handoff_memo=handoff_start_prompt(result.text, str(previous_log)))
+            self.store.update_thread(req.channel, new_ts, handoff_memo=handoff_start_prompt(memo, str(previous_log)))
             self.store.update_thread(req.channel, req.thread_ts, handed_off_to=new_ts)
             self.store.set_awaiting(req.channel, req.thread_ts, False)
-            append_thread_log(ws.cwd, req.channel_name, new_ts, "Kei Agent（引き継ぎ）", result.text)
+            append_thread_log(ws.cwd, req.channel_name, new_ts, "Kei Agent（引き継ぎ）", memo)
         new_link = await self.permalink(req.channel, new_ts)
         await self.post(req, f"🧵 ここから先は新しいスレッドで続けるね: <{new_link}|{title}>")
         return new_ts

@@ -25,6 +25,7 @@ STATUS_LIMIT = 100
 # 何もしていないときの文言
 THINKING_TEXT = "考え中…"
 WAITING_JOB_TEXT = "ジョブの結果を待っている…"
+_PROGRESS_TEXTS = ("調べている…", "作業している…", "まとめている…")
 
 
 class ThreadUI:
@@ -45,14 +46,20 @@ class ThreadUI:
         await self._status("processing")
 
     async def activity(self, activity: str) -> None:
-        """道具を呼ぶたびに呼ばれる。いま何をしているかだけを見せる。"""
-        await self._thinking(activity)
+        """道具の詳細を出さず、固定の利用者向け進捗だけを見せる。"""
+        lowered = activity.lower()
+        if any(word in lowered for word in ("read", "search", "fetch", "glob", "grep", "調べ", "確認")):
+            shown = _PROGRESS_TEXTS[0]
+        elif any(word in lowered for word in ("summar", "まとめ", "answer", "返答")):
+            shown = _PROGRESS_TEXTS[2]
+        else:
+            shown = _PROGRESS_TEXTS[1]
+        await self._thinking(shown)
 
     async def text(self, chunk: str) -> None:
-        """Claude が作業の途中で書いた文章。1行目だけを、いまの様子として見せる。"""
-        line = next((line.strip() for line in chunk.splitlines() if line.strip()), "")
-        if line:
-            await self._thinking(line)
+        """モデルの途中 text は本文にも status にも表示しない。"""
+        if chunk.strip():
+            await self._thinking(_PROGRESS_TEXTS[2])
 
     async def finish(self, answer: str, awaiting: bool = False) -> bool:
         """まとめを本文に出し、スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。

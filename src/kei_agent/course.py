@@ -17,7 +17,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router
+from kei_agent import agents, router, runner
 from kei_agent.request import Request
 from kei_agent.slack_text import FAILED_PREFIX, escape
 
@@ -192,21 +192,19 @@ class CourseChannel:
                 await ui.text(event["text"])
 
         reply = await self.ask_course(ASK, text=payload, on_progress=on_progress)
-        answer = reply.text.strip()
+        answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
         if session_id and not reply.ok and "No conversation found" in str(reply.data.get("errors")):
             # エージェントを入れ替えると会話が消える。1回だけ、続きなしで聞き直す
             self.store.set_agent_session(req.channel, req.thread_ts, AGENT, "")
             reply = await self.ask_course(ASK, text=payload.replace(f'"{session_id}"', "null"),
                                           on_progress=on_progress)
-            answer = reply.text.strip()
+            answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
         new_session = str(reply.data.get("session_id") or "")
         if new_session:
             self.store.set_agent_session(req.channel, req.thread_ts, AGENT, new_session)
-        if not reply.ok:
-            answer = f"{FAILED_PREFIX} {answer or '大学エージェントが止まったよ'}"
-        streamed = await ui.finish(answer or "（返事が空だったよ）")
+        streamed = await ui.finish(answer)
         if not streamed:
-            await self.post(req, answer or "（返事が空だったよ）", markdown=True)
+            await self.post(req, answer, markdown=True)
         await self.mark_answered(req, failed=not reply.ok)
 
     async def ask_course(self, skill: str, text: str = "", on_progress=None, **params) -> agents.Reply:

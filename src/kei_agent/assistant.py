@@ -53,6 +53,7 @@ from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
+from kei_agent.response_output import OutputError, finalize_conversation, safe_failure
 from kei_agent.self_fix import SelfFix
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
@@ -735,6 +736,15 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             await self.post(req, footer)
         return thread_ts
 
+    def render_reply(self, result: runner.RunResult) -> tuple[str, bool]:
+        """モデルの raw text を Slack 用の最終回答へ変換する唯一の入口。"""
+        if result.is_error:
+            return safe_failure("timeout" if result.timed_out else "connection"), False
+        try:
+            return finalize_conversation(result.text), False
+        except OutputError:
+            return safe_failure("conversation"), True
+
     # 依頼の処理
 
     async def submit(self, req: Request) -> None:
@@ -755,7 +765,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         except Exception as e:
             log.exception("依頼の処理が落ちました")
             try:
-                await self.post(req, f"{FAILED_PREFIX} 依頼の処理が落ちました: `{type(e).__name__}: {e}`")
+                await self.post(req, safe_failure("connection"))
                 # 👀 のまま残ると、答えたのかどうかが分からなくなる
                 await self.mark_answered(req, failed=True)
             except Exception:
@@ -766,7 +776,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         try:
             ws = themes.resolve(self.config, req.channel_name)
         except ValueError as e:
-            await self.post(req, f"{FAILED_PREFIX} {e}")
+            log.warning("不正なテーマを指定されました: %s", e)
+            await self.post(req, safe_failure("connection"))
             return None
         if await self.tell_if_waiting(req):
             return None
@@ -787,9 +798,9 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
             try:
                 return await self.run(req, ws)
-            except Exception as e:
+            except Exception:
                 log.exception("依頼の処理に失敗しました")
-                await self.post(req, f"{FAILED_PREFIX} 内部エラーで止まっちゃった: `{type(e).__name__}: {e}`")
+                await self.post(req, safe_failure("connection"))
                 return None
 
     async def route_overview(self, req: Request) -> bool:
@@ -917,7 +928,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if result.limit_reset_at is not None:
             await self.defer_for_limit(req, result.limit_reset_at)
             self.store.set_awaiting(req.channel, req.thread_ts, True)
-            await ui.finish(result.text, awaiting=True)
+            await ui.finish("")
             await self.mark_answered(req, failed=True)
             self.theme_runs.end(req.channel_name, req.thread_ts)
             return result
@@ -989,18 +1000,18 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                      awaiting: bool) -> None:
         """まとめをスレッドに返す。流して見せられなかったときだけ、まとめて投稿する。"""
         assert ws.cwd is not None
+        shown, contract_failed = self.render_reply(result)
         # 着手・取り込みの合図は、検出に使うだけで Slack には出さない（result.text は残す）
         # 区切りの合図は、題をボタンに出すので本文からは消す
-        shown = improve.strip_markers(result.text) if ws.kind is ChannelKind.IMPROVE else strip_handoff(result.text)
+        shown = improve.strip_markers(shown) if ws.kind is ChannelKind.IMPROVE else strip_handoff(shown)
         streamed = await ui.finish(shown, awaiting and not result.is_error)
         if shown:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Kei Agent", shown)
             if not streamed:
                 for chunk in split_text(shown):
                     await self.post(req, chunk, markdown=True)
-        if result.is_error:
-            reason = "上限時間を超えたので止めました" if result.timed_out else "; ".join(result.errors)[:1500]
-            await self.post(req, f"{FAILED_PREFIX} エラーで止まっちゃった: {reason or '原因不明'}")
+        if contract_failed:
+            log.warning("Slack 出力契約に違反した応答を破棄しました: channel=%s thread=%s", req.channel, req.thread_ts)
 
     async def _attach_outputs(self, req: Request, cwd: Path, before) -> None:
         """この回で新しくできた outputs/ のファイルをスレッドに添付する。"""
@@ -1015,7 +1026,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         except Exception as e:
             # 結果はもう返しているので、添付だけ失敗したことを伝える
             log.exception("outputs/ のファイルを添付できません")
-            notes.append(f"`outputs/` のファイルを添付できなかったよ: `{type(e).__name__}: {e}`")
+            notes.append("結果のファイルを添付できなかったよ。もう一度頼んでね。")
         if notes:
             await self.post(req, f"{FAILED_PREFIX} " + " ".join(notes))
 

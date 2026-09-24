@@ -89,9 +89,6 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
     async def on_activity(activity: str) -> None:
         await progress(updater, {"activity": activity})
 
-    async def on_text(chunk: str) -> None:
-        await progress(updater, {"text": chunk})
-
     log.info("claude を動かします: %s（%s）", ws.channel_name, ws.cwd)
     result = await runner.run_model(
         config,
@@ -99,7 +96,7 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
             ws, recipe, ask.get("session_id"), ask.get("channel", ""), ask.get("thread_ts", ""),
             read_only=bool(ask.get("read_only")),
         ),
-        ask["prompt"], on_activity=on_activity, on_text=on_text,
+        ask["prompt"], on_activity=on_activity,
     )
     log.info("claude が終わりました: %s（エラー: %s）", ws.channel_name, result.is_error)
     return envelope.reply(

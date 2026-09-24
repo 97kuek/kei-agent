@@ -16,7 +16,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router
+from kei_agent import agents, router, runner
 from kei_agent.request import Request
 from kei_agent.slack_text import FAILED_PREFIX, escape
 
@@ -127,9 +127,7 @@ class WorkChannel:
                 await ui.activity(event["activity"])
 
         reply = await self.ask_work_text(req.text or "今日の予定は？", on_progress)
-        answer = reply.text.strip() or "（返事が空だったよ）"
-        if not reply.ok:
-            answer = f"{FAILED_PREFIX} {answer}"
+        answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
         streamed = await ui.finish(answer)
         if not streamed:
             await self.post(req, answer, markdown=True)

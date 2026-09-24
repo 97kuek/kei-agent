@@ -170,11 +170,15 @@ class FakeClaude:
         if "side_effect" in behavior:
             behavior["side_effect"](ws.cwd)
         # 実物と同じく、最後の result のイベントから組み立てる（上限の読み取りなども同じ道を通る）
+        text = behavior.get("text", "結果です")
+        if text and not behavior.get("is_error", False) and not behavior.get("raw", False):
+            if "<<kei-agent-final>>" not in text and "<<kei-agent-final-end>>" not in text:
+                text = f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
         result = runner.RunResult()
         runner.apply_event(result, {
             "type": "result",
             "session_id": behavior.get("session_id", "sess-1"),
-            "result": behavior.get("text", "結果です"),
+            "result": text,
             "is_error": behavior.get("is_error", False),
             "errors": behavior.get("errors", []),
         })
