@@ -164,13 +164,13 @@ uv run kei-agent-notion-setup <研究ホームのページID>
 1. <https://www.notion.so/profile/integrations> で、授業用のコネクト（例: `Kei Agent（授業）`）を作り、トークンを控える
 2. Notion に「授業ホーム」のページを作り、そのコネクトの「コンテンツへのアクセス」に追加する
 3. 秘密情報のファイルに `export NOTION_COURSE_TOKEN="ntn_..."` を足す
-4. 次を実行すると、「授業」「課題」の2つのデータベースができる（あとから実行しても、足りない項目だけ足す）
+4. 次を実行すると、正本の「授業」「課題」「学習ログ」「📊 成績履歴」「🎓 単位要件」「📈 GPA推移」の6 DBを整える（あとから実行しても、足りない項目と relation だけを足す）
 
    ```zsh
    uv run --group course kei-agent-course-setup <授業ホームのページID> --seed
    ```
 
-   「授業」は科目名・科目コード・学期・曜日・時限・Moodle・状態、「課題」は締切や状態と、科目へのリレーションを持つ。
+   「授業」は科目名・科目コード・学期・曜日・時限・Moodle・状態、「課題」は課題名・締切・状態と、科目へのリレーションを持つ。
    `--seed` を付けると、`notion_setup.py` の `AUTUMN_2026` に書いた履修科目を入れる（同じ名前があれば足さない）。
    研究用のコネクトとは分けてあるので、授業エージェントは研究のデータベースに触れない。
 
@@ -185,6 +185,15 @@ uv run kei-agent-notion-setup <研究ホームのページID>
 
    取り込むのは「授業」に入れた科目の締切だけ。Moodle のカレンダーには新入生向けの資料なども並ぶため、
    それらは入れずに、科目名だけを返事で知らせる。
+
+7. 課題一覧と GPA 推移の view、既存 Moodle 課題ページの整理枠を統一するときは、必ず dry-run を確認してから反映する
+
+   ```zsh
+   uv run --group course kei-agent-course-layout
+   uv run --group course kei-agent-course-layout --apply
+   ```
+
+   `Untitled` DB は対象外で、既存のページ本文は変更しない。題名は `「…」の提出期限` と完全一致する行だけ短縮する。`GPA推移` は既存の GPA 値を折れ線で表示するだけで、成績・単位・relation を推測して追加しない。
 
 ## 7.55 仕事エージェントの Claude アカウント
 

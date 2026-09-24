@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 
 from kei_agent.notion import Notion
-from kei_agent_course.notion_sync import TOKEN_ENV, read_state
+from kei_agent_course.notion_sync import TOKEN_ENV, assignment_template_blocks, assignment_title, read_state
 
 _ASSIGNMENT_COLUMNS = ("科目", "課題", "締切", "状態")
 
@@ -17,6 +17,15 @@ class LayoutReport:
     """dry-run と apply が同じ形式で返す view 作成・更新予定。"""
 
     planned: tuple[str, ...]
+    assignments: AssignmentLayoutReport | None = None
+
+
+@dataclass(frozen=True)
+class AssignmentLayoutReport:
+    """既存課題の title 値と空ページに対する、安全な移行予定・実績。"""
+
+    renamed: int
+    templated: int
 
 
 def assignment_view_payload(state: dict) -> dict:
@@ -78,6 +87,35 @@ def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool) -> 
     return f"{payload['name']}: {action}"
 
 
+def _plain_title(prop: dict) -> str:
+    """Notion の title 応答を、比較だけに使う文字列へ戻す。"""
+    return "".join(part.get("plain_text") or part.get("text", {}).get("content") or ""
+                   for part in prop.get("title") or [])
+
+
+def reconcile_assignment_pages(notion: Notion, state: dict, apply: bool = False) -> AssignmentLayoutReport:
+    """既存課題の厳密な Moodle title と空本文だけを整理する。"""
+    database = state["databases"]["assignments"]
+    rows = notion.paginate("POST", f"/data_sources/{database['data_source_id']}/query", {"page_size": 100})
+    renamed = templated = 0
+    for row in rows:
+        page_id = row["id"]
+        current = _plain_title((row.get("properties") or {}).get("課題") or {})
+        normalized = assignment_title(current)
+        if normalized != current:
+            renamed += 1
+            if apply:
+                notion.request("PATCH", f"/pages/{page_id}", {
+                    "properties": {"課題": {"title": [{"text": {"content": normalized}}]}},
+                })
+        children = notion.request("GET", f"/blocks/{page_id}/children").get("results") or []
+        if not children:
+            templated += 1
+            if apply:
+                notion.request("PATCH", f"/blocks/{page_id}/children", {"children": assignment_template_blocks()})
+    return AssignmentLayoutReport(renamed, templated)
+
+
 def apply_layout(notion: Notion, state: dict, apply: bool = False) -> LayoutReport:
     """課題・GPA view の変更予定を返し、`apply=True` のときだけ Notion に書き込む。"""
     databases = state["databases"]
@@ -85,7 +123,7 @@ def apply_layout(notion: Notion, state: dict, apply: bool = False) -> LayoutRepo
         _upsert_view(notion, databases["assignments"], assignment_view_payload(state), apply),
         _upsert_view(notion, databases["gpa"], gpa_view_payload(state), apply),
     )
-    return LayoutReport(planned)
+    return LayoutReport(planned, reconcile_assignment_pages(notion, state, apply))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,7 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{TOKEN_ENV} が設定されていません")
     report = apply_layout(Notion(token), read_state(), apply=args.apply)
     mode = "反映" if args.apply else "dry-run"
-    print(f"{mode}: " + "・".join(report.planned))
+    assignment_changes = report.assignments or AssignmentLayoutReport(0, 0)
+    print(f"{mode}: " + "・".join(report.planned)
+          + f" / 課題名 {assignment_changes.renamed} 件・空ページ整理 {assignment_changes.templated} 件")
     return 0
 
 

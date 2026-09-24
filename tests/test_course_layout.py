@@ -36,8 +36,10 @@ def test_gpa_view_is_a_line_chart_of_raw_period_and_gpa_values():
 
 
 class FakeNotion:
-    def __init__(self, views=()):
+    def __init__(self, views=(), assignments=(), page_children=None):
         self.views = list(views)
+        self.assignments = list(assignments)
+        self.page_children = dict(page_children or {})
         self.calls = []
 
     @property
@@ -48,10 +50,33 @@ class FakeNotion:
         self.calls.append((method, path, body))
         if method == "GET" and path.startswith("/views?"):
             return {"results": self.views}
+        if method == "GET" and path.startswith("/blocks/"):
+            return {"results": self.page_children.get(path.split("/")[2], [])}
+        if method == "PATCH" and path.startswith("/blocks/"):
+            self.page_children.setdefault(path.split("/")[2], []).extend(body["children"])
+            return {"results": body["children"]}
+        if method == "PATCH" and path.startswith("/pages/"):
+            page_id = path.rsplit("/", 1)[-1]
+            row = next(row for row in self.assignments if row["id"] == page_id)
+            row["properties"].update(body["properties"])
+            return row
         return {"id": "created-view"}
+
+    def paginate(self, _method, path, _body=None):
+        assert path == "/data_sources/assignment-source/query"
+        return self.assignments
 
     def calls_for(self, method, path):
         return [call for call in self.calls if call[:2] == (method, path)]
+
+    def page_title(self, page_id):
+        row = next(row for row in self.assignments if row["id"] == page_id)
+        title = row["properties"]["課題"]["title"][0]
+        return title.get("plain_text") or title["text"]["content"]
+
+    def appended_children(self, page_id):
+        return [block["heading_2"]["rich_text"][0]["text"]["content"]
+                for block in self.page_children.get(page_id, []) if block.get("type") == "heading_2"]
 
 
 def test_dry_run_never_mutates_notion():
@@ -69,3 +94,22 @@ def test_apply_updates_existing_named_view_without_duplicate():
     assert notion.calls_for("PATCH", "/views/assignment-view")
     created, = notion.calls_for("POST", "/views")
     assert created[2]["name"] == "GPA推移"
+
+
+def assignment(page_id, title):
+    return {"id": page_id, "properties": {"課題": {"title": [{"plain_text": title}]}}}
+
+
+def test_reconcile_updates_only_exact_moodle_titles_and_empty_pages():
+    from kei_agent_course.course_layout import reconcile_assignment_pages
+
+    notion = FakeNotion(
+        assignments=[assignment("p1", "「課題#1」の提出期限"), assignment("p2", "アンケート終了")],
+        page_children={"p1": [], "p2": [{"type": "paragraph"}]},
+    )
+    report = reconcile_assignment_pages(notion, full_state(), apply=True)
+
+    assert report.renamed == 1 and report.templated == 1
+    assert notion.page_title("p1") == "課題#1"
+    assert notion.page_title("p2") == "アンケート終了"
+    assert notion.appended_children("p2") == []
