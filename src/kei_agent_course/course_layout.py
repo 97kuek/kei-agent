@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import urllib.parse
 from dataclasses import dataclass
 
-from kei_agent.notion import Notion
+from kei_agent.notion import MAX_PAGES, Notion, NotionError
 from kei_agent_course.notion_sync import TOKEN_ENV, assignment_template_blocks, assignment_title, read_state
 
 _ASSIGNMENT_COLUMNS = ("科目", "課題", "締切", "状態")
@@ -72,7 +73,7 @@ def gpa_view_payload(state: dict) -> dict:
 
 def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool) -> str:
     """同じ名前の view があれば更新し、なければ作る。dry-run では GET 以外を送らない。"""
-    found = notion.request("GET", f"/views?database_id={database['database_id']}").get("results") or []
+    found = _views(notion, database["database_id"])
     existing = None
     for view in found:
         # List views の応答は name を省略するため、個別取得した完全な view で照合する。
@@ -91,6 +92,22 @@ def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool) -> 
                 **payload,
             })
     return f"{payload['name']}: {action}"
+
+
+def _views(notion: Notion, database_id: str) -> list[dict]:
+    """List views の全ページを読む。後続ページの同名 view も重複作成しない。"""
+    found: list[dict] = []
+    cursor: str | None = None
+    for _ in range(MAX_PAGES):
+        query = {"database_id": database_id, "page_size": 100}
+        if cursor:
+            query["start_cursor"] = cursor
+        response = notion.request("GET", f"/views?{urllib.parse.urlencode(query)}")
+        found.extend(response.get("results") or [])
+        cursor = response.get("next_cursor")
+        if not response.get("has_more") or not cursor:
+            return found
+    raise NotionError(f"GET /views: ページが多すぎます（{MAX_PAGES} ページで打ち切り）")
 
 
 def _plain_title(prop: dict) -> str:

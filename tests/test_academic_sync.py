@@ -14,7 +14,7 @@ def _property(property_id: str, kind: str = "rich_text") -> dict:
 class ExistingCourseHomeNotion:
     """実在の授業ホームと同じ title / relation 名を返す Notion 境界の fake。"""
 
-    def __init__(self, assignment_title: str = "タイトル"):
+    def __init__(self, assignment_title: str = "タイトル", duplicate_title: str = ""):
         names = {
             "courses": {
                 "科目名": "title", "科目コード": "rich_text", "年度": "number", "学期": "select",
@@ -50,13 +50,17 @@ class ExistingCourseHomeNotion:
         }
         self.calls: list[tuple[str, str, dict | None]] = []
         self.deleted: list[str] = []
+        self.duplicate_title = duplicate_title
 
     def children(self, _page_id):
-        return [
+        blocks = [
             {"id": key, "type": "child_database", "child_database": {"title": title}}
             for key, title in (("courses", "授業"), ("assignments", "課題"), ("study_logs", "学習ログ"),
                                ("grades", "📊 成績履歴"), ("requirements", "🎓 単位要件"), ("gpa", "📈 GPA推移"))
         ]
+        if self.duplicate_title:
+            blocks.append({"id": "duplicate", "type": "child_database", "child_database": {"title": self.duplicate_title}})
+        return blocks
 
     def request(self, method, path, body=None):
         self.calls.append((method, path, copy.deepcopy(body)))
@@ -198,6 +202,20 @@ def test_setup_refuses_to_choose_between_duplicate_canonical_databases(tmp_path)
         setup.run()
 
 
+def test_setup_checks_all_canonical_duplicates_before_any_write(tmp_path):
+    from kei_agent.notion import NotionError
+    from kei_agent_course.notion_setup import CourseSetup
+
+    notion = ExistingCourseHomeNotion(duplicate_title="📊 成績履歴")
+    setup = CourseSetup(notion, "home", tmp_path / "notion-course.json")
+
+    with pytest.raises(NotionError, match="重複"):
+        setup.run()
+
+    assert notion.calls == []
+    assert not setup.state_path.exists()
+
+
 def test_academic_sync_upserts_same_record_without_duplicate_pages():
     class Notion:
         def __init__(self):
@@ -281,6 +299,39 @@ def test_academic_sync_updates_an_existing_requirement_by_stable_key():
     ))
 
     assert result.updated == {"grades": 0, "requirements": 1, "gpa": 0}
+
+
+def test_academic_sync_preserves_an_existing_grade_course_relation():
+    class Notion:
+        def __init__(self):
+            self.rows = {
+                "courses": [{"id": "matched-course", "properties": {
+                    "科目名": {"title": [{"plain_text": "数学"}]}, "年度": {"number": 2025},
+                    "学期": {"select": {"name": "春学期"}},
+                }}],
+                "grades": [{"id": "grade-1", "properties": {
+                    "科目名": {"title": [{"plain_text": "数学"}]},
+                    "Kei Agent 成績ID": {"rich_text": [{"plain_text": "grade:2025:春期:数学:2:A"}]},
+                    "取得年度": {"number": 2025}, "学期": {"select": {"name": "春期"}},
+                    "単位": {"number": 2}, "成績": {"rich_text": [{"plain_text": "A"}]},
+                    "GP": {"number": 4}, "科目区分": {"rich_text": [{"plain_text": "基礎"}]},
+                    "授業": {"relation": [{"id": "manually-linked-course"}]},
+                }}],
+                "requirements": [], "gpa": [],
+            }
+
+        def paginate(self, _method, path, _body=None):
+            return self.rows[path.split("/")[2]]
+
+        def request(self, method, path, body=None):
+            raise AssertionError((method, path, body))
+
+    state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
+    result = AcademicSync(Notion(), state).sync(AcademicRecord(
+        grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=(),
+    ))
+
+    assert result.unchanged == {"grades": 1, "requirements": 0, "gpa": 0}
 
 
 def test_academic_import_cli_dry_run_never_reads_state_or_writes(tmp_path, monkeypatch):

@@ -46,9 +46,8 @@ class SyncError(RuntimeError):
 
 def assignment_title(summary: str) -> str:
     """利用者が読める Moodle 課題名にする。厳密に一致する提出期限だけを短縮する。"""
-    clean = summary.strip()
-    match = _QUOTED_DUE.fullmatch(clean)
-    return match.group("title").strip() if match else clean
+    match = _QUOTED_DUE.fullmatch(summary)
+    return match.group("title") if match else summary
 
 
 def assignment_template_blocks() -> list[dict]:

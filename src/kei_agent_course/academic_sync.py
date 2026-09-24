@@ -64,17 +64,27 @@ class AcademicSync:
         parts = prop.get("rich_text") or prop.get("title") or []
         return "".join(str(part.get("plain_text") or part.get("text", {}).get("content") or "") for part in parts)
 
-    def _upsert(self, key: str, id_property: str, identity: str, properties: dict) -> str:
+    def _upsert(self, key: str, id_property: str, identity: str, properties: dict) -> tuple[str, tuple[str, ...]]:
         for row in self._rows(key):
             if self._plain(row.get("properties", {}).get(id_property, {})) == identity:
                 existing = row.get("properties", {})
-                if self._properties_match(existing, properties):
-                    return "unchanged"
-                self.notion.request("PATCH", f"/pages/{row['id']}", {"properties": properties})
-                return "updated"
+                write_properties = dict(properties)
+                preserved = tuple(
+                    name for name, wanted in properties.items()
+                    if "relation" in wanted
+                    and (current := (existing.get(name) or {}).get("relation") or [])
+                    and tuple(item.get("id") for item in current)
+                    != tuple(item.get("id") for item in wanted["relation"])
+                )
+                for name in preserved:
+                    write_properties.pop(name)
+                if self._properties_match(existing, write_properties):
+                    return "unchanged", preserved
+                self.notion.request("PATCH", f"/pages/{row['id']}", {"properties": write_properties})
+                return "updated", preserved
         self.notion.request("POST", "/pages", {"parent": {"type": "data_source_id", "data_source_id": self.sources[key]},
                                                    "properties": properties})
-        return "created"
+        return "created", ()
 
     @classmethod
     def _properties_match(cls, existing: dict, wanted: dict) -> bool:
@@ -118,11 +128,13 @@ class AcademicSync:
                 properties["授業"] = {"relation": [{"id": matches[0]}]}
             elif len(matches) > 1:
                 ambiguous.append(f"成績履歴: {grade.course_name} / {grade.year} / {grade.term}")
-            outcome = self._upsert("grades", "Kei Agent 成績ID", identity, properties)
+            outcome, preserved = self._upsert("grades", "Kei Agent 成績ID", identity, properties)
+            if preserved:
+                ambiguous.append(f"成績履歴: {grade.course_name} / {grade.year} / {grade.term}（既存の{'・'.join(preserved)} relation を保持）")
             ({"created": created, "updated": updated, "unchanged": unchanged}[outcome])["grades"] += 1
         for requirement in record.requirements:
             identity = requirement_key(requirement)
-            outcome = self._upsert("requirements", "Kei Agent 要件ID", identity, {
+            outcome, _ = self._upsert("requirements", "Kei Agent 要件ID", identity, {
                 "要件名": {"title": [{"text": {"content": requirement.name}}]}, "Kei Agent 要件ID": _text(identity),
                 "大区分": _text(requirement.group), "所定単位": {"number": requirement.required},
                 "既得単位": {"number": requirement.earned}, "算入単位": {"number": requirement.included},
@@ -131,7 +143,7 @@ class AcademicSync:
             ({"created": created, "updated": updated, "unchanged": unchanged}[outcome])["requirements"] += 1
         for entry in record.gpa:
             identity = gpa_key(entry)
-            outcome = self._upsert("gpa", "Kei Agent GPAID", identity, {
+            outcome, _ = self._upsert("gpa", "Kei Agent GPAID", identity, {
                 "期間": {"title": [{"text": {"content": entry.period}}]}, "Kei Agent GPAID": _text(identity),
                 "年度": {"number": entry.year}, "種別": {"select": {"name": entry.kind}}, "GPA": {"number": entry.gpa},
             })

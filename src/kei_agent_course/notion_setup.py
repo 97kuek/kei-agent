@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from kei_agent.config import load_config
@@ -147,6 +148,14 @@ class CourseSetup(Setup):
     """授業ホームの下に正本6 DBを作る（すでにあれば、足りない項目だけ足す）。"""
 
     def run(self, courses: list[tuple[str, str, int | None]] | None = None) -> None:
+        titles = [
+            block["child_database"]["title"] for block in self.notion.children(self.home)
+            if block["type"] == "child_database"
+        ]
+        canonical = {title for title, _spec in SPECS.values()}
+        duplicates = sorted(title for title, count in Counter(titles).items() if title in canonical and count > 1)
+        if duplicates:
+            raise NotionError(f"正本データベースが重複しています: {'、'.join(duplicates)}。正本を確認してから整理してください")
         for key, (title, spec) in SPECS.items():
             self.database(key, self.home, title, spec)
         for name, weekday, period in courses or []:

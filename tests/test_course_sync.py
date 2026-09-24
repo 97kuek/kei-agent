@@ -97,6 +97,8 @@ def test_a_new_deadline_becomes_a_row():
 def test_assignment_title_removes_only_quoted_submission_suffix():
     assert notion_sync.assignment_title("「Assignment A」の提出期限") == "Assignment A"
     assert notion_sync.assignment_title("【ミニテスト】PC の受験可能期間の終了") == "【ミニテスト】PC の受験可能期間の終了"
+    assert notion_sync.assignment_title("アンケート終了 ") == "アンケート終了 "
+    assert notion_sync.assignment_title(" 「Assignment A」の提出期限") == " 「Assignment A」の提出期限"
 
 
 def test_new_assignment_gets_sections_but_existing_page_body_is_preserved():

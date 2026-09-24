@@ -36,9 +36,10 @@ def test_gpa_view_is_a_line_chart_of_raw_period_and_gpa_values():
 
 
 class FakeNotion:
-    def __init__(self, views=(), view_details=None, assignments=(), page_children=None):
+    def __init__(self, views=(), view_details=None, view_pages=None, assignments=(), page_children=None):
         self.views = list(views)
         self.view_details = dict(view_details or {})
+        self.view_pages = list(view_pages or [])
         self.assignments = list(assignments)
         self.page_children = dict(page_children or {})
         self.calls = []
@@ -50,6 +51,8 @@ class FakeNotion:
     def request(self, method, path, body=None):
         self.calls.append((method, path, body))
         if method == "GET" and path.startswith("/views?"):
+            if self.view_pages:
+                return self.view_pages[1] if "start_cursor=" in path else self.view_pages[0]
             return {"results": self.views}
         if method == "GET" and path.startswith("/views/"):
             return self.view_details[path.rsplit("/", 1)[-1]]
@@ -104,6 +107,18 @@ def test_apply_reads_view_details_when_the_list_omits_the_name():
         views=[{"id": "assignment-view"}],
         view_details={"assignment-view": {"id": "assignment-view", "name": "課題一覧"}},
     )
+    apply_layout(notion, full_state(), apply=True)
+
+    assert notion.calls_for("PATCH", "/views/assignment-view")
+    created, = notion.calls_for("POST", "/views")
+    assert created[2]["name"] == "GPA推移"
+
+
+def test_apply_finds_a_named_view_on_a_later_list_page():
+    notion = FakeNotion(view_pages=[
+        {"results": [{"id": "first-view", "name": "別のview"}], "has_more": True, "next_cursor": "next-page"},
+        {"results": [{"id": "assignment-view", "name": "課題一覧"}], "has_more": False, "next_cursor": None},
+    ])
     apply_layout(notion, full_state(), apply=True)
 
     assert notion.calls_for("PATCH", "/views/assignment-view")
