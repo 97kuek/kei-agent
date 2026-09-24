@@ -36,8 +36,9 @@ def test_gpa_view_is_a_line_chart_of_raw_period_and_gpa_values():
 
 
 class FakeNotion:
-    def __init__(self, views=(), assignments=(), page_children=None):
+    def __init__(self, views=(), view_details=None, assignments=(), page_children=None):
         self.views = list(views)
+        self.view_details = dict(view_details or {})
         self.assignments = list(assignments)
         self.page_children = dict(page_children or {})
         self.calls = []
@@ -50,6 +51,8 @@ class FakeNotion:
         self.calls.append((method, path, body))
         if method == "GET" and path.startswith("/views?"):
             return {"results": self.views}
+        if method == "GET" and path.startswith("/views/"):
+            return self.view_details[path.rsplit("/", 1)[-1]]
         if method == "GET" and path.startswith("/blocks/"):
             return {"results": self.page_children.get(path.split("/")[2], [])}
         if method == "PATCH" and path.startswith("/blocks/"):
@@ -89,6 +92,18 @@ def test_dry_run_never_mutates_notion():
 
 def test_apply_updates_existing_named_view_without_duplicate():
     notion = FakeNotion(views=[{"id": "assignment-view", "name": "課題一覧"}])
+    apply_layout(notion, full_state(), apply=True)
+
+    assert notion.calls_for("PATCH", "/views/assignment-view")
+    created, = notion.calls_for("POST", "/views")
+    assert created[2]["name"] == "GPA推移"
+
+
+def test_apply_reads_view_details_when_the_list_omits_the_name():
+    notion = FakeNotion(
+        views=[{"id": "assignment-view"}],
+        view_details={"assignment-view": {"id": "assignment-view", "name": "課題一覧"}},
+    )
     apply_layout(notion, full_state(), apply=True)
 
     assert notion.calls_for("PATCH", "/views/assignment-view")

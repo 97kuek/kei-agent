@@ -73,7 +73,13 @@ def gpa_view_payload(state: dict) -> dict:
 def _upsert_view(notion: Notion, database: dict, payload: dict, apply: bool) -> str:
     """同じ名前の view があれば更新し、なければ作る。dry-run では GET 以外を送らない。"""
     found = notion.request("GET", f"/views?database_id={database['database_id']}").get("results") or []
-    existing = next((view for view in found if view.get("name") == payload["name"]), None)
+    existing = None
+    for view in found:
+        # List views の応答は name を省略するため、個別取得した完全な view で照合する。
+        full_view = view if view.get("name") else notion.request("GET", f"/views/{view['id']}")
+        if full_view.get("name") == payload["name"]:
+            existing = full_view
+            break
     action = "update" if existing else "create"
     if apply:
         if existing:
