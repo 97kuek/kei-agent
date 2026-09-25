@@ -144,6 +144,11 @@ class Config:
     def db_path(self) -> Path:
         return self.state_dir / "kei-agent.db"
 
+    @property
+    def hub_state_path(self) -> Path:
+        """共通ホームの ID 控え。研究ホームの notion.json とは独立させる。"""
+        return self.state_dir / "hub.json"
+
     def agent_plugin_dir(self, agent: str) -> Path:
         """そのエージェントの skill の置き場（`plugin/<agent>/`）。
 

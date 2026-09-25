@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 # あちらは a2a-sdk に依存していて本体からは読み込めないので、文字列で持つ
 SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
+LIST_CALENDAR_ASSIGNMENTS = "list-calendar-assignments"
 LIST_CLASSES = "list-classes"
 TIME_REPORT = "time-report"
 # 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）

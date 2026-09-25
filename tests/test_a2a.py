@@ -101,7 +101,8 @@ async def test_card_tells_what_the_agent_can_do(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"].startswith("Kei Agent")
     assert [s["id"] for s in card["skills"]] == [
-        "sync-assignments", "list-due", "list-classes", "list-current-courses", "record-study-time", "ask", "time-report"]
+        "sync-assignments", "list-due", "list-calendar-assignments", "list-classes",
+        "list-current-courses", "record-study-time", "ask", "time-report"]
     # 自由な質問（ask）は claude を動かすので、流しながら返す
     assert card["capabilities"].get("streaming") is True
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
@@ -149,6 +150,21 @@ async def test_list_due_says_what_is_missing_without_the_calendar_url(server, mo
     monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
     result = await Agent(server, TOKEN).ask("list-due")
     assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
+
+
+async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, monkeypatch):
+    from kei_agent.notion import NotionError
+    from kei_agent_course import notion_sync
+
+    def broken_snapshot(days, today):
+        raise NotionError("課題 DB の次ページを読めません")
+
+    monkeypatch.setattr(notion_sync, "list_calendar_assignments", broken_snapshot)
+    result = await Agent(server, TOKEN).ask("list-calendar-assignments", params={"days": 30})
+
+    assert not result.ok
+    assert "次ページ" in json.loads(result.answer)["text"]
+    assert "NOTION_COURSE_TOKEN" not in result.answer
 
 
 async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):

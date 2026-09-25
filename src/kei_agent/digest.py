@@ -204,6 +204,13 @@ class DigestBuilder:
         try:
             notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since),
                                             ["計画", "考察", "振り返り"])
+            if self.assistant.hub is not None:
+                hub_reviews = await asyncio.to_thread(
+                    self.assistant.hub.reviews_edited_since, datetime.fromtimestamp(since))
+                # 移行中の旧レトプラは残すが、新 DB に同じ日の記録がある場合は二重に載せない。
+                migrated_days = {review.day for review in hub_reviews}
+                notes = [n for n in notes if n.kind != "振り返り" or n.day not in migrated_days]
+                notes += hub_reviews
             today_tasks = await asyncio.to_thread(notion.tasks_due_on, today)
             awaiting = await asyncio.to_thread(notion.awaiting_tasks)
             due = await asyncio.to_thread(notion.tasks_due_within, today, 3)

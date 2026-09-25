@@ -10,6 +10,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 # 仕事の名前。オーケストレーターはこの id を指定して頼む
 SYNC_ASSIGNMENTS = "sync-assignments"
 LIST_DUE = "list-due"
+LIST_CALENDAR_ASSIGNMENTS = "list-calendar-assignments"
 LIST_CLASSES = "list-classes"
 LIST_CURRENT_COURSES = "list-current-courses"
 RECORD_STUDY_TIME = "record-study-time"
@@ -54,6 +55,14 @@ def build_card(base_url: str) -> AgentCard:
                             "既定では2週間先まで。metadata の days で変えられる",
                 tags=["moodle"],
                 examples=["今週の締切は？", "明日までの課題を教えて"],
+            ),
+            AgentSkill(
+                id=LIST_CALENDAR_ASSIGNMENTS,
+                name="課題カレンダー用の全件取得",
+                description="授業ホームの課題 DB から指定期間の締切を省略せず読み取る。"
+                            "data.complete/items: id/title/due/status/url。書き込みはしない",
+                tags=["notion", "calendar", "read-only"],
+                examples=[],
             ),
             AgentSkill(
                 id=LIST_CLASSES,

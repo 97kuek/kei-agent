@@ -159,6 +159,27 @@ source ~/.config/zsh/local/kei-agent.zsh
 uv run kei-agent-notion-setup <研究ホームのページID>
 ```
 
+## 7.4 共通 Notion ホーム（大学・研究・仕事）
+
+`Keitaro Ueki` は論理的な親ページ。研究ホーム・授業ホームは移動しない。`NOTION_TOKEN` の本体コネクトに親ページを共有し、研究 `Task` と授業 `課題` のリンクドビュー作成に必要な閲覧権限も確認する。大学エージェントの授業用トークンを本体へ渡さず、研究・大学の agent には親ページの編集権限を追加しない。
+
+次のコマンドは最初に読取専用で ID と schema を確認する。権限不足・同名 DB／ビューの重複があれば適用しない。`--apply` は `日別記録` DB と不足プロパティ・リンクドビューを作るので、表示された対象を確認してから実行する。
+
+```zsh
+source ~/.config/zsh/local/kei-agent.zsh
+uv run kei-agent-hub-setup
+uv run kei-agent-hub-setup --apply
+```
+
+旧 Daily／振り返りの移行は別操作。監査の manifest は秘密情報を含みうるので Git に入れない。件数・同日重複・原本 URL・本文を確認し、件数が変わったら dry-run からやり直す。`--apply` は検証後に限り実行し、旧ページの削除は行わない。たとえば監査で9件なら次の形にする（件数は実際の監査結果に合わせる）。
+
+```zsh
+uv run kei-agent-hub-migrate
+uv run kei-agent-hub-migrate --apply --expected-count 9
+```
+
+適用後は manifest と `日別記録` の各日・本文・元 URL、旧ページの ID／URL、SQLite の `notion_links` を再取得して照合する。途中で停止した場合は manifest と原本を残し、再実行前に停止段階を調べる。課題の予定は大学エージェントの完全スナップショットから30日分を同期する。Outlook 検索はモデルが申告する件数だけでは完全性を独立検証できないため、現時点で自動書込を無効にしている。手入力の予定と同期失敗時の既存行は消さない。
+
 ## 7.5 授業用の Notion（大学エージェント）
 
 1. <https://www.notion.so/profile/integrations> で、授業用のコネクト（例: `Kei Agent（授業）`）を作り、トークンを控える

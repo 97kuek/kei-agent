@@ -27,6 +27,7 @@ from kei_agent_a2a import claude, envelope
 from kei_agent_course import moodle, notion_sync, periods, toggl_report, tools
 from kei_agent_course.card import (
     ASK,
+    LIST_CALENDAR_ASSIGNMENTS,
     LIST_CLASSES,
     LIST_CURRENT_COURSES,
     LIST_DUE,
@@ -38,7 +39,8 @@ from kei_agent_course.ics import Event
 
 log = logging.getLogger(__name__)
 
-SKILLS = (SYNC_ASSIGNMENTS, LIST_DUE, LIST_CLASSES, LIST_CURRENT_COURSES, RECORD_STUDY_TIME, TIME_REPORT, ASK)
+SKILLS = (SYNC_ASSIGNMENTS, LIST_DUE, LIST_CALENDAR_ASSIGNMENTS, LIST_CLASSES,
+          LIST_CURRENT_COURSES, RECORD_STUDY_TIME, TIME_REPORT, ASK)
 NO_ICS = ("Moodle のカレンダーの URL がありません。Moodle のカレンダー画面で「カレンダーをエクスポートする」から "
           f"URL を作って、秘密情報のファイルの {moodle.ICS_ENV} に入れてください")
 # 一度に返す締切の数（声やスレッドで読める長さに収める）
@@ -102,6 +104,7 @@ class CourseExecutor(AgentExecutor):
             return
         log.info("頼まれた仕事: %s", skill)
         handlers = {SYNC_ASSIGNMENTS: self._sync_assignments, LIST_DUE: self._list_due,
+                    LIST_CALENDAR_ASSIGNMENTS: self._list_calendar_assignments,
                     LIST_CLASSES: self._list_classes, LIST_CURRENT_COURSES: self._list_current_courses,
                     RECORD_STUDY_TIME: self._record_study_time, TIME_REPORT: self._time_report, ASK: self._ask}
         await handlers[skill](updater, metadata, text)
@@ -147,6 +150,16 @@ class CourseExecutor(AgentExecutor):
             return
         data = due_data(events, days)
         await self._done(updater, f"これから {days} 日で締切の課題は {len(data['items'])} 件", data)
+
+    async def _list_calendar_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
+        """Notion 課題 DB の完全な read-only snapshot を返す。"""
+        days = asked_days(metadata, 30)
+        try:
+            data = await asyncio.to_thread(notion_sync.list_calendar_assignments, days, date.today())
+        except (notion_sync.SyncError, NotionError) as e:
+            await self._fail(updater, str(e))
+            return
+        await self._done(updater, f"{days} 日間の課題締切は {len(data['items'])} 件", data)
 
     async def _list_classes(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """その曜日の授業を、時刻つきで返す（朝のまとめで時系列に並べるために使う）。"""

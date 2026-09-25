@@ -51,6 +51,7 @@ from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.notion import NotionError
+from kei_agent.notion_hub import HubStore
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_daily, validate_review
@@ -146,9 +147,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     LIMIT_MARGIN_SECONDS = 60
 
     def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str,
-                 notion: NotionStore | None = None, team_url: str = "", team_id: str = ""):
+                 notion: NotionStore | None = None, team_url: str = "", team_id: str = "",
+                 hub: HubStore | None = None):
         self.config = config
         self.notion = notion
+        self.hub = hub
         # チャンネルへのリンクを作るのに使う（例: https://example.slack.com/）
         self.team_url = team_url
         # 返事を流して見せるときに要る（chat.startStream）
@@ -599,8 +602,28 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             return []
         if problems:
             await self.notify_trouble(
-                "Notion の設定が Kei Agent の使う形とずれています。直すまで、Daily や夜間の Task が止まります。\n"
+                "研究 Notion の設定が Kei Agent の使う形とずれています。夜間の Task などが止まります。\n"
                 + "\n".join(f"• {p}" for p in problems))
+        return problems
+
+    async def check_hub_schema(self) -> list[str]:
+        """共通ホームの問題は知らせるが、他の agent や研究 Notion の起動を止めない。"""
+        if self.hub is None:
+            await self.notify_trouble(
+                "共通 Notion ホームを利用できません。親ページの共有と hub state を確認してください。"
+                "Daily とレトプラはローカルファイルだけに残します")
+            return ["共通 Notion ホームを利用できません"]
+        try:
+            problems = await asyncio.to_thread(self.hub.schema_problems)
+        except Exception:
+            log.exception("共通 Notion ホームの設定を確かめられませんでした")
+            self.hub = None
+            await self.notify_trouble("共通 Notion ホームの設定を確認できません。Daily とレトプラは Notion に保存できません")
+            return ["共通 Notion ホームの確認に失敗しました"]
+        if problems:
+            self.hub = None
+            await self.notify_trouble("共通 Notion ホームの項目を確認してください:\n"
+                                      + "\n".join(f"• {p}" for p in problems))
         return problems
 
     async def register_theme(self, channel: str, ws: Workspace) -> None:
@@ -1059,15 +1082,17 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
 
     async def sync_review_conclusion(self, req: Request) -> None:
         """振り返りのスレッドに貼られた結論を、Notion の振り返りページにも追記する。"""
-        if req.trigger != "message" or self.notion is None:
+        if req.trigger != "message":
             return
         link = self.store.notion_link(req.channel, req.thread_ts)
         if link is None or link["kind"] != "review" or not req.text.strip():
             return
-        stamp = datetime.now().strftime("%m/%d %H:%M")
+        if self.hub is None:
+            await self.notify_trouble("振り返りの結論を日別記録に保存できません。共通 Notion ホームの共有を確認してください")
+            return
         try:
-            await asyncio.to_thread(self.notion.append_markdown, link["page_id"],
-                                    f"### Slack に貼った結論（{stamp}）\n\n{req.text}")
+            await asyncio.to_thread(self.hub.append_review_conclusion, link["page_id"], req.text,
+                                    datetime.now(), req.message_ts)
         except NotionError as e:
             await self.notify_trouble(f"振り返りの結論を Notion に追記できませんでした: {e}")
 

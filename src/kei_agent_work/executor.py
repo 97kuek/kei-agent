@@ -65,13 +65,18 @@ class WorkExecutor(AgentExecutor):
             return
         days = asked_days(metadata)
         try:
-            events = await connector.events(self.config, days, store=self.store)
+            if metadata.get("calendar_snapshot") is True:
+                snapshot = await connector.calendar_snapshot(self.config, days, store=self.store)
+                events = snapshot["items"]
+            else:
+                events = await connector.events(self.config, days, store=self.store)
+                snapshot = {"complete": False, "source_count": None, "items": events}
         except connector.WorkCalendarError as e:
             await self._fail(updater, str(e))
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
         await claude.finish(updater, envelope.reply(
-            f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events}))
+            f"これから {days} 日の予定は {len(events)} 件", {"days": days, **snapshot}))
 
     async def _ask(self, updater: TaskUpdater, question: str) -> None:
         """自由な質問に、連携を読んで答える。"""

@@ -122,8 +122,41 @@ def test_connector_reads_the_json_and_drops_the_body():
     from kei_agent_work import connector
 
     event = connector._event(found[0])
-    assert set(event) == {"subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
+    assert set(event) == {"id", "subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
     assert event["start"] == "2026-09-25T11:00"
+    assert event["id"] == ""
+
+
+async def test_calendar_snapshot_requires_matching_source_count(config, store, monkeypatch):
+    from kei_agent_work import connector
+
+    async def reply(*args, **kwargs):
+        return json.dumps({"complete": True, "has_more": False, "source_count": 2,
+                           "items": [{"id": "event-1", "subject": "会議",
+                                      "start": "2026-09-25T11:00", "end": "2026-09-25T12:00"}]})
+
+    monkeypatch.setattr(connector.claude, "ask_connector", reply)
+    snapshot = await connector.calendar_snapshot(config, days=30, store=store)
+
+    assert snapshot["complete"] is False
+    assert snapshot["verified_complete"] is False
+    assert snapshot["source_count"] == 2
+    assert len(snapshot["items"]) == 1
+
+
+async def test_calendar_snapshot_derives_stable_id_when_outlook_id_missing(config, store, monkeypatch):
+    from kei_agent_work import connector
+
+    async def reply(*args, **kwargs):
+        return json.dumps({"complete": True, "has_more": False, "source_count": 1,
+                           "items": [{"subject": "会議", "start": "2026-09-25T11:00",
+                                      "url": "https://outlook.example/event/1"}]})
+
+    monkeypatch.setattr(connector.claude, "ask_connector", reply)
+    first = await connector.calendar_snapshot(config, days=30, store=store)
+    second = await connector.calendar_snapshot(config, days=30, store=store)
+    assert first["items"][0]["id"].startswith("fallback:")
+    assert first["items"][0]["id"] == second["items"][0]["id"]
 
 
 def test_connector_says_when_the_reply_is_not_json():

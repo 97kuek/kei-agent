@@ -16,13 +16,13 @@ from pathlib import Path
 
 from kei_agent import course, maintenance, morning, research, settings, themes, work
 from kei_agent.assistant import Assistant
+from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.config import Config
 from kei_agent.digest import DigestBuilder
 from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
-from kei_agent.review_output import review_footer
 from kei_agent.slack_text import AWAITING_MARKER, clean_text
 from kei_agent.store import Store
 
@@ -40,6 +40,8 @@ DUE_CHECK_SECONDS = 3600
 NOTICE_RETENTION_DAYS = 60
 # 声のレイヤに渡す日数。「明日の予定」「今週の予定」に答えられるように1週間ぶん
 VOICE_DAYS = 7
+HUB_SYNC_HOUR = 8
+HUB_RETRY_SECONDS = 3600
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -79,6 +81,7 @@ class Scheduler:
         self.assistant = assistant
         # 締切が近いものを最後に見に行った時刻（起動直後に1回見る）
         self._due_checked = 0.0
+        self._hub_calendar_checked = 0.0
 
     @property
     def overview_dir(self) -> Path:
@@ -117,6 +120,13 @@ class Scheduler:
             self.store.record_schedule(name, day, {"status": "running"})
             if not await self.run_or_defer(name, day, now.timestamp()):
                 return   # 上限に当たった。残りは明けてからにする
+        hub_day = now.date().isoformat()
+        if (now.hour >= HUB_SYNC_HOUR and not self.store.schedule_ran("hub_calendar", hub_day)
+                and now.timestamp() - self._hub_calendar_checked >= HUB_RETRY_SECONDS):
+            self._hub_calendar_checked = now.timestamp()
+            detail = await self.run_task("hub_calendar", hub_day, record=False)
+            if detail.get("course") == "synced" and detail.get("work") in {"synced", "incomplete"}:
+                self.store.record_schedule("hub_calendar", hub_day, detail)
         await self.notify_due_soon(now)
         await self.nudge_stale_threads()
 
@@ -268,6 +278,61 @@ class Scheduler:
 
     # Daily と振り返り
 
+    async def run_hub_calendar(self, day: str) -> dict:
+        return await self.sync_hub_calendar(day)
+
+    async def sync_hub_calendar(self, day: str) -> dict:
+        """出典ごとに検証・同期する。一方の失敗で他方や Daily を止めない。"""
+        hub = self.assistant.hub
+        if hub is None:
+            return {"course": "no_hub", "work": "no_hub"}
+        checked_at = datetime.combine(date.fromisoformat(day), dtime(9, 0), JST)
+        outcomes = {}
+        sources = (
+            ("course", course.LIST_CALENDAR_ASSIGNMENTS, self.assistant.ask_course),
+            ("work", work.LIST_EVENTS, self.assistant.ask_work),
+        )
+        for domain, skill, ask in sources:
+            try:
+                params = {"days": 30}
+                if domain == "work":
+                    params["calendar_snapshot"] = True
+                reply = await ask(skill, **params)
+                data = reply.data if reply.ok else {}
+                # Claude の自己申告だけでは Outlook 検索の全ページ取得を証明できない。
+                # 独立に検証された取得経路ができるまで Outlook の自動書込を止める。
+                complete = data.get("complete") is True
+                if domain == "work":
+                    complete = complete and data.get("verified_complete") is True
+                if not complete or not isinstance(data.get("items"), list):
+                    outcomes[domain] = "incomplete"
+                    continue
+                items = tuple(
+                    CalendarItem(
+                        source_id=str(item.get("id") or ""),
+                        title=str((item.get("title") if domain == "course" else item.get("subject")) or ""),
+                        start=str((item.get("due") if domain == "course" else item.get("start")) or ""),
+                        end=str(item.get("end") or "") if domain == "work" else "",
+                        url=str(item.get("url") or ""),
+                        location=str(item.get("location") or "") if domain == "work" else "",
+                        status=str(item.get("status") or "") if domain == "course" else "",
+                    ) for item in data["items"] if isinstance(item, dict)
+                )
+                if len(items) != len(data["items"]):
+                    raise IncompleteSnapshot("予定に不正な行があります")
+                snapshot = CalendarSnapshot("課題" if domain == "course" else "Outlook",
+                                            True, items, data.get("source_count"))
+                report = await asyncio.to_thread(sync_calendar, hub, snapshot, checked_at)
+                outcomes[domain] = "synced"
+                outcomes[f"{domain}_counts"] = report.__dict__
+            except (IncompleteSnapshot, NotionError, ValueError, TypeError) as e:
+                log.warning("%s カレンダーを同期できません: %s", domain, e)
+                outcomes[domain] = "error"
+            except Exception:
+                log.exception("%s カレンダーを同期できません", domain)
+                outcomes[domain] = "error"
+        return outcomes
+
     async def _write_digest(self, kind: str, day: str, since: float, ids: dict[str, str]) -> Path:
         path = self.overview_dir / ".kei-agent" / "digest" / f"{day}-{kind}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,14 +344,18 @@ class Scheduler:
 
     async def _save_note(self, channel: str, thread_ts: str, title: str, kind: str, day: str,
                          markdown: str, file: str) -> Note | None:
-        notion = self.assistant.notion
-        if notion is None or not markdown.strip():
+        hub = self.assistant.hub
+        if not markdown.strip():
+            return None
+        if hub is None:
+            await self.assistant.notify_trouble(
+                f"{title} はローカルに残しましたが、日別記録には保存できません。共通 Notion ホームの共有を確認してください")
             return None
         try:
             link = await self.assistant.permalink(channel, thread_ts)
-            return await asyncio.to_thread(notion.create_note, title, kind, day, markdown, link, file)
+            return await asyncio.to_thread(hub.upsert_day, kind, day, title, markdown, link, file)
         except NotionError as e:
-            await self.assistant.notify_trouble(f"{title} を Notion のノートに書けませんでした: {e}")
+            await self.assistant.notify_trouble(f"{title} を日別記録に保存できませんでした: {e}")
             return None
 
     async def run_daily(self, day: str) -> dict:
@@ -384,10 +453,6 @@ class Scheduler:
             note = await self._save_note(channel, thread_ts, title, "振り返り", day, markdown, f"reviews/{day}.md")
             if note:
                 self.store.link_notion(channel, thread_ts, note.id, "review")
-        await self.assistant.post(
-            Request(channel, self.overview_channel_name, thread_ts, None, ""),
-            review_footer(note.url if note else None, title),
-        )
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None}
 
@@ -516,6 +581,7 @@ async def _run_once(name: str, record: bool) -> None:
 
     from kei_agent.config import load_config
     from kei_agent.jobs import JobManager
+    from kei_agent.notion_hub import load_hub
     from kei_agent.notion_store import load_notion
 
     config = load_config()
@@ -527,7 +593,7 @@ async def _run_once(name: str, record: bool) -> None:
     assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
                           os.environ["SLACK_BOT_TOKEN"], auth["user_id"],
                           notion=load_notion(config), team_url=auth.get("url", ""),
-                          team_id=auth.get("team_id", ""))
+                          team_id=auth.get("team_id", ""), hub=load_hub(config))
     scheduler = Scheduler(config, store, assistant)
     day = date.today().isoformat()
     detail = await scheduler.run_task(name, day, record=record)

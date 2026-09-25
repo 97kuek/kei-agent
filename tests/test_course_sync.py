@@ -1,7 +1,7 @@
 """Moodle の締切を Notion の「課題」に取り込むところ。"""
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ def _rich(text):
 
 
 def _row(event, page_id="row-1", course_page="page-db", when=None):
-    return {"id": page_id, "properties": {
+    return {"id": page_id, "url": f"https://notion.example/{page_id}", "properties": {
         "課題": _title(event.summary),
         "Moodle ID": _rich(event.uid),
         "締切": {"date": {"start": when or event.starts_at.astimezone().isoformat()}},
@@ -74,6 +74,25 @@ def _sync(notion, events, known_only=True):
 
 def _page_writes(notion):
     return [call for call in notion.calls if call[:2] == ("POST", "/pages")]
+
+
+def test_calendar_assignment_snapshot_reads_all_notion_rows_including_manual():
+    assignments = [_row(REPORT, page_id=f"p-{i}") for i in range(21)]
+    assignments.append({"id": "manual", "url": "https://notion.example/manual", "properties": {
+        "課題": _title("手入力の課題"), "締切": {"date": {"start": "2026-10-01T23:59:00+09:00"}},
+        "状態": {"status": {"name": "未着手"}},
+    }})
+    notion = FakeNotion(assignments=assignments)
+
+    snapshot = notion_sync.CourseNotion(notion, STATE).calendar_assignments(
+        days=30, today=date(2026, 9, 24))
+
+    assert snapshot["complete"] is True
+    assert len(snapshot["items"]) == 22
+    assert next(item for item in snapshot["items"] if item["id"] == "manual") == {
+        "id": "manual", "title": "手入力の課題", "due": "2026-10-01T23:59:00+09:00",
+        "status": "未着手", "url": "https://notion.example/manual"}
+    assert notion.calls == []
 
 
 def test_a_new_deadline_becomes_a_row():

@@ -17,6 +17,7 @@ from kei_agent import home, research
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config
 from kei_agent.jobs import JobManager
+from kei_agent.notion_hub import load_hub
 from kei_agent.notion_store import load_notion
 from kei_agent.schedule import Scheduler
 from kei_agent.store import Store
@@ -51,6 +52,7 @@ async def serve() -> None:
         bot_token=os.environ["SLACK_BOT_TOKEN"],
         bot_user_id=auth["user_id"],
         notion=load_notion(config),
+        hub=load_hub(config),
         team_url=auth.get("url", ""),
         team_id=auth.get("team_id", ""),
     )
@@ -118,7 +120,7 @@ async def serve() -> None:
 
     job_loop = asyncio.create_task(assistant.job_loop())
     ask_loop = asyncio.create_task(assistant.ask_loop())
-    schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
+    schedule_loop: asyncio.Task | None = None
     log.info("Kei Agent を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
@@ -131,14 +133,17 @@ async def serve() -> None:
         await assistant.resume_interrupted()
         # Notion の項目がずれていると、Daily や夜間の Task が黙って止まるので、起動時に確かめる
         await assistant.check_notion_schema()
+        await assistant.check_hub_schema()
         # つないでいるエージェント（A2A）の名刺を読んで、生きているかを見る
         await assistant.check_agents()
+        schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()
     finally:
         job_loop.cancel()
         ask_loop.cancel()
-        schedule_loop.cancel()
+        if schedule_loop is not None:
+            schedule_loop.cancel()
         await handler.close_async()
 
 

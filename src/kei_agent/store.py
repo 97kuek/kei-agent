@@ -468,6 +468,18 @@ class Store:
             "SELECT * FROM notion_links WHERE channel = ? AND thread_ts = ?", (channel, thread_ts)
         ).fetchone()
 
+    def relink_notion_pages(self, old_to_new: dict[str, str]) -> int:
+        """全件の移行先が照合できた後、既存スレッドのリンク先を一括更新する。"""
+        if any(not old or not new for old, new in old_to_new.items()):
+            raise ValueError("元 ID と移行先 ID が必要です")
+        with self.conn:
+            count = 0
+            for old, new in old_to_new.items():
+                count += self.conn.execute(
+                    "UPDATE notion_links SET page_id = ? WHERE page_id = ?", (new, old)
+                ).rowcount
+        return count
+
     # schedule
 
     def schedule_ran(self, name: str, day: str) -> bool:

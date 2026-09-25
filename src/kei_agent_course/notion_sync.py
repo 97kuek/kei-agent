@@ -18,7 +18,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import load_config
@@ -143,6 +143,45 @@ class CourseNotion:
 
     def _rows(self, data_source_id: str) -> list[dict]:
         return self.notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
+
+    def calendar_assignments(self, days: int, today: date) -> dict:
+        """課題 DB の締切を全件読む。Moodle ICS の件数上限や同期は通さない。"""
+        if not 1 <= days <= 400:
+            raise SyncError("取得期間は1〜400日にしてください")
+        through = today + timedelta(days=days - 1)
+        rows = self.notion.paginate("POST", f"/data_sources/{self.assignments}/query", {
+            "filter": {"and": [
+                {"property": "締切", "date": {"on_or_after": today.isoformat()}},
+                {"property": "締切", "date": {"on_or_before": through.isoformat()}},
+            ]},
+            "page_size": 100,
+        })
+        seen = set()
+        items = []
+        for row in rows:
+            page_id = row.get("id")
+            if not page_id or page_id in seen:
+                raise SyncError("課題 DB のページ ID が欠落または重複しています")
+            seen.add(page_id)
+            props = row.get("properties") or {}
+            due = (props.get("締切", {}).get("date") or {}).get("start")
+            if not due:
+                continue
+            try:
+                due_day = date.fromisoformat(due[:10])
+            except ValueError:
+                raise SyncError(f"課題 {page_id} の締切が不正です") from None
+            if not today <= due_day <= through:
+                continue
+            title = _plain(props.get("課題"))
+            url = row.get("url")
+            if not title or not url:
+                raise SyncError(f"課題 {page_id} の名前または URL がありません")
+            items.append({"id": page_id, "title": title, "due": due,
+                          "status": ((props.get("状態") or {}).get("status") or {}).get("name") or "",
+                          "url": url})
+        items.sort(key=lambda item: (item["due"], item["title"], item["id"]))
+        return {"complete": True, "items": items}
 
     def course_ids(self) -> dict[str, str]:
         """科目名 → 「授業」のページ ID。"""
@@ -368,6 +407,15 @@ def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
     rows = notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
     return tuple(sorted({_plain(row.get("properties", {}).get("科目名")) for row in rows}
                         - {""}))
+
+
+def list_calendar_assignments(days: int, today: date | None = None, *,
+                              token: str = "", state: dict | None = None) -> dict:
+    """A2A 用 read-only 契約。接続できないときに空の完全 snapshot を返さない。"""
+    token = token or os.environ.get(TOKEN_ENV, "")
+    if not token:
+        raise SyncError(NO_TOKEN)
+    return CourseNotion(Notion(token), state or read_state()).calendar_assignments(days, today or date.today())
 
 
 def sync(events: list[Event], known_only: bool = True, token: str = "", state: dict | None = None) -> Result:

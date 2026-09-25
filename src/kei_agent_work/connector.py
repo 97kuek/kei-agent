@@ -14,6 +14,8 @@ Entra ID にアプリを登録しなくても Outlook を読める。
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -61,12 +63,22 @@ PROMPT = """{tool} を使って、{since} から {until} までの私の予定�
 配列の1つは次の形です（値が無ければ空文字）。
 
 [{{"subject": "件名", "start": "2026-09-24T18:00", "end": "2026-09-24T19:00",
-   "location": "場所", "organizer": "主催者のメールアドレス", "all_day": false, "url": "Outlook のリンク"}}]
+   "id": "Outlook の予定 ID", "location": "場所", "organizer": "主催者のメールアドレス",
+   "all_day": false, "url": "Outlook の予定ページのリンク"}}]
 
 - 時刻は Tokyo Standard Time の壁時計の時刻をそのまま使い、分までにしてください
 - 取り消された予定は除いてください
 - 予定が無ければ [] とだけ答えてください
 - 本文（会議の詳細、Teams の参加リンク、パスコード）は入れないでください"""
+
+SNAPSHOT_PROMPT = """{tool} で {since} から {until} までの Outlook 予定を全件検索してください。
+検索結果に続きがある場合は全ページを取得し、取得件数と検索元の件数を照合してください。
+JSON オブジェクトだけ返してください。説明や Markdown は不要です。
+{{"complete": true, "has_more": false, "source_count": 0, "items": []}}
+items の各要素は id/subject/start/end/location/url/all_day だけを含めます。
+id は予定の安定 ID。得られなければ空文字にしてください。
+source_count が分からない、件数が一致しない、検索結果が途中で切れている場合は complete を false にしてください。
+時刻は Tokyo Standard Time の壁時計の時刻。本文、Teams 参加リンク、パスコード、メール本文は絶対に含めません。"""
 
 
 class WorkCalendarError(RuntimeError):
@@ -93,6 +105,7 @@ async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = 
 
 def _event(item: dict) -> dict:
     return {
+        "id": str(item.get("id") or ""),
         "subject": str(item.get("subject") or "（件名なし）"),
         "start": str(item.get("start") or "")[:16],
         "end": str(item.get("end") or "")[:16],
@@ -102,6 +115,42 @@ def _event(item: dict) -> dict:
         "free": False,
         "url": str(item.get("url") or ""),
     }
+
+
+async def calendar_snapshot(config: Config, days: int = 30, today: date | None = None,
+                            store: Store | None = None) -> dict:
+    """完全性を機械検証できない取得は complete=False とする。"""
+    start = today or date.today()
+    prompt = SNAPSHOT_PROMPT.format(tool=CALENDAR_TOOL, since=start.isoformat(),
+                                    until=(start + timedelta(days=max(days, 1))).isoformat())
+    try:
+        text = await claude.ask_connector(config, prompt, ALLOWED, config.agent_plugin_dir(AGENT),
+                                          DENY, TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT)
+        raw = json.loads(text)
+    except (claude.ConnectorError, ValueError) as e:
+        raise WorkCalendarError(f"Outlook の完全な予定一覧を確認できません: {e}") from None
+    if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+        raise WorkCalendarError("Outlook の予定一覧が正しい JSON オブジェクトではありません")
+    source_count = raw.get("source_count")
+    complete = (raw.get("complete") is True and raw.get("has_more") is False
+                and type(source_count) is int and source_count == len(raw["items"])
+                and all(isinstance(item, dict) for item in raw["items"]))
+    items = []
+    for raw_item in raw["items"]:
+        if not isinstance(raw_item, dict):
+            continue
+        event = _event(raw_item)
+        if not event["id"] and event["url"] and event["start"] and event["subject"]:
+            fingerprint = "\0".join((event["url"], event["start"], event["subject"]))
+            event["id"] = "fallback:" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+        items.append({key: event[key] for key in ("id", "subject", "start", "end",
+                                                  "all_day", "location", "url")})
+    if any(not item["start"] or not item["id"] for item in items):
+        complete = False
+    # 件数も complete も LLM の申告であり、検索 API 自身のページング証明ではない。
+    # カレンダーへの自動書込は独立に検証できる取得経路ができるまで停止する。
+    return {"complete": complete, "verified_complete": False,
+            "source_count": source_count, "items": items}
 
 
 async def ask(config: Config, question: str, prompt_path: Path | None = None, store: Store | None = None) -> str:

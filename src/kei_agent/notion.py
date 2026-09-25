@@ -441,11 +441,6 @@ class Setup:
                                    {"property": "状態", "status": {"does_not_equal": "完了"}}]},
                 "sorts": [{"property": "期日", "direction": "ascending"}],
             }),
-            ("最近の Daily と振り返り", notes, {
-                "name": "最近の Daily と振り返り", "type": "list",
-                "filter": {"or": [_eq_select("種類", "Daily"), _eq_select("種類", "振り返り")]},
-                "sorts": [{"property": "日付", "direction": "descending"}],
-            }),
             ("進行中のテーマ", themes, {
                 "name": "進行中のテーマ", "type": "list", "filter": _eq_select("状態", "進行中"),
             }),

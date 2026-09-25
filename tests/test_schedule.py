@@ -7,9 +7,12 @@ from datetime import time as dtime
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import morning, runner, themes
+from kei_agent import agents, morning, runner, themes
+from kei_agent import schedule as schedule_module
 from kei_agent.assistant import Assistant
+from kei_agent.calendar_sync import SyncReport
 from kei_agent.jobs import JobManager
+from kei_agent.notion_store import Note
 from kei_agent.schedule import Scheduler, due_day, search_keywords
 
 REVIEW_REPLY = """**今日の成果**
@@ -33,13 +36,33 @@ DAILY_REPLY = """**今日のタスク**
 1. 僕は何から進めよう？"""
 
 
+class FakeHub:
+    def __init__(self):
+        self.notes = []
+        self.appended = []
+
+    def upsert_day(self, kind, day, title, markdown, slack_url, file):
+        note = Note(f"hub-{day}", title, kind, day, f"https://notion.example/hub/{day}", markdown)
+        self.notes.append(note)
+        return note
+
+    def append_review_conclusion(self, page_id, text, stamp, message_id=None):
+        self.appended.append((page_id, text))
+
+    def reviews_edited_since(self, since):
+        return []
+
+    def schema_problems(self):
+        return []
+
+
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), team_url="https://example.slack.com/")
+                          notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack, claude
 
 
@@ -51,6 +74,86 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
         text = md.read_text().replace("## 検索キーワード\n", "## 検索キーワード\n\n" + "\n".join(f"- {k}" for k in keywords) + "\n", 1)
         md.write_text(text)
     return ws
+
+
+async def test_hub_calendar_sync_keeps_course_when_outlook_is_incomplete(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    seen = []
+
+    async def ask_course(skill, **params):
+        assert skill == "list-calendar-assignments"
+        return agents.Reply(data={"complete": True, "items": [
+            {"id": "assignment-1", "title": "課題", "due": "2026-09-25",
+             "status": "未着手", "url": "https://notion.so/assignment-1"}]})
+
+    async def ask_work(skill, **params):
+        assert skill == "list-events"
+        return agents.Reply(data={"complete": True, "source_count": 1, "items": [
+            {"id": "event-1", "subject": "会議", "start": "2026-09-25T11:00"}]})
+
+    def record_sync(hub, snapshot, checked_at):
+        seen.append(snapshot)
+        return SyncReport(1, 0, 0)
+
+    monkeypatch.setattr(assistant, "ask_course", ask_course)
+    monkeypatch.setattr(assistant, "ask_work", ask_work)
+    monkeypatch.setattr(schedule_module, "sync_calendar", record_sync)
+
+    result = await scheduler.sync_hub_calendar("2026-09-24")
+
+    assert result["course"] == "synced"
+    assert result["work"] == "incomplete"
+    assert [(snapshot.source, snapshot.items[0].source_id) for snapshot in seen] == [
+        ("課題", "assignment-1")]
+
+
+async def test_hub_calendar_sync_without_hub_does_not_call_agents(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    assistant.hub = None
+
+    async def unexpected(*args, **kwargs):
+        raise AssertionError("agent must not be called")
+
+    monkeypatch.setattr(assistant, "ask_course", unexpected)
+    monkeypatch.setattr(assistant, "ask_work", unexpected)
+    assert await scheduler.sync_hub_calendar("2026-09-24") == {
+        "course": "no_hub", "work": "no_hub"}
+
+
+async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
+    _, assistant, *_ = env
+    notices = []
+
+    async def notice(text):
+        notices.append(text)
+
+    monkeypatch.setattr(assistant, "notify_trouble", notice)
+    monkeypatch.setattr(assistant.hub, "schema_problems", lambda: ["日別記録の列がありません"])
+    assert await assistant.check_hub_schema() == ["日別記録の列がありません"]
+    assert assistant.hub is None
+    assert assistant.notion is not None
+    assert notices
+
+
+async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    runs = []
+
+    async def fake_run(name, day, record=True):
+        runs.append((name, day))
+        return {"course": "error", "work": "incomplete"}
+
+    async def noop(*args):
+        return None
+
+    monkeypatch.setattr(schedule_module.settings, "schedule_time", lambda *args: "")
+    monkeypatch.setattr(scheduler, "run_task", fake_run)
+    monkeypatch.setattr(scheduler, "notify_due_soon", noop)
+    monkeypatch.setattr(scheduler, "nudge_stale_threads", noop)
+    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:05"))
+    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:06"))
+    await scheduler.tick(datetime.fromisoformat("2026-09-18T09:06"))
+    assert runs == [("hub_calendar", "2026-09-18"), ("hub_calendar", "2026-09-18")]
 
 
 # 時刻
@@ -88,7 +191,8 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
     # 01:30 の夜間、07:00 の先行研究、08:00 の Daily が1回ずつ。21:00 はまだ
-    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("daily", "2026-09-18")]
+    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"),
+                   ("daily", "2026-09-18"), ("hub_calendar", "2026-09-18")]
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
@@ -277,8 +381,9 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
     assert header["channel"] == "C5" and header["text"].endswith("🌅 Daily 9/18（金）")
     assert header["text"].startswith("☀️")
-    note = assistant.notion.notes[-1]
+    note = assistant.hub.notes[-1]
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
+    assert [n.kind for n in assistant.notion.notes] == ["考察"]
     assert detail["notion_url"] == note.url
 
 
@@ -301,6 +406,7 @@ async def test_invalid_daily_is_not_saved_to_notion(env):
 
     assert result["status"] == "error"
     assert assistant.notion.notes == []
+    assert assistant.hub.notes == []
 
 
 async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
@@ -354,18 +460,18 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
     assert "reviews/2026-09-18.md" in claude.calls[0]["prompt"]
     texts = slack.texts()
     assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == REVIEW_REPLY
-    note = assistant.notion.notes[-1]
+    note = assistant.hub.notes[-1]
     assert note.kind == "振り返り" and "## Codex での振り返り" in note.body
-    assert "Codex App" not in texts[2] and "/reviews/" not in texts[2]
-    assert note.url in texts[2] and "このスレッド" in texts[2]
+    assert len(texts) == 2
+    assert assistant.notion.notes == []
 
     await assistant.on_message({"channel": "C5", "user": "UME", "ts": "1001.5", "thread_ts": "1001.000",
                                 "text": "条件Bの差は質問の順番で説明できる"})
     while assistant.tasks:
         import asyncio
         await asyncio.gather(*list(assistant.tasks))
-    (page_id, md), = assistant.notion.appended
-    assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in md
+    (page_id, conclusion), = assistant.hub.appended
+    assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in conclusion
 
 
 async def test_review_never_posts_model_progress_narration(env):
@@ -379,15 +485,24 @@ async def test_review_never_posts_model_progress_narration(env):
     assert any("振り返りを利用者向けの形に整えられなかったよ" in text for text in slack.texts())
 
 
-async def test_review_footer_is_notion_native_without_local_path(env):
+async def test_review_does_not_post_extra_footer(env):
     scheduler, _assistant, slack, claude = env
     claude.behaviors = [{"text": REVIEW_REPLY}]
 
     await scheduler.run_review("2026-09-23")
 
-    footer = slack.texts()[-1]
-    assert "Codex App" not in footer and "/reviews/" not in footer
-    assert "このスレッド" in footer and "Notion" in footer
+    assert slack.texts() == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
+
+
+async def test_review_without_hub_never_writes_research_notes(env):
+    scheduler, assistant, _slack, claude = env
+    assistant.hub = None
+    claude.behaviors = [{"text": REVIEW_REPLY}]
+
+    result = await scheduler.run_review("2026-09-23")
+
+    assert result["notion_url"] is None
+    assert assistant.notion.notes == []
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):
