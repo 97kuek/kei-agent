@@ -41,7 +41,7 @@ def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase |
     return use_case if confidence >= 0.8 and use_case in allowed else None
 
 
-async def classify_research(config: Config, store, prompt: str) -> UseCase:
+async def classify_research(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
     """研究 provider の Luna/Haiku recipe で一度だけ分類する。
 
     router workspace は connector なし・read-only。失敗時に別 provider/上位 model では再試行しない。
@@ -49,7 +49,7 @@ async def classify_research(config: Config, store, prompt: str) -> UseCase:
     return await _classify(config, store, "research", prompt, _RESEARCH_CASES, UseCase.RESEARCH_EXECUTE,
                            "research_extract, research_screen, research_compare, research_execute, research_design",
                            "書誌・固定項目・ログの抽出は extract、明確な基準の候補仕分けは screen、比較・結果分析は compare、"
-                           "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。")
+                           "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。", provider=provider)
 
 
 async def classify_course(config: Config, store, prompt: str) -> UseCase:
@@ -67,9 +67,9 @@ async def classify_work(config: Config, store, prompt: str) -> UseCase:
 
 
 async def _classify(config: Config, store, actor: str, prompt: str, allowed: frozenset[UseCase],
-                    fallback: UseCase, candidates: str, guidance: str) -> UseCase:
+                    fallback: UseCase, candidates: str, guidance: str, *, provider: str | None = None) -> UseCase:
     try:
-        recipe = resolve_classifier(config, store, actor)
+        recipe = resolve_classifier(config, store, actor, provider=provider)
     except ModelPolicyError:
         return fallback
     from kei_agent.router import workspace

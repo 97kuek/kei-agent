@@ -106,9 +106,10 @@ class CourseExecutor(AgentExecutor):
                     RECORD_STUDY_TIME: self._record_study_time, TIME_REPORT: self._time_report, ASK: self._ask}
         await handlers[skill](updater, metadata, text)
 
-    async def _fail(self, updater: TaskUpdater, reason: str) -> None:
+    async def _fail(self, updater: TaskUpdater, reason: str, limit_reset_at: float | None = None) -> None:
         log.warning("断りました: %s", reason)
-        await updater.failed(updater.new_agent_message([_text(envelope.failure(reason))]))
+        await updater.failed(updater.new_agent_message([
+            _text(envelope.reply(reason, ok=False, limit_reset_at=limit_reset_at))]))
 
     async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
         await claude.finish(updater, envelope.reply(text, data))
@@ -217,9 +218,7 @@ class CourseExecutor(AgentExecutor):
         if not question:
             await self._fail(updater, "質問が空です")
             return
-        guide = self.config.repo_root / "prompts" / f"{tools.AGENT}.md"
-        prompt = (f"{guide.read_text(encoding='utf-8') if guide.exists() else ''}\n\n---\n\n"
-                  f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
+        prompt = (f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
                   f"次の質問に答えてください。\n\n{question}")
         from kei_agent.model_classifier import UsageLimited, classify_course
         try:
@@ -231,9 +230,9 @@ class CourseExecutor(AgentExecutor):
             answer = await claude.ask_connector(
                 self.config, prompt, tools.ALLOWED, self.config.agent_plugin_dir(tools.AGENT),
                 tools.DENY, tools.TIMEOUT_MINUTES, store=self.store, agent=tools.AGENT,
-                use_case=use_case)
+                use_case=use_case, provider=str(metadata.get("provider") or ""))
         except claude.ConnectorError as e:
-            await self._fail(updater, str(e))
+            await self._fail(updater, str(e), e.limit_reset_at)
             return
         await claude.finish(updater, envelope.reply(answer))
 

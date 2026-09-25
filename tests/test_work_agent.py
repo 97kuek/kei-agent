@@ -41,6 +41,19 @@ def test_events_are_grouped_by_day():
     assert lines[4] == "*このあと*" and lines[5] == "• 9/25（金） 終日 全社イベント（本社）"
 
 
+def test_tomorrow_request_excludes_today_and_later_events():
+    text = work.events_text(work.events_of({"items": EVENTS}), datetime(2026, 9, 21, 9),
+                            period="tomorrow")
+    assert text.startswith("*明日*\n• 14:00–15:00 定例")
+    assert "朝会" not in text and "全社イベント" not in text
+
+
+def test_requested_period_preserves_tomorrow_intent():
+    assert work.requested_period("明日の予定を教えて") == "tomorrow"
+    assert work.requested_period("今日の予定") == "today"
+    assert work.requested_period("今週の予定") == "week"
+
+
 def test_no_events_says_so():
     assert work.events_text([], datetime(2026, 9, 21)) == work.NO_EVENTS
 

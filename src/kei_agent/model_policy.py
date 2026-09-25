@@ -168,7 +168,7 @@ def resolve_selected(config, store, actor: str, use_case: UseCase | str, *, manu
     return resolve(actor, selected_provider(config, store, actor), use_case, manual=manual)
 
 
-def resolve_classifier(config, store, actor: str) -> ResolvedModel:
+def resolve_classifier(config, store, actor: str, *, provider: str | None = None) -> ResolvedModel:
     """plugin actor の軽量分類だけに使う routing recipe。
 
     通常の ``resolve`` は actor 固有の仕事だけを許可する。分類は例外的に routing
@@ -178,7 +178,7 @@ def resolve_classifier(config, store, actor: str) -> ResolvedModel:
         raise ModelPolicyError(f"{actor} は軽量分類を使えません")
     from kei_agent.settings import selected_provider
 
-    provider = selected_provider(config, store, actor)
+    provider = provider or selected_provider(config, store, actor)
     if provider not in PROVIDERS:
         raise ModelPolicyError(f"provider を選んでください: {actor}")
     try:

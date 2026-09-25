@@ -356,8 +356,7 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
     assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == REVIEW_REPLY
     note = assistant.notion.notes[-1]
     assert note.kind == "振り返り" and "## Codex での振り返り" in note.body
-    assert "Codex App" not in texts[2] and "/reviews/" not in texts[2]
-    assert note.url in texts[2] and "このスレッド" in texts[2]
+    assert len(texts) == 2
 
     await assistant.on_message({"channel": "C5", "user": "UME", "ts": "1001.5", "thread_ts": "1001.000",
                                 "text": "条件Bの差は質問の順番で説明できる"})
@@ -379,15 +378,13 @@ async def test_review_never_posts_model_progress_narration(env):
     assert any("振り返りを利用者向けの形に整えられなかったよ" in text for text in slack.texts())
 
 
-async def test_review_footer_is_notion_native_without_local_path(env):
+async def test_review_does_not_post_an_extra_footer(env):
     scheduler, _assistant, slack, claude = env
     claude.behaviors = [{"text": REVIEW_REPLY}]
 
     await scheduler.run_review("2026-09-23")
 
-    footer = slack.texts()[-1]
-    assert "Codex App" not in footer and "/reviews/" not in footer
-    assert "このスレッド" in footer and "Notion" in footer
+    assert slack.texts() == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):
@@ -534,14 +531,36 @@ async def test_moon_removed_from_someone_elses_message_is_ignored(env):
 
 # 契約の上限（Claude AI usage limit）
 
+
+def test_claude_limit_does_not_block_codex_daily(env, store):
+    from kei_agent import settings
+
+    scheduler, _, *_ = env
+    settings.set_agent_provider(store, "router", "codex")
+    store.set_limit_until("claude", time.time() + 3600)
+    assert scheduler.can_run("daily", time.time())
+
+
+async def test_limited_schedule_is_deferred_only_once_per_day(env):
+    scheduler, _, *_ = env
+    scheduler.store.set_limit_until("claude", time.time() + 3600)
+    now = datetime.fromisoformat("2026-09-18 08:05")
+    await scheduler.tick(now)
+    first = scheduler.store.pending_deferred("schedule")
+    await scheduler.tick(now)
+    assert scheduler.store.pending_deferred("schedule") == first
+
+
 async def test_tick_waits_while_the_usage_limit_is_on(env, monkeypatch):
     scheduler, assistant, *_ = env
     ran = []
-    monkeypatch.setattr(scheduler, "run_task", lambda name, day, record=True: ran.append(name))
-    assistant.limited_until = time.time() + 3600
+    async def record(name, day, record=True):
+        ran.append(name)
+    monkeypatch.setattr(scheduler, "run_task", record)
+    scheduler.store.set_limit_until("claude", time.time() + 3600)
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
-    assert ran == []
+    assert ran == []  # 08:05 時点では保守はまだ期日ではない
 
 
 async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monkeypatch):
@@ -552,7 +571,7 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
 
     async def hits_the_limit(name, day, record=True):
         ran.append((name, day))
-        assistant.limited_until = reset
+        scheduler.store.set_limit_until("claude", reset)
         return {"status": "error"}
 
     monkeypatch.setattr(scheduler, "run_task", hits_the_limit)
@@ -569,9 +588,10 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
         scheduler.store.record_schedule(name, day, {"status": "done"})
 
     monkeypatch.setattr(scheduler, "run_task", works)
-    assistant.limited_until = 0
+    scheduler.store.set_limit_until("claude", 0)
     await scheduler.catch_up_deferred(reset + 120)
-    assert done == [("night", "2026-09-18")]
+    assert done == [("night", "2026-09-18"), ("literature", "2026-09-18"),
+                    ("daily", "2026-09-18")]
     assert scheduler.store.due_deferred("schedule", reset + 200) == []
 
 

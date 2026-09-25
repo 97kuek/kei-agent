@@ -29,7 +29,7 @@ CANCEL_JOB = "cancel-job"
 FORGET_JOB = "forget-job"
 # RunResult のうち、相手から受け取る項目（知らない項目が増えても落ちないように、ここで絞る）
 FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
-          "timed_out", "requested_domains", "limit_reset_at")
+          "timed_out", "requested_domains", "limit_reset_at", "provider")
 _OVERRIDE = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 _LABELS = {
     "research-extract": UseCase.RESEARCH_EXTRACT,
@@ -78,7 +78,8 @@ def prepare(config: Config, ws: Workspace, prompt: str) -> tuple[Workspace, str]
 
 
 def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str, thread_ts: str,
-                use_case: UseCase = UseCase.RESEARCH_EXECUTE, *, read_only: bool = False) -> str:
+                use_case: UseCase = UseCase.RESEARCH_EXECUTE, *, provider: str = "",
+                read_only: bool = False) -> str:
     return json.dumps({
         "channel_name": ws.channel_name,
         "prompt": prompt,
@@ -87,6 +88,7 @@ def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str
         "thread_ts": thread_ts,
         "allowed_domains": list(ws.allowed_domains),
         "use_case": use_case.value,
+        "provider": provider,
         "read_only": read_only,
     }, ensure_ascii=False)
 
@@ -104,7 +106,7 @@ async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | No
               use_case: UseCase = UseCase.RESEARCH_EXECUTE,
               on_activity: Callable[[str], Awaitable[None]] | None = None,
               on_text: Callable[[str], Awaitable[None]] | None = None,
-              *, read_only: bool = False) -> runner.RunResult:
+              *, provider: str = "", read_only: bool = False) -> runner.RunResult:
     """研究エージェントに claude を1回動かしてもらう。"""
 
     async def on_progress(payload: str) -> None:
@@ -118,7 +120,8 @@ async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | No
             await on_text(event["text"])
 
     reply = await agents.ask(agent, RUN_CLAUDE, on_progress=on_progress,
-                             text=ask_payload(ws, prompt, session_id, channel, thread_ts, use_case, read_only=read_only))
+                             text=ask_payload(ws, prompt, session_id, channel, thread_ts, use_case,
+                                              provider=provider, read_only=read_only))
     if not reply.data:
         # 封筒が開けなかった（つながらない、途中で切れた、形が違う）
         return runner.RunResult(is_error=True, errors=[reply.text or "研究エージェントが返事をしませんでした"])

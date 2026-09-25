@@ -103,7 +103,7 @@
 
 ### スレッド内の返信
 
-- 保存した session ID で、選択済み provider の会話を再開する
+- provider と prompt version が一致する session ID だけで会話を再開する。変更時は公開済み Slack 履歴から新しい会話を始める
 - 処理中なら終わってから順番に
 
 ### ジョブ

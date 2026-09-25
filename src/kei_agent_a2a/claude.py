@@ -30,7 +30,8 @@ from kei_agent import guard, runner
 from kei_agent.agent_policy import policy_for
 from kei_agent.codex_app_server import AppServerClient
 from kei_agent.config import Config
-from kei_agent.model_policy import ModelPolicyError, ResolvedModel, UseCase, resolve_selected
+from kei_agent.model_policy import ModelPolicyError, ResolvedModel, UseCase, resolve, resolve_selected
+from kei_agent.provider_permissions import connector_profile
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
 
@@ -117,7 +118,8 @@ DENY_ALWAYS = ("Bash", "Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit",
 
 
 def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str],
-                      plugin_dir: Path, recipe: ResolvedModel | None = None) -> list[str]:
+                      plugin_dir: Path, recipe: ResolvedModel | None = None,
+                      instructions: str = "") -> list[str]:
     """連携を使う claude の起動コマンド。
 
     `plugin_dir` はそのエージェントの skill の置き場（`plugin/<agent>/`）。`plugin/` そのものを
@@ -133,6 +135,8 @@ def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str
         "--allowedTools", *allowed, "Skill",
         "--disallowedTools", *DENY_ALWAYS, *deny,
     ]
+    if instructions:
+        command += ["--append-system-prompt", instructions]
     if recipe is not None:
         command += ["--model", recipe.model]
         if recipe.reasoning_effort:
@@ -140,20 +144,45 @@ def connector_command(config: Config, allowed: Sequence[str], deny: Sequence[str
     return command
 
 
+def connector_instructions(config: Config, agent: str, instructions_path: Path | None = None) -> str:
+    """連携実行でも担当 agent の正規指示を使う。研究専用指示は混ぜない。"""
+    if agent not in {"course", "work"}:
+        raise ValueError(f"unsupported connector agent: {agent}")
+    path = instructions_path or config.repo_root / "prompts" / f"{agent}.md"
+    return path.read_text(encoding="utf-8")
+
+
 async def ask_codex_app(config: Config, agent: str, prompt: str, model: str,
-                        reasoning_effort: str, timeout_minutes: int) -> str:
+                        reasoning_effort: str, timeout_minutes: int,
+                        instructions_path: Path | None = None) -> str:
     """接続済み Codex App を agent policy の範囲だけで使う。"""
+    workspace = prepare_codex_connector_workspace(config, agent)
     result = await AppServerClient(config.codex_bin, timeout_minutes * 60).run(
-        prompt, policy_for(agent), model, reasoning_effort)
+        prompt, policy_for(agent), model, reasoning_effort,
+        instructions=connector_instructions(config, agent, instructions_path),
+        cwd=workspace,
+        profile=connector_profile(workspace, config.agent_plugin_dir(agent) / "skills"))
     if result.is_error:
         # App Server の内部エラーや外部データは Slack へ出さない。
-        raise ConnectorError("Codex の接続を使えませんでした")
+        raise ConnectorError("Codex の接続を使えませんでした", result.limit_reset_at)
     return result.text
+
+
+def prepare_codex_connector_workspace(config: Config, agent: str) -> Path:
+    """連携用 Codex に担当 agent の skill だけを見せる専用作業場。"""
+    if agent not in {"course", "work"}:
+        raise ValueError(f"unsupported connector agent: {agent}")
+    workspace = config.state_dir / "codex-connectors" / agent
+    workspace.mkdir(parents=True, exist_ok=True)
+    runner.install_skill_directory(config.agent_plugin_dir(agent) / "skills", workspace)
+    return workspace
 
 
 async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plugin_dir: Path,
                         deny: Sequence[str] = (), timeout_minutes: int = 3, *, store=None,
-                        agent: str = "", use_case: UseCase | None = None) -> str:
+                        agent: str = "", use_case: UseCase | None = None,
+                        provider: str = "",
+                        instructions_path: Path | None = None) -> str:
     """アカウントの連携を、道具を絞って使わせる（返事の文をそのまま返す）。
 
     会社の Microsoft 365 のように、Claude のアカウントに付いている連携は、ユーザー設定を
@@ -166,14 +195,19 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plu
     if store is not None and agent:
         default_cases = {"course": UseCase.COURSE_EXPLAIN, "work": UseCase.WORK_SINGLE_SOURCE}
         try:
-            recipe = resolve_selected(config, store, agent, use_case or default_cases[agent])
+            recipe = (resolve(agent, provider, use_case or default_cases[agent]) if provider else
+                      resolve_selected(config, store, agent, use_case or default_cases[agent]))
         except (KeyError, ModelPolicyError) as e:
             raise ConnectorError(str(e)) from e
     if recipe is not None and recipe.provider == "codex":
         # Codex の失敗を Claude で再試行すると、利用者が選んだ provider と権限境界を破る。
+        if instructions_path is not None:
+            return await ask_codex_app(config, agent, prompt, recipe.model, recipe.reasoning_effort,
+                                       timeout_minutes, instructions_path=instructions_path)
         return await ask_codex_app(config, agent, prompt, recipe.model, recipe.reasoning_effort, timeout_minutes)
 
-    command = connector_command(config, allowed, deny, plugin_dir, recipe)
+    command = connector_command(config, allowed, deny, plugin_dir, recipe,
+                                instructions=connector_instructions(config, agent, instructions_path) if agent else "")
     proc = await asyncio.create_subprocess_exec(
         *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -244,4 +278,6 @@ async def finish(updater: TaskUpdater, payload: str) -> None:
 
 
 class ConnectorError(RuntimeError):
-    pass
+    def __init__(self, message: str, limit_reset_at: float | None = None):
+        super().__init__(message)
+        self.limit_reset_at = limit_reset_at

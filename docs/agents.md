@@ -90,13 +90,17 @@ provider = ""             # App Home で "claude" または "codex" を選ぶ
 connectors = []            # Codexで使う有効なMCP名だけを明示する
 ```
 
-agent単位でClaude/Codexへ切り替えられる。通常実行の allowlist は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` のみ。Astra/Fable は依頼者が明示指定した例外だけに使い、通常レシピには割り当てない。Codexは `codex exec --json --sandbox workspace-write` のJSONLを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。provider 未選択・connector 不足・契約上限では理由を出して停止し、暗黙のモデル切り替えや別 provider への自動フォールバックはしない。
+agent単位でClaude/Codexへ切り替えられる。通常実行の allowlist は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` のみ。Astra/Fable は依頼者が明示指定した例外だけに使い、通常レシピには割り当てない。Codex CLI は一時的な `kei_agent_scoped` permission profile と `codex exec --json` を使い、JSONL の正常完了した最終メッセージだけを共通の `RunResult` に変換する。認証情報を環境変数やリポジトリに写さず、各CLIのログイン状態を使う。provider 未選択・connector 不足・契約上限では理由を出して停止し、暗黙のモデル切り替えや別 provider への自動フォールバックはしない。
 
 Codexで外部 connector を使うときは、`connectors` に名前を明示し、`codex mcp list --json` で有効と確認できるものだけを列挙する。実行前には agent ごとの許可範囲と照合し、未接続・担当外なら起動しない。許可範囲は研究が `research-notion` と `wandb`、大学が `notion` と `box`、仕事が読み取り専用の `microsoft-365`。SharePoint はこの経路に含めない。connector の自動インストール、OAuth、認証情報・URLの移行はしない。
 
 Codexの接続可否は環境ごと・時期ごとに変わるため、この文書へ検出結果を固定しない。起動時のpreflightで、`connectors` に宣言したものがagentの許可範囲と実際の接続一覧の両方を満たすことを確認する。満たさない場合はそのproviderで起動せず、別providerへ自動で切り替えない。
 
-この切り替えが現時点で直接適用されるのは、研究のsandbox実行器である。研究テーマの作業場はリポジトリ外なので、Codex起動前に `plugin/research/skills` だけを `<テーマ>/.agents/skills` へ相対シンボリックリンクとして公開する。既存の利用者skillは上書きしない。大学・仕事の `ask` は、Notion／Box／Microsoft 365のアカウント連携を使うため、Codex側の同等MCPコネクタを確認するまではClaude connectorを正とする。
+研究の sandbox 実行器では、研究 agent の skill だけを作業場へ公開し、既存の利用者 skill は上書きしない。大学・仕事の `ask` は選択 provider のアカウント連携を使用するが、Codex App Server のローカル権限 profile が実行できない環境では開始前に拒否する。連携の利用可否と、書込・ネットワーク境界が実環境で強制されるかは別々に検証する。
+
+実行契約は actor / use case ごとの recipe、prompt 内容の version、skill directory、必要な filesystem / network / connector 能力をまとめる。Claude と Codex は同じ契約から起動条件を作る。provider を変更した場合や prompt version が変わった場合、古い session ID を使わず Slack スレッドの公開履歴から新しい会話を開始する。旧形式の session ID は移行のため残すが再開キーには使わない。契約上限は provider ごとに保存し、別 provider への暗黙の再試行はしない。
+
+2026-09-24 の read-only canary: Claude Haiku 4.5 と Codex Luna は固定の最終応答を返した。Codex の custom profile は `:root="deny"` だと macOS 上で CLI 自体を起動できず、CLI 経路は `:root="read"` と個別 deny-read の組み合わせで起動・deny-read を確認した。書込範囲とネットワーク allowlist は未検証。App Server connector 経路は `:root="deny"` の安全な profile のまま、同環境で実行前 canary に失敗して fail-closed となるため未検証。接続・権限を確認せずに「Claude/Codex 完全同等」と扱わない。
 
 動かし方は2つある。**どちらも共通の agent 実行器を使い、provider 固有の CLI 呼び出しを個別の skill に書かない。**
 

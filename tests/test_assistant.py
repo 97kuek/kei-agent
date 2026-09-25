@@ -1,5 +1,6 @@
 import asyncio
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -122,6 +123,46 @@ async def test_thread_reply_without_mention_resumes_session(env, store):
     assert claude.calls[1]["session_id"] == "sess-1" and claude.calls[1]["prompt"] == "続きを"
 
 
+async def test_switching_provider_uses_slack_history_not_the_old_session(env, store):
+    from kei_agent import settings
+
+    assistant, slack, claude, _ = env
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 始めて"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "research", "codex")
+    slack.replies = [
+        {"ts": "10.1", "user": "UME", "text": "始めて"},
+        {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "前回の答え"},
+        {"ts": "10.3", "user": "UME", "text": "続きを"},
+    ]
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "続きを"})
+    await settle(assistant)
+
+    assert claude.calls[1]["session_id"] is None
+    assert "前回の答え" in claude.calls[1]["prompt"]
+    assert store.last_provider("C1", "10.1", "research") == "codex"
+
+
+async def test_switching_back_to_claude_starts_a_new_session(env, store):
+    from kei_agent import settings
+
+    assistant, slack, claude, _ = env
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 最初"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "research", "codex")
+    slack.replies = [{"ts": "10.1", "user": "UME", "text": "最初"},
+                     {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "一回目"}]
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "次"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "research", "claude")
+    slack.replies.append({"ts": "10.4", "user": "UBOT", "bot_id": "B1", "text": "二回目"})
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.5", "thread_ts": "10.1", "text": "さらに"})
+    await settle(assistant)
+
+    assert claude.calls[2]["session_id"] is None
+    assert "二回目" in claude.calls[2]["prompt"]
+
+
 async def test_messages_that_should_not_trigger(env):
     assistant, slack, claude, _ = env
     # スレッドの外（メンションなし）
@@ -139,6 +180,8 @@ async def test_messages_that_should_not_trigger(env):
 async def test_missing_session_is_restored_from_thread_history(env, store):
     assistant, slack, claude, _ = env
     store.upsert_thread("C1", "10.1", "vlm", "lost-session")
+    store.set_session("C1", "10.1", "research", "claude", "lost-session",
+                      runner.system_prompt_version(assistant.config))
     slack.replies = [
         {"ts": "10.1", "user": "UME", "text": "<@UBOT> 条件Aで回して"},
         {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "⏳ 作業中"},
@@ -157,7 +200,9 @@ async def test_missing_session_is_restored_from_thread_history(env, store):
     assert first["session_id"] == "lost-session" and second["session_id"] is None
     assert "依頼者: 条件Aで回して" in second["prompt"] and "Kei Agent: 条件Aの結果は 82% でした" in second["prompt"]
     assert "作業中" not in second["prompt"] and second["prompt"].count("Bも") == 1
-    assert store.get_thread("C1", "10.1")["session_id"] == "sess-new"
+    assert store.get_thread("C1", "10.1")["session_id"] == "lost-session"
+    assert store.session_for("C1", "10.1", "research", "claude",
+                             runner.system_prompt_version(assistant.config)) == "sess-new"
     assert not any(t.startswith("⚠️") for t in slack.texts())
 
 
@@ -169,6 +214,8 @@ async def test_long_thread_history_is_paged_and_says_what_it_dropped(env, store,
     monkeypatch.setattr(mod, "HISTORY_PAGE", 2)
     monkeypatch.setattr(mod, "HISTORY_MAX_MESSAGES", 4)
     store.upsert_thread("C1", "10.1", "vlm", "lost-session")
+    store.set_session("C1", "10.1", "research", "claude", "lost-session",
+                      runner.system_prompt_version(assistant.config))
     pages = [
         ([{"ts": "10.1", "user": "UME", "text": "いちばん古い話"},
           {"ts": "10.2", "user": "UME", "text": "その次"}], "c1"),
@@ -311,6 +358,8 @@ async def test_improve_channel_records_backlog_in_research_data(env, config):
 async def test_thread_broadcast_reply_continues_thread(env, store):
     assistant, slack, claude, _ = env
     store.upsert_thread("C1", "10.1", "vlm", "s")
+    store.set_session("C1", "10.1", "research", "claude", "s",
+                      runner.system_prompt_version(assistant.config))
     store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",
                                 "subtype": "thread_broadcast", "text": "チャンネルにも送った返信"})
@@ -467,6 +516,8 @@ async def test_same_thread_runs_one_at_a_time(env, monkeypatch):
 
     monkeypatch.setattr(runner, "run_model", slow)
     assistant.store.upsert_thread("C1", "10.1", "vlm", "s")
+    assistant.store.set_session("C1", "10.1", "research", "claude", "s",
+                                runner.system_prompt_version(assistant.config))
     assistant.store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "a"})
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "b"})
@@ -748,9 +799,8 @@ async def test_domains_asked_through_the_bash_tool_also_become_buttons(env, monk
     assert "huggingface.co" in post["text"] and "重みを落とす" in post["text"]
 
 
-async def test_updated_rules_are_passed_to_a_resumed_session_once(env, monkeypatch):
-    """--resume では、会話を始めたときのシステムプロンプトが使われ続ける。
-    決まりを変えたら、次の依頼のときに1回だけ本文として渡す。"""
+async def test_updated_rules_start_a_fresh_session_once(env, monkeypatch):
+    """指示版が変わったら旧 session を再開せず、Slack 履歴で新規 session を作る。"""
     assistant, slack, claude, _ = env
     version = {"v": "v1"}
     monkeypatch.setattr(runner, "system_prompt_version", lambda config: version["v"])
@@ -767,8 +817,11 @@ async def test_updated_rules_are_passed_to_a_resumed_session_once(env, monkeypat
     await settle(assistant)
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.4", "thread_ts": "10.1", "text": "さらに"})
     await settle(assistant)
-    assert "新しい決まり" in claude.calls[2]["prompt"] and claude.calls[2]["prompt"].endswith("もう一度")
-    assert "新しい決まり" not in claude.calls[3]["prompt"]
+    assert claude.calls[2]["session_id"] is None
+    assert "Slack のスレッドの履歴" in claude.calls[2]["prompt"]
+    assert claude.calls[2]["prompt"].endswith("もう一度")
+    assert claude.calls[3]["session_id"] == "sess-1"
+    assert claude.calls[3]["prompt"] == "さらに"
 
 
 # 契約の上限（Claude AI usage limit）
@@ -786,7 +839,7 @@ async def test_usage_limit_is_retried_after_it_resets(env, store, monkeypatch):
     texts = "\n".join(slack.texts())
     assert "上限" in texts and "やり直す" in texts
     assert "エラーで止まっちゃった" not in texts        # ふつうのエラーとしては出さない
-    assert assistant.limited_until > time.time()
+    assert store.limit_until("claude") > time.time()
     assert store.due_deferred("request", time.time()) == []      # まだ明けていない
 
     deferred = store.due_deferred("request", reset + 120)
@@ -804,7 +857,25 @@ async def test_usage_limit_without_a_reset_time_waits_a_while(env, store):
     claude.behaviors = [{"is_error": True, "text": "Claude AI usage limit reached", "errors": []}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
-    assert time.time() + 60 < assistant.limited_until <= time.time() + assistant.LIMIT_FALLBACK_SECONDS + 5
+    assert time.time() + 60 < store.limit_until("claude") <= time.time() + assistant.LIMIT_FALLBACK_SECONDS + 5
+
+
+async def test_quota_retry_does_not_auto_switch_provider(env, store):
+    from kei_agent import settings
+
+    assistant, slack, claude, _ = env
+    reset = time.time() + 3600
+    claude.behaviors = [{"is_error": True, "text": f"Claude AI usage limit reached|{int(reset)}"}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 調べて"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "research", "codex")
+
+    await assistant.retry_deferred(now=reset + 120)
+    await settle(assistant)
+
+    assert len(claude.calls) == 1
+    assert not store.pending_deferred("request")
+    assert any("自動で再実行しなかった" in text for text in slack.texts())
 
 
 async def test_next_request_after_an_error_carries_the_stalled_request(env, store):
@@ -1183,7 +1254,7 @@ async def test_course_channel_asks_the_university_agent(env):
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.1", "text": "<@UBOT> 課題を取り込んで"})
     await settle(assistant)
 
-    assert asked == [("sync-assignments", None)]
+    assert asked == [("sync-assignments", {"provider": "claude"})]
     assert "新しい課題 2 件" in slack.texts()
     assert claude.calls == []
     assert ("reactions_add", {"channel": "C7", "timestamp": "11.1", "name": "white_check_mark"}) in slack.calls
@@ -1291,6 +1362,43 @@ async def test_course_channel_sends_free_questions_to_ask(env, store):
     assert store.agent_session("C7", "11.2", "course") == "course-1"
 
 
+async def test_course_connector_rebuilds_context_from_published_history(env, store):
+    import json as _json
+
+    from kei_agent import a2a, settings
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            asked.append(_json.loads(text))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
+                "ok": True, "text": "<<kei-agent-final>>\n答えだよ\n<<kei-agent-final-end>>",
+                "data": {}, "limit_reset_at": None, "cost_usd": None,
+            }))
+
+    assistant.agents["course"] = _Agent()
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 前の話は？"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "course", "codex")
+    slack.replies = [
+        {"ts": "11.2", "user": "UME", "text": "前の話は？"},
+        {"ts": "11.3", "user": "UBOT", "bot_id": "B1", "text": "答えだよ"},
+        {"ts": "11.4", "user": "UME", "text": "それは？"},
+    ]
+    await assistant.on_message({"channel": "C7", "user": "UME", "ts": "11.4",
+                                "thread_ts": "11.2", "text": "それは？"})
+    await settle(assistant)
+
+    assert asked[1]["session_id"] is None
+    assert "答えだよ" in asked[1]["prompt"]
+    assert store.last_provider("C7", "11.2", "course") == "codex"
+
+
 async def test_course_thread_takes_replies_without_a_mention(env, store):
     """大学のスレッドでも、メンションなしの返信で続けられる（スレッドを覚えていないと拾えない）。"""
     import json as _json
@@ -1391,7 +1499,7 @@ async def test_course_channel_formats_the_deadlines(env):
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "12.1", "text": "<@UBOT> 締切を教えて"})
     await settle(assistant)
 
-    assert asked == [("list-due", None)]
+    assert asked == [("list-due", {"provider": "claude"})]
     reply = slack.texts()[-1]
     assert "9/21（月） 17:00 プロジェクト研究B / 履修申請フォーム" in reply
     assert "（ほかに 2 件）" in reply
@@ -1484,6 +1592,7 @@ async def test_claude_runs_through_the_research_agent_when_configured(env, store
     assert skill == "run-claude"
     assert payload["channel_name"] == "vlm" and payload["prompt"] == "図を作って"
     assert payload["channel"] == "C1" and payload["thread_ts"] == "13.1"
+    assert payload["provider"] == "claude"
     # 経過は入力欄の下の1行に出し、返事はいつもどおり流して見せる
     assert "作業している…" in slack.thinking()
     assert slack.streamed() == ["できたよ"]
@@ -1548,15 +1657,55 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
                                 "text": "<@UBOT> 来週までにやることある？"})
     await settle(assistant)
 
-    assert asked == [("list-due", {"days": 3})]
+    assert asked == [("list-due", {"days": 3, "provider": "claude"})]
     assert "作業している…" in slack.thinking()
 
 
 # 仕事のチャンネル（#30_work）
 
 
-async def test_work_channel_asks_the_work_agent(env, monkeypatch):
-    """仕事の依頼は仕事エージェントに取り次ぎ、予定を日ごとに分けて出す。"""
+async def test_work_connector_rebuilds_context_from_published_history(env, store):
+    import json as _json
+
+    from kei_agent import a2a, settings
+
+    assistant, slack, _, _ = env
+    slack.channels["C8"] = "30_work"
+    asked = []
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8789"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            asked.append(text)
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
+                "ok": True, "text": "<<kei-agent-final>>\n朝会だよ\n<<kei-agent-final-end>>",
+                "data": {}, "limit_reset_at": None, "cost_usd": None,
+            }))
+
+    assistant.agents["work"] = _Agent()
+    await assistant.on_mention({"channel": "C8", "user": "UME", "ts": "11.2", "text": "<@UBOT> 何があった？"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "work", "codex")
+    slack.replies = [
+        {"ts": "11.2", "user": "UME", "text": "何があった？"},
+        {"ts": "11.3", "user": "UBOT", "bot_id": "B1", "text": "朝会だよ"},
+        {"ts": "11.4", "user": "UME", "text": "それの詳細は？"},
+    ]
+    await assistant.on_message({"channel": "C8", "user": "UME", "ts": "11.4",
+                                "thread_ts": "11.2", "text": "それの詳細は？"})
+    await settle(assistant)
+
+    assert "朝会だよ" in asked[1]
+    assert store.last_provider("C8", "11.2", "work") == "codex"
+
+
+@pytest.mark.parametrize("question,expected,excluded,minimum_days", [
+    ("今日の予定は？", "朝会", "定例", 1),
+    ("明日の予定を教えて", "定例", "朝会", 2),
+])
+async def test_work_channel_asks_the_work_agent(env, monkeypatch, question, expected, excluded, minimum_days):
+    """仕事の予定は依頼された日の分だけを取り次いで出す。"""
     import json as _json
 
     from kei_agent import a2a, router
@@ -1573,10 +1722,14 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch):
 
         async def ask(self, skill, text="", params=None):
             asked.append((skill, params))
+            today = datetime.now().date().isoformat()
+            tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
                 "ok": True, "text": "予定 1 件", "limit_reset_at": None, "cost_usd": None,
-                "data": {"days": 1, "items": [{"subject": "朝会", "start": "2026-09-21T10:00:00",
-                                               "end": "2026-09-21T10:15:00", "location": "Zoom"}]}}))
+                "data": {"days": minimum_days, "items": [{"subject": "朝会", "start": f"{today}T10:00:00",
+                                               "end": f"{today}T10:15:00", "location": "Zoom"},
+                                              {"subject": "定例", "start": f"{tomorrow}T14:00:00",
+                                               "end": f"{tomorrow}T15:00:00", "location": "Teams"}]}}))
 
     assistant.agents["work"] = _Agent()
 
@@ -1585,12 +1738,13 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch):
 
     monkeypatch.setattr(router, "pick", fake_pick)
 
-    await assistant.on_mention({"channel": "C8", "user": "UME", "ts": "15.1", "text": "<@UBOT> 今日の予定は？"})
+    await assistant.on_mention({"channel": "C8", "user": "UME", "ts": "15.1", "text": f"<@UBOT> {question}"})
     await settle(assistant)
 
-    assert asked == [("list-events", {"days": 1})]
+    assert asked == [("list-events", {"days": minimum_days, "provider": "claude"})]
     assert claude.calls == []
-    assert any("朝会" in (t or "") for t in slack.texts())
+    shown = "\n".join(slack.texts())
+    assert expected in shown and excluded not in shown
 
 
 async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
@@ -1626,7 +1780,7 @@ async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
                                 "text": "<@UBOT> 今週の課題の締切は？"})
     await settle(assistant)
 
-    assert asked == [("list-due", {"days": 7})]
+    assert asked == [("list-due", {"days": 7, "provider": "claude"})]
     assert claude.calls == []            # 研究の claude は動かさない
 
 

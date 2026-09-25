@@ -60,8 +60,8 @@ def test_post_run_exposes_only_minimal_outcome_metadata():
     assert not hasattr(outcome, "text")
 
 
-async def test_runner_rejects_a_missing_codex_connector_before_starting(config, tmp_path, monkeypatch):
-    """未接続 connector でも Codex 子プロセスを起動する変更を捕捉する。"""
+async def test_runner_rejects_user_config_mcp_hidden_by_ignore_user_config(config, tmp_path, monkeypatch):
+    """ユーザー設定にある MCP を、隔離起動中にも使えると誤認しない。"""
     marker = tmp_path / "started"
     fake = tmp_path / "fake-codex.sh"
     fake.write_text(f"#!/bin/sh\ntouch {marker}\n")
@@ -71,10 +71,10 @@ async def test_runner_rejects_a_missing_codex_connector_before_starting(config, 
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
 
-    async def no_connectors(_: str) -> frozenset[str]:
-        return frozenset()
+    async def verified(*_args, **_kwargs):
+        return None
 
-    monkeypatch.setattr(runner, "discover_mcp_names", no_connectors)
+    monkeypatch.setattr(runner, "verify_codex_profile", verified)
 
     with pytest.raises(run_hooks.ConnectorPolicyError, match="Codex MCP に見つかりません"):
         await runner.run_model(config, runner.ExecutionRequest(
@@ -83,20 +83,15 @@ async def test_runner_rejects_a_missing_codex_connector_before_starting(config, 
     assert not marker.exists()
 
 
-async def test_runner_accepts_the_scoped_research_notion_gateway(config, tmp_path, monkeypatch):
+async def test_runner_accepts_the_scoped_research_notion_gateway(config, tmp_path):
     """実行時だけ注入する research-notion は preflight で許可する。"""
     fake = tmp_path / "fake-codex.sh"
-    fake.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t1\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"OK\"}}'\n")
+    fake.write_text("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t1\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"OK\"}}' '{\"type\":\"turn.completed\"}'\n")
     fake.chmod(0o755)
     profile = SimpleNamespace(provider="codex", model="", reasoning_effort="high", connectors=frozenset({"research-notion"}))
     config = replace(config, codex_bin=str(fake), agent_profiles={"research": profile})
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
-
-    async def no_connectors(_: str) -> frozenset[str]:
-        return frozenset()
-
-    monkeypatch.setattr(runner, "discover_mcp_names", no_connectors)
 
     result = await runner.run_model(config, runner.ExecutionRequest(
         ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")

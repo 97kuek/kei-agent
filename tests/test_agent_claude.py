@@ -163,3 +163,41 @@ def test_connector_does_not_disallow_the_skill_tool(config):
     command = claude.connector_command(config, ["mcp__read"], (), config.agent_plugin_dir("work"))
 
     assert "Skill" not in command[command.index("--disallowedTools") + 1:]
+
+
+def test_connector_instructions_use_only_agent_guide(config):
+    instructions = claude.connector_instructions(config, "course")
+
+    assert instructions == (config.repo_root / "prompts" / "course.md").read_text(encoding="utf-8")
+    assert "research-notion" not in instructions
+    command = claude.connector_command(config, (), (), config.agent_plugin_dir("course"),
+                                       instructions=instructions)
+    assert command[command.index("--append-system-prompt") + 1] == instructions
+
+
+async def test_codex_app_receives_agent_guide_as_developer_instructions(config, monkeypatch):
+    seen = {}
+
+    class FakeAppServer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self, prompt, _policy, _model, _effort, *, instructions, cwd, profile):
+            seen.update(prompt=prompt, instructions=instructions, cwd=cwd, profile=profile)
+            return claude.runner.RunResult(text="結果")
+
+    monkeypatch.setattr(claude, "AppServerClient", FakeAppServer)
+    assert await claude.ask_codex_app(config, "course", "過去問は？", "gpt-6-luna", "medium", 3) == "結果"
+    assert seen["prompt"] == "過去問は？"
+    assert seen["instructions"] == claude.connector_instructions(config, "course")
+    assert seen["cwd"] == config.state_dir / "codex-connectors" / "course"
+    assert "write" not in seen["profile"].filesystem.values()
+
+
+def test_codex_connector_workspace_exposes_only_its_agent_skills(config):
+    workspace = claude.prepare_codex_connector_workspace(config, "course")
+    skill_root = workspace / ".agents" / "skills"
+
+    assert workspace == config.state_dir / "codex-connectors" / "course"
+    assert (skill_root / "managing-academic-record").is_symlink()
+    assert not (skill_root / "managing-wandb").exists()

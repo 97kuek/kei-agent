@@ -61,33 +61,36 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, f"できるのは {' / '.join(SKILLS)} だけです")
             return
         if skill == ASK:
-            await self._ask(updater, claude.ask_prompt(message_text(context)))
+            await self._ask(updater, claude.ask_prompt(message_text(context)), str(metadata.get("provider") or ""))
             return
         days = asked_days(metadata)
         try:
-            events = await connector.events(self.config, days, store=self.store)
+            provider = str(metadata.get("provider") or "")
+            events = await connector.events(self.config, days, store=self.store,
+                                            **({"provider": provider} if provider else {}))
         except connector.WorkCalendarError as e:
-            await self._fail(updater, str(e))
+            await self._fail(updater, str(e), e.limit_reset_at)
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
         await claude.finish(updater, envelope.reply(
             f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events}))
 
-    async def _ask(self, updater: TaskUpdater, question: str) -> None:
+    async def _ask(self, updater: TaskUpdater, question: str, provider: str = "") -> None:
         """自由な質問に、連携を読んで答える。"""
         if not question.strip():
             await self._fail(updater, "質問が空です")
             return
         try:
-            answer = await connector.ask(self.config, question, store=self.store)
+            answer = await connector.ask(self.config, question, store=self.store, provider=provider)
         except connector.WorkCalendarError as e:
-            await self._fail(updater, str(e))
+            await self._fail(updater, str(e), e.limit_reset_at)
             return
         await claude.finish(updater, envelope.reply(answer))
 
-    async def _fail(self, updater: TaskUpdater, reason: str) -> None:
+    async def _fail(self, updater: TaskUpdater, reason: str, limit_reset_at: float | None = None) -> None:
         log.warning("断りました: %s", reason)
-        await updater.failed(updater.new_agent_message([Part(text=envelope.failure(reason))]))
+        await updater.failed(updater.new_agent_message([
+            Part(text=envelope.reply(reason, ok=False, limit_reset_at=limit_reset_at))]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)

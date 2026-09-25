@@ -1,12 +1,15 @@
 import asyncio
 import json
 import os
+import tomllib
 from dataclasses import replace
 
 import pytest
 
 from kei_agent import guard, router, runner, themes
+from kei_agent.execution_contract import resolve_contract
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
+from kei_agent.provider_permissions import preflight
 
 
 def request(config, *, actor="research", provider="claude", use_case=UseCase.RESEARCH_EXECUTE,
@@ -54,12 +57,78 @@ def test_codex_recipe_builds_a_jsonl_workspace_write_command(config):
     config = replace(config, codex_bin="codex-test")
     cmd = runner.build_command(config, request(config, provider="codex", session_id="thread-1"))
 
-    assert cmd[:4] == ["codex-test", "exec", "--json", "--sandbox"]
-    assert "workspace-write" in cmd
+    assert cmd[:4] == ["codex-test", "exec", "--json", "--strict-config"]
+    filesystem_config = next(value.split("=", 1)[1] for value in cmd
+                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
+    filesystem = tomllib.loads("value=" + filesystem_config)["value"]
+    assert filesystem[str(config.research_root / "vlm")] == "write"
     assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-6-sol"
     assert "--config" in cmd and "model_reasoning_effort=high" in cmd
     assert "--plugin-dir" not in cmd
     assert cmd[-1] == "-"
+
+
+def test_codex_command_receives_the_canonical_prompt_as_developer_instructions(config):
+    execution = request(config, provider="codex")
+    command = runner.build_command(config, execution)
+    instruction = next(value for value in command if value.startswith("developer_instructions="))
+
+    assert json.loads(instruction.split("=", 1)[1]) == resolve_contract(config, execution).prompt_text
+
+
+def test_codex_command_uses_scoped_profile_instead_of_coarse_sandbox(config):
+    execution = request(config, provider="codex")
+    command = runner.build_command(config, execution)
+    profile = preflight(config, resolve_contract(config, execution), "codex_cli")
+
+    assert "--sandbox" not in command
+    assert "--strict-config" in command
+    assert "--ignore-user-config" in command
+    assert all(setting in command for setting in profile.config_overrides)
+
+
+def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skills(config, tmp_path):
+    research = resolve_contract(config, request(config, provider="codex"))
+    course_request = request(config, actor="course", provider="codex", use_case=UseCase.COURSE_EXPLAIN)
+    course = resolve_contract(config, course_request)
+    target = tmp_path / ".agents" / "skills"
+    target.mkdir(parents=True)
+    user_skill = target / "user-skill"
+    user_skill.mkdir()
+    (user_skill / "SKILL.md").write_text("user-owned")
+
+    runner.install_agent_skills(research, tmp_path)
+    assert any(path.is_symlink() for path in target.iterdir() if path.name != "user-skill")
+    runner.install_agent_skills(course, tmp_path)
+
+    assert user_skill.is_dir()
+    assert {path.name for path in target.iterdir() if path.is_symlink()} == {
+        path.name for path in course.skill_dir.iterdir() if (path / "SKILL.md").is_file()
+    }
+
+
+def test_codex_skill_installer_adopts_its_legacy_research_link(config, tmp_path):
+    contract = resolve_contract(config, request(config, provider="codex"))
+    source = next(path for path in contract.skill_dir.iterdir() if (path / "SKILL.md").is_file())
+    target = tmp_path / ".agents" / "skills"
+    target.mkdir(parents=True)
+    (target / source.name).symlink_to(source, target_is_directory=True)
+
+    runner.install_agent_skills(contract, tmp_path)
+
+    assert (target / ".kei-agent-managed-skills.json").is_file()
+
+
+def test_router_skill_installation_removes_previously_managed_agent_skills(config, tmp_path):
+    research = resolve_contract(config, request(config, provider="codex"))
+    router_contract = resolve_contract(config, request(
+        config, actor="router", provider="codex", use_case=UseCase.ROUTING, read_only=True))
+    target = tmp_path / ".agents" / "skills"
+
+    runner.install_agent_skills(research, tmp_path)
+    runner.install_agent_skills(router_contract, tmp_path)
+
+    assert not [path for path in target.iterdir() if path.is_symlink()]
 
 
 def test_execution_request_has_no_model_or_effort_override_fields(config):
@@ -119,8 +188,11 @@ def test_read_only_execution_removes_claude_write_tools_and_notion_gateway(confi
 
 def test_read_only_execution_has_no_codex_notion_gateway(config):
     command = runner.build_command(config, request(config, provider="codex", read_only=True))
-    assert command[command.index("--sandbox") + 1] == "read-only"
-    assert "research-notion" not in " ".join(command)
+    filesystem_config = next(value.split("=", 1)[1] for value in command
+                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
+    assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
+    configs = [command[index + 1] for index, part in enumerate(command) if part == "--config"]
+    assert not any(item.startswith("mcp_servers.research-notion.") for item in configs)
 
 
 def test_classifier_recipe_is_always_read_only_even_if_the_caller_omits_it(config, store):
@@ -160,7 +232,9 @@ def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(
     command = runner.build_codex_command(config, execution.workspace, None, execution.recipe, actor="router")
 
     assert "--skip-git-repo-check" in command
-    assert command[command.index("--sandbox") + 1] == "read-only"
+    filesystem_config = next(value.split("=", 1)[1] for value in command
+                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
+    assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
     configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
     assert "apps._default.enabled=false" in configs
     assert not any("research-notion" in item for item in configs)
@@ -171,7 +245,8 @@ def test_codex_install_links_only_research_skills_into_theme_workspace(config):
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
 
-    runner.install_codex_skills(config, ws)
+    execution = request(config, provider="codex")
+    runner.install_agent_skills(resolve_contract(config, execution), ws.cwd)
 
     skills_dir = ws.cwd / ".agents" / "skills"
     wandb = skills_dir / "managing-wandb"
@@ -192,8 +267,26 @@ def test_apply_codex_events_maps_thread_message_and_command_activity():
         "type": "item.completed",
         "item": {"type": "agent_message", "text": "完了"},
     })
+    assert result.text == ""
     runner.apply_codex_event(result, {"type": "turn.completed", "usage": {"total_cost_usd": 0.2}})
     assert (result.session_id, result.text, result.is_error) == ("t1", "完了", False)
+
+
+def test_codex_only_uses_the_last_message_after_a_completed_turn():
+    result = runner.RunResult()
+    runner.apply_codex_event(result, {"type": "item.completed", "item": {
+        "type": "agent_message", "text": "内部の途中経過"}})
+    runner.apply_codex_event(result, {"type": "item.completed", "item": {
+        "type": "agent_message", "text": "<<kei-agent-final>>\n答え\n<<kei-agent-final-end>>"}})
+    assert result.text == ""
+    runner.apply_codex_event(result, {"type": "turn.completed"})
+    assert result.text == "<<kei-agent-final>>\n答え\n<<kei-agent-final-end>>"
+
+
+def test_nonzero_exit_discards_even_a_result_text():
+    result = runner.finalize_run_result(runner.RunResult(text="途中結果"), returncode=1)
+    assert result.is_error and result.failure_kind == "runtime"
+    assert result.text == ""
 
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
@@ -370,9 +463,56 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
     )
 
     assert (result.session_id, result.text, result.is_error) == ("thread-1", "完了", False)
-    assert seen_text == ["完了"]
+    assert seen_text == []  # 未検証の text は callback にも流さない
     assert seen_activity == ["実行している: pwd"]
     assert (ws.cwd / ".agents" / "skills" / "managing-wandb").is_symlink()
+
+
+async def test_codex_profile_canary_failure_stops_before_starting_the_model(config, monkeypatch):
+    from kei_agent.provider_permissions import CapabilityUnavailable
+
+    async def unavailable(*_args, **_kwargs):
+        raise CapabilityUnavailable("Codex の権限を強制できません")
+
+    async def should_not_start(*_args, **_kwargs):
+        raise AssertionError("model process must not start")
+
+    monkeypatch.setattr(runner, "verify_codex_profile", unavailable)
+    monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", should_not_start)
+    ws = themes.resolve(config, "vlm")
+
+    result = await runner.run_model(config, runner.ExecutionRequest(
+        ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
+
+    assert result.is_error and result.failure_kind == "capability"
+    assert result.text == ""
+
+
+async def test_codex_nonzero_exit_never_returns_its_completed_message(config, tmp_path, monkeypatch):
+    fake = tmp_path / "fake-codex-failed.sh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "cat > /dev/null\n"
+        "printf '%s\\n' "
+        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"途中結果\"}}' "
+        "'{\"type\":\"turn.completed\"}'\n"
+        "exit 1\n"
+    )
+    fake.chmod(0o755)
+    config = replace(config, codex_bin=str(fake))
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+
+    async def verified(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(runner, "verify_codex_profile", verified)
+
+    result = await runner.run_model(config, runner.ExecutionRequest(
+        ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
+
+    assert result.is_error and result.failure_kind == "runtime"
+    assert result.text == ""
 
 
 def test_apply_event_reads_the_usage_limit_and_when_it_resets():

@@ -43,13 +43,12 @@ from kei_agent.auto_messages import (
     interrupted_prompt,
     job_resume_prompt,
     job_status_label,
-    rules_update_prompt,
 )
 from kei_agent.config import Config
 from kei_agent.course import CourseChannel
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
@@ -177,7 +176,6 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
         self.restart_requested = asyncio.Event()
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
-        self.limited_until = 0.0
         # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/agents.md）
         self.agents: dict[str, a2a.Agent] = agents.build(config)
         # 名刺から読んだスキルの一覧（振り分け係が使う）。エージェントを入れ替えるとスキルが増えるので、
@@ -659,7 +657,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
 
     async def run_agent(self, ws: Workspace, prompt: str, session_id: str | None = None,
                          channel: str = "", thread_ts: str = "",
-                         on_activity=None, on_text=None) -> runner.RunResult:
+                         on_activity=None, on_text=None, *, provider: str | None = None) -> runner.RunResult:
         """claude を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
 
         どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
@@ -669,23 +667,28 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if actor == "self_fix":
             use_case = UseCase.SELF_FIX_DESIGN
         else:
+            provider = provider or settings.selected_provider(self.config, self.store, actor)
             explicit_use_case = research.has_explicit_use_case(prompt)
             use_case, prompt = research.use_case_for_prompt(prompt)
             if not explicit_use_case:
                 from kei_agent.model_classifier import UsageLimited, classify_research
                 try:
-                    use_case = await classify_research(self.config, self.store, prompt)
+                    use_case = await classify_research(self.config, self.store, prompt, provider=provider)
                 except UsageLimited as e:
-                    return runner.RunResult(is_error=True, errors=[str(e)], limit_reset_at=e.reset_at)
+                    return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
+                                            limit_reset_at=e.reset_at)
         try:
-            recipe = resolve_selected(self.config, self.store, actor, use_case,
-                                      manual=actor == research.AGENT and research.is_manual_use_case(use_case))
+            recipe = (resolve(actor, provider, use_case,
+                              manual=actor == research.AGENT and research.is_manual_use_case(use_case))
+                      if provider else resolve_selected(
+                          self.config, self.store, actor, use_case,
+                          manual=actor == research.AGENT and research.is_manual_use_case(use_case)))
         except ModelPolicyError as e:
             return runner.RunResult(is_error=True, errors=[str(e)])
         with self.claude_running():
             if agent is not None:
                 return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
-                                          use_case, on_activity, on_text)
+                                          use_case, on_activity, on_text, provider=recipe.provider)
             return await runner.run_model(
                 self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts), prompt,
                 on_activity, on_text,
@@ -711,12 +714,18 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 else:
                     agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
                     if agent is not None:
-                        result = await research.run(agent, ws, prompt, None, "", "", use_case)
+                        result = await research.run(agent, ws, prompt, None, "", "", use_case,
+                                                    provider=recipe.provider)
                     else:
                         result = await runner.run_model(
                             self.config, runner.ExecutionRequest(ws, recipe, None, "", ""), prompt,
                         )
             self.store.end_run(run_id, result.is_error, result.cost_usd)
+            if result.limit_reset_at is not None:
+                provider = result.provider
+                if provider:
+                    self.store.set_limit_until(provider, max(
+                        self.store.limit_until(provider), self.limit_until(result.limit_reset_at)))
         return result
 
     async def publish(self, channel: str, channel_name: str, ws: Workspace, header: str,
@@ -941,7 +950,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
 
         if result.limit_reset_at is not None:
-            await self.defer_for_limit(req, result.limit_reset_at)
+            await self.defer_for_limit(req, result.limit_reset_at,
+                                       result.provider or "")
             self.store.set_awaiting(req.channel, req.thread_ts, True)
             await ui.finish("")
             await self.mark_answered(req, failed=True)
@@ -980,35 +990,45 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        session_id = row["session_id"] if row else None
+        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else research.AGENT
+        provider = settings.selected_provider(self.config, self.store, actor)
         version = runner.system_prompt_version(self.config)
-        if session_id and row["prompt_version"] != version:
-            # --resume では会話を始めたときのシステムプロンプトが使われ続けるので、変わった決まりを本文で渡す
-            prompt = rules_update_prompt(runner.system_prompt_text(self.config)) + prompt
+        session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
+        prior_provider = self.store.last_provider(req.channel, req.thread_ts, actor)
         # 区切って立てたスレッドの最初の回には、前のスレッドの引き継ぎメモを渡す
         prompt = self.handoff_memo_for(row) + prompt
         stalled = row["stalled_request"] if row else None
-        if stalled:
+        if stalled or (row is not None and row["session_id"] and not session_id) or (
+            prior_provider is not None and prior_provider != provider
+        ):
             # 止まった回は claude 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts,
-                                    stalled if stalled != req.text else None, dropped=dropped)
+                                    stalled if stalled and stalled != req.text else None, dropped=dropped)
             session_id = None
 
         on_activity, on_text = (ui.activity, ui.text) if ui is not None else (None, None)
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
-                                         on_activity, on_text)
+                                        on_activity, on_text, provider=provider)
 
         result = await attempt(prompt, session_id)
         if result.session_missing:
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             result = await attempt(
                 history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped), None)
-        if result.session_id:
-            self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
-            self.store.set_prompt_version(req.channel, req.thread_ts, version)
+        if not result.is_error:
+            if result.session_id:
+                self.store.set_session(req.channel, req.thread_ts, actor, provider,
+                                       result.session_id, version)
+                # 既存 row の session_id は provider 不明の legacy 値なので上書きしない。
+                # 新規スレッドは従来互換の参照値として保存する。
+                if row is None or row["session_id"] is None:
+                    self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
+                self.store.set_prompt_version(req.channel, req.thread_ts, version)
+            else:
+                self.store.set_last_provider(req.channel, req.thread_ts, actor, provider)
         return result
 
     async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,
@@ -1137,28 +1157,31 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             return now + self.LIMIT_FALLBACK_SECONDS
         return reset_at + self.LIMIT_MARGIN_SECONDS
 
-    async def note_limit(self, reply: agents.Reply) -> None:
+    async def note_limit(self, reply: agents.Reply, agent: str, provider: str) -> None:
         """エージェントが上限に当たったことを、本体の1か所に集める（約束は本体が持つ）。
 
-        エージェントは自分の claude を動かすが、契約の枠は1つなので、待つ・やり直すの管理は
-        オーケストレーターに寄せる（docs/agents.md）。
+        provider ごとに待つ・やり直すの管理をオーケストレーターで持つ。
         """
         if reply.limit_reset_at is None:
             return
-        until = self.limit_until(reply.limit_reset_at)
-        if until <= self.limited_until:
+        if not provider:
             return
-        self.limited_until = until
+        until = self.limit_until(reply.limit_reset_at)
+        if until <= self.store.limit_until(provider):
+            return
+        self.store.set_limit_until(provider, until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
-        await self.notify_trouble(f"エージェントが Claude の契約の上限に当たりました。{when} ごろまで待ちます。")
+        await self.notify_trouble(f"{agent} の {provider} 利用上限に当たりました。{when} ごろまで待ちます。")
 
-    async def defer_for_limit(self, req: Request, reset_at: float) -> None:
+    async def defer_for_limit(self, req: Request, reset_at: float, provider: str) -> None:
         """上限に達した依頼を、明けてからやり直すものとして覚えておく。"""
         until = self.limit_until(reset_at)
-        self.limited_until = max(self.limited_until, until)
-        self.store.defer_run("request", req.to_payload(), until)
+        if not provider:
+            raise ValueError("provider が未選択です")
+        self.store.set_limit_until(provider, max(self.store.limit_until(provider), until))
+        self.store.defer_run("request", {**req.to_payload(), "provider": provider}, until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
-        await self.post(req, f"{FAILED_PREFIX} Claude の契約の上限に達したみたい。{when} ごろに自動でやり直すね。")
+        await self.post(req, f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。")
         self.notify_voice("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
 
     # 再起動で途中で止まった依頼
@@ -1196,7 +1219,17 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         now = time.time() if now is None else now
         for deferred_id, payload in self.store.due_deferred("request", now):
             self.store.finish_deferred(deferred_id)
-            await self.submit(Request.from_payload(payload))
+            req = Request.from_payload(payload)
+            original_provider = payload.get("provider")
+            if original_provider:
+                kind = themes.resolve(self.config, req.channel_name).kind
+                actor = (course.AGENT if kind is ChannelKind.COURSE else
+                         work.AGENT if kind is ChannelKind.WORK else
+                         "self_fix" if kind is ChannelKind.IMPROVE else research.AGENT)
+                if settings.selected_provider(self.config, self.store, actor) != original_provider:
+                    await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
+                    continue
+            await self.submit(req)
 
     # ジョブ
 

@@ -70,21 +70,24 @@ PROMPT = """{tool} を使って、{since} から {until} までの私の予定�
 
 
 class WorkCalendarError(RuntimeError):
-    pass
+    def __init__(self, message: str, limit_reset_at: float | None = None):
+        super().__init__(message)
+        self.limit_reset_at = limit_reset_at
 
 
 async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = None,
-                 store: Store | None = None) -> list[dict]:
+                 store: Store | None = None, provider: str = "") -> list[dict]:
     """これから days 日ぶんの予定を、始まる順に。"""
     start = today or date.today()
     prompt = PROMPT.format(tool=CALENDAR_TOOL, since=start.isoformat(),
                            until=(start + timedelta(days=max(days, 1))).isoformat())
     try:
         text = await claude.ask_connector(config, prompt, ALLOWED, config.agent_plugin_dir(AGENT),
-                                          DENY, TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT)
+                                          DENY, TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT,
+                                          provider=provider)
         found = claude.json_reply(text)
     except claude.ConnectorError as e:
-        raise WorkCalendarError(str(e)) from None
+        raise WorkCalendarError(str(e), e.limit_reset_at) from None
     events_ = [_event(item) for item in found if str(item.get("start") or "").strip()]
     events_.sort(key=lambda e: e["start"])
     log.info("Outlook の予定を %d 件読みました（%d 日ぶん）", len(events_), days)
@@ -104,11 +107,10 @@ def _event(item: dict) -> dict:
     }
 
 
-async def ask(config: Config, question: str, prompt_path: Path | None = None, store: Store | None = None) -> str:
+async def ask(config: Config, question: str, prompt_path: Path | None = None, store: Store | None = None,
+              provider: str = "") -> str:
     """自由な質問に、連携を読んで答える（長さの加減は prompts/work.md が決める）。"""
-    guide = (prompt_path or config.repo_root / "prompts" / "work.md")
-    instructions = guide.read_text(encoding="utf-8") if guide.exists() else ""
-    prompt = f"{instructions}\n\n---\n\n今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
+    prompt = f"今日は {date.today().isoformat()}。次の質問に答えてください。\n\n{question}"
     from kei_agent.model_classifier import UsageLimited, classify_work
     actual_store = store or Store(config.db_path)
     try:
@@ -118,6 +120,6 @@ async def ask(config: Config, question: str, prompt_path: Path | None = None, st
     try:
         return await claude.ask_connector(config, prompt, ALLOWED_ASK, config.agent_plugin_dir(AGENT),
                                           DENY, ASK_TIMEOUT_MINUTES, store=actual_store, agent=AGENT,
-                                          use_case=use_case)
+                                          use_case=use_case, instructions_path=prompt_path, provider=provider)
     except claude.ConnectorError as e:
-        raise WorkCalendarError(str(e)) from None
+        raise WorkCalendarError(str(e), e.limit_reset_at) from None

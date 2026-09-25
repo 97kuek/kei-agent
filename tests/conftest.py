@@ -35,7 +35,7 @@ def store(config: Config) -> Store:
 @pytest.fixture(autouse=True)
 def fake_model_classifier(monkeypatch):
     """通常の unit test は本物の CLI を起動せず、既存の用途判定だけを再現する。"""
-    async def classify(_config, _store, prompt: str):
+    async def classify(_config, _store, prompt: str, **_kwargs):
         return research.use_case_for_prompt(prompt)[0]
 
     monkeypatch.setattr(model_classifier, "classify_research", classify)

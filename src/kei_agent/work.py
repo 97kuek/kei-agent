@@ -16,7 +16,8 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router, runner
+from kei_agent import agents, router, runner, settings
+from kei_agent.auto_messages import history_prompt
 from kei_agent.request import Request
 from kei_agent.response_output import safe_failure
 from kei_agent.slack_text import escape
@@ -73,14 +74,23 @@ def events_of(data: dict) -> list[dict]:
     return items
 
 
-def events_text(events: list[dict], now: datetime) -> str:
-    """今日・明日・今週に分けて出す。"""
-    if not events:
-        return NO_EVENTS
+def requested_period(question: str) -> str:
+    """明示された単一の日付だけを選ぶ。複数日・未指定なら一覧にする。"""
+    if "明日" in question and "今日" not in question and "今週" not in question:
+        return "tomorrow"
+    if "今日" in question and "明日" not in question and "今週" not in question:
+        return "today"
+    return "week"
+
+
+def events_text(events: list[dict], now: datetime, period: str = "week") -> str:
+    """指定された期間の予定だけを今日・明日・このあとに分けて出す。"""
     today, tomorrow = now.date(), (now + timedelta(days=1)).date()
     groups: dict[str, list[dict]] = {"今日": [], "明日": [], "このあと": []}
     for event in events:
         day = _at(event["start"]).date()
+        if (period == "today" and day != today) or (period == "tomorrow" and day != tomorrow):
+            continue
         name = "今日" if day == today else "明日" if day == tomorrow else "このあと"
         groups[name].append(event)
     lines = []
@@ -89,7 +99,7 @@ def events_text(events: list[dict], now: datetime) -> str:
             continue
         lines.append(f"*{name}*")
         lines += [_line(event, with_day=name == "このあと") for event in found]
-    return "\n".join(lines)
+    return "\n".join(lines) or NO_EVENTS
 
 
 class WorkChannel:
@@ -98,7 +108,7 @@ class WorkChannel:
 
         すでに振り分けが済んでいるとき（研究全体のチャンネルから回ってきたとき）は、その仕事を使う。
         """
-        params = params or {}
+        params = dict(params or {})
         if not skill:
             skills = await self.skills_of(AGENT)
             choice = await router.pick(self.config, skills, req.text, store=self.store) if skills else router.Choice()
@@ -106,12 +116,15 @@ class WorkChannel:
         if skill == ASK:
             await self.work_ask(req)
             return
+        period = requested_period(req.text)
+        if period == "tomorrow" and isinstance(params.get("days"), int):
+            params["days"] = max(params["days"], 2)
         reply = await self.ask_work(skill, **params)
         if not reply.ok:
             await self.post(req, safe_failure("connection"))
             await self.mark_answered(req, failed=True)
             return
-        await self.post(req, events_text(events_of(reply.data), datetime.now()))
+        await self.post(req, events_text(events_of(reply.data), datetime.now(), period))
         await self.mark_answered(req, failed=False)
 
     async def work_ask(self, req: Request) -> None:
@@ -127,8 +140,15 @@ class WorkChannel:
             if event.get("activity"):
                 await ui.activity(event["activity"])
 
-        reply = await self.ask_work_text(req.text or "今日の予定は？", on_progress)
+        prompt = req.text or "今日の予定は？"
+        if req.message_ts != req.thread_ts:
+            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
+            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped)
+        reply = await self.ask_work_text(prompt, on_progress)
         answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
+        if reply.ok:
+            self.store.set_last_provider(req.channel, req.thread_ts, AGENT,
+                                         settings.selected_provider(self.config, self.store, AGENT))
         streamed = await ui.finish(answer)
         if not streamed:
             await self.post(req, answer, markdown=True)
@@ -140,10 +160,11 @@ class WorkChannel:
         if agent is None:
             await self.notify_trouble("仕事エージェントの住所が config.toml の [a2a.agents] にありません")
             return agents.Reply.broken("仕事エージェントの住所がないよ")
-        reply = await agents.ask(agent, ASK, text=question, on_progress=on_progress)
+        provider = settings.selected_provider(self.config, self.store, AGENT)
+        reply = await agents.ask(agent, ASK, params={"provider": provider}, text=question, on_progress=on_progress)
         if not reply.ok:
             await self.notify_trouble(f"仕事エージェント（{agent.base_url}）の ask が返した理由: {reply.text[:300]}")
-        await self.note_limit(reply)
+        await self.note_limit(reply, AGENT, provider)
         return reply
 
     async def ask_work(self, skill: str, **params) -> agents.Reply:
@@ -152,8 +173,9 @@ class WorkChannel:
         if agent is None:
             await self.notify_trouble("仕事エージェントの住所が config.toml の [a2a.agents] にありません")
             return agents.Reply.broken("仕事エージェントの住所がないよ")
-        reply = await agents.ask(agent, skill, params=params or None)
+        provider = settings.selected_provider(self.config, self.store, AGENT)
+        reply = await agents.ask(agent, skill, params={**params, "provider": provider})
         if not reply.ok:
             await self.notify_trouble(f"仕事エージェント（{agent.base_url}）の {skill} が返した理由: {reply.text[:300]}")
-        await self.note_limit(reply)
+        await self.note_limit(reply, AGENT, provider)
         return reply
