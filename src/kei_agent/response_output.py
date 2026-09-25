@@ -140,3 +140,14 @@ def safe_failure(kind: str = "conversation") -> str:
         "provider": "⚠️ 使う AI（Claude か Codex）がまだ選ばれていないよ。App Home の設定で選んでからもう一度頼んでね。",
     }
     return messages.get(kind, messages["conversation"])
+
+
+def trouble_notice(text: str, limit: int = 200) -> str:
+    """改善チャンネルに出す、何が起きたかの1行。
+
+    `…できません: RuntimeError: …` のように後ろに付く例外の中身は出さない（ログにだけ残す）。
+    手元の絶対パスは名前だけにし、長さを切る。
+    """
+    head = re.split(r": |：", text.strip(), maxsplit=1)[0]
+    first = " ".join(_INTERNAL_EXCEPTION.sub("", _hide_local_paths(head)).split())
+    return first if len(first) <= limit else first[:limit - 1] + "…"

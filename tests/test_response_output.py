@@ -1,6 +1,12 @@
 import pytest
 
-from kei_agent.response_output import OutputError, finalize_conversation, validate_daily, validate_structured_response
+from kei_agent.response_output import (
+    OutputError,
+    finalize_conversation,
+    trouble_notice,
+    validate_daily,
+    validate_structured_response,
+)
 
 
 def test_finalizer_keeps_only_the_marked_user_facing_answer():
@@ -62,3 +68,11 @@ def test_daily_requires_four_bold_sections_in_order():
     assert validate_daily(valid) == valid
     with pytest.raises(OutputError):
         validate_daily("*今日のタスク*\nなし")
+
+
+def test_trouble_notice_says_what_happened_without_local_paths():
+    notice = trouble_notice("共通 Notion ホームを利用できません。/Users/kei/.local/state/kei-agent/hub.json を確認して")
+
+    assert notice == "共通 Notion ホームを利用できません。hub.json を確認して"
+    assert len(trouble_notice("あ" * 500)) == 200
+    assert trouble_notice("course が返した理由: RuntimeError: secret") == "course が返した理由"

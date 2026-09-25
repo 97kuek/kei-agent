@@ -53,7 +53,14 @@ from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
 from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
-from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_daily, validate_review
+from kei_agent.response_output import (
+    OutputError,
+    finalize_conversation,
+    safe_failure,
+    trouble_notice,
+    validate_daily,
+    validate_review,
+)
 from kei_agent.self_fix import SelfFix
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
@@ -558,14 +565,15 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             log.warning("依頼者への通知を投稿できません", exc_info=True)
 
     async def notify_trouble(self, text: str) -> None:
-        """詳細はログに残し、改善チャンネルには安全な状態だけを知らせる。"""
+        """詳細はログに残し、改善チャンネルには何が起きたかを1行で知らせる（パスは名前だけ、長さは切る）。"""
         log.warning(text)
         try:
             ids = await self.channel_ids()
             channel = next((ids[n] for n in self.config.improve_channels if n in ids), None)
             if channel:
                 await self.slack.chat_postMessage(
-                    channel=channel, text=f"{FAILED_PREFIX} Kei Agent で確認が必要な問題が起きたよ。")
+                    channel=channel,
+                    text=f"{FAILED_PREFIX} Kei Agent で確認が必要な問題が起きたよ: {trouble_notice(text)}")
         except Exception:
             log.exception("Kei Agent の改善のチャンネルに知らせられません")
 
