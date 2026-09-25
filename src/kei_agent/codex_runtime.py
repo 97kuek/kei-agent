@@ -124,3 +124,28 @@ async def discover_mcp_names(codex_bin: str = "codex") -> frozenset[str]:
     if proc.returncode:
         return frozenset()
     return parse_mcp_names(stdout)
+
+
+async def discover_enabled_mcp_names_strict(codex_bin: str = "codex") -> frozenset[str]:
+    """App 実行前にユーザー設定の MCP を列挙する。読めなければ安全側で停止。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            codex_bin, "mcp", "list", "--json",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        entries = json.loads(stdout)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Codex MCP の設定を確認できません") from exc
+    if proc.returncode or not isinstance(entries, list):
+        raise RuntimeError("Codex MCP の設定を確認できません")
+    names: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("enabled"), bool):
+            raise RuntimeError("Codex MCP の設定を確認できません")
+        if entry["enabled"]:
+            name = entry.get("name")
+            if not isinstance(name, str):
+                raise RuntimeError("Codex MCP の設定を確認できません")
+            names.add(name)
+    return frozenset(names)

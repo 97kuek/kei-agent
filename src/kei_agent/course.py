@@ -17,7 +17,8 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router, runner
+from kei_agent import agents, router, runner, settings
+from kei_agent.auto_messages import history_prompt
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape
@@ -179,11 +180,15 @@ class CourseChannel:
         """自由な質問を大学エージェントに渡す。経過は1行に出し、返事は流して見せる。"""
         ui = self.thread_ui(req)
         await ui.start()
-        # 空文字は「このスレッドは大学が答えた」という目印だけで、会話の鍵ではない（assistant._dispatch）
-        session_id = self.store.agent_session(req.channel, req.thread_ts, AGENT) or None
+        # 連携は毎回独立した process なので、Claude / Codex の session ID は再開に使わない。
+        # 既に公開した Slack の返答だけを、次の質問の文脈にする。
+        prompt = req.text or "授業について教えて"
+        if req.message_ts != req.thread_ts:
+            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
+            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped)
         payload = json.dumps({
-            "prompt": req.text or "授業について教えて",
-            "session_id": session_id,
+            "prompt": prompt,
+            "session_id": None,
             "channel": req.channel,
             "thread_ts": req.thread_ts,
         }, ensure_ascii=False)
@@ -200,15 +205,12 @@ class CourseChannel:
 
         reply = await self.ask_course(ASK, text=payload, on_progress=on_progress)
         answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
-        if session_id and not reply.ok and "No conversation found" in str(reply.data.get("errors")):
-            # エージェントを入れ替えると会話が消える。1回だけ、続きなしで聞き直す
-            self.store.set_agent_session(req.channel, req.thread_ts, AGENT, "")
-            reply = await self.ask_course(ASK, text=payload.replace(f'"{session_id}"', "null"),
-                                          on_progress=on_progress)
-            answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
         new_session = str(reply.data.get("session_id") or "")
         if new_session:
             self.store.set_agent_session(req.channel, req.thread_ts, AGENT, new_session)
+        if reply.ok:
+            self.store.set_last_provider(req.channel, req.thread_ts, AGENT,
+                                         settings.selected_provider(self.config, self.store, AGENT))
         streamed = await ui.finish(answer)
         if not streamed:
             await self.post(req, answer, markdown=True)
@@ -220,10 +222,11 @@ class CourseChannel:
         if agent is None:
             await self.notify_trouble("大学エージェントの住所が config.toml の [a2a.agents] にありません")
             return agents.Reply.broken("大学エージェントの住所がないよ")
-        reply = await agents.ask(agent, skill, params=params or None, text=text, on_progress=on_progress)
+        provider = settings.selected_provider(self.config, self.store, AGENT)
+        reply = await agents.ask(agent, skill, params={**params, "provider": provider}, text=text, on_progress=on_progress)
         if not reply.ok:
             await self.notify_trouble(f"大学エージェント（{agent.base_url}）の {skill} が返した理由: {reply.text[:300]}")
-        await self.note_limit(reply)
+        await self.note_limit(reply, AGENT, provider)
         return reply
 
     async def course_due(self, days: int, now: datetime) -> list[dict] | None:

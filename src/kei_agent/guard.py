@@ -23,6 +23,7 @@ DEFAULT_DENY_READ = (
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
+    "~/.codex",              # Codex の認証情報とローカル設定
     "~/.config/gh",          # バックアップ先への push 権限
     "~/.netrc",
     "~/.git-credentials",

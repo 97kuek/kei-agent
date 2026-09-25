@@ -33,7 +33,7 @@ from a2a.types import Part, Task, TaskState, TaskStatus
 from kei_agent import research, themes
 from kei_agent.config import Config, load_config
 from kei_agent.jobs import Pueue
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.store import Store
 from kei_agent_a2a import claude, envelope
 from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, RUN_CLAUDE, SUBMIT_JOB
@@ -102,8 +102,12 @@ class ResearchExecutor(AgentExecutor):
             return
         try:
             use_case = UseCase(str(ask.get("use_case") or UseCase.RESEARCH_EXECUTE))
-            recipe = resolve_selected(self.config, self.store, research.AGENT, use_case,
-                                      manual=research.is_manual_use_case(use_case))
+            provider = str(ask.get("provider") or "")
+            recipe = (resolve(research.AGENT, provider, use_case,
+                              manual=research.is_manual_use_case(use_case))
+                      if provider else resolve_selected(
+                          self.config, self.store, research.AGENT, use_case,
+                          manual=research.is_manual_use_case(use_case)))
         except (ModelPolicyError, ValueError) as e:
             await self._fail(updater, str(e))
             return

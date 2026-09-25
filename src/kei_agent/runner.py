@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -13,11 +12,14 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Literal
 
 from kei_agent import guard, run_hooks
-from kei_agent.codex_runtime import discover_mcp_names
 from kei_agent.config import Config, path_without_venv
+from kei_agent.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.model_policy import ResolvedModel, UseCase, validate_resolved
+from kei_agent.provider_permissions import CapabilityUnavailable, PermissionProfile, preflight
 from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -47,8 +49,10 @@ def system_prompt_text(config: Config) -> str:
 
 
 def system_prompt_version(config: Config) -> str:
-    """prompts/system.md の版。--resume では会話を始めたときの版が使われ続けるので、変わったかを見るのに使う。"""
-    return hashlib.sha256(system_prompt_text(config).encode("utf-8")).hexdigest()[:12]
+    """研究 session の指示・skill の版。変更時は古い会話を再開しない。"""
+    from kei_agent.execution_contract import prompt_fingerprint
+
+    return prompt_fingerprint(system_prompt_text(config), config.agent_plugin_dir(AGENT) / "skills")
 
 
 def run_timeout_seconds(config: Config, ws: Workspace) -> float:
@@ -67,20 +71,27 @@ def notion_mcp_config(config: Config) -> dict:
 
 def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
                         recipe: ResolvedModel, *, actor: str = AGENT,
-                        read_only: bool = False) -> list[str]:
+                        read_only: bool = False, contract: ExecutionContract | None = None) -> list[str]:
     """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
     assert ws.cwd is not None
     # ルーターは状態DBの下（Gitリポジトリ外）で、接続先も作業用MCPも不要な分類だけをする。
     is_router = actor == "router" or ws.system_prompt == config.repo_root / "prompts" / "router.md"
+    if contract is None:
+        contract = resolve_contract(config, ExecutionRequest(ws, recipe, session_id, "", "", read_only))
+    profile = preflight(config, contract, "codex_cli")
     cmd = [
-        config.codex_bin, "exec", "--json", "--sandbox", "read-only" if is_router or read_only else "workspace-write",
+        config.codex_bin, "exec", "--json", "--strict-config", "--ignore-user-config",
         "--cd", str(ws.cwd),
     ]
+    for setting in profile.config_overrides:
+        cmd += ["--config", setting]
     if is_router:
         cmd.append("--skip-git-repo-check")
     cmd += ["--model", recipe.model]
     if recipe.reasoning_effort:
         cmd += ["--config", f"model_reasoning_effort={recipe.reasoning_effort}"]
+    if contract and contract.prompt_text:
+        cmd += codex_instruction_config(contract)
     # 個人の App connector（Google Calendar等）は研究にもルーターにも渡さない。
     cmd += ["--config", "apps._default.enabled=false"]
     if actor == "research" and not read_only and not is_router:
@@ -99,7 +110,7 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
 
 def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
                           recipe: ResolvedModel, *, actor: str = AGENT,
-                          read_only: bool = False) -> list[str]:
+                          read_only: bool = False, contract: ExecutionContract | None = None) -> list[str]:
     cmd = [
         config.claude_bin,
         "-p",
@@ -110,13 +121,17 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
         "--settings", json.dumps(guard.build_settings(config, ws, read_only=read_only), ensure_ascii=False),
         "--permission-mode", "dontAsk",
     ]
-    if actor in {"research", "course", "work"}:
-        cmd += ["--plugin-dir", str(config.agent_plugin_dir(actor))]
+    plugin_dir = contract.skill_dir.parent if contract and contract.skill_dir else (
+        config.agent_plugin_dir(actor) if actor in {"research", "course", "work"} else None)
+    if plugin_dir:
+        cmd += ["--plugin-dir", str(plugin_dir)]
     if actor == "research" and not read_only:
         # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
         cmd += ["--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False), "--strict-mcp-config"]
     prompt_path = ws.system_prompt or config.system_prompt_path
-    if prompt_path.exists():
+    if contract is not None and contract.prompt_text:
+        cmd += ["--append-system-prompt", contract.prompt_text]
+    elif contract is None and prompt_path.exists():
         # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
         cmd += ["--append-system-prompt", prompt_path.read_text(encoding="utf-8")]
     cmd += ["--model", recipe.model]
@@ -132,11 +147,12 @@ def build_command(config: Config, request: ExecutionRequest) -> list[str]:
     validate_resolved(request.recipe)
     ws = _execution_workspace(request)
     read_only = _is_read_only(request)
+    contract = resolve_contract(config, request)
     if request.recipe.provider == "codex":
         return build_codex_command(config, ws, request.session_id, request.recipe,
-                                   actor=request.recipe.actor, read_only=read_only)
+                                   actor=request.recipe.actor, read_only=read_only, contract=contract)
     return _build_claude_command(config, ws, request.session_id, request.recipe,
-                                 actor=request.recipe.actor, read_only=read_only)
+                                 actor=request.recipe.actor, read_only=read_only, contract=contract)
 
 
 @dataclass(frozen=True)
@@ -171,23 +187,92 @@ def build_model_command(config: Config, ws: Workspace, session_id: str | None,
     return build_command(config, ExecutionRequest(ws, recipe, session_id, "", ""))
 
 
-def install_codex_skills(config: Config, ws: Workspace) -> None:
-    """テーマ作業場へ研究 plugin の skill を安全な相対シンボリックリンクで公開する。"""
-    assert ws.cwd is not None
-    source_root = config.agent_plugin_dir(AGENT) / "skills"
-    if not source_root.is_dir():
-        return
+async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionProfile) -> None:
+    """同じ profile を OS sandbox が起動できることを、モデル実行前に確認する。"""
+    command = [codex_bin, "sandbox", "-P", "kei_agent_scoped", "-C", str(cwd)]
+    for setting in profile.config_overrides:
+        command += ["-c", setting]
+    command += ["--", "/usr/bin/true"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+    except (OSError, TimeoutError) as exc:
+        raise CapabilityUnavailable("Codex の権限を強制できません") from exc
+    if proc.returncode != 0:
+        raise CapabilityUnavailable("Codex の権限を強制できません")
 
-    target_root = ws.cwd / ".agents" / "skills"
+
+def codex_instruction_config(contract: ExecutionContract) -> list[str]:
+    """正本の指示を Codex の developer instruction に渡す。"""
+    return ["--config", "developer_instructions=" + json.dumps(contract.prompt_text, ensure_ascii=False)]
+
+
+def install_agent_skills(contract: ExecutionContract, cwd: os.PathLike[str]) -> None:
+    """この実行の agent skill だけを公開する。利用者所有の skill は触らない。"""
+    if contract.skill_dir is None:
+        clear_managed_skill_directory(Path(cwd))
+        return
+    install_skill_directory(contract.skill_dir, Path(cwd))
+
+
+def _managed_skill_sources(manifest: Path) -> dict[str, Path]:
+    try:
+        raw = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    except (ValueError, OSError) as e:
+        raise RuntimeError("managed skill manifest is invalid") from e
+    if not isinstance(raw, dict) or any(
+        not isinstance(name, str) or Path(name).name != name or not isinstance(source, str)
+        for name, source in raw.items()
+    ):
+        raise RuntimeError("managed skill manifest is invalid")
+    return {name: Path(source) for name, source in raw.items()}
+
+
+def clear_managed_skill_directory(cwd: Path) -> None:
+    """manifest に記録された Kei Agent link だけを外す。"""
+    target_root = cwd / ".agents" / "skills"
+    manifest = target_root / ".kei-agent-managed-skills.json"
+    managed = _managed_skill_sources(manifest)
+    for name, source in managed.items():
+        target = target_root / name
+        if not target.is_symlink() or target.resolve() != source.resolve():
+            raise RuntimeError(f"managed skill changed by another owner: {name}")
+        target.unlink()
+    if manifest.exists():
+        manifest.write_text("{}", encoding="utf-8")
+
+
+def install_skill_directory(source_root: Path, cwd: Path) -> None:
+    """指定された agent の skill ディレクトリだけを作業場へ反映する。"""
+    if not source_root.is_dir():
+        raise FileNotFoundError(f"agent skill directory is missing: {source_root}")
+    target_root = cwd / ".agents" / "skills"
     target_root.mkdir(parents=True, exist_ok=True)
+    manifest = target_root / ".kei-agent-managed-skills.json"
+    managed = _managed_skill_sources(manifest)
+    for name, managed_source in managed.items():
+        target = target_root / name
+        if target.is_symlink() and target.resolve() == managed_source.resolve():
+            target.unlink()
+        elif target.exists() or target.is_symlink():
+            raise RuntimeError(f"managed skill changed by another owner: {name}")
+    new_managed: dict[str, str] = {}
     for source in sorted(source_root.iterdir()):
         if not source.is_dir() or not (source / "SKILL.md").is_file():
             continue
         target = target_root / source.name
-        # 作業場にある既存 skill は利用者が管理しているものなので、上書きしない。
         if target.exists() or target.is_symlink():
-            continue
+            # 旧 install_codex_skills は manifest を残さず、同じ source への link だけを作った。
+            # 一致する旧 link は安全に引き継ぎ、それ以外は利用者所有として止める。
+            if target.is_symlink() and target.resolve() == source.resolve():
+                target.unlink()
+            else:
+                raise RuntimeError(f"agent skill collides with existing skill: {source.name}")
         target.symlink_to(os.path.relpath(source, target_root), target_is_directory=True)
+        new_managed[source.name] = str(source.resolve())
+    manifest.write_text(json.dumps(new_managed, ensure_ascii=False), encoding="utf-8")
 
 
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str,
@@ -235,6 +320,7 @@ def describe_tool(name: str, tool_input: dict) -> str:
 
 @dataclass
 class RunResult:
+    provider: str | None = None
     session_id: str | None = None
     text: str = ""
     is_error: bool = False
@@ -248,6 +334,8 @@ class RunResult:
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None
+    failure_kind: Literal["quota", "timeout", "session_missing", "capability", "runtime"] | None = None
+    _final_candidate: str = field(default="", repr=False)
 
     @property
     def session_missing(self) -> bool:
@@ -301,7 +389,10 @@ def apply_codex_event(result: RunResult, event: dict) -> str | None:
     if etype == "item.completed" and item_type == "agent_message":
         text = str(item.get("text") or "").strip()
         if text:
-            result.text = f"{result.text}\n{text}".strip()
+            result._final_candidate = text
+        return None
+    if etype == "turn.completed" and not result.is_error:
+        result.text = result._final_candidate
         return None
     if etype == "turn.failed":
         error = event.get("error") or {}
@@ -315,6 +406,25 @@ def apply_codex_event(result: RunResult, event: dict) -> str | None:
         result.is_error = True
         result.limit_reset_at = parse_limit(message)
     return None
+
+
+def finalize_run_result(result: RunResult, returncode: int | None) -> RunResult:
+    """プロセス終了まで確認してから、公開候補を確定する。"""
+    if result.timed_out:
+        result.is_error = True
+        result.failure_kind = "timeout"
+    elif result.limit_reset_at is not None:
+        result.is_error = True
+        result.failure_kind = "quota"
+    elif result.session_missing:
+        result.is_error = True
+        result.failure_kind = "session_missing"
+    elif returncode != 0 or result.is_error or not result.text.strip():
+        result.is_error = True
+        result.failure_kind = "runtime"
+    if result.is_error:
+        result.text = ""
+    return result
 
 
 def parse_limit(text: str, now: float | None = None) -> float | None:
@@ -374,14 +484,17 @@ async def run_model(
         model=recipe.model,
     )
     if is_codex:
-        if recipe.actor == AGENT and not _is_read_only(request):
-            install_codex_skills(config, ws)
-        configured_connectors = await discover_mcp_names(config.codex_bin)
-        # 研究用 Notion gateway はこの実行だけに --config で注入するため、
-        # グローバルな `codex mcp list` には現れない。
-        configured_connectors = configured_connectors | frozenset({NOTION_MCP})
+        contract = resolve_contract(config, request)
+        # --ignore-user-config で起動するので、ユーザー設定の MCP は実行時に存在しない。
+        # この回に明示注入する gateway だけを「利用可能」と扱う。
+        configured_connectors = frozenset({NOTION_MCP})
         connectors = config.agent_profiles.get(recipe.actor)
         run_hooks.preflight(context, frozenset(getattr(connectors, "connectors", ())), configured_connectors)
+        try:
+            await verify_codex_profile(config.codex_bin, ws.cwd, preflight(config, contract, "codex_cli"))
+        except CapabilityUnavailable as exc:
+            return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
+        install_agent_skills(contract, ws.cwd)
     started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *build_command(config, request),
@@ -398,7 +511,7 @@ async def run_model(
     proc.stdin.write(prompt.encode("utf-8"))
     proc.stdin.close()
 
-    result = RunResult()
+    result = RunResult(provider=recipe.provider)
 
     async def read_stdout() -> None:
         async for raw in proc.stdout:
@@ -406,14 +519,8 @@ async def run_model(
                 event = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if on_text and not is_codex and event.get("type") == "assistant":
-                for block in event.get("message", {}).get("content", []):
-                    if block.get("type") == "text" and (block.get("text") or "").strip():
-                        await on_text(block["text"])
-            if is_codex and on_text and event.get("type") == "item.completed":
-                item = event.get("item") or {}
-                if item.get("type") == "agent_message" and (item.get("text") or "").strip():
-                    await on_text(item["text"])
+            # 途中の assistant / agent_message は内部の思考や下書きを含み得る。
+            # Slack / A2A へ on_text では流さず、完了後の final だけを採用する。
             activity = apply_codex_event(result, event) if is_codex else apply_event(result, event)
             if activity and on_activity:
                 await on_activity(activity)
@@ -442,9 +549,10 @@ async def run_model(
         stderr = await _drain(stderr_task)
         with suppress(TimeoutError):
             await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
-    if proc.returncode and not result.text and not result.errors and stderr:
+    if proc.returncode and not result.errors and stderr:
         result.is_error = True
         result.errors.append(stderr[-2000:])
+    finalize_run_result(result, proc.returncode)
     run_hooks.post_run(run_hooks.RunOutcome(
         context=context,
         duration_ms=round((time.monotonic() - started_at) * 1000),

@@ -1,3 +1,5 @@
+import pytest
+
 from kei_agent import codex_runtime
 
 
@@ -57,6 +59,21 @@ def test_mcp_parser_returns_enabled_names_only_not_connection_details():
 
     assert names == frozenset({"wandb"})
     assert all("private.example" not in name for name in names)
+
+
+async def test_strict_mcp_discovery_rejects_unreadable_config(monkeypatch):
+    class Process:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"private error"
+
+    async def create(*_args, **_kwargs):
+        return Process()
+
+    monkeypatch.setattr(codex_runtime.asyncio, "create_subprocess_exec", create)
+    with pytest.raises(RuntimeError, match="MCP の設定"):
+        await codex_runtime.discover_enabled_mcp_names_strict("codex")
 
 
 async def test_run_probe_uses_jsonl_output_from_the_cli(tmp_path):

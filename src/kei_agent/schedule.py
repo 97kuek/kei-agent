@@ -105,27 +105,27 @@ class Scheduler:
         sched = self.config.schedule
         if not sched.enabled:
             return
-        # Claude の契約の上限に達している間は、決まった時刻の処理も始めない（明けてからやり直す）
-        if self.assistant.limited_until > now.timestamp():
-            return
         await self.catch_up_deferred(now.timestamp())
+        pending = {(payload.get("name"), payload.get("day"))
+                   for _, payload in self.store.pending_deferred("schedule")}
         for name in TASK_NAMES:
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
             # Slack（App Home）で変えた時刻を毎回読み直す。止めている処理は空文字
             hhmm = settings.schedule_time(self.config, self.store, name)
             day = due_day(now, hhmm, catch_up)
-            if day is None or self.store.schedule_ran(name, day):
+            if day is None or self.store.schedule_ran(name, day) or (name, day) in pending:
                 continue
             # 実行中に次の tick で二重に動かないよう、先に記録する
             self.store.record_schedule(name, day, {"status": "running"})
-            if not await self.run_or_defer(name, day, now.timestamp()):
-                return   # 上限に当たった。残りは明けてからにする
+            await self.run_or_defer(name, day, now.timestamp())
         hub_day = now.date().isoformat()
-        if (now.hour >= HUB_SYNC_HOUR and not self.store.schedule_ran("hub_calendar", hub_day)
+        if (not self.store.pending_deferred("schedule")
+                and now.hour >= HUB_SYNC_HOUR and not self.store.schedule_ran("hub_calendar", hub_day)
                 and now.timestamp() - self._hub_calendar_checked >= HUB_RETRY_SECONDS):
             self._hub_calendar_checked = now.timestamp()
             detail = await self.run_task("hub_calendar", hub_day, record=False)
-            if detail.get("course") == "synced" and detail.get("work") in {"synced", "incomplete"}:
+            if (isinstance(detail, dict) and detail.get("course") == "synced"
+                    and detail.get("work") in {"synced", "incomplete"}):
                 self.store.record_schedule("hub_calendar", hub_day, detail)
         await self.notify_due_soon(now)
         await self.nudge_stale_threads()
@@ -141,13 +141,32 @@ class Scheduler:
             self.store.record_schedule(name, day, detail)
         return detail
 
+    def task_provider(self, name: str) -> str | None:
+        """定期処理が使う明示 provider。保守はモデルを使わない。"""
+        if name == "maintenance":
+            return None
+        actor = "router" if name in {"daily", "review"} else "research"
+        return settings.selected_provider(self.config, self.store, actor)
+
+    def can_run(self, name: str, now: float, provider: str | None = None) -> bool:
+        provider = self.task_provider(name) if provider is None else provider
+        return provider is None or bool(provider) and self.store.limit_until(provider) <= now
+
     async def run_or_defer(self, name: str, day: str, now: float) -> bool:
         """実行する。途中で契約の上限に当たったら、その日の分として残さず、明けてからやり直す。"""
-        await self.run_task(name, day)
-        if self.assistant.limited_until > now:
+        provider = self.task_provider(name)
+        if provider == "":
+            self.store.record_schedule(name, day, {"status": "provider_unselected"})
+            return False
+        if not self.can_run(name, now, provider):
+            until = self.store.limit_until(provider)
+        else:
+            await self.run_task(name, day)
+            until = self.store.limit_until(provider) if provider else 0.0
+        if until > now:
             log.info("上限に当たったので、%s（%s）は明けてからやり直します", name, day)
             self.store.forget_schedule(name, day)
-            self.store.defer_run("schedule", {"name": name, "day": day}, self.assistant.limited_until)
+            self.store.defer_run("schedule", {"name": name, "day": day, "provider": provider}, until)
             return False
         return True
 

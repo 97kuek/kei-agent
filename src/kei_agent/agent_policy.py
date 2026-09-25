@@ -12,10 +12,11 @@ class AppPolicy:
     agent: str
     app_names: frozenset[str]
     read_only: bool
+    read_only_app_names: frozenset[str] = frozenset()
 
 
 POLICIES: dict[str, AppPolicy] = {
-    "course": AppPolicy("course", frozenset({"Box", "Notion"}), False),
+    "course": AppPolicy("course", frozenset({"Box", "Notion"}), False, frozenset({"Box"})),
     "work": AppPolicy("work", frozenset({"Microsoft Outlook Email", "Microsoft Outlook Calendar"}), True),
     # 研究は App connector を使わず、scoped Notion gateway と W&B MCP だけを使う。
     "research": AppPolicy("research", frozenset(), False),

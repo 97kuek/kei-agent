@@ -121,6 +121,30 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     updated_at REAL NOT NULL,
     PRIMARY KEY (channel, thread_ts, agent)
 );
+-- 新しい会話の鍵は provider と指示版まで揃うときだけ再利用する。
+-- 旧 threads / agent_sessions の session_id は migration 後も消さない。
+CREATE TABLE IF NOT EXISTS provider_sessions (
+    channel TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (channel, thread_ts, agent, provider)
+);
+CREATE TABLE IF NOT EXISTS provider_thread_state (
+    channel TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (channel, thread_ts, agent)
+);
+CREATE TABLE IF NOT EXISTS provider_limits (
+    provider TEXT PRIMARY KEY,
+    until REAL NOT NULL
+);
 -- 一度だけ知らせるもの（課題の締切 24 時間前など）。同じ目印では二度知らせない
 CREATE TABLE IF NOT EXISTS notices (
     key TEXT PRIMARY KEY,
@@ -514,6 +538,69 @@ class Store:
             )
 
     # エージェントの会話の続き
+
+    def last_provider(self, channel: str, thread_ts: str, agent: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT provider FROM provider_thread_state WHERE channel = ? AND thread_ts = ? AND agent = ?",
+            (channel, thread_ts, agent),
+        ).fetchone()
+        return row["provider"] if row else None
+
+    def session_for(self, channel: str, thread_ts: str, agent: str,
+                    provider: str, prompt_version: str) -> str | None:
+        if self.last_provider(channel, thread_ts, agent) != provider:
+            return None
+        row = self.conn.execute(
+            """SELECT session_id FROM provider_sessions
+               WHERE channel = ? AND thread_ts = ? AND agent = ?
+                 AND provider = ? AND prompt_version = ?""",
+            (channel, thread_ts, agent, provider, prompt_version),
+        ).fetchone()
+        return row["session_id"] if row else None
+
+    def set_last_provider(self, channel: str, thread_ts: str, agent: str, provider: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO provider_thread_state (channel, thread_ts, agent, provider, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT (channel, thread_ts, agent) DO UPDATE SET
+                     provider = excluded.provider, updated_at = excluded.updated_at""",
+                (channel, thread_ts, agent, provider, time.time()),
+            )
+
+    def set_session(self, channel: str, thread_ts: str, agent: str, provider: str,
+                    session_id: str, prompt_version: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO provider_sessions
+                   (channel, thread_ts, agent, provider, session_id, prompt_version, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (channel, thread_ts, agent, provider) DO UPDATE SET
+                     session_id = excluded.session_id, prompt_version = excluded.prompt_version,
+                     updated_at = excluded.updated_at""",
+                (channel, thread_ts, agent, provider, session_id, prompt_version, time.time()),
+            )
+            self.conn.execute(
+                """INSERT INTO provider_thread_state (channel, thread_ts, agent, provider, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT (channel, thread_ts, agent) DO UPDATE SET
+                     provider = excluded.provider, updated_at = excluded.updated_at""",
+                (channel, thread_ts, agent, provider, time.time()),
+            )
+
+    def limit_until(self, provider: str) -> float:
+        row = self.conn.execute("SELECT until FROM provider_limits WHERE provider = ?", (provider,)).fetchone()
+        return float(row["until"]) if row else 0.0
+
+    def set_limit_until(self, provider: str, until: float) -> None:
+        if provider not in {"claude", "codex"}:
+            raise ValueError(f"unknown provider: {provider}")
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO provider_limits (provider, until) VALUES (?, ?)
+                   ON CONFLICT (provider) DO UPDATE SET until = excluded.until""",
+                (provider, until),
+            )
 
     def agent_session(self, channel: str, thread_ts: str, agent: str) -> str | None:
         row = self.conn.execute(

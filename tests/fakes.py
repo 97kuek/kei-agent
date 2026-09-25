@@ -174,7 +174,7 @@ class FakeClaude:
         if (text and not behavior.get("is_error", False) and not behavior.get("raw", False)
                 and "<<kei-agent-final>>" not in text and "<<kei-agent-final-end>>" not in text):
             text = f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
-        result = runner.RunResult()
+        result = runner.RunResult(provider=request.recipe.provider)
         runner.apply_event(result, {
             "type": "result",
             "session_id": behavior.get("session_id", "sess-1"),
