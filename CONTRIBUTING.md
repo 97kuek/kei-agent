@@ -1,66 +1,56 @@
-# コントリビュートの手順
+# 開発の手順
 
-Kei Agent は、Slack で頼んだ作業を Mac 上のエージェントが進めて、同じスレッドに結果を返す Bot です。
+Kei Agent は個人用に作ったアシスタントです。自分用に作り替えるのは自由です。アイデアは ueki.keitaro@gmail.com までどうぞ。
 
-誰でも利用可能ですが、これは個人用に最適化したAIアシスタントなので、自分専用のアシスタントを新たに作りたい場合はこれを煮るなり焼くなりして好きに使ってください。
+仕組みは [`docs/architecture.md`](docs/architecture.md)、入れ方は [`deploy/README.md`](deploy/README.md)。
 
-こうした方がいいんじゃない？とかアイデアあれば、ueki.keitaro@gmail.comまでお気軽にご連絡ください。
-
-ここからは、Kei Agentの開発手順について述べていきます。
-
-仕組みは `docs/design.md`、使い方は `docs/using.md`、入れ方は `deploy/README.md` を参照してください。
-
-## 変更する前に
-
-- 設計の判断を変えるときは、先に `docs/design.md` の該当する表を直し、理由も書く
-- エージェントを増やす・直すときは `docs/agents.md` の決まりに合わせる（名前、返事の封筒、柵）
-- Notion の構成を変えるときは `docs/notion-layout.md`、`src/kei_agent/notion.py`（作る側）、`src/kei_agent/notion_store.py`（読み書きする側）を合わせて直す
-- 大きな変更（Slack App の権限、sandbox の設定、柵の置き方）は、Issue で相談してから始める
-- 使っていて気づいた要望は、Slack の `#00_kei-agent` で `@Kei Agent` をつけて書くと `~/kei-agent/overview/backlog.md` に記録される（研究データと一緒に非公開でバックアップされる）
-
-## 開発の準備
+## 準備
 
 ```zsh
 brew install pueue && brew services start pueue
-uv sync
-uv run --group work pytest
+uv sync --all-groups
+uv run python -m pytest
 ```
 
-Slack や Notion につないで動かすときは、`deploy/README.md` の手順で秘密情報のファイルを用意する。
+Slack や Notion につないで動かすときは、`deploy/README.md` の秘密情報のファイルを用意する。
 
-## 確認すること
+## 確かめること
 
-- `uv run --group work pytest` がすべて通る（プルリクエストと `main` への push では、GitHub Actions でも実行される）
-- `uvx ruff check .` が通る（設定は `pyproject.toml` の `[tool.ruff]`）
-- Slack を通る動きを変えたときは、手元で `uv run kei-agent` を起動し、テーマのチャンネルで実際に頼んで確かめる
-- 定期処理を変えたときは、`uv run kei-agent-schedule <night|literature|daily|review|maintenance>` で1回動かして確かめる（`--record` を付けなければ本番の実行に影響しない）
-- `claude -p` の権限や sandbox を変えたときは、テーマのディレクトリの外に書き込めないことを確かめる
-- Notion を読み書きする処理を変えたときは、本物の研究ホームで Task やノートを作って確かめ、確認用のページはゴミ箱に移す
+- `uv run python -m pytest` と `uvx ruff check .` が通る（プルリクエストと `main` への push で GitHub Actions も同じものを回す）
+- Slack を通る動きを変えたら、手元で `uv run kei-agent` を起動し、テーマのチャンネルで実際に頼む
+- 定期処理を変えたら `uv run kei-agent-schedule <名前>` で1回動かす（`--record` なし）
+- sandbox や権限を変えたら、作業場の外に書き込めないことを確かめる
+- Notion の読み書きを変えたら、本物のホームで作って確かめ、確認用のページはゴミ箱に移す
+
+## 変えるときの決まり
+
+- 仕組みを変えたら `docs/architecture.md` の該当する節も同じ変更で直す。使い方が変わるなら `docs/using.md`、入れ方なら `deploy/README.md`
+- ドキュメントには「いまどうなっているか」だけを書く。経緯は Git の履歴に残す
+- Notion の DB やプロパティの名前を変えたら、`src/kei_agent/notion.py`・`notion_store.py`・`notion_hub.py`（大学は `src/kei_agent_course/notion_setup.py`）も合わせる
+- モデル名は `src/kei_agent/model_policy.py` にだけ書く。skill や prompt に埋め込まない
+- Slack の権限、sandbox、柵（`guard.py`、`config.toml`、`deploy/`）の大きな変更は、先に Issue で相談する
+
+## エージェントを増やすとき
+
+名前（`<agent>`）をすべての場所でそろえる。
+
+1. `src/kei_agent_<agent>/` に `card.py`（名刺。スキルの ID は kebab-case の動詞-目的語、自由な質問は `ask`）、`executor.py`、`app.py`（`kei_agent_a2a.server.serve` を呼ぶだけ）
+2. `pyproject.toml` に `kei-agent-<agent>` のコマンドと `[dependency-groups] <agent> = [{ include-group = "agents" }]`
+3. `config.toml` の `[a2a.agents]` に `127.0.0.1` の次のポート、`[agents.<agent>]`、`[channels]`
+4. `deploy/run-<agent>.sh`、`deploy/com.kei-agent.<agent>.plist.template`、`deploy/install.sh` の `case`
+5. 秘密情報は `~/.config/zsh/local/kei-agent-<agent>.zsh`（600）に分ける
+6. 本体の取り次ぎ（`src/kei_agent/<agent>.py`）と、`model_policy.py` の用途と recipe
+7. skill を持たせるなら `plugin/<agent>/`（`kei-agent-<agent>` という名前の plugin、`skills/<skill>/SKILL.md`、`hooks/`）を作り、`AGENT_PLUGINS` に足す。スクリプトは標準ライブラリだけで書く
+8. テストは本物の A2A サーバーを立てて往復を見る（`tests/test_a2a.py` の型）。外部サービスとモデルは偽物にする
 
 ## 書き方
 
-- コメント、ログ、Slack への投稿、ドキュメントは日本語で書く
-- `plugin/skills/*/scripts/` のスクリプトは sandbox の中で動くので、標準ライブラリだけで書く
-- 設定は `config.toml` に、トークンなどの秘密情報は環境変数に置く。秘密情報をコード、コミット、ログ、Issue に含めない
+- コメント、ログ、Slack への投稿、ドキュメントは日本語
+- 設定は `config.toml`、秘密情報は環境変数。秘密情報をコード、コミット、ログ、Issue に含めない
 
-## コミットメッセージ
+## コミットとプルリクエスト
 
-1行目に、何をするかを日本語で短く書く。文末は「〜する」の形にし、句点は付けない。
-必要なら1行空けて、理由と主な変更を書く。
-
-```text
-決まった時刻に論文の新着、Daily、振り返り、夜間の Task を動かす
-
-- 07:00 先行研究の新着、08:00 Daily、21:00 振り返りの材料を投稿する
-- 🌙 をつけたメッセージを夜間（00:00）の Task として順に実行する
-```
-
-- 1つのコミットには1つの目的だけを入れる
-- `feat:` などの接頭辞は付けない
-- AI の共同作成者の行（`Co-Authored-By:`）や、生成ツールの署名を入れない。プルリクエストの説明も同じ
-
-## ブランチとプルリクエスト
-
-- `main` は常に動く状態にする。launchd の Kei Agent は `main` を動かしている
-- 作業はブランチで行い、プルリクエストで `main` に入れる
-- プルリクエストには、何を変えたか、どう確かめたかを書く
+- 1行目に何をするかを日本語で短く書く（「〜する」で終え、句点なし）。必要なら1行空けて理由と主な変更
+- 1つのコミットには1つの目的
+- `main` は常に動く状態に保つ（launchd の Kei Agent は `main` を動かしている）。作業はブランチで行い、プルリクエストで入れる
+- プルリクエストには、何を変えたかと、どう確かめたかを書く

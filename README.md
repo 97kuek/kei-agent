@@ -1,64 +1,43 @@
 # Kei Agent
 
-> Slackから頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進めるパーソナルアシスタント
+> Slack で頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進めるパーソナルアシスタント
 
-![Kei Agent の構成](docs/architecture.png)
+## 何ができるか
 
-## 概要
+- **研究**（`#10_<テーマ>`）… テーマごとの作業場（`~/research/<テーマ>/`）でコードを書き、実験を回し、論文を探し、研究ホーム（Notion）に残す
+- **大学**（`#20_course`）… Moodle の締切、Box の学部要項・過去問、Notion の授業ホーム（課題・成績・単位）を扱う
+- **仕事**（`#30_work`）… 会社の Outlook・メール・SharePoint・Teams を読んで答える（送信や予定の変更はしない）
+- **定期実行** … 07:00 先行研究の新着、08:00 今日の予定と Daily、21:00 Retro & Planning、00:00 🌙 を付けた Task
+- **自己改善**（`#00_kei-agent`）… 要望から Kei Agent 自身のコードを直し、承認されたものだけをテストして取り込む
+- **声** … 机の上で声で相談できる（OpenAI Realtime API。既定は切）
 
-- Slackの決まったチャンネルに依頼文を流すと、オーケストレータが担当のエージェントに振り分ける
-
-### 研究エージェント
-
-- Slackの`10_〇〇`チャンネルで動作する
-- 研究室のサーバやGPU・Slack・arXiv・Notionと連携している
-- 研究室Slackの教授・先輩からのアドバイスやarXivから取得した先行研究を確認可能
-- 計算資源を研究室のGPUなどにSSH接続することで、Slack上でも話し合った内容を研究エージェントが実装・実行まで行ってくれる
-- 作業ログ・進捗・データなどをnotionで管理
-
-### 大学エージェント
-
-- Slackの`20_course`チャンネルで動作する
-- BoxとMoodleと連携しており、課題情報や過去問・学部要項などの大学情報に特化したエージェント
+## 構成
 
 ```text
-@Kei Agent マルチメディア工学Aの過去問で頻出のテーマってなに？
-@Kei Agent 今日締め切りの課題ってある？
+Slack（個人ワークスペース、Socket Mode）
+  │
+  ▼
+Kei Agent 本体（オーケストレーター, src/kei_agent/）
+  Slack の受け口・振り分け・柵・Notion・定期実行・自己改善
+  │  A2A（127.0.0.1、共有トークン）
+  ├─ 大学エージェント   :8787  Moodle / Box / 授業ホーム / Toggl
+  ├─ 研究エージェント   :8788  作業場での CLI 実行 / pueue ジョブ
+  ├─ 仕事エージェント   :8789  Microsoft 365（読むだけ）
+  └─ 声のレイヤ         :8790  Realtime API / マイク / スピーカー
+  研究 Notion ゲートウェイ :8791（研究ホームの中だけを触る MCP）
 ```
 
-### 仕事エージェント
-
-- Slackの`30_work`チャンネルで動作する
-- OutlookやTeams、Sharepoint、notion等と連携しており、仕事関連の予定やドキュメント探しに特化したエージェント
-
-```text
-@Kei Agent 直近で私が返信しなければいけないメールってある？
-@Kei Agent 〇〇関連のドキュメントってどこにある？
-```
-
-### 定期実行
-
-- 朝（デフォルトは8:00）になると`#01_overview`に今日の予定とDailyが届く
-- 夜（デフォルトは9:00）になると`#01_overview`に今日やったことと残タスクが届く
-
-### 自己改善
-
-- `#00_kei-agent`に本システムのバグや不具合などを報告すると、案・実装・取り込みをそれぞれ確認し、承認された変更だけをテストして`push`する
+各エージェントは Claude Code CLI か Codex CLI のどちらかで動く（App Home で agent ごとに選ぶ）。
+すべて同じ Mac の launchd で常駐する。
 
 ## ドキュメント
 
-- 細かい設計仕様は以下のドキュメントを参照
-
 | 読みたいこと | 場所 |
 |---|---|
-| Slack で何が頼めるか、定期実行、設定画面 | [`docs/using.md`](docs/using.md) |
-| 入れ方（Slack App、秘密情報、常時起動） | [`deploy/README.md`](deploy/README.md) |
-| 仕組みと、そう決めた理由 | [`docs/design.md`](docs/design.md) |
-| 声で話す（Stack-chan はまだ無い） | [`docs/voice.md`](docs/voice.md) |
-| エージェントを増やすときの決まり | [`docs/agents.md`](docs/agents.md) |
-| Notion の構成 | [`docs/notion-layout.md`](docs/notion-layout.md) |
-| Codex App 側の使い方、依頼文のテンプレート | [`docs/codex.md`](docs/codex.md) |
-| 変更の手順、コミットメッセージの書き方 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Slack での使い方（チャンネル、合図、時間記録、App Home、声） | [`docs/using.md`](docs/using.md) |
+| いまの仕組み（プロセス、provider とモデル、出力、柵、Notion、定期実行、声） | [`docs/architecture.md`](docs/architecture.md) |
+| 入れ方と運用（Slack App、秘密情報、launchd、Notion の準備、困ったとき） | [`deploy/README.md`](deploy/README.md) |
+| 開発の手順、テスト、書き方 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 ## ライセンス
 
