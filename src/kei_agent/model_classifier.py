@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import re
-
 from kei_agent import runner
 from kei_agent.config import Config
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier
+from kei_agent.router import json_object, workspace
 
-_JSON = re.compile(r"\{.*?\}", re.DOTALL)
 _RESEARCH_CASES = frozenset({
     UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
     UseCase.RESEARCH_EXECUTE, UseCase.RESEARCH_DESIGN,
@@ -29,11 +26,10 @@ class UsageLimited(RuntimeError):
 
 def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase | None:
     """形式不正・低信頼は None。呼び出し側が通常 recipe へ安全に戻す。"""
-    match = _JSON.search(text or "")
-    if not match:
+    data = json_object(text)
+    if data is None:
         return None
     try:
-        data = json.loads(match.group(0))
         confidence = float(data.get("confidence"))
         use_case = UseCase(str(data.get("use_case") or ""))
     except (TypeError, ValueError, AttributeError):
@@ -44,7 +40,7 @@ def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase |
 async def classify_research(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
     """研究 provider の Luna/Haiku recipe で一度だけ分類する。
 
-    router workspace は connector なし・read-only。失敗時に別 provider/上位 model では再試行しない。
+    分類用の workspace は connector なし・read-only。失敗時に別 provider/上位 model では再試行しない。
     """
     return await _classify(config, store, "research", prompt, _RESEARCH_CASES, UseCase.RESEARCH_EXECUTE,
                            "research_extract, research_screen, research_compare, research_execute, research_design",
@@ -72,14 +68,13 @@ async def _classify(config: Config, store, actor: str, prompt: str, allowed: fro
         recipe = resolve_classifier(config, store, actor, provider=provider)
     except ModelPolicyError:
         return fallback
-    from kei_agent.router import workspace
     classifier_prompt = ("次の依頼をユースケースに分類してください。JSON 1行だけで答えてください。"
                          "形: {\"use_case\":\"候補名\",\"confidence\":0.0から1.0}。\n"
                          f"候補は {candidates}。\n{guidance}\n"
                          f"迷うときは {fallback.value} と confidence を 0.7 未満にしてください。\n\n依頼:\n{prompt[:1200]}")
     try:
         result = await runner.run_model(
-            config, runner.ExecutionRequest(workspace(config), recipe, None, "", "", read_only=True),
+            config, runner.ExecutionRequest(workspace(config, actor), recipe, None, "", "", read_only=True),
             classifier_prompt,
         )
     except Exception:

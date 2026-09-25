@@ -7,12 +7,12 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
-from kei_agent.notion import Notion, NotionError
-from kei_agent.notion_store import Note, _plain, _rich, blocks_to_markdown, markdown_to_blocks, summarize
+from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, write_json_atomic
+from kei_agent.notion_store import Note, blocks_to_markdown, markdown_to_blocks, plain_text, rich_text, summarize
 
 log = logging.getLogger(__name__)
 
@@ -252,8 +252,7 @@ class HubSetup:
                          calendar.database_id, daily.database_id,
                          tasks.data_source_id, assignments.data_source_id,
                          views["研究 Task"]["id"], views["授業課題"]["id"], daily_view_id)
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(state.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(self.state_path, state.__dict__)
         return state
 
 
@@ -295,7 +294,7 @@ class HubStore:
     def _section(blocks: list[dict], title: str) -> tuple[dict, list[dict]]:
         headings = [(i, block) for i, block in enumerate(blocks)
                     if block.get("type") == "heading_2"
-                    and _plain(block["heading_2"].get("rich_text", [])) == title]
+                    and plain_text(block["heading_2"].get("rich_text", [])) == title]
         if len(headings) != 1:
             raise NotionError(f"日別記録の「{title}」区画がありません、または重複しています")
         index, heading = headings[0]
@@ -307,22 +306,10 @@ class HubStore:
     def _managed_end(blocks: list[dict]) -> int:
         matches = [index for index, block in enumerate(blocks)
                    if block.get("type") == "paragraph"
-                   and _plain(block["paragraph"].get("rich_text", [])) == MANAGED_END]
+                   and plain_text(block["paragraph"].get("rich_text", [])) == MANAGED_END]
         if len(matches) != 1:
             raise NotionError("日別記録の本文境界がありません、または重複しています。追記を守るため更新を止めます")
         return matches[0]
-
-    def _append_blocks(self, page_id: str, blocks: list[dict], after: str | None = None) -> None:
-        for offset in range(0, len(blocks), 100):
-            body = {"children": blocks[offset:offset + 100]}
-            if after:
-                body["after"] = after
-            response = self.notion.request("PATCH", f"/blocks/{page_id}/children", body)
-            if after and offset + 100 < len(blocks):
-                added = response.get("results") or []
-                if not added:
-                    raise NotionError("日別記録に追加した block ID を確認できません")
-                after = added[-1]["id"]
 
     def upsert_day(self, kind: Literal["Daily", "振り返り"], day: str, title: str,
                    markdown: str, slack_url: str | None, file: str | None) -> Note:
@@ -342,14 +329,14 @@ class HubStore:
             managed_end = self._managed_end(old_section)
         summary = summarize(markdown, limit=200)
         properties = {
-            column: {"rich_text": _rich(summary)},
+            column: {"rich_text": rich_text(summary)},
             f"{column} Slack": {"url": slack_url},
-            f"{column} ファイル": {"rich_text": _rich(file or "")},
+            f"{column} ファイル": {"rich_text": rich_text(file or "")},
         }
         content = markdown_to_blocks(markdown)
         if existing is None:
             properties.update({
-                "日付": {"title": _rich(day)},
+                "日付": {"title": rich_text(day)},
                 "対象日": {"date": {"start": day}},
                 ("レトプラ" if column == "Daily" else "Daily"): {"rich_text": []},
             })
@@ -365,15 +352,15 @@ class HubStore:
             page = self.notion.request("POST", "/pages", {
                 "parent": {"type": "data_source_id", "data_source_id": self.state.daily_ds_id},
                 "properties": properties,
-                "children": blocks[:100],
+                "children": blocks[:BLOCKS_PER_REQUEST],
             })
-            self._append_blocks(page["id"], blocks[100:])
+            append_blocks(self.notion, page["id"], blocks[BLOCKS_PER_REQUEST:])
         else:
-            # 新しいブロックを先に置き、成功後に旧区画だけを archive する。
+            # 新しいブロックを先に置き、成功後に旧区画だけをゴミ箱へ移す。
             if content:
-                self._append_blocks(existing["id"], content, heading["id"])
+                append_blocks(self.notion, existing["id"], content, heading["id"])
             for block in old_section[:managed_end]:
-                self.notion.request("PATCH", f"/blocks/{block['id']}", {"archived": True})
+                self.notion.request("PATCH", f"/blocks/{block['id']}", {"in_trash": True})
             page = self.notion.request("PATCH", f"/pages/{existing['id']}", {"properties": properties})
         return Note(page["id"], title, kind, day, page.get("url"), markdown)
 
@@ -387,7 +374,7 @@ class HubStore:
         page = self._day(day)
         if page is None:
             raise NotionError(f"{day} の移行先が見つかりません")
-        raw = _plain(page.get("properties", {}).get("移行元 ID", {}).get("rich_text") or [])
+        raw = plain_text(page.get("properties", {}).get("移行元 ID", {}).get("rich_text") or [])
         try:
             prior = json.loads(raw) if raw else []
         except ValueError:
@@ -401,15 +388,16 @@ class HubStore:
         if len(payload) > 2000:
             raise NotionError(f"{day} の移行元 ID が Notion の文字数上限を超えます")
         self.notion.request("PATCH", f"/pages/{page['id']}", {"properties": {
-            "移行元 ID": {"rich_text": _rich(payload)}}})
+            "移行元 ID": {"rich_text": rich_text(payload)}}})
 
     def section_body(self, day: str, kind: Literal["Daily", "振り返り"]) -> str:
+        """Kei Agent が書く本文（境界より前）だけ。境界と、その後の手書き・結論は含めない。"""
         page = self._day(day)
         if page is None:
             return ""
         blocks = self.notion.children(page["id"])
         _, content = self._section(blocks, "Daily" if kind == "Daily" else "レトプラ")
-        return blocks_to_markdown(content, self.notion.children)
+        return blocks_to_markdown(content[:self._managed_end(content)], self.notion.children)
 
     def append_review_conclusion(self, page_id: str, text: str, stamp: datetime,
                                  message_id: str | None = None) -> None:
@@ -424,16 +412,13 @@ class HubStore:
         key = message_id or hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         marker = f"Slack に貼った結論（{stamp:%m/%d %H:%M}、ID {key}）"
         if any(block.get("type") == "heading_3" and
-               _plain(block["heading_3"].get("rich_text", [])) == marker for block in section):
+               plain_text(block["heading_3"].get("rich_text", [])) == marker for block in section):
             return
-        added = markdown_to_blocks(f"### {marker}\n{text}")
-        self.notion.request("PATCH", f"/blocks/{page_id}/children", {
-            "after": section[-1]["id"] if section else heading["id"],
-            "children": added,
-        })
-        summary = _plain(page["properties"]["レトプラ"].get("rich_text", []))
+        append_blocks(self.notion, page_id, markdown_to_blocks(f"### {marker}\n{text}"),
+                      section[-1]["id"] if section else heading["id"])
+        summary = plain_text(page["properties"]["レトプラ"].get("rich_text", []))
         self.notion.request("PATCH", f"/pages/{page_id}", {"properties": {
-            "レトプラ": {"rich_text": _rich(summarize(summary + "\n" + text, limit=200))}}})
+            "レトプラ": {"rich_text": rich_text(summarize(summary + "\n" + text, limit=200))}}})
 
     def reviews_edited_since(self, since: datetime) -> list[Note]:
         rows = self.notion.paginate("POST", f"/data_sources/{self.state.daily_ds_id}/query", {
@@ -443,72 +428,46 @@ class HubStore:
             ]},
             "page_size": 100,
         })
-        return [Note(row["id"], _plain(row["properties"]["日付"]["title"]), "振り返り",
+        return [Note(row["id"], plain_text(row["properties"]["日付"]["title"]), "振り返り",
                      row["properties"]["対象日"]["date"]["start"], row.get("url"),
                      self.day_body(row["properties"]["対象日"]["date"]["start"])) for row in rows]
 
-    def week_snapshot(self, today: date) -> str:
-        """エージェントに渡せる最小限の横断材料。token や編集用 client は含めない。"""
-        monday = today - timedelta(days=today.weekday())
-        sunday = monday + timedelta(days=6)
-        lines = []
-        for label, ds_id, due, status, done, title in (
-            ("研究 Task", self.state.tasks_ds_id, "期日", "状態", "完了", "タイトル"),
-            ("授業課題", self.state.assignments_ds_id, "締切", "状態", "提出済み", "課題"),
-        ):
-            if not ds_id:
-                continue
-            rows = self.notion.paginate("POST", f"/data_sources/{ds_id}/query", {
-                "filter": {"and": [
-                    {"property": due, "date": {"on_or_after": monday.isoformat()}},
-                    {"property": due, "date": {"on_or_before": sunday.isoformat()}},
-                    {"property": status, "status": {"does_not_equal": done}},
-                ]},
-                "page_size": 100,
-            })
-            for row in rows:
-                props = row["properties"]
-                lines.append(f"{label}: {(props[due].get('date') or {}).get('start')} "
-                             f"{_plain(props[title]['title'])} "
-                             f"{(props[status].get('status') or {}).get('name')} {row.get('url') or ''}")
-        calendar_rows = self.notion.paginate("POST", f"/data_sources/{self.state.calendar_ds_id}/query", {
+    def calendar_rows(self, source: str, window_start: date, window_end: date) -> list[dict]:
+        """その出典の行のうち、日付が範囲内か空のもの。"""
+        rows = self.notion.paginate("POST", f"/data_sources/{self.state.calendar_ds_id}/query", {
             "filter": {"and": [
-                {"property": "日付", "date": {"on_or_after": monday.isoformat()}},
-                {"property": "日付", "date": {"on_or_before": sunday.isoformat()}},
+                {"property": "出典", "select": {"equals": source}},
+                {"or": [
+                    {"property": "日付", "date": {"on_or_after": window_start.isoformat()}},
+                    {"property": "日付", "date": {"is_empty": True}},
+                ]},
             ]},
             "page_size": 100,
         })
-        for row in calendar_rows:
-            props = row["properties"]
-            lines.append(f"予定: {(props['日付'].get('date') or {}).get('start')} "
-                         f"{_plain(props['名前']['title'])} "
-                         f"{(props.get('出典', {}).get('select') or {}).get('name') or '手入力'} "
-                         f"{props.get('元 URL', {}).get('url') or row.get('url') or ''}")
-        return "\n".join(lines)
-
-    def calendar_rows(self, source: str, window_start: date, window_end: date) -> list[dict]:
-        rows = self.notion.paginate("POST", f"/data_sources/{self.state.calendar_ds_id}/query", {
-            "filter": {"property": "出典", "select": {"equals": source}},
-            "page_size": 100,
-        })
-        return [{"id": row["id"],
-                 "出典 ID": _plain(row["properties"].get("出典 ID", {}).get("rich_text") or []),
-                 "日付": (row["properties"].get("日付", {}).get("date") or {}).get("start") or "",
-                 "同期状態": (row["properties"].get("同期状態", {}).get("select") or {}).get("name") or ""}
-                 for row in rows]
+        found = []
+        for row in rows:
+            day = (row["properties"].get("日付", {}).get("date") or {}).get("start") or ""
+            # 入れ子の上限があるので、上端は取ってきてから絞る
+            if day and day[:10] > window_end.isoformat():
+                continue
+            found.append({"id": row["id"],
+                          "出典 ID": plain_text(row["properties"].get("出典 ID", {}).get("rich_text") or []),
+                          "日付": day,
+                          "同期状態": (row["properties"].get("同期状態", {}).get("select") or {}).get("name") or ""})
+        return found
 
     def calendar_upsert(self, source: str, item, checked_at: datetime,
                         existing_id: str | None = None) -> None:
         properties = {
-            "名前": {"title": _rich(item.title)},
+            "名前": {"title": rich_text(item.title)},
             "日付": {"date": {"start": item.start, **({"end": item.end} if item.end else {})}},
             "出典": {"select": {"name": source}},
-            "出典 ID": {"rich_text": _rich(item.source_id)},
+            "出典 ID": {"rich_text": rich_text(item.source_id)},
             "元 URL": {"url": item.url or None},
             "最終確認": {"date": {"start": checked_at.astimezone().isoformat()}},
             "同期状態": {"select": {"name": "確認済み"}},
-            "場所": {"rich_text": _rich(item.location)},
-            "元の状態": {"rich_text": _rich(item.status)},
+            "場所": {"rich_text": rich_text(item.location)},
+            "元の状態": {"rich_text": rich_text(item.status)},
         }
         if existing_id:
             self.notion.request("PATCH", f"/pages/{existing_id}", {"properties": properties})

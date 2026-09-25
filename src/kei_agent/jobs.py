@@ -29,6 +29,8 @@ JOBS_DIR = Path(".kei-agent/jobs")
 LOG_TAIL_BYTES = 64 * 1024
 # 書きかけのまま残った依頼のファイルを消すまでの秒数
 TMP_LIFETIME_SECONDS = 3600
+# pueue_id が空のまま、これより古い行は、投入の途中で止まったものとみなす
+SUBMIT_GRACE_SECONDS = 300
 # 1つのジョブで宣言できる「できるはずのファイル」の数
 MAX_EXPECTED_FILES = 10
 # ジョブに渡す環境変数。pueue は投入したプロセスの環境をそのまま保存するので、Slack のトークンなどを持ち込まない
@@ -254,7 +256,9 @@ class JobManager:
             path.unlink(missing_ok=True)
 
     async def _submit(self, req: SubmitRequest, cwd: Path) -> Outcome:
-        job = self.store.add_job(req.request_id, req.channel, req.thread_ts, str(cwd), req.name, "",
+        # 投入と pueue_id の記録の間で落ちても、ラベル（kei-agent-<id>）から refresh で拾い直す
+        job = self.store.add_job(req.request_id, req.channel, req.thread_ts, str(cwd), req.name,
+                                 f"{req.script} {' '.join(req.args)}".strip(),
                                  status="queued", expects=req.expects)
         try:
             self._check_thread(req, cwd)
@@ -269,7 +273,7 @@ class JobManager:
             job = self.store.update_job(job.id, status="rejected", detail=f"pueue に投入できませんでした: {e}", reported=1)
             self._write_state(job)
             return Outcome(req.channel, req.thread_ts, job, job.detail)
-        job = self.store.update_job(job.id, command=f"{req.script} {' '.join(req.args)}".strip(), pueue_id=task_id)
+        job = self.store.update_job(job.id, pueue_id=task_id)
         self._write_state(job)
         return Outcome(req.channel, req.thread_ts, job)
 
@@ -291,8 +295,12 @@ class JobManager:
     async def refresh(self) -> list[Job]:
         """pueue の状態を反映し、終わったばかりで未報告のジョブを返す。"""
         active = self.store.active_jobs()
-        if active:
+        stuck = self.store.unsubmitted_jobs(time.time() - SUBMIT_GRACE_SECONDS)
+        if active or stuck:
             tasks = await self.pueue.tasks()
+            if stuck:
+                self._recover_unsubmitted(stuck, tasks)
+                active = self.store.active_jobs()
             for job in active:
                 task = tasks.get(job.pueue_id)
                 if task is None:
@@ -309,6 +317,19 @@ class JobManager:
                             # 片づけに失敗しても、ジョブの状態はもう確定している
                             log.warning("pueue のタスク %s を片づけられません", job.pueue_id, exc_info=True)
         return self.store.unreported_finished_jobs()
+
+    def _recover_unsubmitted(self, stuck: list[Job], tasks: dict[int, dict]) -> None:
+        """pueue_id を書く前に止まったジョブ。pueue にあれば拾い直し、なければ失敗として知らせる。"""
+        by_label = {task.get("label"): task_id for task_id, task in tasks.items() if task.get("label")}
+        for job in stuck:
+            task_id = by_label.get(f"kei-agent-{job.id}")
+            if task_id is not None:
+                log.warning("投入の途中で止まったジョブ %s を pueue のタスク %s として拾い直します", job.id, task_id)
+                job = self.store.update_job(job.id, pueue_id=task_id)
+            else:
+                job = self.store.update_job(job.id, status="failed", finished_at=time.time(),
+                                            detail="pueue に投入する途中で Kei Agent が止まりました")
+            self._write_state(job)
 
     def mark_reported(self, job: Job) -> None:
         self.store.update_job(job.id, reported=1)

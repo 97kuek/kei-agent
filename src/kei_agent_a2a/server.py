@@ -1,4 +1,4 @@
-"""A2A サーバーの立ち上げ（大学・研究のエージェントで共通）。
+"""A2A サーバーの立ち上げ（大学・研究・仕事のエージェントと声のレイヤで共通）。
 
 `/.well-known/agent-card.json` で名刺を返し、`/a2a` で JSON-RPC を受ける。
 外には出さず、127.0.0.1 でだけ待ち受ける。合言葉（Bearer トークン）が合わない相手は断る。
@@ -77,3 +77,18 @@ def serve(name: str, build_card: Callable[[str], AgentCard], build_executor: Cal
     make = build_app or globals()["build_app"]
     app = make(build_card(base_url), build_executor(), rpc_path, token)
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def agent_entry(name: str, build_card: Callable[[str], AgentCard], build_executor: Callable[[], AgentExecutor],
+                default_port: int, env_prefix: str
+                ) -> tuple[Callable[..., Starlette], Callable[[], None]]:
+    """エージェントの `build_app`（テスト用）と `main`（launchd からの入口）を作る。"""
+    from kei_agent_a2a.card import RPC_PATH
+
+    def agent_app(base_url: str, token: str, executor: AgentExecutor | None = None) -> Starlette:
+        return build_app(build_card(base_url), executor or build_executor(), RPC_PATH, token)
+
+    def main() -> None:
+        serve(name, build_card, build_executor, RPC_PATH, default_port, env_prefix)
+
+    return agent_app, main

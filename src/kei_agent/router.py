@@ -1,10 +1,10 @@
 """言われたことを、どのエージェントの、どの仕事に振るかを決める（振り分け係）。
 
 エージェントの名刺からスキルの一覧を集めて、軽いモデル（Haiku）に選ばせる。エージェントが増えても、
-名刺を読むだけなので、ここのコードは変えなくてよい（docs/agents.md）。
+名刺を読むだけなので、ここのコードは変えなくてよい（docs/architecture.md の「振り分けと A2A」）。
 
 判定に使うのは短い分類なので、道具も会話の続きも要らない。うまく選べなかったときは、
-そのドメインの自由質問の窓口（`ask`）に回す（docs/design.md の11章）。
+そのドメインの自由質問の窓口（`ask`）に回す（docs/architecture.md）。
 """
 
 from __future__ import annotations
@@ -50,8 +50,6 @@ class Choice:
     agent: str = ""
     skill: str = ASK
     params: dict = field(default_factory=dict)
-    # 判定に使った額（分かるとき）
-    cost_usd: float | None = None
 
 
 def catalog(skills: list[dict]) -> str:
@@ -66,17 +64,25 @@ def catalog(skills: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def json_object(text: str) -> dict | None:
+    """モデルの返事から、最初の {...} を JSON として拾う（前後に文が付いていてもよい）。"""
+    found = _JSON.search(text or "")
+    if not found:
+        return None
+    try:
+        data = json.loads(found.group(0))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def parse(text: str, allowed: set[str]) -> Choice:
     """返ってきた文から JSON を拾う。読めなければ ask に回す。
 
     エージェントをまたぐときは、仕事の名前が `course:list-due` のように「相手:仕事」になる。
     """
-    found = _JSON.search(text or "")
-    if not found:
-        return Choice()
-    try:
-        data = json.loads(found.group(0))
-    except ValueError:
+    data = json_object(text)
+    if data is None:
         return Choice()
     name = str(data.get("skill") or "")
     if name not in allowed:
@@ -88,9 +94,13 @@ def parse(text: str, allowed: set[str]) -> Choice:
     return Choice(agent=agent, skill=skill or ASK, params=params)
 
 
-def workspace(config: Config) -> Workspace:
-    """判定だけを動かす場所（何も書かないが、claude は作業場を要る）。"""
-    cwd = config.state_dir / "router"
+def workspace(config: Config, actor: str = "router") -> Workspace:
+    """判定だけを動かす場所（何も書かないが、claude は作業場を要る）。
+
+    Codex は作業場に担当 agent の skill を置くので、分類は actor ごとに別の場所にする
+    （research と course の分類が同時に走っても、同じ skill の置き場を取り合わない）。
+    """
+    cwd = config.state_dir / "router" if actor == "router" else config.state_dir / "classifier" / actor
     cwd.mkdir(parents=True, exist_ok=True)
     return Workspace("router", ChannelKind.COURSE, cwd, timeout_minutes=TIMEOUT_MINUTES,
                      # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
@@ -136,9 +146,8 @@ async def _choose(config: Config, skills: str, allowed: set[str], text: str, fal
     )
     if result.is_error:
         log.warning("振り分けに失敗しました: %s", "; ".join(result.errors)[:200])
-        return Choice(cost_usd=result.cost_usd)
+        return Choice()
     choice = parse(result.text, allowed)
-    choice.cost_usd = result.cost_usd
     # 相手も選ぶとき（研究全体のチャンネル）だけ、誰に渡したかを出す。
     # 相手が1人のときは、チャンネルで決まっているので仕事の名前だけでよい
     who = f"{choice.agent or '本体'} の " if fallback == SELF else ""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,17 @@ import pytest
 from kei_agent import model_classifier, research
 from kei_agent.config import REPO_ROOT, AgentProfile, Config
 from kei_agent.store import Store
+
+# 開発機のシェルには本物の秘密情報が入っている。テストから Toggl・Notion・Slack などに届かないよう、
+# 各テストの前に消す（使うテストは monkeypatch.setenv で入れ直す）
+_SECRET_PREFIXES = ("TOGGL_", "NOTION_", "SLACK_", "KEI_AGENT_", "BOX_", "WANDB_", "OPENAI_")
+
+
+@pytest.fixture(autouse=True)
+def no_real_secrets(monkeypatch):
+    for name in list(os.environ):
+        if name.startswith(_SECRET_PREFIXES):
+            monkeypatch.delenv(name)
 
 
 @pytest.fixture

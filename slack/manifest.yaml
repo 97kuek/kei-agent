@@ -11,7 +11,13 @@ features:
   # 返事を流しながら見せる表示（chat.startStream）に必要
   agent_view:
     agent_description: 研究・授業・仕事の用事を受け取り、担当のエージェントが進めて結果を返す
-  # 設定画面（テーマごとの接続先と、決まった時刻の処理）。docs/plan.md の11章
+  # 設定画面（テーマごとの接続先と、決まった時刻の処理）。docs/using.md
+  # 時間記録の開始・停止（10_・20_・30_ のチャンネルで使う）
+  slash_commands:
+    - command: /toggl
+      description: 時間記録を始める・止める
+      usage_hint: "[start|stop]"
+      should_escape: false
   app_home:
     home_tab_enabled: true
     messages_tab_enabled: true
@@ -30,6 +36,7 @@ oauth_config:
       - reactions:read
       - reactions:write
       - assistant:write
+      - commands
 settings:
   event_subscriptions:
     bot_events:

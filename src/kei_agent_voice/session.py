@@ -1,4 +1,4 @@
-"""聞いて、答える。声のレイヤの本筋（docs/voice.md）。
+"""聞いて、答える。声のレイヤの本筋（docs/architecture.md の「声のレイヤ」）。
 
 **考えるのは全部 Realtime API**（`live.py`）。ここがするのは、繋ぎ目の世話だけ。
 
@@ -9,7 +9,7 @@
 
 前は自分で文字起こしをして、言葉で道を振り分けて、音声合成していた。**全部やめた**。
 言葉で振り分けていたせいで、「明日の予定」にも「今週の予定」にも**今日の予定を答えていた**
-（docs/voice.md の3節）。いまは依頼者のことを**道具として渡す**（`tools.py`）ので、
+（docs/architecture.md の「声のレイヤ」）。いまは依頼者のことを**道具として渡す**（`tools.py`）ので、
 いつのことかはモデルが引数で渡してくる。
 """
 
@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 from kei_agent.config import Config, load_config
+from kei_agent.store import Store
 from kei_agent_voice import journal, live
 from kei_agent_voice.face import Face
 from kei_agent_voice.tools import Tools
@@ -30,11 +31,12 @@ class VoiceSession:
     """マイクを開けているあいだ、Realtime API と繋がっている。"""
 
     def __init__(self, held: dict, config: Config | None = None,
-                 brain: live.Live | None = None, face: Face | None = None):
+                 brain: live.Live | None = None, face: Face | None = None,
+                 store: Store | None = None):
         self.held = held
         self.config = config or load_config()
         self.face = face or Face()
-        self.brain = brain or live.Live(Tools(held, self.config))
+        self.brain = brain or live.Live(Tools(held, self.config, store=store))
         self._talking: asyncio.Task | None = None
         self._notices: asyncio.Queue[str] = asyncio.Queue()
         self._notice_worker: asyncio.Task | None = None
@@ -59,7 +61,7 @@ class VoiceSession:
             log.info("マイクを閉じました")
 
     async def run(self, listening: bool = False) -> None:
-        """立ち上げ。**既定ではマイクを開けない**（docs/voice.md の7節）。"""
+        """立ち上げ。**既定ではマイクを開けない**（docs/architecture.md の「声のレイヤ」）。"""
         self._notice_worker = asyncio.create_task(self._speak_notices())
         if listening:
             self.set_listening(True)

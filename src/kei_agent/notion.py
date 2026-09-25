@@ -1,4 +1,4 @@
-"""Notion の「研究ホーム」を作る（docs/notion-layout.md）。Kei Agent が読み書きするときの接続も兼ねる。
+"""Notion の「研究ホーム」を作る（docs/architecture.md の「Notion」）。Kei Agent が読み書きするときの接続も兼ねる。
 
 使い方:
     source ~/.config/zsh/local/kei-agent.zsh
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -29,6 +30,8 @@ MIN_INTERVAL_SECONDS = 0.34
 MAX_RETRIES = 3
 # ページをたどる回数の上限（次のカーソルが返り続けても止まる）
 MAX_PAGES = 200
+# 1回のリクエストで足せるブロックの上限
+BLOCKS_PER_REQUEST = 100
 
 
 class NotionError(RuntimeError):
@@ -41,7 +44,7 @@ class Notion:
         self._last_request = 0.0
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
-        """Notion を1回呼ぶ。混んでいるとき（429）と一時的な失敗（5xx）は、待ってから試し直す。"""
+        """Notion を1回呼ぶ。混んでいるとき（429）、一時的な失敗（5xx）、切断やタイムアウトは、待ってから試し直す。"""
         for attempt in range(MAX_RETRIES + 1):
             wait = MIN_INTERVAL_SECONDS - (time.monotonic() - self._last_request)
             if wait > 0:
@@ -70,12 +73,21 @@ class Notion:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")
+            try:
+                detail = e.read().decode("utf-8", "replace")
+            except (OSError, http.client.HTTPException):
+                detail = ""
             if e.code == 429 or e.code >= 500:
                 raise _Retryable(f"{e.code} {detail}", _retry_after(e)) from None
             raise NotionError(f"{method} {path}: {e.code} {detail}") from None
-        except (urllib.error.URLError, TimeoutError) as e:
-            raise NotionError(f"{method} {path}: {e}") from None
+        except json.JSONDecodeError as e:
+            raise NotionError(f"{method} {path}: 応答を JSON として読めません: {e}") from None
+        except (http.client.HTTPException, OSError) as e:
+            # 切断・途中切れ・タイムアウト（URLError と TimeoutError も OSError）。Notion 側で書き込みが
+            # 済んでいるかもしれないので、試し直すのは読むだけ・消すだけの要求に限る（二重にページを作らない）
+            if _safe_to_resend(method, path):
+                raise _Retryable(f"接続エラー: {e!r}", None) from None
+            raise NotionError(f"{method} {path}: 接続エラー（書き込みが済んだか分からない）: {e!r}") from None
 
     def paginate(self, method: str, path: str, body: dict | None = None) -> list[dict]:
         """`has_more` をたどって全部集める。GET はクエリ、POST は本文にカーソルを入れる。"""
@@ -96,6 +108,28 @@ class Notion:
 
     def children(self, block_id: str) -> list[dict]:
         return self.paginate("GET", f"/blocks/{block_id}/children")
+
+
+
+def _safe_to_resend(method: str, path: str) -> bool:
+    """同じ要求をもう一度送っても結果が変わらないか。POST でも検索と DB の問い合わせは読むだけ。"""
+    return method in ("GET", "DELETE") or path.rstrip("/").endswith(("/query", "/search")) or path == "/search"
+
+def append_blocks(notion, block_id: str, blocks: list[dict], after: str | None = None) -> list[dict]:
+    """ブロックを 100 件ずつ足す。`after` を渡すとそのブロックの直後に、順番を保って入れる。"""
+    added: list[dict] = []
+    for offset in range(0, len(blocks), BLOCKS_PER_REQUEST):
+        body: dict = {"children": blocks[offset:offset + BLOCKS_PER_REQUEST]}
+        if after:
+            # 2026-03-11 から `after` は廃止され、position で指定する
+            body["position"] = {"type": "after_block", "after_block": {"id": after}}
+        results = notion.request("PATCH", f"/blocks/{block_id}/children", body).get("results") or []
+        added += results
+        if after and offset + BLOCKS_PER_REQUEST < len(blocks):
+            if not results:
+                raise NotionError("追加した block の ID を確認できません")
+            after = results[-1]["id"]
+    return added
 
 
 class _Retryable(RuntimeError):
@@ -253,6 +287,21 @@ def _read_state(path: Path) -> dict:
         raise NotionError(f"{path} を読めません（消すと作り直します）: {e}") from None
 
 
+def write_json_atomic(path: Path, data) -> None:
+    """一時ファイルに書いてから置き換える。途中で落ちても壊れた JSON を残さない。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class Setup:
     def __init__(self, notion: Notion, home_page_id: str, state_path: Path):
         self.notion = notion
@@ -263,8 +312,7 @@ class Setup:
         self.log: list[str] = []
 
     def save(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(self.state, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(self.state_path, self.state)
 
     # ページとデータベース
 

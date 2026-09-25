@@ -1,6 +1,6 @@
 """Toggl の記録を、科目ごと・課題ごとに集計する（読むだけ）。
 
-プロジェクト＝科目、エントリの説明＝課題名で突き合わせる（docs/design.md の11章）。
+プロジェクト＝科目、エントリの説明＝課題名で突き合わせる（docs/architecture.md）。
 測るのは依頼者自身。ここでは足し合わせて返すだけで、計測の開始も停止もしない。
 Toggl の鍵は研究の時間記録と同じものを使う（`kei_agent.timelog`）。
 """
@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from kei_agent.timelog import Toggl, TogglError, load_toggl
+from kei_agent_course.course_identity import normalize_course_name
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def totals(entries: list[dict], courses: Iterable[str] | None = None) -> dict[st
 
     動かしっぱなしの記録（duration が空か負）、休憩、消した記録は数えない。
     """
-    known = set(courses) if courses is not None else None
+    known = {normalize_course_name(name) for name in courses} if courses is not None else None
     out: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for entry in entries:
         duration = entry.get("duration")
@@ -44,7 +45,7 @@ def totals(entries: list[dict], courses: Iterable[str] | None = None) -> dict[st
         course = (entry.get("project") or {}).get("name") or "-"
         if course.startswith("大学 / "):
             course = course.removeprefix("大学 / ").strip() or "-"
-        if known is not None and course not in known:
+        if known is not None and normalize_course_name(course) not in known:
             continue
         out[course][(entry.get("description") or "").strip() or NO_NAME] += float(duration)
     return {course: dict(tasks) for course, tasks in out.items()}

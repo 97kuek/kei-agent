@@ -1,44 +1,30 @@
-"""このエージェントの Agent Card（何ができるかを書いた名刺）。
-
-A2A では、相手はまず `/.well-known/agent-card.json` を読んで、何ができるかと、どこに話しかければよいかを知る。
-"""
+"""大学エージェントの Agent Card（何ができるかを書いた名刺）。形は `kei_agent_a2a.card`。"""
 
 from __future__ import annotations
 
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.types import AgentCard, AgentSkill
 
-# 仕事の名前。オーケストレーターはこの id を指定して頼む
-SYNC_ASSIGNMENTS = "sync-assignments"
-LIST_DUE = "list-due"
-LIST_CALENDAR_ASSIGNMENTS = "list-calendar-assignments"
-LIST_CLASSES = "list-classes"
-LIST_CURRENT_COURSES = "list-current-courses"
-RECORD_STUDY_TIME = "record-study-time"
-TIME_REPORT = "time-report"
-# 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
-ASK = "ask"
-
-VERSION = "0.1.0"
-# JSON-RPC の窓口（Agent Card の supported_interfaces に載せる）
-RPC_PATH = "/a2a"
+from kei_agent_a2a.card import agent_card
+from kei_agent_course.skills import (
+    ASK,
+    LIST_CALENDAR_ASSIGNMENTS,
+    LIST_CLASSES,
+    LIST_CURRENT_COURSES,
+    LIST_DUE,
+    RECORD_STUDY_TIME,
+    SYNC_ASSIGNMENTS,
+    TIME_REPORT,
+)
 
 
 def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺を作る。base_url は `http://127.0.0.1:8787` のような、外から見える住所。"""
-    return AgentCard(
-        name="Kei Agent（大学）",
-        description="Moodle の課題、Notion の授業と課題、Toggl の実績、Box の学部要項と過去問を扱う。"
-                    "自由な質問には、自分の claude が Box と Notion を読んで答える",
-        version=VERSION,
-        supported_interfaces=[AgentInterface(
-            url=base_url.rstrip("/") + RPC_PATH,
-            protocol_binding="JSONRPC",
-            protocol_version="1.0",
-        )],
-        # 自由な質問（ask）は claude を動かすので、経過を流しながら返す
-        capabilities=AgentCapabilities(streaming=True, push_notifications=False),
-        default_input_modes=["text/plain"],
-        default_output_modes=["text/plain", "application/json"],
+    return agent_card(
+        "Kei Agent（大学）",
+        "Moodle の課題、Notion の授業と課題、Toggl の実績、Box の学部要項と過去問を扱う。"
+        "自由な質問には、自分の claude が Box と Notion を読んで答える",
+        base_url,
+        output_modes=("text/plain", "application/json"),
         skills=[
             AgentSkill(
                 id=SYNC_ASSIGNMENTS,

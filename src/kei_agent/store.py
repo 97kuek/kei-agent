@@ -8,6 +8,9 @@ import time
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+# runs を残す最短の日数。timelog の週ごとの集計で前の週と比べるので、8 週より短くしない
+RUNS_MIN_DAYS = 8 * 7
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
     channel TEXT NOT NULL,
@@ -112,7 +115,7 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 -- エージェントが持っている会話の続き（どのスレッドの、どのエージェントの claude か）。
--- 会話の単位はスレッドなので、本体が覚える（docs/agents.md）
+-- 会話の単位はスレッドなので、本体が覚える（docs/architecture.md の「振り分けと A2A」）
 CREATE TABLE IF NOT EXISTS agent_sessions (
     channel TEXT NOT NULL,
     thread_ts TEXT NOT NULL,
@@ -404,13 +407,6 @@ class Store:
             self.conn.execute("UPDATE threads SET stalled_request = ? WHERE channel = ? AND thread_ts = ?",
                               (text, channel, thread_ts))
 
-    def clear_session(self, channel: str, thread_ts: str) -> None:
-        with self.conn:
-            self.conn.execute(
-                "UPDATE threads SET session_id = NULL, updated_at = ? WHERE channel = ? AND thread_ts = ?",
-                (time.time(), channel, thread_ts),
-            )
-
     def count_turn(self, channel: str, thread_ts: str) -> int:
         """依頼者の依頼を1つ数え、これまでの数を返す。"""
         with self.conn:
@@ -624,6 +620,78 @@ class Store:
             "ORDER BY updated_at DESC LIMIT 1", (channel, thread_ts)).fetchone()
         return row["agent"] if row else None
 
+    # Slack から変える設定（settings.py）
+
+    def theme_domains(self, theme: str | None = None) -> list[sqlite3.Row]:
+        if theme is None:
+            return self.conn.execute("SELECT theme, domain FROM theme_domains ORDER BY theme, domain").fetchall()
+        return self.conn.execute(
+            "SELECT theme, domain FROM theme_domains WHERE theme = ? ORDER BY domain", (theme,)).fetchall()
+
+    def add_theme_domain(self, theme: str, domain: str, reason: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO theme_domains (theme, domain, reason, added_at) VALUES (?, ?, ?, ?)",
+                (theme, domain, reason, time.time()),
+            )
+
+    def remove_theme_domains(self, theme: str, domain: str | None = None) -> None:
+        """domain を省くと、そのテーマの接続先をすべて消す。"""
+        with self.conn:
+            if domain is None:
+                self.conn.execute("DELETE FROM theme_domains WHERE theme = ?", (theme,))
+            else:
+                self.conn.execute("DELETE FROM theme_domains WHERE theme = ? AND domain = ?", (theme, domain))
+
+    def add_domain_request(self, channel: str, thread_ts: str, theme: str, domain: str, reason: str) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO domain_requests (channel, thread_ts, theme, domain, reason, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
+                (channel, thread_ts, theme, domain, reason, time.time()),
+            )
+        return int(cur.lastrowid)
+
+    def domain_request(self, request_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM domain_requests WHERE id = ?", (request_id,)).fetchone()
+
+    def resolve_domain_request(self, request_id: int, status: str) -> bool:
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE domain_requests SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
+                (status, time.time(), request_id),
+            )
+        return cur.rowcount == 1
+
+    def count_pending_domain_requests(self, channel: str, thread_ts: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM domain_requests WHERE channel = ? AND thread_ts = ? AND status = 'pending'",
+            (channel, thread_ts)).fetchone()
+        return int(row["n"])
+
+    def take_domain_decisions(self, channel: str, thread_ts: str) -> list[sqlite3.Row]:
+        with self.conn:
+            rows = self.conn.execute(
+                """SELECT * FROM domain_requests WHERE channel = ? AND thread_ts = ?
+                   AND status != 'pending' AND resumed = 0 ORDER BY id""", (channel, thread_ts)).fetchall()
+            self.conn.execute(
+                "UPDATE domain_requests SET resumed = 1 WHERE channel = ? AND thread_ts = ? AND status != 'pending'",
+                (channel, thread_ts))
+        return rows
+
+    def setting(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.conn:
+            self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                              "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def delete_setting(self, key: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
     # 一度だけ知らせるもの
 
     def noticed(self, key: str) -> bool:
@@ -635,9 +703,26 @@ class Store:
             self.conn.execute("INSERT OR REPLACE INTO notices (key, at) VALUES (?, ?)", (key, time.time()))
 
     def drop_old_agent_sessions(self, before: float) -> int:
-        """古いスレッドのエージェントの会話を忘れる（毎晩の保守から呼ぶ）。"""
+        """古いスレッドのエージェントの会話と、済んだ記録を忘れる（毎晩の保守から呼ぶ）。消した行数を返す。
+
+        runs は研究時間の週ごとの集計に使うので、before より新しくても最低 RUNS_MIN_DAYS 日は残す。
+        schedule_runs は「前回からの差分」に使うので、処理ごとに最新の1行は残す。
+        """
+        runs_before = min(before, time.time() - RUNS_MIN_DAYS * 86400)
         with self.conn:
-            return self.conn.execute("DELETE FROM agent_sessions WHERE updated_at < ?", (before,)).rowcount
+            removed = 0
+            for sql, args in (
+                ("DELETE FROM agent_sessions WHERE updated_at < ?", (before,)),
+                ("DELETE FROM provider_sessions WHERE updated_at < ?", (before,)),
+                ("DELETE FROM provider_thread_state WHERE updated_at < ?", (before,)),
+                ("DELETE FROM deferred_runs WHERE done = 1 AND created_at < ?", (before,)),
+                ("""DELETE FROM schedule_runs WHERE ran_at < ? AND ran_at < (
+                        SELECT MAX(ran_at) FROM schedule_runs AS latest WHERE latest.name = schedule_runs.name)""",
+                 (before,)),
+                ("DELETE FROM runs WHERE ended_at IS NOT NULL AND started_at < ?", (runs_before,)),
+            ):
+                removed += self.conn.execute(sql, args).rowcount
+            return removed
 
     def drop_old_notices(self, before: float) -> int:
         """古い目印を捨てる（毎晩の保守から呼ぶ）。"""
@@ -707,6 +792,13 @@ class Store:
         ).fetchall()
         return [Job.from_row(r) for r in rows]
 
+    def unsubmitted_jobs(self, before: float) -> list[Job]:
+        """queued のまま pueue_id が空で、before より前に作った行（投入の途中で止まったもの）。"""
+        rows = self.conn.execute(
+            "SELECT * FROM jobs WHERE status = 'queued' AND pueue_id IS NULL AND submitted_at < ?", (before,)
+        ).fetchall()
+        return [Job.from_row(r) for r in rows]
+
     def unreported_finished_jobs(self) -> list[Job]:
         rows = self.conn.execute(
             "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed', 'cancelled') AND reported = 0"
@@ -726,6 +818,14 @@ class Store:
     def open_runs(self) -> list[sqlite3.Row]:
         """終わりがまだ記録されていない実行（いま動いているもの）。古い順。"""
         return self.conn.execute("SELECT * FROM runs WHERE ended_at IS NULL ORDER BY started_at").fetchall()
+
+    def finished_runs(self, since: float, until: float) -> list[sqlite3.Row]:
+        """since 以上 until 未満に始まり、終わりが記録された実行。"""
+        return self.conn.execute(
+            "SELECT channel_name, started_at, ended_at FROM runs "
+            "WHERE ended_at IS NOT NULL AND started_at >= ? AND started_at < ?",
+            (since, until),
+        ).fetchall()
 
     def end_run(self, run_id: int, is_error: bool, cost_usd: float | None) -> None:
         with self.conn:

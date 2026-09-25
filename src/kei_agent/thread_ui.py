@@ -64,17 +64,26 @@ class ThreadUI:
     async def finish(self, answer: str, awaiting: bool = False) -> bool:
         """まとめを本文に出し、スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。
 
-        流して見せられていれば True（結果をもう一度投稿しない）。
+        流して見せられていれば True（結果をもう一度投稿しない）。途中で流せなくなったときは、
+        流せなかった残りだけをここで投稿して True を返す（流した分と重ねて出さない）。
         """
-        for piece in split_text(answer) if answer.strip() else []:
+        pieces = split_text(answer) if answer.strip() else []
+        sent = 0
+        for piece in pieces:
             await self._stream([{"type": "markdown_text", "text": piece}])
-        streamed = False
+            if not self.stream_ok:
+                break
+            sent += 1
         if self.stream_ts is not None:
             try:
                 await self.slack.chat_stopStream(channel=self.channel, ts=self.stream_ts)
-                streamed = self.stream_ok and bool(answer.strip())
             except Exception:
+                # 本文はもう流れているので、終わりの合図が失敗しても出し直さない
                 log.warning("流して見せた返事を終われません", exc_info=True)
+        streamed = bool(pieces) and sent > 0
+        if streamed:
+            for piece in pieces[sent:]:
+                await self.slack.chat_postMessage(channel=self.channel, thread_ts=self.thread_ts, markdown_text=piece)
         await self._status("suspended" if awaiting else "active")
         return streamed
 

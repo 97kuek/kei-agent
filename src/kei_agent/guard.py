@@ -1,6 +1,6 @@
 """Kei Agent の柵。sandbox の設定、読ませない場所、操作してよい人、取り込んでよい差分の判定。
 
-このファイルと `config.toml`、`deploy/` は、Kei Agent 自身に直させない（docs/design.md の10章）。
+このファイルと `config.toml`、`deploy/` は、Kei Agent 自身に直させない（docs/architecture.md）。
 ここに触れた差分は、中身を見る前に捨てる。
 """
 
@@ -16,10 +16,10 @@ if TYPE_CHECKING:
     from kei_agent.themes import Workspace
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
-# 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう
+# 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう。
+# 使うたびに更新するトークン（`<state_dir>/secrets`）は state_dir で変わるので、config.py で足す
 DEFAULT_DENY_READ = (
     "~/.config/zsh/local",   # Kei Agent の秘密情報（deploy/README.md）
-    "~/.local/state/kei-agent/secrets",  # 使うたびに更新するトークン（Box など）
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
@@ -31,13 +31,16 @@ DEFAULT_DENY_READ = (
 )
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
+STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "KEI_AGENT_A2A_",
+                         "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
                          # ドメインごとの鍵（Box・Moodle・Microsoft・Toggl）。エージェントの claude にも渡さない
                          "BOX_", "MOODLE_", "MS_", "TOGGL_", "OPENAI_API_KEY", "CODEX_API_KEY")
 # 上の prefix に当たっても、子プロセスに残すもの。
 # 研究の claude が持つ Notion の鍵は、研究ホームだけを操作できるゲートウェイの合言葉だけ
 # （生の NOTION_TOKEN は NOTION_ の prefix で落ちる）
 KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "KEI_AGENT_NOTION_GATEWAY_TOKEN")
+# prefix で書けない、Kei Agent 自身の合言葉（KEI_AGENT_*_TOKEN など）。あとから増えても渡さない
+_KEI_AGENT_SECRET_ENV = re.compile(r"^KEI_AGENT_\w*(?:TOKEN|SECRET|PASSWORD|API_KEY)$")
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
 PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.toml", "deploy/")
@@ -127,10 +130,11 @@ def build_settings(config: Config, ws: Workspace, *, read_only: bool = False) ->
 
 
 def strip_env(base: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in base.items() if k in KEPT_CLAUDE_ENV or not k.startswith(STRIPPED_ENV_PREFIXES)}
+    return {k: v for k, v in base.items() if k in KEPT_CLAUDE_ENV or not (
+        k.startswith(STRIPPED_ENV_PREFIXES) or _KEI_AGENT_SECRET_ENV.match(k))}
 
 
-# Kei Agent 自身の差分の確認（docs/design.md の10章）
+# Kei Agent 自身の差分の確認（docs/architecture.md）
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout

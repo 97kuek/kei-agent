@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from kei_agent.agent_policy import policy_for
@@ -142,3 +144,153 @@ for line in sys.stdin:
     server.chmod(0o755)
 
     assert await AppServerClient(str(server), timeout_seconds=3).installed() == []
+
+
+async def test_strict_mcp_discovery_rejects_unreadable_config(monkeypatch):
+    from kei_agent import codex_app_server
+
+    class Process:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"private error"
+
+    async def create(*_args, **_kwargs):
+        return Process()
+
+    monkeypatch.setattr(codex_app_server.asyncio, "create_subprocess_exec", create)
+    with pytest.raises(RuntimeError, match="MCP の設定"):
+        await codex_app_server.discover_enabled_mcp_names_strict("codex")
+
+
+def _fake_server(tmp_path, body: str):
+    server = tmp_path / "fake-app-server.py"
+    server.write_text("#!/usr/bin/env python3\nimport json, os, sys, time\n"
+                      f"open({str(tmp_path / 'pid')!r}, 'w').write(str(os.getpid()))\n" + body)
+    server.chmod(0o755)
+    return server
+
+
+def _alive(pid: int) -> bool:
+    import os
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def test_initialize_timeout_stops_the_spawned_process(tmp_path):
+    """initialize に答えない App Server を、起動したまま残さない。"""
+    server = tmp_path / "silent-app-server.sh"
+    server.write_text(f"#!/bin/sh\necho $$ > {tmp_path / 'pid'}\nexec sleep 60\n")
+    server.chmod(0o755)
+
+    with pytest.raises(TimeoutError):
+        await AppServerClient(str(server), timeout_seconds=2).installed()
+
+    pid = int((tmp_path / "pid").read_text())
+    assert not _alive(pid)
+
+
+async def _prepared_client(server, monkeypatch, timeout_seconds: float = 5):
+    from kei_agent import codex_app_server
+
+    client = AppServerClient(str(server), timeout_seconds=timeout_seconds)
+
+    async def verified(*_args, **_kwargs):
+        return None
+
+    async def installed():
+        return []
+
+    async def no_mcp(_codex_bin):
+        return frozenset()
+
+    monkeypatch.setattr(client, "_verify_profile", verified)
+    monkeypatch.setattr(client, "installed", installed)
+    monkeypatch.setattr(codex_app_server, "discover_enabled_mcp_names_strict", no_mcp)
+    return client
+
+
+# initialize / app/installed / thread/start / turn/start に答える、最小の App Server
+_RESPOND = """
+def send(obj):
+    print(json.dumps(obj), flush=True)
+
+def answer(request):
+    method = request.get("method")
+    if method == "thread/start":
+        send({"id": request["id"], "result": {"thread": {"id": "thread-1"}}})
+    elif method == "turn/start":
+        send({"id": request["id"], "result": {"turn": {"id": "turn-1"}}})
+        return True
+    elif method == "app/installed":
+        send({"id": request["id"], "result": {"apps": []}})
+    elif "id" in request:
+        send({"id": request["id"], "result": {}})
+    return False
+"""
+
+
+async def test_server_approval_request_is_declined_instead_of_hanging(tmp_path, monkeypatch):
+    """App Server からの承認の問い合わせには断りを返し、turn を進める。"""
+    server = _fake_server(tmp_path, _RESPOND + f"""
+for line in sys.stdin:
+    request = json.loads(line)
+    if answer(request):
+        send({{"id": 1, "method": "item/commandExecution/requestApproval", "params": {{"command": "rm -rf /"}}}})
+        reply = json.loads(sys.stdin.readline())
+        open({str(tmp_path / 'reply.json')!r}, "w").write(json.dumps(reply))
+        send({{"method": "item/completed", "params": {{"item": {{"type": "agentMessage", "text": "できた"}}}}}})
+        send({{"method": "turn/completed", "params": {{"turn": {{"id": "turn-1", "status": "completed"}}}}}})
+""")
+    client = await _prepared_client(server, monkeypatch)
+
+    result = await client.run("質問", policy_for("research"), "gpt-6-luna", "medium",
+                              cwd=tmp_path, profile=connector_profile(tmp_path))
+
+    assert not result.is_error and result.text == "できた"
+    import json
+    assert json.loads((tmp_path / "reply.json").read_text()) == {"id": 1, "result": {"decision": "decline"}}
+
+
+async def test_unknown_server_request_gets_a_json_rpc_error(tmp_path, monkeypatch):
+    server = _fake_server(tmp_path, _RESPOND + f"""
+for line in sys.stdin:
+    request = json.loads(line)
+    if answer(request):
+        send({{"id": "x", "method": "item/tool/requestUserInput", "params": {{}}}})
+        reply = json.loads(sys.stdin.readline())
+        open({str(tmp_path / 'reply.json')!r}, "w").write(json.dumps(reply))
+        send({{"method": "turn/completed", "params": {{"turn": {{"id": "turn-1", "status": "failed"}}}}}})
+""")
+    client = await _prepared_client(server, monkeypatch)
+
+    result = await client.run("質問", policy_for("research"), "gpt-6-luna", "medium",
+                              cwd=tmp_path, profile=connector_profile(tmp_path))
+
+    import json
+    reply = json.loads((tmp_path / "reply.json").read_text())
+    assert reply["id"] == "x" and reply["error"]["code"] == -32601
+    assert result.is_error
+
+
+async def test_run_has_an_overall_deadline_even_if_events_keep_coming(tmp_path, monkeypatch):
+    """1行ずつは届き続けても、全体の上限時間で止める。"""
+    server = _fake_server(tmp_path, _RESPOND + """
+for line in sys.stdin:
+    request = json.loads(line)
+    if answer(request):
+        while True:
+            send({"method": "item/agentMessage/delta", "params": {"delta": "…"}})
+            time.sleep(0.1)
+""")
+    client = await _prepared_client(server, monkeypatch, timeout_seconds=1)
+
+    result = await asyncio.wait_for(
+        client.run("質問", policy_for("research"), "gpt-6-luna", "medium",
+                   cwd=tmp_path, profile=connector_profile(tmp_path)), timeout=10)
+
+    assert result.is_error and result.timed_out and result.failure_kind == "timeout"
+    assert not _alive(int((tmp_path / "pid").read_text()))

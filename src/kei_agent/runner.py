@@ -18,8 +18,8 @@ from typing import Literal
 from kei_agent import guard, run_hooks
 from kei_agent.config import Config, path_without_venv
 from kei_agent.execution_contract import ExecutionContract, resolve_contract
-from kei_agent.model_policy import ResolvedModel, UseCase, validate_resolved
-from kei_agent.provider_permissions import CapabilityUnavailable, PermissionProfile, preflight
+from kei_agent.model_policy import ResolvedModel, validate_resolved
+from kei_agent.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
 from kei_agent.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -36,11 +36,14 @@ UNKNOWN_LIMIT_RESET = -1.0
 
 # claude が終わったあと、プロセスが消えるのを待つ秒数
 EXIT_GRACE_SECONDS = 5
+# resume しようとした会話が provider 側に残っていないときの文
+SESSION_MISSING_MARKERS = ("No conversation found", "no rollout found for")
 # このファイルが動かすのは研究の claude だけ。skill も MCP も研究のものに限る
 AGENT = "research"
 # 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）。合言葉は claude が環境変数から入れる
 NOTION_MCP = "research-notion"
 GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
+GATEWAY_AUTH_ENV = "KEI_AGENT_NOTION_GATEWAY_AUTH"
 
 
 def system_prompt_text(config: Config) -> str:
@@ -65,7 +68,8 @@ def notion_mcp_config(config: Config) -> dict:
     return {"mcpServers": {NOTION_MCP: {
         "type": "http",
         "url": config.notion_gateway_url,
-        "headers": {"Authorization": f"Bearer ${{{GATEWAY_TOKEN_ENV}}}"},
+        # build_env は合言葉そのもの（GATEWAY_TOKEN_ENV）を子に渡さず、ヘッダーの値だけを GATEWAY_AUTH_ENV に置く
+        "headers": {"Authorization": f"${{{GATEWAY_AUTH_ENV}}}"},
     }}}
 
 
@@ -98,7 +102,7 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
         # 研究ホームの外へ届く Notion を持ち込まず、検査済みgatewayだけを渡す。
         cmd += [
             "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
-            "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="KEI_AGENT_NOTION_GATEWAY_AUTH"}}',
+            "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="{GATEWAY_AUTH_ENV}"}}',
             "--config", f"mcp_servers.{NOTION_MCP}.enabled=true",
         ]
     if session_id:
@@ -109,8 +113,8 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
 
 
 def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
-                          recipe: ResolvedModel, *, actor: str = AGENT,
-                          read_only: bool = False, contract: ExecutionContract | None = None) -> list[str]:
+                          recipe: ResolvedModel, contract: ExecutionContract, *, actor: str = AGENT,
+                          read_only: bool = False) -> list[str]:
     cmd = [
         config.claude_bin,
         "-p",
@@ -121,19 +125,14 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
         "--settings", json.dumps(guard.build_settings(config, ws, read_only=read_only), ensure_ascii=False),
         "--permission-mode", "dontAsk",
     ]
-    plugin_dir = contract.skill_dir.parent if contract and contract.skill_dir else (
-        config.agent_plugin_dir(actor) if actor in {"research", "course", "work"} else None)
-    if plugin_dir:
-        cmd += ["--plugin-dir", str(plugin_dir)]
+    if contract.skill_dir:
+        cmd += ["--plugin-dir", str(contract.skill_dir.parent)]
     if actor == "research" and not read_only:
         # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
         cmd += ["--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False), "--strict-mcp-config"]
-    prompt_path = ws.system_prompt or config.system_prompt_path
-    if contract is not None and contract.prompt_text:
+    if contract.prompt_text:
+        # --resume のときは効かない（会話を始めたときの版が残る）。版が変われば assistant が会話を始め直す
         cmd += ["--append-system-prompt", contract.prompt_text]
-    elif contract is None and prompt_path.exists():
-        # --resume のときは効かない（会話を始めたときの版が残る）。変わった版は assistant が本文で渡す
-        cmd += ["--append-system-prompt", prompt_path.read_text(encoding="utf-8")]
     cmd += ["--model", recipe.model]
     if recipe.reasoning_effort:
         cmd += ["--effort", recipe.reasoning_effort]
@@ -142,17 +141,17 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
     return cmd
 
 
-def build_command(config: Config, request: ExecutionRequest) -> list[str]:
+def build_command(config: Config, request: ExecutionRequest,
+                  contract: ExecutionContract | None = None) -> list[str]:
     """解決済み recipe だけで Claude/Codex の command を組み立てる。"""
     validate_resolved(request.recipe)
-    ws = _execution_workspace(request)
-    read_only = _is_read_only(request)
-    contract = resolve_contract(config, request)
+    ws = request.workspace
+    contract = contract or resolve_contract(config, request)
     if request.recipe.provider == "codex":
         return build_codex_command(config, ws, request.session_id, request.recipe,
-                                   actor=request.recipe.actor, read_only=read_only, contract=contract)
-    return _build_claude_command(config, ws, request.session_id, request.recipe,
-                                 actor=request.recipe.actor, read_only=read_only, contract=contract)
+                                   actor=request.recipe.actor, read_only=contract.read_only, contract=contract)
+    return _build_claude_command(config, ws, request.session_id, request.recipe, contract,
+                                 actor=request.recipe.actor, read_only=contract.read_only)
 
 
 @dataclass(frozen=True)
@@ -171,25 +170,9 @@ class ExecutionRequest:
     read_only: bool = False
 
 
-def _execution_workspace(request: ExecutionRequest) -> Workspace:
-    """workspace は場所だけを表す。権限は ExecutionRequest から決める。"""
-    return request.workspace
-
-
-def _is_read_only(request: ExecutionRequest) -> bool:
-    """呼び出し元が取り落としても、分類 recipe は書込み実行にしない。"""
-    return request.read_only or request.recipe.actor == "router" or request.recipe.use_case is UseCase.ROUTING
-
-
-def build_model_command(config: Config, ws: Workspace, session_id: str | None,
-                        recipe: ResolvedModel) -> list[str]:
-    """用途別 recipe から実行コマンドを組み立てる。"""
-    return build_command(config, ExecutionRequest(ws, recipe, session_id, "", ""))
-
-
 async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionProfile) -> None:
     """同じ profile を OS sandbox が起動できることを、モデル実行前に確認する。"""
-    command = [codex_bin, "sandbox", "-P", "kei_agent_scoped", "-C", str(cwd)]
+    command = [codex_bin, "sandbox", "-P", PROFILE_NAME, "-C", str(cwd)]
     for setting in profile.config_overrides:
         command += ["-c", setting]
     command += ["--", "/usr/bin/true"]
@@ -204,9 +187,13 @@ async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionPro
         raise CapabilityUnavailable("Codex の権限を強制できません")
 
 
+def codex_instructions_setting(text: str) -> str:
+    """正本の指示を Codex の developer instruction にする設定（CLI と App Server で共通）。"""
+    return "developer_instructions=" + json.dumps(text, ensure_ascii=False)
+
+
 def codex_instruction_config(contract: ExecutionContract) -> list[str]:
-    """正本の指示を Codex の developer instruction に渡す。"""
-    return ["--config", "developer_instructions=" + json.dumps(contract.prompt_text, ensure_ascii=False)]
+    return ["--config", codex_instructions_setting(contract.prompt_text)]
 
 
 def install_agent_skills(contract: ExecutionContract, cwd: os.PathLike[str]) -> None:
@@ -264,12 +251,7 @@ def install_skill_directory(source_root: Path, cwd: Path) -> None:
             continue
         target = target_root / source.name
         if target.exists() or target.is_symlink():
-            # 旧 install_codex_skills は manifest を残さず、同じ source への link だけを作った。
-            # 一致する旧 link は安全に引き継ぎ、それ以外は利用者所有として止める。
-            if target.is_symlink() and target.resolve() == source.resolve():
-                target.unlink()
-            else:
-                raise RuntimeError(f"agent skill collides with existing skill: {source.name}")
+            raise RuntimeError(f"agent skill collides with existing skill: {source.name}")
         target.symlink_to(os.path.relpath(source, target_root), target_is_directory=True)
         new_managed[source.name] = str(source.resolve())
     manifest.write_text(json.dumps(new_managed, ensure_ascii=False), encoding="utf-8")
@@ -283,9 +265,9 @@ def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
     if include_gateway_auth and token:
-        env["KEI_AGENT_NOTION_GATEWAY_AUTH"] = f"Bearer {token}"
+        env[GATEWAY_AUTH_ENV] = f"Bearer {token}"
     else:
-        env.pop("KEI_AGENT_NOTION_GATEWAY_AUTH", None)
+        env.pop(GATEWAY_AUTH_ENV, None)
     return env
 
 
@@ -330,16 +312,19 @@ class RunResult:
     activities: list[str] = field(default_factory=list)
     timed_out: bool = False
     # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
-    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/design.md の9章）
+    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/architecture.md）
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None
     failure_kind: Literal["quota", "timeout", "session_missing", "capability", "runtime"] | None = None
     _final_candidate: str = field(default="", repr=False)
+    # 成功の最後のイベント（result / turn.completed）まで届いたか
+    _completed: bool = field(default=False, repr=False)
 
     @property
     def session_missing(self) -> bool:
-        return any("No conversation found" in e for e in self.errors)
+        # Claude は "No conversation found"、Codex は "no rollout found for thread id" で断る
+        return any(marker in e for e in self.errors for marker in SESSION_MISSING_MARKERS)
 
 
 def apply_event(result: RunResult, event: dict) -> str | None:
@@ -368,6 +353,7 @@ def apply_event(result: RunResult, event: dict) -> str | None:
         result.cost_usd = event.get("total_cost_usd")
         result.duration_ms = event.get("duration_ms")
         result.errors = [str(e) for e in event.get("errors") or []]
+        result._completed = not result.is_error
         if result.is_error:
             result.limit_reset_at = parse_limit(" ".join([result.text, *result.errors]))
     return None
@@ -393,6 +379,7 @@ def apply_codex_event(result: RunResult, event: dict) -> str | None:
         return None
     if etype == "turn.completed" and not result.is_error:
         result.text = result._final_candidate
+        result._completed = True
         return None
     if etype == "turn.failed":
         error = event.get("error") or {}
@@ -450,14 +437,22 @@ def parse_limit(text: str, now: float | None = None) -> float | None:
     return (reset if reset > base else reset + timedelta(days=1)).timestamp()
 
 
-def _kill_group(pid: int) -> None:
+def kill_group(pid: int) -> None:
     """claude とその中で動いている Bash を、プロセスグループごと止める。
 
     start_new_session=True で起動しているので、グループIDは claude の pid と同じ。
     claude 本体を回収したあとでも、残った子プロセスを止められるよう getpgid は使わない。
+    プロセスグループで止める処理はここを正本にする（kei_agent_a2a からも使う）。
     """
     with suppress(ProcessLookupError, PermissionError):
         os.killpg(pid, signal.SIGKILL)
+
+
+async def stop_group(proc) -> None:
+    """プロセスグループごと止めて、回収まで少しだけ待つ。"""
+    kill_group(proc.pid)
+    with suppress(TimeoutError, ProcessLookupError):
+        await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
 
 
 async def run_model(
@@ -472,7 +467,7 @@ async def run_model(
     この関数だけが CLI を起動する。呼び出し元は provider / model / effort を個別に
     指定できず、``ExecutionRequest.recipe`` を model policy で解決して渡す。
     """
-    ws = _execution_workspace(request)
+    ws = request.workspace
     assert ws.cwd is not None
     recipe = request.recipe
     validate_resolved(recipe)
@@ -483,8 +478,8 @@ async def run_model(
         workspace_kind=ws.kind.value,
         model=recipe.model,
     )
+    contract = resolve_contract(config, request)
     if is_codex:
-        contract = resolve_contract(config, request)
         # --ignore-user-config で起動するので、ユーザー設定の MCP は実行時に存在しない。
         # この回に明示注入する gateway だけを「利用可能」と扱う。
         configured_connectors = frozenset({NOTION_MCP})
@@ -497,10 +492,10 @@ async def run_model(
         install_agent_skills(contract, ws.cwd)
     started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
-        *build_command(config, request),
+        *build_command(config, request, contract),
         cwd=ws.cwd,
         env=build_env(config, dict(os.environ), request.channel, request.thread_ts,
-                      include_gateway_auth=recipe.actor == AGENT and not _is_read_only(request)),
+                      include_gateway_auth=recipe.actor == AGENT and not contract.read_only),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -545,14 +540,18 @@ async def run_model(
             with suppress(TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
         # 正常に終わっていれば空振りする。Bash が残したプロセスがいれば、ここでまとめて止める
-        _kill_group(proc.pid)
+        kill_group(proc.pid)
         stderr = await _drain(stderr_task)
         with suppress(TimeoutError):
             await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
-    if proc.returncode and not result.errors and stderr:
+    returncode = proc.returncode
+    if result._completed and returncode == -signal.SIGKILL:
+        # 成功の result まで届いたあと、終わらないので猶予のあとで止めた。答えはそのまま使う
+        returncode = 0
+    if returncode and not result.errors and stderr:
         result.is_error = True
         result.errors.append(stderr[-2000:])
-    finalize_run_result(result, proc.returncode)
+    finalize_run_result(result, returncode)
     run_hooks.post_run(run_hooks.RunOutcome(
         context=context,
         duration_ms=round((time.monotonic() - started_at) * 1000),

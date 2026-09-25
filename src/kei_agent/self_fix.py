@@ -1,4 +1,4 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。
+"""Slack から Kei Agent 自身を直す流れ（docs/architecture.md）。
 
 #00_kei-agent で案を話し合い、合意したら worktree で直し、差分を見せてから main に取り込んで入れ替わる。
 部品（git の操作、確認、合図）は improve.py、柵は guard.py にある。
@@ -51,6 +51,22 @@ class SelfFix:
         self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail=detail)
         await self.post(req, f"{FAILED_PREFIX} {text}")
 
+    async def recover_interrupted_fixes(self) -> int:
+        """前回の起動で「直している途中」のまま終わったものを失敗にする。起動時に1回呼ぶ。
+
+        これをしないと working が残り続け、次の直しに着手できない。
+        """
+        rows = self.store.improvements_in("working")
+        for row in rows:
+            self.store.update_improvement(row["channel"], row["thread_ts"], status="failed", detail="中断")
+            try:
+                req = Request(row["channel"], await self.channel_name(row["channel"]), row["thread_ts"], None, "")
+                await self.post(req, f"{FAILED_PREFIX} 直している途中で Kei Agent が止まったので、中断したよ。"
+                                     "続けるなら、もう一度「着手」まで進めて。")
+            except Exception:
+                log.warning("中断した直しを知らせられません", exc_info=True)
+        return len(rows)
+
     async def _check_or_fail(self, req: Request, worktree: Path, base: str) -> bool:
         """柵に触れていないか、秘密情報が入っていないかを見る。だめなら失敗として知らせる。"""
         problems = await asyncio.to_thread(guard.check_change, worktree, base, "HEAD")
@@ -82,6 +98,21 @@ class SelfFix:
         self.spawn(self._self_fix(req, worktree, branch, base))
 
     async def _self_fix(self, req: Request, worktree: Path, branch: str, base: str) -> None:
+        """想定外の例外でも working のまま残さず、失敗として知らせる。"""
+        try:
+            await self._run_self_fix(req, worktree, branch, base)
+        except asyncio.CancelledError:
+            raise  # 終了のとき。次の起動で recover_interrupted_fixes が失敗にする
+        except Exception as e:
+            log.exception("直している途中で失敗しました")
+            detail = f"{type(e).__name__}: {e}"[:500]
+            try:
+                await self._fix_failed(req, detail, f"直している途中で止まったよ: {detail}")
+            except Exception:
+                log.warning("失敗を知らせられません", exc_info=True)
+                self.store.update_improvement(req.channel, req.thread_ts, status="failed", detail=detail)
+
+    async def _run_self_fix(self, req: Request, worktree: Path, branch: str, base: str) -> None:
         ws = Workspace(req.channel_name, ChannelKind.SELF_FIX, worktree)
         messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
         prompt = improve.FIX_PROMPT + history_prompt(messages, self.bot_user_id, "", None, dropped=dropped)
@@ -158,7 +189,22 @@ class SelfFix:
             return
         if not await self._check_or_fail(req, worktree, base):
             return
-        merged = await asyncio.to_thread(improve.merge_and_push, self.config, branch)
+        try:
+            merged = await asyncio.to_thread(improve.merge_and_push, self.config, branch)
+        except improve.PushError as e:
+            if e.undone:
+                # 手元の main は元に戻した。worktree は残すので、もう一度「いいよ」でやり直せる
+                await self.post(req, f"{FAILED_PREFIX} GitHub に push できなかったので、取り込みを取り消したよ。"
+                                     f"もう一度「いいよ」と言えばやり直す。\n```\n{e.output[:1000]}\n```")
+            else:
+                await self._fix_failed(req, "push できず、手元の main も戻せなかった",
+                                       "GitHub に push できず、手元の main も戻せなかったよ。"
+                                       "手元の main が GitHub より進んだままなので、手で確かめて。"
+                                       f"\n```\n{e.output[:1000]}\n```")
+            return
+        except RuntimeError as e:
+            await self._fix_failed(req, str(e)[:500], f"main に取り込めなかったよ:\n```\n{str(e)[:1000]}\n```")
+            return
         improve.mark_pending(self.config, base, req.thread_ts)
         self.store.update_improvement(req.channel, req.thread_ts, status="restarting", merge_commit=merged)
         await asyncio.to_thread(improve.remove_worktree, self.config, worktree, branch)

@@ -48,7 +48,7 @@ from kei_agent.config import Config
 from kei_agent.course import CourseChannel
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
+from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
 from kei_agent.notion_store import NotionStore
@@ -85,6 +85,7 @@ from kei_agent.time_cards import (
     RETRY,
     START,
     STOP,
+    course_loading_view,
     course_view,
     memo_view,
     retry_blocks,
@@ -139,6 +140,19 @@ class ThemeRuns:
         return overlapped
 
 
+
+# run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
+NO_PROVIDER = "provider が選ばれていません"
+
+def time_domain(channel_name: str) -> str:
+    """チャンネル名の番号から、時間記録の領域を決める。"""
+    return "course" if channel_name.startswith("20_") else "work" if channel_name.startswith("30_") else "research"
+
+
+def gateway_endpoint(mcp_url: str, path: str) -> str:
+    """Notion gateway の MCP の URL（…/mcp）から、同じサーバーの別の口を作る。"""
+    return f"{mcp_url.rstrip('/').removesuffix('/mcp')}/{path.lstrip('/')}"
+
 class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
@@ -179,7 +193,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
         self.restart_requested = asyncio.Event()
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
-        # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/agents.md）
+        # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/architecture.md の「振り分けと A2A」）
         self.agents: dict[str, a2a.Agent] = agents.build(config)
         # 名刺から読んだスキルの一覧（振り分け係が使う）。エージェントを入れ替えるとスキルが増えるので、
         # しばらくたったら読み直す（本体の再起動を待たない）
@@ -196,31 +210,29 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if not channel_id:
             return
         if not name:
-            name = await self.channel_name(channel_id)
-        domain = "course" if name.startswith("20_") else "work" if name.startswith("30_") else "research"
+            # 番号を外したテーマ名では 20_/30_ を見分けられないので、Slack の生の名前を使う
+            info = await self.slack.conversations_info(channel=channel_id)
+            name = str(info["channel"]["name"])
+        domain = time_domain(name)
         user_id = str(body["user"]["id"])
         action_id = action.get("action_id")
         if action_id == START:
             if domain == "course" and themes.theme_name(name) == "course":
-                reply = await self.ask_course("list-current-courses")
-                items = reply.data.get("items") if reply.ok else None
-                if not items:
-                    await self._time_notice(channel_id, "今学期の履修科目を読み出せなかったよ。Notion の「授業」を確認してね。")
-                    return
-                await self.slack.views_open(trigger_id=body["trigger_id"], view=course_view(channel_id, items))
+                await self._open_course_picker(body["trigger_id"], channel_id)
                 return
             binding = self.time_tracker.course_binding(channel_id)
-            entry, previous = self.time_tracker.start(TimerContext(user_id, domain, channel_id, themes.theme_name(name),
+            await self._start_timer(TimerContext(user_id, domain, channel_id, themes.theme_name(name),
                 binding.course_page_id if binding else "", binding.course_name if binding else ""))
-            if previous:
-                await self._sync_time_entry(previous)
-                await self._update_time_card(previous.channel_id, None)
-            await self._update_time_card(channel_id, entry)
         elif action_id == STOP:
+            active = self.time_tracker.active(user_id)
+            if active is None or active.id != str(action.get("value") or ""):
+                # 古いカードの停止ボタン。別のチャンネルで動いている計測は止めず、このカードだけ直す
+                running_here = active if active is not None and active.channel_id == channel_id else None
+                await self._update_time_card(channel_id, running_here)
+                return
             entry = self.time_tracker.stop(user_id)
             if entry:
-                await self._sync_time_entry(entry)
-                await self._update_time_card(entry.channel_id, None)
+                await self._after_timer_change(stopped=entry)
         elif action_id == MEMO:
             entry = self.time_tracker.entry(str(action.get("value") or ""))
             if entry and entry.user_id == user_id:
@@ -253,37 +265,114 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 course_id, course_name = str(picked["id"]), str(picked["name"])
             except (ValueError, KeyError, TypeError):
                 return {"course": "科目を選び直してね"}
-            name = await self.channel_name(channel_id)
-            self.time_tracker.bind_course_channel(channel_id, course_id, course_name)
-            entry, previous = self.time_tracker.start(TimerContext(str(body["user"]["id"]), "course", channel_id,
-                themes.theme_name(name), course_id, course_name))
-            if previous:
-                await self._sync_time_entry(previous)
-                await self._update_time_card(previous.channel_id, None)
-            await self._update_time_card(channel_id, entry)
+            user_id = str(body["user"]["id"])
+            # Slack は3秒以内の ack を求める。Toggl や Notion への送信は ack のあとに回す
+            self.spawn(self._start_course_timer(user_id, channel_id, course_id, course_name))
         return None
 
-    async def _update_time_card(self, channel: str, entry) -> None:
-        card = self.store.time_card(channel)
-        if card is None:
-            posted = await self.slack.chat_postMessage(channel=channel, text=time_fallback(entry), blocks=time_blocks(entry))
-            self.store.upsert_time_card(channel, str(posted["ts"]))
-        else:
-            await self.slack.chat_update(channel=channel, ts=card["message_ts"], text=time_fallback(entry), blocks=time_blocks(entry))
+    async def on_time_command(self, body: dict) -> str:
+        """`/toggl` を受ける。Slack へは3秒以内に ack するので、返す文は手元の計測だけで決め、送信は後に回す。
 
-    async def _time_notice(self, channel: str, text: str) -> None:
-        await self.slack.chat_postMessage(channel=channel, text=f"⚠️ {text}")
+        引数なしは切り替え（このチャンネルで計測中なら止め、そうでなければここで始める）。
+        `start`/`開始`、`stop`/`停止` で向きを決められる。
+        """
+        user_id = str(body.get("user_id") or "")
+        if not self.is_allowed(user_id):
+            return "この操作は利用できません"
+        channel_id, name = str(body.get("channel_id") or ""), str(body.get("channel_name") or "")
+        if channel_id and (not name or name in ("privategroup", "directmessage")):
+            info = await self.slack.conversations_info(channel=channel_id)
+            name = str(info["channel"]["name"])
+        if not channel_id or not name.startswith(("10_", "20_", "30_")):
+            return "時間を記録できるのは 10_・20_・30_ で始まるチャンネルだけだよ。"
+        arg = str(body.get("text") or "").strip().lower()
+        if arg not in ("", "start", "開始", "stop", "停止"):
+            return "使い方: `/toggl`（切り替え）、`/toggl start`、`/toggl stop`"
+        active = self.time_tracker.active(user_id)
+        here = active is not None and active.channel_id == channel_id
+        if arg in ("stop", "停止") or (not arg and here):
+            if active is None:
+                return "いまは計測していないよ。"
+            entry = self.time_tracker.stop(user_id)
+            if entry is None:
+                return "いまは計測していないよ。"
+            self.spawn(self._after_timer_change(stopped=entry, post_cards=False))
+            minutes = max(1, int((entry.ended_at - entry.started_at + 59) // 60))
+            return f"⏹ 止めたよ: {entry.description}（{minutes}分）"
+        if here:
+            return f"⏱️ もう計測中だよ: {active.description}"
+        domain = time_domain(name)
+        theme = themes.theme_name(name)
+        if domain == "course" and theme == "course":
+            await self._open_course_picker(str(body.get("trigger_id") or ""), channel_id)
+            return "科目を選ぶ画面を開いたよ。選ぶと計測を始めるね。"
+        binding = self.time_tracker.course_binding(channel_id)
+        entry, previous = self.time_tracker.start(TimerContext(
+            user_id, domain, channel_id, theme,
+            binding.course_page_id if binding else "", binding.course_name if binding else ""))
+        self.spawn(self._after_timer_change(started=entry, stopped=previous, post_cards=False))
+        switched = f"（{previous.description} は止めたよ）" if previous else ""
+        return f"▶️ 始めたよ: {entry.description}{switched}"
+
+    async def _open_course_picker(self, trigger_id: str, channel_id: str) -> None:
+        """先に読み込み中の画面を開き、今学期の科目が届いたら差し替える。"""
+        opened = await self.slack.views_open(trigger_id=trigger_id, view=course_loading_view(channel_id))
+        view_id = str((opened.get("view") or {}).get("id") or "")
+        self.spawn(self._fill_course_picker(view_id, channel_id))
+
+    async def _fill_course_picker(self, view_id: str, channel_id: str) -> None:
+        reply = await self.ask_course("list-current-courses")
+        items = reply.data.get("items") if reply.ok else None
+        view = (course_view(channel_id, items) if items else course_loading_view(
+            channel_id, "今学期の履修科目を読み出せなかったよ。Notion の「授業」を確認してね。"))
+        await self.slack.views_update(view_id=view_id, view=view)
+
+    async def _after_timer_change(self, started: TimeEntry | None = None, stopped: TimeEntry | None = None,
+                                  post_cards: bool = True) -> None:
+        """カードの表示を合わせ、止めた記録を Toggl と Notion に送る。"""
+        if stopped is not None:
+            await self._update_time_card(stopped.channel_id, None, create=post_cards)
+        if started is not None:
+            await self._update_time_card(started.channel_id, started, create=post_cards)
+        if stopped is not None:
+            await self._sync_time_entry(stopped)
+
+    async def _start_course_timer(self, user_id: str, channel_id: str, course_id: str, course_name: str) -> None:
+        name = await self.channel_name(channel_id)
+        self.time_tracker.bind_course_channel(channel_id, course_id, course_name)
+        await self._start_timer(TimerContext(user_id, "course", channel_id, name, course_id, course_name))
+
+    async def _start_timer(self, context: TimerContext) -> None:
+        """計測を始め、止めた前の計測を送ってカードを直す。"""
+        entry, previous = self.time_tracker.start(context)
+        await self._after_timer_change(started=entry, stopped=previous)
+
+    async def _update_time_card(self, channel: str, entry, create: bool = True) -> None:
+        """カードを今の計測に合わせる。create=False なら、カードのないチャンネルには置かない。"""
+        card = self.store.time_card(channel)
+        if card is None and not create:
+            return
+        if card is not None:
+            try:
+                await self.slack.chat_update(channel=channel, ts=card["message_ts"], text=time_fallback(entry),
+                                             blocks=time_blocks(entry))
+                return
+            except Exception:
+                # カードが消されたときは、新しく置き直す（固定は利用者がやり直す）
+                log.warning("時間カードを更新できないので置き直します: %s", channel, exc_info=True)
+        posted = await self.slack.chat_postMessage(channel=channel, text=time_fallback(entry), blocks=time_blocks(entry))
+        self.store.upsert_time_card(channel, str(posted["ts"]))
 
     async def _sync_time_entry(self, entry: TimeEntry, force: bool = False) -> None:
         if entry.ended_at is None:
             return
         if entry.toggl_state == "needs_review" and not force:
             return
-        if entry.toggl_state != "done":
-            toggl = load_toggl()
-            if toggl is None:
-                self.store.set_time_delivery(entry.id, toggl_state="pending")
-                return
+        toggl = load_toggl() if entry.toggl_state not in ("done", "not_configured") else None
+        if entry.toggl_state not in ("done", "not_configured") and toggl is None:
+            # Toggl を使わない運用でも、Notion の学習ログ・研究ログは残す
+            self.store.set_time_delivery(entry.id, toggl_state="not_configured")
+        if toggl is not None:
             try:
                 await asyncio.to_thread(toggl.record_completed, entry.description, entry.description,
                                         datetime.fromtimestamp(entry.started_at).astimezone(),
@@ -293,7 +382,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 await self.slack.chat_postMessage(channel=entry.channel_id, text="Toggl の確認が必要です",
                                                    blocks=retry_blocks(entry))
                 return
-            except TogglError:
+            except TogglError as e:
+                log.warning("Toggl に送れないので後で再送します: %s", e)
                 self.store.set_time_delivery(entry.id, toggl_state="pending")
                 return
             else:
@@ -329,7 +419,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if not token:
             raise RuntimeError("研究 Notion gateway の合言葉がありません")
         async with (aiohttp.ClientSession() as session,
-                    session.post(f"{self.config.notion_gateway_url.rstrip('/')}/time-logs", headers={
+                    session.post(gateway_endpoint(self.config.notion_gateway_url, "time-logs"), headers={
                         "Authorization": f"Bearer {token}"}, json={
                             "entry_id": entry.id, "started_at": started_at, "duration_minutes": minutes,
                             "theme": themes.theme_name(entry.channel_name), "memo": entry.memo,
@@ -680,8 +770,12 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
 
     async def run_agent(self, ws: Workspace, prompt: str, session_id: str | None = None,
                          channel: str = "", thread_ts: str = "",
-                         on_activity=None, on_text=None, *, provider: str | None = None) -> runner.RunResult:
+                         on_activity=None, on_text=None, *, provider: str | None = None,
+                         use_case: UseCase | None = None, request_text: str | None = None) -> runner.RunResult:
         """claude を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
+
+        `use_case` を渡せば分類しない。`request_text` は分類に使う依頼者の文（引き継ぎメモや履歴の
+        前置きを付ける前のもの）。渡さなければ prompt で分類する。
 
         どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
         """
@@ -691,12 +785,16 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             use_case = UseCase.SELF_FIX_DESIGN
         else:
             provider = provider or settings.selected_provider(self.config, self.store, actor)
-            explicit_use_case = research.has_explicit_use_case(prompt)
-            use_case, prompt = research.use_case_for_prompt(prompt)
-            if not explicit_use_case:
+            if provider not in PROVIDERS:
+                # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
+                return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
+            if use_case is None and research.has_explicit_use_case(prompt):
+                use_case, prompt = research.use_case_for_prompt(prompt)
+            if use_case is None:
                 from kei_agent.model_classifier import UsageLimited, classify_research
                 try:
-                    use_case = await classify_research(self.config, self.store, prompt, provider=provider)
+                    use_case = await classify_research(self.config, self.store, request_text or prompt,
+                                                       provider=provider)
                 except UsageLimited as e:
                     return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
                                             limit_reset_at=e.reset_at)
@@ -768,7 +866,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                     shown = validate_daily(shown)
                 elif output_kind == "review":
                     shown = validate_review(shown)
-            except OutputError:
+            except OutputError as e:
+                # 形式を確かめる前の本文は出さない
+                shown = ""
+                log.warning("%s の出力契約に違反: %s", output_kind, e)
                 result.is_error = True
                 result.errors.append(f"invalid {output_kind} output")
         if shown:
@@ -786,10 +887,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     def render_reply(self, result: runner.RunResult) -> tuple[str, bool]:
         """モデルの raw text を Slack 用の最終回答へ変換する唯一の入口。"""
         if result.is_error:
+            if NO_PROVIDER in result.errors:
+                return safe_failure("provider"), False
             return safe_failure("timeout" if result.timed_out else "connection"), False
         try:
             return finalize_conversation(result.text), False
-        except OutputError:
+        except OutputError as e:
+            # 本文はログに残さない。どの決まりに外れたかだけを残して、原因を追えるようにする
+            log.warning("Slack 出力契約に違反: %s（%d 文字）", e, len(result.text or ""))
             return safe_failure("conversation"), True
 
     # 依頼の処理
@@ -848,7 +953,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             except Exception:
                 log.exception("依頼の処理に失敗しました")
                 await self.post(req, safe_failure("connection"))
+                # 👀 と「作業中」の表示を残したままにしない
+                await self.mark_answered(req, failed=True)
+                with suppress(Exception):
+                    await self.thread_ui(req).finish("")
                 return None
+            finally:
+                # 途中で落ちても、このテーマを「重なって動いている」ままにしない（何度呼んでもよい）
+                self.theme_runs.end(req.channel_name, req.thread_ts)
 
     async def route_overview(self, req: Request) -> bool:
         """研究全体のチャンネルで、ほかのエージェントの用事なら、そちらに回す（回したら True）。
@@ -1018,6 +1130,12 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         version = runner.system_prompt_version(self.config)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
         prior_provider = self.store.last_provider(req.channel, req.thread_ts, actor)
+        # [[research-design]] などの指定は依頼者の文の先頭にある。前置きを付ける前に読み取る
+        request_text = prompt
+        use_case = None
+        if actor == research.AGENT and research.has_explicit_use_case(prompt):
+            use_case, prompt = research.use_case_for_prompt(prompt)
+            request_text = prompt
         # 区切って立てたスレッドの最初の回には、前のスレッドの引き継ぎメモを渡す
         prompt = self.handoff_memo_for(row) + prompt
         stalled = row["stalled_request"] if row else None
@@ -1034,7 +1152,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
-                                        on_activity, on_text, provider=provider)
+                                        on_activity, on_text, provider=provider,
+                                        use_case=use_case, request_text=request_text)
 
         result = await attempt(prompt, session_id)
         if result.session_missing:
@@ -1116,7 +1235,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         except NotionError as e:
             await self.notify_trouble(f"振り返りの結論を Notion に追記できませんでした: {e}")
 
-    # Slack の外からの依頼（声のレイヤなど。docs/design.md の12章）
+    # Slack の外からの依頼（声のレイヤなど。docs/architecture.md）
 
     async def ask_loop(self) -> None:
         """同じ Mac に置かれた依頼を、数秒ごとに拾う。"""
@@ -1137,7 +1256,12 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         pending = ask.claim_asks(self.config)
         if not pending:
             return
-        ids = await self.channel_ids()
+        try:
+            ids = await self.channel_ids()
+        except Exception:
+            # 拾った依頼を「処理中」のまま置き去りにしない。戻して次の周回で拾い直す
+            ask.recover_asks(self.config)
+            raise
         for item in pending:
             try:
                 theme = str(item.payload.get("theme") or "")
@@ -1297,10 +1421,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     async def job_loop(self) -> None:
         failing = False
         while True:
+            # 1つが落ちても残りは回す。ジョブの確認が止まっても、時間記録の再送は止めない
+            for step in (self.retry_deferred, self.retry_time_entries):
+                try:
+                    await step()
+                except Exception:
+                    log.exception("定期のやり直しに失敗しました: %s", step.__name__)
             try:
                 await self.poll_jobs()
-                await self.retry_deferred()
-                await self.retry_time_entries()
                 failing = False
             except Exception as e:
                 log.exception("ジョブの確認に失敗しました")

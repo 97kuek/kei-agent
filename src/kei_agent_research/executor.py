@@ -9,13 +9,13 @@
     cancel-job / forget-job  {"task_id": 12}
 
 ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、オーケストレーターが覚えている。
-ここは pueue の待ち行列を持つだけ（docs/design.md の11章）。
+ここは pueue の待ち行列を持つだけ（docs/architecture.md）。
 
 返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）で、`data` には `RunResult` が入る。
 経過と柵の扱いは `kei_agent_a2a/claude.py`（大学エージェントと共通）。
 
 会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方は持たない。
-それはオーケストレーターの仕事（docs/design.md の11章）。
+それはオーケストレーターの仕事（docs/architecture.md）。
 """
 
 from __future__ import annotations
@@ -25,17 +25,15 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
-from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent import research, themes
 from kei_agent.config import Config, load_config
 from kei_agent.jobs import Pueue
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.store import Store
-from kei_agent_a2a import claude, envelope
+from kei_agent_a2a import claude
+from kei_agent_a2a.executor import SkillExecutor
 from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, RUN_CLAUDE, SUBMIT_JOB
 
 log = logging.getLogger(__name__)
@@ -54,13 +52,7 @@ def _json(text: str) -> dict:
     return data
 
 
-def message_text(context: RequestContext) -> str:
-    message = getattr(context, "message", None)
-    parts = getattr(message, "parts", []) if message is not None else []
-    return "\n".join(p.text for p in parts if getattr(p, "text", ""))
-
-
-class ResearchExecutor(AgentExecutor):
+class ResearchExecutor(SkillExecutor):
     def __init__(self, config: Config | None = None, pueue: Pueue | None = None):
         self.config = config or load_config()
         self.pueue = pueue or Pueue(self.config)
@@ -68,15 +60,7 @@ class ResearchExecutor(AgentExecutor):
         # pueue のグループは最初に使うときだけ用意する
         self._group_ready = False
 
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        metadata = dict(getattr(context, "metadata", None) or {})
-        text = message_text(context)
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        # 仕事の状態を知らせる前に、まず「その仕事がある」ことを相手に渡す（A2A の決まり）
-        await event_queue.enqueue_event(Task(
-            id=context.task_id, context_id=context.context_id,
-            status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED)))
-        await updater.start_work()
+    async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", RUN_CLAUDE)
         if skill not in SKILLS:
             await self._fail(updater, f"できるのは {' / '.join(SKILLS)} です")
@@ -148,20 +132,13 @@ class ResearchExecutor(AgentExecutor):
         """ジョブを動かしてよい場所だけを受け付ける（渡された場所で何でも動かさない）。
 
         研究テーマの中と、研究全体の作業場（`<agent_root>/overview`。研究テーマの外にある）。
+        研究テーマを並べた場所（`research_root`）そのものでは動かさない。
         """
-        roots = (self.config.research_root.resolve(), self.config.overview_dir.resolve())
+        research_root = self.config.research_root.resolve()
+        overview = self.config.overview_dir.resolve()
         path = Path(cwd).expanduser().resolve()
-        if not path.is_dir() or not any(root in path.parents or root == path for root in roots):
+        # 研究テーマの親（research_root そのもの）は、どのテーマでもないので断る
+        inside = research_root in path.parents or overview == path or overview in path.parents
+        if not path.is_dir() or not inside:
             raise ValueError(f"ジョブを動かしてよい場所ではありません: {cwd}")
         return path
-
-    async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
-        await claude.finish(updater, envelope.reply(text, data))
-
-    async def _fail(self, updater: TaskUpdater, reason: str) -> None:
-        log.warning("断りました: %s", reason)
-        await updater.failed(updater.new_agent_message([Part(text=envelope.failure(reason))]))
-
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        await updater.cancel()

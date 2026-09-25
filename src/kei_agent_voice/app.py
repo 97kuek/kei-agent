@@ -1,6 +1,6 @@
 """声のレイヤの起動（A2A サーバー）。土台は `kei_agent_a2a.server`。
 
-常駐させる（呼びかけを待ち続けるので、コマンドではなくサービス。docs/voice.md の4節）。
+常駐させる（呼びかけを待ち続けるので、コマンドではなくサービス。docs/architecture.md の「声のレイヤ」）。
 """
 
 from __future__ import annotations
@@ -23,14 +23,8 @@ DEFAULT_PORT = 8790
 ENV_PREFIX = "KEI_AGENT_VOICE"
 
 
-def build_app(base_url: str, token: str, executor: VoiceExecutor | None = None,
-              listen: bool = False) -> Starlette:
-    executor = executor or VoiceExecutor()
-    app = _build_app(build_card(base_url), executor, RPC_PATH, token)
-    if listen:
-        # Starlette 1.6 は on_startup を持たない。lifespan だけ
-        app.router.lifespan_context = _ears(executor)
-    return app
+def build_app(base_url: str, token: str, executor: VoiceExecutor | None = None) -> Starlette:
+    return _build_app(build_card(base_url), executor or VoiceExecutor(), RPC_PATH, token)
 
 
 def _ears(executor: VoiceExecutor, config: Config | None = None, store: Store | None = None):
@@ -45,7 +39,8 @@ def _ears(executor: VoiceExecutor, config: Config | None = None, store: Store | 
         runtime_store = store or Store(runtime_config.db_path)
         try:
             initial_listening = settings.listening_enabled(runtime_store)
-            session = VoiceSession(executor.held, config=runtime_config)
+            # 道具も同じ store を使う（sqlite はつないだスレッドでしか使えない）
+            session = VoiceSession(executor.held, config=runtime_config, store=runtime_store)
             # マイクの開け閉めは、本体が Slack（App Home）から押してくる
             executor.session = session
             # 保存済みの設定を初期値として使う（既定では開けない）
@@ -69,6 +64,7 @@ def main() -> None:
     # 名刺は serve が住所つきで作ってくれるので、それをそのまま使う
     def with_ears(card, executor, path, token):
         app = _build_app(card, executor, path, token)
+        # Starlette 1.6 は on_startup を持たない。lifespan だけ
         app.router.lifespan_context = _ears(executor)
         return app
 

@@ -14,8 +14,11 @@ if [[ ! -r "$SECRETS" ]]; then
 fi
 source "$SECRETS"
 
-# ログは launchd の標準出力（~/Library/Logs/kei-agent/notion-gateway-launchd.log）に出る
-
 REPO="${0:A:h:h}"
+source "$REPO/deploy/_common.sh"
+
+# ログは launchd の標準出力（~/Library/Logs/kei-agent/notion-gateway-launchd.log）に出る
+trim_launchd_log notion-gateway-launchd.log
+
 cd "$REPO"
 exec uv run --frozen kei-agent-notion-gateway

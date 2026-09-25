@@ -128,3 +128,34 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
             config, store, "research", "実験ログを見て", model_classifier._RESEARCH_CASES,
             UseCase.RESEARCH_EXECUTE, "research_extract", "抽出は extract。")
     assert raised.value.reset_at == 123.0
+
+
+async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
+    """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
+    from kei_agent import model_classifier, router, runner, settings
+
+    seen = []
+
+    async def record(_config, request, _prompt, *_args, **_kwargs):
+        seen.append(request.workspace.cwd)
+        return runner.RunResult(text='{"use_case":"research_extract","confidence":0.9}')
+
+    monkeypatch.setattr(runner, "run_model", record)
+    for actor in ("research", "course"):
+        settings.set_agent_provider(store, actor, "codex")
+    # conftest が差し替えた classify_research ではなく、本物の _classify を通す
+    await model_classifier._classify(config, store, "research", "ログを見て", model_classifier._RESEARCH_CASES,
+                                     UseCase.RESEARCH_EXECUTE, "", "")
+    await model_classifier._classify(config, store, "course", "課題の要件", model_classifier._COURSE_CASES,
+                                     UseCase.COURSE_EXPLAIN, "", "")
+
+    assert len(set(seen + [router.workspace(config).cwd])) == 3
+
+
+def test_json_object_is_read_from_the_first_brace_block():
+    from kei_agent.router import json_object
+
+    assert json_object('はい\n{"skill": "ask"}\nどうぞ') == {"skill": "ask"}
+    assert json_object("よく分かりません") is None
+    assert json_object("{broken}") is None
+    assert json_object("[1, 2]") is None

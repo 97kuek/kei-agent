@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kei_agent.config import AGENT_PLUGINS
 from kei_agent.model_policy import ResolvedModel, UseCase
 
 if TYPE_CHECKING:
@@ -37,8 +38,13 @@ def prompt_fingerprint(prompt_text: str, skill_dir: Path | None) -> str:
     return digest.hexdigest()[:12]
 
 
+def is_read_only(request: ExecutionRequest) -> bool:
+    """呼び出し元が取り落としても、振り分け・分類の recipe は書込み実行にしない。"""
+    return request.read_only or request.recipe.actor == "router" or request.recipe.use_case is UseCase.ROUTING
+
+
 def required_capabilities(request: ExecutionRequest) -> frozenset[str]:
-    read_only = request.read_only or request.recipe.actor == "router" or request.recipe.use_case is UseCase.ROUTING
+    read_only = is_read_only(request)
     required = {"filesystem.read", "filesystem.deny_read", "network.domain_allowlist"}
     if not read_only:
         required.add("filesystem.write_scope")
@@ -53,8 +59,8 @@ def resolve_contract(config: Config, request: ExecutionRequest) -> ExecutionCont
                    (config.repo_root / "prompts" / f"{actor}.md" if actor in {"course", "work"}
                     else config.system_prompt_path))
     prompt_text = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
-    skill_dir = config.agent_plugin_dir(actor) / "skills" if actor in {"research", "course", "work"} else None
-    read_only = request.read_only or actor == "router" or request.recipe.use_case is UseCase.ROUTING
+    skill_dir = config.agent_plugin_dir(actor) / "skills" if actor in AGENT_PLUGINS else None
+    read_only = is_read_only(request)
     return ExecutionContract(
         workspace=request.workspace,
         recipe=request.recipe,

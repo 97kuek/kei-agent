@@ -72,11 +72,7 @@ def assistant_seconds(store: Store, since: float, until: float) -> dict[tuple[st
 
     終わっていない実行（ended_at が空）は数えない。
     """
-    rows = store.conn.execute(
-        "SELECT channel_name, started_at, ended_at FROM runs "
-        "WHERE ended_at IS NOT NULL AND started_at >= ? AND started_at < ?",
-        (since, until),
-    ).fetchall()
+    rows = store.finished_runs(since, until)
     totals: dict[tuple[str, str], float] = defaultdict(float)
     for r in rows:
         totals[(_day(r["started_at"]), r["channel_name"] or "-")] += r["ended_at"] - r["started_at"]
@@ -103,7 +99,7 @@ class Toggl:
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
             raise TogglError(f"GET {path}: {e}") from None
 
-    def _post(self, path: str, body: dict) -> dict:
+    def _post(self, path: str, body: dict | list) -> dict:
         req = urllib.request.Request(
             f"{TOGGL_API}{path}", method="POST", data=json.dumps(body).encode(),
             headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
@@ -148,13 +144,14 @@ class Toggl:
             raise ValueError("開始時刻にはタイムゾーンが必要です")
         project_id = self._project_id(project_name.strip())
         path = f"/organizations/{self.organization_id}/workspaces/{self.workspace_id}/time-entries/bulk"
-        self._post(path, {"items": [{
+        # bulk は本文に配列そのものを受け取る（{"items": ...} の形だと 400 になる）
+        self._post(path, [{
             "project_id": project_id,
             "description": description.strip(),
             "start": started_at.isoformat(),
             "duration": int(duration_seconds),
             "type": "activity",
-        }]})
+        }])
 
     def entries(self, since: date, until: date) -> list[dict]:
         """since 〜 until（両端を含む、手元の日付）の記録。"""

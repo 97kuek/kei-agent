@@ -9,11 +9,29 @@ def test_finalizer_keeps_only_the_marked_user_facing_answer():
     assert finalize_conversation(raw) == "僕が調べた結果、課題はないよ。"
 
 
-def test_finalizer_rejects_missing_marker_and_local_path():
+def test_finalizer_rejects_missing_marker():
     with pytest.raises(OutputError):
         finalize_conversation("確認します")
-    with pytest.raises(OutputError):
-        finalize_conversation("<<kei-agent-final>>\nreviews/today.md に保存したよ\n<<kei-agent-final-end>>")
+
+
+def test_finalizer_keeps_workspace_file_names():
+    # プロンプトは outputs/ のファイル名を書くよう頼んでいる。これで返答全体を捨てない
+    raw = "<<kei-agent-final>>\n図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ\n<<kei-agent-final-end>>"
+
+    assert finalize_conversation(raw) == "図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"
+
+
+def test_finalizer_hides_absolute_local_paths_instead_of_dropping_the_answer():
+    raw = ("<<kei-agent-final>>\n結果は /Users/kei/research/amr/outputs/fig.png と "
+           "~/notes/memo.md、file:///tmp/x.txt にあるよ\n<<kei-agent-final-end>>")
+
+    assert finalize_conversation(raw) == "結果は fig.png と memo.md、x.txt にあるよ"
+
+
+def test_finalizer_allows_ordinary_words_about_steps_and_tools():
+    raw = "<<kei-agent-final>>\nまず締切を確認するといいよ。Claude Code の話なら続けるね\n<<kei-agent-final-end>>"
+
+    assert finalize_conversation(raw) == "まず締切を確認するといいよ。Claude Code の話なら続けるね"
 
 
 def test_finalizer_allows_a_normal_web_link():

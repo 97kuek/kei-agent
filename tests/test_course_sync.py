@@ -248,7 +248,7 @@ def test_current_courses_returns_only_this_terms_enrolled_courses():
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
 
 
-def test_match_course_keeps_finished_course_out_of_schedule_but_available_for_grades():
+def test_finished_course_stays_out_of_the_schedule():
     from datetime import date
 
     rows = [*COURSE_ROWS_FULL, {"id": "math-page", "properties": {
@@ -258,7 +258,53 @@ def test_match_course_keeps_finished_course_out_of_schedule_but_available_for_gr
     course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE)
 
     assert "数学" not in [item["subject"] for item in course.current_courses(date(2026, 9, 21))]
-    assert course.match_course("数学", 2025, "春期") == "math-page"
+
+
+def test_last_years_course_left_as_enrolled_does_not_come_back():
+    """去年の「履修中」が残っていても、年度が違えば今年の授業に出さない（1〜3月は前の年度）。"""
+    from datetime import date
+
+    rows = [{"id": key, "url": "", "properties": {
+        "科目名": _title(name), "曜日": _select("月"), "時限": {"number": 2},
+        "状態": _select("履修中"), "学期": _select("秋学期"), "年度": {"number": year}}}
+        for key, name, year in (("old", "去年のデータベース", 2025), ("now", "データベース", 2026))]
+
+    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE)
+    assert [c["subject"] for c in course.courses_on("月", date(2026, 9, 21))] == ["データベース"]
+    assert [c["subject"] for c in course.courses_on("月", date(2027, 1, 18))] == ["データベース"]
+
+
+@pytest.mark.parametrize(("term", "spring", "autumn"), [
+    ("春ク", True, False), ("夏ク", True, False), ("秋ク", False, True), ("冬ク", False, True),
+    ("その他", True, True), ("", True, True), ("通年", True, True),
+])
+def test_quarters_follow_their_semester(term, spring, autumn):
+    from datetime import date
+
+    from kei_agent_course import periods
+
+    assert periods.in_term(term, date(2026, 5, 11)) is spring
+    assert periods.in_term(term, date(2026, 11, 9)) is autumn
+
+
+def test_academic_year_starts_in_april():
+    from datetime import date
+
+    from kei_agent_course import periods
+
+    assert periods.academic_year(date(2027, 3, 31)) == 2026
+    assert periods.academic_year(date(2027, 4, 1)) == 2027
+
+
+def test_next_weekday_is_today_or_later():
+    from datetime import date
+
+    from kei_agent_course import periods
+
+    friday = date(2026, 9, 25)
+    assert periods.next_weekday("金", friday) == friday
+    assert periods.next_weekday("月", friday) == date(2026, 9, 28)
+    assert periods.next_weekday("他", friday) == friday
 
 
 def test_study_time_log_is_idempotent_and_relates_the_course():

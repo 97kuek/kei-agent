@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+from kei_agent_course.periods import GRADE_TERM_NAMES
+
 
 @dataclass(frozen=True)
 class Grade:
@@ -142,7 +144,7 @@ def _grades(path: Path) -> tuple[Grade, ...]:
         result.append(Grade(
             course_name=name,
             year=year,
-            term=term if term in {"春期", "秋期", "夏ク", "秋ク", "冬ク", "通年"} else "その他",
+            term=term if term in GRADE_TERM_NAMES else "その他",
             credits=credits,
             grade=grade,
             gp=_number(gp_text),

@@ -218,6 +218,30 @@ async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
     assert store.get_job(job.id).status == "queued"
 
 
+async def test_job_left_without_pueue_id_is_adopted_from_its_label(config, store, theme):
+    """投入したあと pueue_id を書く前に落ちても、ラベルから拾い直す。"""
+    pueue = FakePueue()
+    manager = JobManager(config, store, pueue)
+    job = store.add_job("r10", "C1", "100.1", str(theme.cwd), "sweep", "scripts/sweep.py", status="queued")
+    task_id = await pueue.add(theme.cwd, "cmd", label=f"kei-agent-{job.id}")
+    with store.conn:
+        store.conn.execute("UPDATE jobs SET submitted_at = submitted_at - 3600 WHERE id = ?", (job.id,))
+
+    assert await manager.refresh() == []
+    assert store.get_job(job.id).pueue_id == task_id
+    assert store.active_jobs()[0].id == job.id
+
+
+async def test_job_lost_before_reaching_pueue_is_reported_failed(config, store, theme):
+    manager = JobManager(config, store, FakePueue())
+    job = store.add_job("r11", "C1", "100.1", str(theme.cwd), "sweep", "scripts/sweep.py", status="queued")
+    with store.conn:
+        store.conn.execute("UPDATE jobs SET submitted_at = submitted_at - 3600 WHERE id = ?", (job.id,))
+
+    failed, = await manager.refresh()
+    assert failed.id == job.id and failed.status == "failed" and "途中で" in failed.detail
+
+
 # できるはずのファイル（--expect）
 
 

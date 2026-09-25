@@ -8,7 +8,7 @@ Notion の「授業」には曜日（月〜日・他）と時限（1〜7）が�
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 # 早稲田大学の標準の時間割（1時限 90 分）
 WASEDA = {
@@ -25,6 +25,14 @@ WEEKDAYS = "月火水木金土日"
 SPRING, AUTUMN, ALL_YEAR = "春学期", "秋学期", "通年"
 # 春学期の月（4〜8月）。残りは秋学期として扱う
 SPRING_MONTHS = range(4, 9)
+# 年度の始まりの月（1〜3月は前の年度）
+YEAR_START_MONTH = 4
+# 成績 HTML の学期名 → 授業 DB の学期名
+GRADE_TERMS = {"春期": SPRING, "秋期": AUTUMN}
+# クォーター科目が開かれる学期
+QUARTERS = {"春ク": SPRING, "夏ク": SPRING, "秋ク": AUTUMN, "冬ク": AUTUMN}
+# 成績 HTML で学期として読む名前（ほかは「その他」）
+GRADE_TERM_NAMES = frozenset({*GRADE_TERMS, *QUARTERS, ALL_YEAR})
 
 
 def weekday_of(day: date) -> str:
@@ -37,9 +45,42 @@ def term_of(day: date) -> str:
     return SPRING if day.month in SPRING_MONTHS else AUTUMN
 
 
-def in_term(term: str, day: date) -> bool:
-    """その科目が、その日に開かれているか（通年はいつでも対象。空欄は判断せず対象に含める）。"""
-    return term in ("", ALL_YEAR, term_of(day))
+def academic_year(day: date) -> int:
+    """その日が属する年度（4月始まり）。"""
+    return day.year if day.month >= YEAR_START_MONTH else day.year - 1
+
+
+def course_term(term: str) -> str:
+    """成績の学期名を授業 DB の学期名にそろえる（春期→春学期。クォーターはそのまま）。"""
+    return GRADE_TERMS.get(term, term)
+
+
+def semester_of(term: str) -> str:
+    """学期・クォーターを、開かれる学期（春学期／秋学期／通年）に直す。分からなければ空文字。"""
+    term = course_term(term)
+    if term in (SPRING, AUTUMN, ALL_YEAR):
+        return term
+    return QUARTERS.get(term, "")
+
+
+def in_term(term: str, day: date, year: int | None = None) -> bool:
+    """その科目が、その日に開かれているか。
+
+    年度が入っていれば、その日の年度と合うものだけ。通年はいつでも対象。
+    学期が空欄や「その他」のものは判断せず対象に含める。
+    """
+    if year is not None and year != academic_year(day):
+        return False
+    semester = semester_of(term)
+    return semester in ("", ALL_YEAR, term_of(day))
+
+
+def next_weekday(weekday: str, today: date) -> date:
+    """今日から見て、次のその曜日の日付（今日がその曜日なら今日）。曜日でなければ今日。"""
+    index = WEEKDAYS.find(weekday) if len(weekday) == 1 else -1
+    if index < 0:
+        return today
+    return today + timedelta(days=(index - today.weekday()) % 7)
 
 
 def span(period: int | None) -> tuple[time, time] | None:

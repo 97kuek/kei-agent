@@ -210,3 +210,29 @@ def test_course_still_denies_box_writes_by_name():
 
     assert "mcp__claude_ai_Box__upload_file" in tools.DENY
     assert not set(tools.ALLOWED) & set(tools.DENY)
+
+
+async def test_list_classes_for_another_weekday_uses_that_days_date(server, monkeypatch):
+    """曜日を指定されたら、今日ではなく、次のその曜日の日付で学期と時刻を決める。"""
+    from datetime import date
+
+    from kei_agent_course import executor, notion_sync
+
+    class _Today(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 25)   # 金曜
+
+    seen = []
+
+    def courses_on(weekday, day):
+        seen.append((weekday, day))
+        return [{"id": "p1", "subject": "データベース", "weekday": weekday, "term": "秋学期", "period": 2, "url": ""}]
+
+    monkeypatch.setattr(executor, "date", _Today)
+    monkeypatch.setattr(notion_sync, "courses_on", courses_on)
+    result = await Agent(server, TOKEN).ask("list-classes", params={"weekday": "月"})
+
+    assert seen == [("月", date(2026, 9, 28))]
+    item, = json.loads(result.answer)["data"]["items"]
+    assert item["start"] == "2026-09-28T10:40"

@@ -5,65 +5,43 @@
 
 返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）。見せ方はオーケストレーターが決める。
 `list-events` が返すのは件名・時間・場所・リンクまで。朝のまとめで1行ずつ並べる形に合わせている
-（docs/design.md の11章）。
+（docs/architecture.md）。
 """
 
 from __future__ import annotations
 
 import logging
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
-from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent.config import Config, load_config
 from kei_agent.store import Store
-from kei_agent_a2a import claude, envelope
+from kei_agent_a2a import claude
+from kei_agent_a2a.executor import SkillExecutor, asked_days
 from kei_agent_work import connector
 from kei_agent_work.card import ASK, LIST_EVENTS
 
 log = logging.getLogger(__name__)
 
 SKILLS = (LIST_EVENTS, ASK)
+# 予定を読む先の長さの上限（日）
+MAX_DAYS = 90
 
 
-def message_text(context: RequestContext) -> str:
-    """届いたメッセージの本文。"""
-    message = getattr(context, "message", None)
-    parts = getattr(message, "parts", []) if message is not None else []
-    return "\n".join(p.text for p in parts if getattr(p, "text", ""))
-
-
-def asked_days(metadata: dict | None, default: int = connector.DEFAULT_DAYS) -> int:
-    try:
-        days = int((metadata or {}).get("days", default))
-    except (TypeError, ValueError):
-        return default
-    return days if 1 <= days <= 90 else default
-
-
-class WorkExecutor(AgentExecutor):
+class WorkExecutor(SkillExecutor):
     def __init__(self, config: Config | None = None, store: Store | None = None):
         self.config = config or load_config()
         self.store = store or Store(self.config.db_path)
 
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        metadata = dict(getattr(context, "metadata", None) or {})
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        # 仕事の状態を知らせる前に、まず「その仕事がある」ことを相手に渡す（A2A の決まり）
-        await event_queue.enqueue_event(Task(
-            id=context.task_id, context_id=context.context_id,
-            status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED)))
-        await updater.start_work()
+    async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", LIST_EVENTS)
         if skill not in SKILLS:
             await self._fail(updater, f"できるのは {' / '.join(SKILLS)} だけです")
             return
         if skill == ASK:
-            await self._ask(updater, claude.ask_prompt(message_text(context)), str(metadata.get("provider") or ""))
+            await self._ask(updater, claude.ask_prompt(text), str(metadata.get("provider") or ""))
             return
-        days = asked_days(metadata)
+        days = asked_days(metadata, connector.DEFAULT_DAYS, MAX_DAYS)
         try:
             provider = str(metadata.get("provider") or "")
             if metadata.get("calendar_snapshot") is True:
@@ -79,8 +57,7 @@ class WorkExecutor(AgentExecutor):
             await self._fail(updater, str(e), e.limit_reset_at)
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
-        await claude.finish(updater, envelope.reply(
-            f"これから {days} 日の予定は {len(events)} 件", {"days": days, **snapshot}))
+        await self._done(updater, f"これから {days} 日の予定は {len(events)} 件", {"days": days, **snapshot})
 
     async def _ask(self, updater: TaskUpdater, question: str, provider: str = "") -> None:
         """自由な質問に、連携を読んで答える。"""
@@ -92,13 +69,4 @@ class WorkExecutor(AgentExecutor):
         except connector.WorkCalendarError as e:
             await self._fail(updater, str(e), e.limit_reset_at)
             return
-        await claude.finish(updater, envelope.reply(answer))
-
-    async def _fail(self, updater: TaskUpdater, reason: str, limit_reset_at: float | None = None) -> None:
-        log.warning("断りました: %s", reason)
-        await updater.failed(updater.new_agent_message([
-            Part(text=envelope.reply(reason, ok=False, limit_reset_at=limit_reset_at))]))
-
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        await updater.cancel()
+        await self._done(updater, answer)

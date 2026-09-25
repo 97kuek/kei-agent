@@ -33,7 +33,6 @@ TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")  # 実行
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
-WEEKDAYS = "月火水木金土日"
 # 締切が近いものを知らせるために、カレンダーを見に行く間隔（秒）
 DUE_CHECK_SECONDS = 3600
 # 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
@@ -42,6 +41,9 @@ NOTICE_RETENTION_DAYS = 60
 VOICE_DAYS = 7
 HUB_SYNC_HOUR = 8
 HUB_RETRY_SECONDS = 3600
+# Outlook の全件取得を独立に確かめる経路がまだない（kei_agent_work は verified_complete を返さない）。
+# 聞いても必ず捨てるので、できるまでは work に聞かない（毎日・毎時 claude を回さない）
+OUTLOOK_SYNC_ENABLED = False
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -58,8 +60,7 @@ def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
 
 
 def label(day: str) -> str:
-    d = date.fromisoformat(day)
-    return f"{d.month}/{d.day}（{WEEKDAYS[d.weekday()]}）"
+    return morning.day_label(date.fromisoformat(day))
 
 
 def search_keywords(claude_md: Path) -> list[str]:
@@ -125,7 +126,7 @@ class Scheduler:
             self._hub_calendar_checked = now.timestamp()
             detail = await self.run_task("hub_calendar", hub_day, record=False)
             if (isinstance(detail, dict) and detail.get("course") == "synced"
-                    and detail.get("work") in {"synced", "incomplete"}):
+                    and detail.get("work") in {"synced", "incomplete", "disabled"}):
                 self.store.record_schedule("hub_calendar", hub_day, detail)
         await self.notify_due_soon(now)
         await self.nudge_stale_threads()
@@ -307,10 +308,11 @@ class Scheduler:
             return {"course": "no_hub", "work": "no_hub"}
         checked_at = datetime.combine(date.fromisoformat(day), dtime(9, 0), JST)
         outcomes = {}
-        sources = (
-            ("course", course.LIST_CALENDAR_ASSIGNMENTS, self.assistant.ask_course),
-            ("work", work.LIST_EVENTS, self.assistant.ask_work),
-        )
+        sources = [("course", course.LIST_CALENDAR_ASSIGNMENTS, self.assistant.ask_course)]
+        if OUTLOOK_SYNC_ENABLED:
+            sources.append(("work", work.LIST_EVENTS, self.assistant.ask_work))
+        else:
+            outcomes["work"] = "disabled"
         for domain, skill, ask in sources:
             try:
                 params = {"days": 30}

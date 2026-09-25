@@ -2,14 +2,13 @@
 
 柵そのもの（書き込み先、読ませない場所、基本の接続先）は `config.toml` に残し、ここでは扱わない。
 保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
-許可を足せてしまう（docs/design.md の9章）。
+許可を足せてしまう（docs/architecture.md）。
 """
 
 from __future__ import annotations
 
 import re
 import sqlite3
-import time
 
 from kei_agent.config import HHMM, MODEL_ACTORS, AgentProfile, Config
 from kei_agent.guard import valid_domain
@@ -33,35 +32,27 @@ _REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[
 # テーマごとの接続先
 
 def theme_domains(store: Store, theme: str) -> list[str]:
-    rows = store.conn.execute(
-        "SELECT domain FROM theme_domains WHERE theme = ? ORDER BY domain", (theme,)).fetchall()
-    return [r["domain"] for r in rows]
+    return [r["domain"] for r in store.theme_domains(theme)]
 
 
 def all_theme_domains(store: Store) -> dict[str, list[str]]:
     result: dict[str, list[str]] = {}
-    for r in store.conn.execute("SELECT theme, domain FROM theme_domains ORDER BY theme, domain"):
+    for r in store.theme_domains():
         result.setdefault(r["theme"], []).append(r["domain"])
     return result
 
 
 def allow_domain(store: Store, theme: str, domain: str, reason: str) -> None:
-    with store.conn:
-        store.conn.execute(
-            "INSERT OR IGNORE INTO theme_domains (theme, domain, reason, added_at) VALUES (?, ?, ?, ?)",
-            (theme, domain.strip().lower(), reason, time.time()),
-        )
+    store.add_theme_domain(theme, domain.strip().lower(), reason)
 
 
 def remove_domain(store: Store, theme: str, domain: str) -> None:
-    with store.conn:
-        store.conn.execute("DELETE FROM theme_domains WHERE theme = ? AND domain = ?", (theme, domain))
+    store.remove_theme_domains(theme, domain)
 
 
 def drop_theme(store: Store, theme: str) -> None:
     """テーマを閉じたら、そのテーマで許可した接続先も消す。"""
-    with store.conn:
-        store.conn.execute("DELETE FROM theme_domains WHERE theme = ?", (theme,))
+    store.remove_theme_domains(theme)
 
 
 # Claude からの接続の申し出
@@ -80,59 +71,35 @@ def parse_connect_requests(text: str) -> list[tuple[str, str]]:
 
 
 def add_request(store: Store, channel: str, thread_ts: str, theme: str, domain: str, reason: str) -> int:
-    with store.conn:
-        cur = store.conn.execute(
-            """INSERT INTO domain_requests (channel, thread_ts, theme, domain, reason, status, created_at)
-               VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
-            (channel, thread_ts, theme, domain, reason, time.time()),
-        )
-    return int(cur.lastrowid)
+    return store.add_domain_request(channel, thread_ts, theme, domain, reason)
 
 
 def get_request(store: Store, request_id: int) -> sqlite3.Row | None:
-    return store.conn.execute("SELECT * FROM domain_requests WHERE id = ?", (request_id,)).fetchone()
+    return store.domain_request(request_id)
 
 
 def resolve_request(store: Store, request_id: int, status: str) -> bool:
     """まだ決まっていない申し出を allowed / denied にする。もう決まっていたら False（ボタンの2度押し）。"""
-    with store.conn:
-        cur = store.conn.execute(
-            "UPDATE domain_requests SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
-            (status, time.time(), request_id),
-        )
-    return cur.rowcount == 1
+    return store.resolve_domain_request(request_id, status)
 
 
 def pending_requests(store: Store, channel: str, thread_ts: str) -> int:
-    row = store.conn.execute(
-        "SELECT COUNT(*) AS n FROM domain_requests WHERE channel = ? AND thread_ts = ? AND status = 'pending'",
-        (channel, thread_ts)).fetchone()
-    return int(row["n"])
+    return store.count_pending_domain_requests(channel, thread_ts)
 
 
 def take_decisions(store: Store, channel: str, thread_ts: str) -> list[sqlite3.Row]:
     """決まったが、まだ Claude に伝えていない申し出。取り出したら伝えたことにする。"""
-    with store.conn:
-        rows = store.conn.execute(
-            """SELECT * FROM domain_requests WHERE channel = ? AND thread_ts = ?
-               AND status != 'pending' AND resumed = 0 ORDER BY id""", (channel, thread_ts)).fetchall()
-        store.conn.execute(
-            "UPDATE domain_requests SET resumed = 1 WHERE channel = ? AND thread_ts = ? AND status != 'pending'",
-            (channel, thread_ts))
-    return rows
+    return store.take_domain_decisions(channel, thread_ts)
 
 
 # 決まった時刻の処理
 
 def _get(store: Store, key: str) -> str | None:
-    row = store.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
+    return store.setting(key)
 
 
 def _set(store: Store, key: str, value: str) -> None:
-    with store.conn:
-        store.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                     "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
+    store.set_setting(key, value)
 
 
 def _config_time(config: Config, name: str) -> str:
@@ -167,7 +134,7 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
     _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
 
 
-# 声で知らせるか（docs/voice.md の7節）
+# 声で知らせるか（docs/architecture.md の「声のレイヤ」）
 
 VOICE_KEY = "voice.enabled"
 LISTEN_KEY = "voice.listening"
@@ -190,7 +157,7 @@ def listening_enabled(store: Store) -> bool:
     """マイクで聞くか。**既定は切**。
 
     常に録っているのは落ち着かないし、講義中に「経過」「計測」のような同音で反応しても困る。
-    聞きたいときだけ Slack から入れる（docs/voice.md の7節）。
+    聞きたいときだけ Slack から入れる（docs/architecture.md の「声のレイヤ」）。
     """
     return _get(store, LISTEN_KEY) == "1"
 
@@ -216,8 +183,7 @@ def clear_agent_profile(store: Store, agent: str) -> None:
     """App Home の provider 選択を外し、未選択へ戻す。"""
     if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
-    with store.conn:
-        store.conn.execute("DELETE FROM settings WHERE key = ?", (f"agent.{agent}.provider",))
+    store.delete_setting(f"agent.{agent}.provider")
 
 
 def has_agent_profile_override(store: Store, agent: str) -> bool:

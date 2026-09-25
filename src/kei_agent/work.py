@@ -5,7 +5,7 @@
 
 `list-events` から作る一覧は、件名・時間・場所・リンクまで（1行ずつ並べるため）。自由な質問の返事は
 仕事エージェントの claude が組み立てる（長さの加減は prompts/work.md）
-（docs/design.md の11章）。
+（docs/architecture.md）。
 
 Assistant に混ぜて使う。self.agents、self.post などは Assistant のもの。
 """

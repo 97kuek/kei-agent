@@ -1,5 +1,5 @@
 """仕事エージェント（A2A サーバー）。
 
 会社のアカウントの予定・メール・資料を読んで、個人の Slack には要点とリンクだけを返す。
-いまできるのは Outlook の予定を読むことだけ（docs/agents.md、docs/design.md の11章）。
+いまできるのは Outlook の予定を読むことだけ（docs/architecture.md の「振り分けと A2A」、docs/architecture.md）。
 """

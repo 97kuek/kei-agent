@@ -72,7 +72,7 @@ timeout_seconds = 300
 # 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
 
 [a2a.agents]
-# ほかのエージェントの住所（docs/agents.md）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
+# ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
 # 行を消すと、そのエージェントは使わない（research を消すと、claude は本体の中で動く）
 course = "http://127.0.0.1:8787"
 research = "http://127.0.0.1:8788"

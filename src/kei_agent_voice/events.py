@@ -1,8 +1,8 @@
 """本体から来た出来事を、喋る文と顔に変える。
 
 本体が渡すのは「何が起きたか」だけ（`{"kind": "done", "theme": "amr-query"}`）。
-文と顔と首をここで組み立てる。本体に「どんな顔をさせるか」を持たせると、対応表が2か所に散る
-（docs/voice.md の4節）。
+文と顔をここで組み立てる。本体に「どんな顔をさせるか」を持たせると、対応表が2か所に散る
+（docs/architecture.md の「声のレイヤ」）。
 
 声の言い方は、Slack に出す形とは別に作る。帯（`` `9時 .####...` ``）も URL も声では読めず、
 「あと23時間で締切」は声なら「明日の夕方までだよ」の方が自然。
@@ -23,8 +23,6 @@ class Reaction:
     """出来事への反応。`text` が空なら喋らない（顔だけ変える）。"""
     text: str = ""
     face: str = NEUTRAL
-    # 依頼者の方を向くか。気づいてほしいときだけ True にする
-    look: bool = False
 
     @property
     def speaks(self) -> bool:
@@ -66,14 +64,14 @@ def reaction(event: dict) -> Reaction | None:
         # マイクの開け閉め。喋らない（executor が session に渡す）
         return Reaction(face=NEUTRAL)
     if kind == "due":
-        return Reaction(_due(event), NEUTRAL, look=True)
+        return Reaction(_due(event), NEUTRAL)
     if kind == "done":
-        return Reaction(f"{_theme(event)}、終わったよ。結果は Slack に出てる。", HAPPY, look=True)
+        return Reaction(f"{_theme(event)}、終わったよ。結果は Slack に出てる。", HAPPY)
     if kind == "failed":
-        return Reaction(f"{_theme(event)}、うまくいかなかったみたい。Slack を見てみて。", SAD, look=True)
+        return Reaction(f"{_theme(event)}、うまくいかなかったみたい。Slack を見てみて。", SAD)
     if kind == "limited":
         at = _hhmm(str(event.get("reset_at") or ""))
         when = f"{at}ごろ" if at else "しばらくしたら"
         return Reaction(f"Claude の上限に当たっちゃった。{when}に自動でやり直すね。", SLEEPY)
     # awaiting
-    return Reaction(f"{_theme(event)}、聞きたいことがあって止まってるよ。", DOUBT, look=True)
+    return Reaction(f"{_theme(event)}、聞きたいことがあって止まってるよ。", DOUBT)

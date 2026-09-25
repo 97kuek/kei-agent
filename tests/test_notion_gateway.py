@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fakes import check_notion_body
 
 
 class FakeNotion:
@@ -9,6 +10,7 @@ class FakeNotion:
         self.calls = []
 
     def request(self, method, path, body=None):
+        check_notion_body(body)
         self.calls.append((method, path, body))
         item_id = path.rsplit("/", 1)[-1]
         if item_id not in self.parents:
@@ -96,6 +98,7 @@ class RecordingNotion:
         self.response = response if response is not None else {"id": "x"}
 
     def request(self, method, path, body=None):
+        check_notion_body(body)
         self.calls.append((method, path, body))
         return dict(self.response)
 

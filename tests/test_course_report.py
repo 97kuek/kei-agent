@@ -83,3 +83,9 @@ def test_report_without_the_keys_says_so(monkeypatch):
     monkeypatch.setattr(toggl_report, "load_toggl", lambda: None)
     with pytest.raises(TogglError, match="TOGGL_API_TOKEN"):
         toggl_report.report(days=7, today=date(2026, 9, 20))
+
+
+def test_course_names_are_matched_across_full_and_half_width():
+    """Toggl と「授業」で全角・半角だけが違う科目名も、同じ科目として数える。"""
+    by_course = toggl_report.totals([entry("情報セキュリティＢ", "小テスト", 1)], courses={"情報セキュリティB"})
+    assert set(by_course) == {"情報セキュリティＢ"}

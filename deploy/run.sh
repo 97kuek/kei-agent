@@ -14,14 +14,9 @@ source "$SECRETS"
 # ログは Kei Agent 自身が 5MB ごとに回す。launchd の標準出力には、起動に失敗したときの出力だけが残る
 export KEI_AGENT_LOG_FILE="$HOME/Library/Logs/kei-agent/kei-agent.log"
 
-# launchd の出力は回らないので、起動のたびに大きすぎるものを捨てる
-# （設定を間違えると KeepAlive で 30 秒ごとに再起動し、同じエラーが積もり続ける）
-LAUNCHD_LOG="$HOME/Library/Logs/kei-agent/launchd.log"
-if [[ -f "$LAUNCHD_LOG" ]] && (( $(stat -f%z "$LAUNCHD_LOG") > 5242880 )); then
-  : > "$LAUNCHD_LOG"
-fi
-
 REPO="${0:A:h:h}"
+source "$REPO/deploy/_common.sh"
+trim_launchd_log launchd.log
 cd "$REPO"
 
 # Kei Agent が自分を入れ替えたあとの起動（src/kei_agent/improve.py）。

@@ -26,6 +26,7 @@ from kei_agent.notion import Notion, NotionError
 from kei_agent_course import periods
 from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.ics import Event
+from kei_agent_course.notion_props import number, plain, select
 
 log = logging.getLogger(__name__)
 
@@ -113,16 +114,6 @@ def require_course_databases(state: dict) -> dict[str, dict]:
     return databases
 
 
-def _plain(prop: dict | None) -> str:
-    """title と rich_text の中身を、ただの文字列にする。"""
-    parts = (prop or {}).get("title") or (prop or {}).get("rich_text") or []
-    return "".join(p.get("plain_text", "") for p in parts).strip()
-
-
-def _select(prop: dict | None) -> str:
-    return ((prop or {}).get("select") or {}).get("name") or ""
-
-
 def _when(prop: dict | None) -> datetime | None:
     start = ((prop or {}).get("date") or {}).get("start")
     try:
@@ -173,7 +164,7 @@ class CourseNotion:
                 raise SyncError(f"課題 {page_id} の締切が不正です") from None
             if not today <= due_day <= through:
                 continue
-            title = _plain(props.get("課題"))
+            title = plain(props.get("課題"))
             url = row.get("url")
             if not title or not url:
                 raise SyncError(f"課題 {page_id} の名前または URL がありません")
@@ -187,9 +178,9 @@ class CourseNotion:
         """科目名 → 「授業」のページ ID。"""
         found: dict[str, str] = {}
         for row in self._rows(self.courses):
-            if _select(row["properties"].get("状態")) == "終了":
+            if select(row["properties"].get("状態")) == "終了":
                 continue
-            name = normalize_course_name(_plain(row["properties"].get("科目名")))
+            name = normalize_course_name(plain(row["properties"].get("科目名")))
             if not name:
                 continue
             if name in found:
@@ -201,23 +192,24 @@ class CourseNotion:
         """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。
 
         学期の終わった科目が残っていても混ざらないよう、その日の学期（と通年）だけを返す。
+        年度が入っている科目は、その日の年度のものだけ（去年の「履修中」を今年に出さない）。
         """
         on = on or date.today()
         found = []
         for row in self._rows(self.courses):
             props = row["properties"]
-            if _select(props.get("状態")) not in ("", "履修中"):
+            if select(props.get("状態")) not in ("", "履修中"):
                 continue
-            if not periods.in_term(_select(props.get("学期")), on):
+            if not periods.in_term(select(props.get("学期")), on, number(props.get("年度"))):
                 continue
-            day = _select(props.get("曜日"))
+            day = select(props.get("曜日"))
             if weekday and day != weekday:
                 continue
             found.append({
                 "id": row["id"],
-                "subject": _plain(props.get("科目名")),
+                "subject": plain(props.get("科目名")),
                 "weekday": day,
-                "term": _select(props.get("学期")),
+                "term": select(props.get("学期")),
                 "period": (props.get("時限") or {}).get("number"),
                 "url": row.get("url", ""),
             })
@@ -228,19 +220,6 @@ class CourseNotion:
         """時間カードの候補。曜日で絞らず、今学期に履修中の科目だけ返す。"""
         return self.courses_on(on=on)
 
-    def match_course(self, name: str, year: int, term: str) -> str | None:
-        """成績 record を過去を含む科目台帳へ安全に結ぶ。
-
-        同名の科目が複数ある場合や、年度・学期が記録されていない場合は推測しない。
-        """
-        normalized_term = {"春期": "春学期", "秋期": "秋学期"}.get(term, term)
-        matches = [row["id"] for row in self._rows(self.courses) if (
-            _plain(row.get("properties", {}).get("科目名")) == name
-            and (row.get("properties", {}).get("年度") or {}).get("number") == year
-            and _select(row.get("properties", {}).get("学期")) == normalized_term
-        )]
-        return matches[0] if len(matches) == 1 else None
-
     def record_study_time(self, entry_id: str, started_at: str, duration_minutes: int,
                           course_page_id: str = "", memo: str = "", slack_url: str = "") -> dict:
         """学習ログを記録IDで一度だけ作る。"""
@@ -249,14 +228,14 @@ class CourseNotion:
         if entry_id in self._recorded_study_ids:
             return {"entry_id": entry_id, "notion_url": ""}
         for row in self._rows(self.study_logs):
-            if _plain(row.get("properties", {}).get("Kei Agent 記録ID")) == entry_id:
+            if plain(row.get("properties", {}).get("Kei Agent 記録ID")) == entry_id:
                 self._recorded_study_ids.add(entry_id)
                 return {"entry_id": entry_id, "notion_url": row.get("url", "")}
         title = "大学の学習"
         if course_page_id:
             for row in self._rows(self.courses):
                 if row.get("id") == course_page_id:
-                    title = _plain(row.get("properties", {}).get("科目名")) or title
+                    title = plain(row.get("properties", {}).get("科目名")) or title
                     break
         props = {
             "タイトル": {"title": [{"text": {"content": title}}]},
@@ -276,7 +255,7 @@ class CourseNotion:
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
         return {uid: row for row in self._rows(self.assignments)
-                if (uid := _plain(row["properties"].get("Moodle ID")))}
+                if (uid := plain(row["properties"].get("Moodle ID")))}
 
     def ensure_assignment_template(self, page_id: str) -> bool:
         """本文がまだ空の課題ページにだけ、整理用の見出しを一度追加する。"""
@@ -339,7 +318,7 @@ class CourseNotion:
     def _differs(self, row: dict, event: Event, course_id: str | None) -> bool:
         """Moodle 側と食い違っているか（状態や見積時間は見ない）。"""
         props = row.get("properties") or {}
-        if _plain(props.get("課題")) != assignment_title(event.summary)[:TITLE_LIMIT]:
+        if plain(props.get("課題")) != assignment_title(event.summary)[:TITLE_LIMIT]:
             return True
         when = _when(props.get("締切"))
         if when is None or when != event.starts_at.astimezone():
@@ -354,46 +333,33 @@ class CourseNotion:
         return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
 
 
+def _client(token: str = "", state: dict | None = None) -> CourseNotion:
+    """トークンと状態は、省くと環境変数とファイルから読む。"""
+    token = token or course_token()
+    if not token:
+        raise SyncError(NO_TOKEN)
+    return CourseNotion(Notion(token), state or read_state())
+
+
 def courses_on(weekday: str = "", on: date | None = None, token: str = "",
                state: dict | None = None) -> list[dict]:
     """履修中の科目（曜日・時限つき）。朝のまとめで、時限を時刻に直すのに使う。"""
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state()).courses_on(weekday, on)
+    return _client(token, state).courses_on(weekday, on)
 
 
 def current_courses(on: date | None = None, token: str = "", state: dict | None = None) -> list[dict]:
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state()).current_courses(on)
+    return _client(token, state).current_courses(on)
 
 
 def record_study_time(entry_id: str, started_at: str, duration_minutes: int, course_page_id: str = "",
                       memo: str = "", slack_url: str = "", token: str = "", state: dict | None = None) -> dict:
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    current = state or read_state()
-    if "study_logs" not in current.get("databases", {}):
-        from kei_agent_course.notion_setup import CourseSetup
-
-        setup = CourseSetup(Notion(token), str(current.get("home_page_id") or ""), state_path())
-        if not setup.home:
-            raise SyncError(NO_STATE)
-        setup.run()
-        current = setup.state
-    return CourseNotion(Notion(token), current).record_study_time(
+    return _client(token, state).record_study_time(
         entry_id, started_at, duration_minutes, course_page_id, memo, slack_url)
 
 
 def course_names(token: str = "", state: dict | None = None) -> set[str]:
     """「授業」に入れてある科目の名前（Toggl のプロジェクト名と突き合わせるのに使う）。"""
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return set(CourseNotion(Notion(token), state or read_state()).course_ids())
+    return set(_client(token, state).course_ids())
 
 
 def course_token(env: dict[str, str] | None = None) -> str:
@@ -405,25 +371,19 @@ def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
     """授業 DB の科目名だけを読み出す。ページ・relation・DB は一切変更しない。"""
     data_source_id = state["databases"]["courses"]["data_source_id"]
     rows = notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
-    return tuple(sorted({_plain(row.get("properties", {}).get("科目名")) for row in rows}
+    return tuple(sorted({plain(row.get("properties", {}).get("科目名")) for row in rows}
                         - {""}))
 
 
 def list_calendar_assignments(days: int, today: date | None = None, *,
                               token: str = "", state: dict | None = None) -> dict:
     """A2A 用 read-only 契約。接続できないときに空の完全 snapshot を返さない。"""
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state()).calendar_assignments(days, today or date.today())
+    return _client(token, state).calendar_assignments(days, today or date.today())
 
 
 def sync(events: list[Event], known_only: bool = True, token: str = "", state: dict | None = None) -> Result:
-    """締切を Notion に反映する。トークンと状態は、省くと環境変数とファイルから読む。"""
-    token = token or os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state()).sync(events, known_only=known_only)
+    """締切を Notion に反映する。"""
+    return _client(token, state).sync(events, known_only=known_only)
 
 
 def main(argv: list[str] | None = None) -> None:

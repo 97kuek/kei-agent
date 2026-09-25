@@ -1,10 +1,10 @@
-"""ほかのエージェントに仕事を頼む（オーケストレーター側の共通部分）。docs/agents.md
+"""ほかのエージェントに仕事を頼む（オーケストレーター側の共通部分）。docs/architecture.md の「振り分けと A2A」
 
 住所は `config.toml` の `[a2a.agents]`（名前 = 住所）。返事は全エージェント共通の封筒
 （`kei_agent_a2a/envelope.py`）で受け取る。どのエージェントでも同じように頼み、同じように読む。
 
 上限（レートリミット）に当たったことは封筒の `limit_reset_at` で返ってくる。依頼者への約束
-（「◯時ごろに自動でやり直す」）はオーケストレーターが1か所で持つ（docs/design.md の11章）。
+（「◯時ごろに自動でやり直す」）はオーケストレーターが1か所で持つ（docs/architecture.md）。
 """
 
 from __future__ import annotations

@@ -9,7 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-ACTORS = frozenset({"research", "course", "work", "router", "self_fix"})
+from kei_agent.config import AGENT_PLUGINS, MODEL_ACTORS
+
+ACTORS = MODEL_ACTORS
 PROVIDERS = frozenset({"codex", "claude"})
 
 ALLOWED_MODELS = {
@@ -174,7 +176,7 @@ def resolve_classifier(config, store, actor: str, *, provider: str | None = None
     通常の ``resolve`` は actor 固有の仕事だけを許可する。分類は例外的に routing
     recipe を使うが、実行 actor は依頼の担当のままにして runner の権限境界を保つ。
     """
-    if actor not in {"research", "course", "work"}:
+    if actor not in AGENT_PLUGINS:
         raise ModelPolicyError(f"{actor} は軽量分類を使えません")
     from kei_agent.settings import selected_provider
 
@@ -197,7 +199,7 @@ def validate_resolved(recipe: ResolvedModel) -> None:
     CLI 起動直前に再解決して比べることで、allowlist 内の手動例外を通常用途へ偽装する経路を閉じる。
     plugin actor の ``routing`` だけは分類器専用の軽量例外として同じ固定値を検証する。
     """
-    if recipe.use_case is UseCase.ROUTING and recipe.actor in {"research", "course", "work"}:
+    if recipe.use_case is UseCase.ROUTING and recipe.actor in AGENT_PLUGINS:
         expected_values = _RECIPES.get((recipe.provider, UseCase.ROUTING))
         expected = (ResolvedModel(recipe.actor, UseCase.ROUTING, recipe.provider, *expected_values)
                     if expected_values is not None else None)

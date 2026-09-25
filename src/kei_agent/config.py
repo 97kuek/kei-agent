@@ -90,7 +90,7 @@ class MaintenanceConfig:
 
 @dataclass(frozen=True)
 class A2AConfig:
-    """ほかのエージェントの住所（docs/agents.md）。
+    """ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。
 
     `[a2a.agents]` に「名前 = 住所」を並べる。名前は launchd・ログ・秘密情報ファイル・ポートの
     呼び名と同じにする。書かなければ、そのエージェントは使わない（研究を書かなければ本体の中で動かす）。
@@ -173,7 +173,7 @@ class Config:
         """研究全体・中長期の方針のチャンネルが書く場所。
 
         Daily・振り返り・声の記録は、研究だけでなく授業と仕事の内容も含むので、
-        研究テーマの隣ではなく Kei Agent 側に置く（docs/design.md）。
+        研究テーマの隣ではなく Kei Agent 側に置く（docs/architecture.md）。
         """
         return self.agent_root / "overview"
 
@@ -287,11 +287,14 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(channels, CHANNELS_KEYS, "[channels]")
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     _check_times(schedule, data.get("maintenance", {}))
+    state_dir = _expand(data.get("state_dir", "~/.local/state/kei-agent"))
+    # 既定の読ませない場所には、使うたびに更新するトークン（Box など）の置き場も足す
+    deny_read = sandbox.get("deny_read", (*DEFAULT_DENY_READ, str(state_dir / "secrets")))
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
         agent_root=_expand(data.get("agent_root", "~/kei-agent")),
         course_root=_expand(data.get("course_root", "~/course")),
-        state_dir=_expand(data.get("state_dir", "~/.local/state/kei-agent")),
+        state_dir=state_dir,
         repo_root=REPO_ROOT,
         allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
@@ -306,7 +309,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
-        deny_read=tuple(_expand(p) for p in sandbox.get("deny_read", DEFAULT_DENY_READ)),
+        deny_read=tuple(_expand(p) for p in deny_read),
         claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),
         codex_bin=env.get("KEI_AGENT_CODEX_BIN", "codex"),
         pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),

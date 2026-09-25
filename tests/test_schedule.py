@@ -76,8 +76,27 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
     return ws
 
 
+async def test_hub_calendar_sync_skips_outlook_until_it_can_be_verified(env, monkeypatch):
+    scheduler, assistant, *_ = env
+
+    async def ask_course(skill, **params):
+        return agents.Reply(data={"complete": True, "items": []})
+
+    async def ask_work(skill, **params):
+        raise AssertionError("検証できない Outlook の取得に claude を回さない")
+
+    monkeypatch.setattr(assistant, "ask_course", ask_course)
+    monkeypatch.setattr(assistant, "ask_work", ask_work)
+    monkeypatch.setattr(schedule_module, "sync_calendar", lambda *a: SyncReport(0, 0, 0))
+
+    result = await scheduler.sync_hub_calendar("2026-09-24")
+
+    assert result["course"] == "synced" and result["work"] == "disabled"
+
+
 async def test_hub_calendar_sync_keeps_course_when_outlook_is_incomplete(env, monkeypatch):
     scheduler, assistant, *_ = env
+    monkeypatch.setattr(schedule_module, "OUTLOOK_SYNC_ENABLED", True)
     seen = []
 
     async def ask_course(skill, **params):
@@ -154,6 +173,26 @@ async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env
     await scheduler.tick(datetime.fromisoformat("2026-09-18T08:06"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18T09:06"))
     assert runs == [("hub_calendar", "2026-09-18"), ("hub_calendar", "2026-09-18")]
+
+
+async def test_hub_calendar_is_done_for_the_day_when_outlook_is_disabled(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    runs = []
+
+    async def fake_run(name, day, record=True):
+        runs.append((name, day))
+        return {"course": "synced", "work": "disabled"}
+
+    async def noop(*args):
+        return None
+
+    monkeypatch.setattr(schedule_module.settings, "schedule_time", lambda *args: "")
+    monkeypatch.setattr(scheduler, "run_task", fake_run)
+    monkeypatch.setattr(scheduler, "notify_due_soon", noop)
+    monkeypatch.setattr(scheduler, "nudge_stale_threads", noop)
+    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:05"))
+    await scheduler.tick(datetime.fromisoformat("2026-09-18T10:06"))
+    assert runs == [("hub_calendar", "2026-09-18")]
 
 
 # 時刻
@@ -360,7 +399,8 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
     assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
-    assistant.notion.create_note("条件Bの考察", "考察", "2026-09-17", "質問を先に見せると精度が上がる")
+    assistant.notion.notes.append(Note("note-1", "条件Bの考察", "考察", "2026-09-17",
+                                       "https://notion.example/note-1", "質問を先に見せると精度が上がる"))
     claude.behaviors = [{"text": DAILY_REPLY, "session_id": "daily-sess"}]
 
     detail = await scheduler.run_daily("2026-09-18")

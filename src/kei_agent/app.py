@@ -81,7 +81,7 @@ async def serve() -> None:
     ):
         app.event(name)(guard(handler))
 
-    # ボタンと App Home（docs/design.md の9章）。Slack は3秒以内の ack を待つので、先に返してから処理する
+    # ボタンと App Home（docs/architecture.md）。Slack は3秒以内の ack を待つので、先に返してから処理する
     def acked(handler):
         async def wrapped(ack, body):
             await ack()
@@ -93,6 +93,16 @@ async def serve() -> None:
     app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
     app.action(re.compile(r"^kei_agent_time_(start|stop)$"))(acked(assistant.on_time_action))
     app.action(re.compile(r"^kei_agent_time_(memo|retry)$"))(acked(assistant.on_time_action))
+
+    @app.command("/toggl")
+    async def toggl_command(ack, body):
+        # ack の文は本人にだけ見える。Toggl や Notion への送信は、on_time_command が裏に回す
+        try:
+            text = await assistant.on_time_command(body)
+        except Exception:
+            log.exception("/toggl を処理できませんでした")
+            text = "⚠️ 時間記録を切り替えられなかったよ。もう一度試してね。"
+        await ack(text)
 
     @app.view(re.compile(r"^kei_agent_time_(memo|course)_submit$"))
     async def time_card_view(ack, body):
@@ -129,6 +139,8 @@ async def serve() -> None:
         await asyncio.wait_for(handler.connect_async(), CONNECT_TIMEOUT_SECONDS)
         # 自分を入れ替えたあとの起動なら、その結果をスレッドに知らせる（improve.py）
         await assistant.announce_update()
+        # 再起動で途中になった自己改善を「中断」にして、次の着手を止めないようにする
+        await assistant.recover_interrupted_fixes()
         # 前の版で動いていて、入れ替えや強制終了で止まった依頼をやり直す
         await assistant.resume_interrupted()
         # Notion の項目がずれていると、Daily や夜間の Task が黙って止まるので、起動時に確かめる

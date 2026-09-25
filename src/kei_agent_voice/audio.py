@@ -1,4 +1,4 @@
-"""マイクから生の音を取り、返ってきた生の音を鳴らす（docs/voice.md）。
+"""マイクから生の音を取り、返ってきた生の音を鳴らす（docs/architecture.md の「声のレイヤ」）。
 
 OpenAI Realtime API は音をそのままやりとりするので、文字起こしも音声合成も要らない。
 ここが要るのは**音の出し入れだけ**。
@@ -47,7 +47,7 @@ _PLAY = ("ffmpeg", "-hide_banner", "-loglevel", "error")
 
 
 class Unavailable(Exception):
-    """音の出し入れができない（`ffmpeg` が入っていない、マイクが使えない）。"""
+    """声で話せない（`ffmpeg` が無い、マイクが使えない、鍵が無い・断られた）。`live` もこれを使う。"""
 
 
 def ms_of(pcm: bytes) -> int:
@@ -125,6 +125,16 @@ class Speaker:
                 self.proc = None
                 return
             self._written_ms += ms_of(pcm)
+
+    def begin_item(self) -> None:
+        """次の返事を鳴らし始める。**長さは返事ごとに数え直す**（割り込みで伝えるのは返事の中の位置）。
+
+        前の返事がまだ鳴っていれば、次の返事はそれが鳴り終わってから鳴り始める。
+        """
+        with self._lock:
+            now = time.monotonic()
+            ends = self._started + self._written_ms / 1000 if self._started else now
+            self._started, self._written_ms = max(now, ends), 0
 
     @property
     def played_ms(self) -> int:

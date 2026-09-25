@@ -4,7 +4,7 @@ import pytest
 
 from kei_agent_course import academic_sync
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
-from kei_agent_course.academic_sync import AcademicSync, grade_key, inspect_course_home
+from kei_agent_course.academic_sync import AcademicSync, grade_key
 
 
 def _property(property_id: str, kind: str = "rich_text") -> dict:
@@ -223,25 +223,6 @@ def test_academic_sync_keeps_separate_grade_category_and_chronological_gpa_label
     assert notion.rows["gpa"][0]["properties"]["期間"]["title"][0]["text"]["content"] == "2024 1 春学期"
 
 
-def test_inspect_reports_duplicates_without_mutating_notion():
-    class Notion:
-        writes = []
-
-        def children(self, _page_id):
-            return [
-                {"type": "child_database", "child_database": {"title": "授業"}},
-                {"type": "child_database", "child_database": {"title": "授業"}},
-                {"type": "child_database", "child_database": {"title": "雑記"}},
-            ]
-
-    notion = Notion()
-    report = inspect_course_home(notion, "home", {"databases": {}})
-
-    assert report.duplicates == ("授業",)
-    assert report.unmanaged == ("雑記",)
-    assert notion.writes == []
-
-
 def test_setup_refuses_to_choose_between_duplicate_canonical_databases(tmp_path):
     from kei_agent.notion import NotionError
     from kei_agent_course.notion_setup import CourseSetup
@@ -398,3 +379,70 @@ def test_academic_import_cli_dry_run_never_reads_state_or_writes(tmp_path, monke
 
     assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html"), "--dry-run"]) == 0
     assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html")]) == 2
+
+
+class CountingNotion:
+    """読んだ回数と書き込みを数える Notion の fake。"""
+
+    def __init__(self, rows=None):
+        self.rows = {key: [] for key in ("courses", "grades", "requirements", "gpa")} | (rows or {})
+        self.reads: list[str] = []
+        self.writes: list[tuple] = []
+
+    def paginate(self, _method, path, _body=None):
+        key = path.split("/")[2]
+        self.reads.append(key)
+        return self.rows[key]
+
+    def request(self, method, path, body=None):
+        self.writes.append((method, path, body))
+        return {"id": "new"}
+
+
+STATE = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
+
+
+def test_duplicate_record_keys_stop_before_any_write():
+    notion = CountingNotion()
+    record = AcademicRecord(grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),
+                                    Grade("数学", 2025, "春期", 2, "B", 3, "基礎")), requirements=(), gpa=())
+
+    with pytest.raises(ValueError, match="重複"):
+        AcademicSync(notion, STATE).sync(record)
+
+    assert notion.writes == []
+
+
+def test_duplicate_identity_already_in_notion_stops_before_any_write():
+    row = {"properties": {"Kei Agent 成績ID": {"rich_text": [{"plain_text": "grade:2025:春期:数学"}]}}}
+    notion = CountingNotion({"grades": [{"id": "a", **row}, {"id": "b", **row}]})
+
+    with pytest.raises(ValueError, match="重複"):
+        AcademicSync(notion, STATE).sync(AcademicRecord(
+            grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=()))
+
+    assert notion.writes == []
+
+
+def test_each_database_is_read_once_per_run():
+    notion = CountingNotion()
+    AcademicSync(notion, STATE).sync(AcademicRecord(
+        grades=tuple(Grade(f"科目{i}", 2025, "春期", 2, "A", 4, "基礎") for i in range(5)),
+        requirements=tuple(Requirement(f"要件{i}", "", 2, 2, 2, 0, "区分") for i in range(3)),
+        gpa=(GPAEntry("2025年度（春学期）", 2025, 3.5, "春学期"),),
+    ))
+
+    assert sorted(notion.reads) == ["courses", "gpa", "grades", "requirements"]
+
+
+def test_grade_matches_a_course_whose_name_differs_only_in_width():
+    """全角・半角の違いだけの科目名は、同じ科目として結ぶ。"""
+    notion = CountingNotion({"courses": [{"id": "course-b", "properties": {
+        "科目名": {"title": [{"plain_text": "情報セキュリティB"}]}, "年度": {"number": 2025},
+        "学期": {"select": {"name": "秋学期"}}}}]})
+
+    AcademicSync(notion, STATE).sync(AcademicRecord(
+        grades=(Grade("情報セキュリティＢ", 2025, "秋期", 2, "A", 4, "基礎"),), requirements=(), gpa=()))
+
+    (_method, _path, body), = notion.writes
+    assert body["properties"]["授業"] == {"relation": [{"id": "course-b"}]}

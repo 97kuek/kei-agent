@@ -14,9 +14,9 @@ from datetime import date
 from pathlib import Path
 
 from kei_agent.config import load_config
-from kei_agent.notion import Notion, NotionError
+from kei_agent.notion import Notion, NotionError, write_json_atomic
 from kei_agent.notion_hub import RESEARCH_HOME_ID, HubStore, load_hub
-from kei_agent.notion_store import NotionStore, _plain, blocks_to_markdown
+from kei_agent.notion_store import NotionStore, blocks_to_markdown, plain_text
 from kei_agent.store import Store
 
 
@@ -111,7 +111,7 @@ def audit_legacy_notes(notion: Notion, notes_ds_id: str) -> MigrationManifest:
             date.fromisoformat(day)
         except ValueError:
             raise NotionError(f"旧記録 {page_id} の日付が不正です") from None
-        title = _plain(props.get("タイトル", {}).get("title") or [])
+        title = plain_text(props.get("タイトル", {}).get("title") or [])
         url = row.get("url")
         if not title or not url:
             raise NotionError(f"旧記録 {page_id} のタイトルまたは URL がありません")
@@ -124,20 +124,28 @@ def audit_legacy_notes(notion: Notion, notes_ds_id: str) -> MigrationManifest:
         entries.append(MigrationEntry(
             page_id, url, body, day, kind, title,
             props.get("Slack", {}).get("url"),
-            _plain(props.get("ファイル", {}).get("rich_text") or []) or None,
+            plain_text(props.get("ファイル", {}).get("rich_text") or []) or None,
             _checksum(body), props,
         ))
     return MigrationManifest(notes_ds_id, tuple(entries))
 
 
+ARCHIVE_TITLE = "旧 Daily・レトプラ記録"
+
+
+def _find_archive(notion: Notion, home_id: str) -> str | None:
+    """旧記録置き場の ID。重複していたら止める。"""
+    matches = [block["id"] for block in notion.children(home_id)
+               if block.get("type") == "child_page"
+               and block.get("child_page", {}).get("title") == ARCHIVE_TITLE]
+    if len(matches) > 1:
+        raise NotionError("旧記録置き場が重複しています")
+    return matches[0] if matches else None
+
+
 def verify_manifest_current(notion: Notion, manifest: MigrationManifest, home_id: str) -> None:
     """部分移動後も manifest の全原本を ID で検証し、新規旧行は拒否する。"""
-    archives = [block["id"] for block in notion.children(home_id)
-                if block.get("type") == "child_page"
-                and block.get("child_page", {}).get("title") == "旧 Daily・レトプラ記録"]
-    if len(archives) > 1:
-        raise NotionError("旧記録置き場が重複しています")
-    archive_id = archives[0] if archives else None
+    archive_id = _find_archive(notion, home_id)
     expected = {entry.page_id for entry in manifest.entries}
     if len(expected) != len(manifest.entries):
         raise NotionError("manifest に元 ID の重複があります")
@@ -180,17 +188,12 @@ def _original_unchanged(notion: Notion, entry: MigrationEntry) -> dict:
     return page
 
 
-def _archive_parent(notion: Notion, home_id: str) -> str:
-    name = "旧 Daily・レトプラ記録"
-    matches = [block for block in notion.children(home_id)
-               if block.get("type") == "child_page" and block.get("child_page", {}).get("title") == name]
-    if len(matches) > 1:
-        raise NotionError("旧記録置き場が重複しています")
-    if matches:
-        return matches[0]["id"]
+def _archive_parent(notion: Notion, home_id: str, found: str | None) -> str:
+    if found:
+        return found
     page = notion.request("POST", "/pages", {
         "parent": {"type": "page_id", "page_id": home_id},
-        "properties": {"title": {"title": [{"text": {"content": name}}]}},
+        "properties": {"title": {"title": [{"text": {"content": ARCHIVE_TITLE}}]}},
     })
     return page["id"]
 
@@ -200,7 +203,7 @@ def _archive_research_view(notion: Notion) -> None:
     blocks = notion.children(RESEARCH_HOME_ID)
     title = "最近の Daily と振り返り"
     headings = [b for b in blocks if b.get("type") == "heading_2"
-                and _plain(b["heading_2"].get("rich_text", [])) == title]
+                and plain_text(b["heading_2"].get("rich_text", [])) == title]
     linked = [b for b in blocks if b.get("type") == "child_database"
               and b.get("child_database", {}).get("title") == title]
     if not headings and not linked:
@@ -208,7 +211,7 @@ def _archive_research_view(notion: Notion) -> None:
     if len(headings) != 1 or len(linked) != 1:
         raise NotionError("研究ホームの旧 Daily／振り返りビューを一意に同定できません")
     for block in (linked[0], headings[0]):
-        notion.request("PATCH", f"/blocks/{block['id']}", {"archived": True})
+        notion.request("PATCH", f"/blocks/{block['id']}", {"in_trash": True})
 
 
 def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifest,
@@ -220,11 +223,7 @@ def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifes
     if len(pages) != len(manifest.entries):
         raise NotionError("manifest に元 ID の重複があります")
     # archive が既にある場合の重複も、コピー開始前に検出する。
-    archive_blocks = [b for b in notion.children(hub.state.home_id)
-                      if b.get("type") == "child_page"
-                      and b.get("child_page", {}).get("title") == "旧 Daily・レトプラ記録"]
-    if len(archive_blocks) > 1:
-        raise NotionError("旧記録置き場が重複しています")
+    found_archive = _find_archive(notion, hub.state.home_id)
     groups: dict[tuple[str, str], list[MigrationEntry]] = defaultdict(list)
     for entry in manifest.entries:
         groups[(entry.day, entry.kind)].append(entry)
@@ -247,7 +246,7 @@ def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifes
         hub.set_legacy_ids(day, [entry.page_id for entry in entries])
         for entry in entries:
             mapping[entry.page_id] = row["id"]
-    archive_id = _archive_parent(notion, hub.state.home_id)
+    archive_id = _archive_parent(notion, hub.state.home_id, found_archive)
     moved = 0
     unresolved = []
     for entry in manifest.entries:
@@ -274,10 +273,7 @@ def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifes
 
 
 def _save_manifest(path: Path, manifest: MigrationManifest) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(manifest.to_dict(), stream, ensure_ascii=False, indent=2)
+    write_json_atomic(path, manifest.to_dict())
 
 
 def main() -> None:

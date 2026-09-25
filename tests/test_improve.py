@@ -1,4 +1,4 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。"""
+"""Slack から Kei Agent 自身を直す流れ（docs/architecture.md）。"""
 
 import asyncio
 import subprocess
@@ -309,3 +309,46 @@ async def test_start_needs_a_second_yes(env):
 def test_strip_markers_removes_only_marker_lines():
     text = "直したよ。\n:memo: 件名: x\n🛠 着手\n📦 取り込み"
     assert improve.strip_markers(text) == "直したよ。\n:memo: 件名: x"
+
+
+# 途中で止まったとき
+
+async def test_unexpected_error_while_fixing_marks_the_improvement_failed(env, monkeypatch):
+    assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
+    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": edits_code()}]
+
+    def broken(worktree, message):
+        raise RuntimeError("git が落ちた")
+    monkeypatch.setattr(improve, "commit_all", broken)
+    await second_yes(assistant)
+
+    row = assistant.store.improvement("C9", "20.1")
+    assert row["status"] == "failed" and "git が落ちた" in row["detail"]
+    assert "直している途中で止まった" in "\n".join(slack.texts())
+
+
+async def test_fix_left_working_by_a_restart_is_marked_interrupted(env):
+    assistant, slack, claude, cfg = env
+    assistant.store.start_improvement("C9", "20.1", "経過を細かく")
+
+    assert await assistant.recover_interrupted_fixes() == 1
+
+    row = assistant.store.improvement("C9", "20.1")
+    assert row["status"] == "failed" and row["detail"] == "中断"
+    assert "中断した" in "\n".join(slack.texts())
+
+
+async def test_push_failure_undoes_the_local_merge_and_keeps_review(env, monkeypatch):
+    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
+    before = git(cfg.repo_root, "rev-parse", "main")
+    git(cfg.repo_root, "remote", "set-url", "origin", str(cfg.repo_root.parent / "missing.git"))
+
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
+    await settle(assistant)
+
+    assert git(cfg.repo_root, "rev-parse", "main") == before                    # 手元の main は元のまま
+    assert assistant.store.improvement("C9", "20.1")["status"] == "review"    # もう一度「いいよ」でやり直せる
+    assert not improve.pending_path(cfg).exists()
+    assert not assistant.restart_requested.is_set()
+    assert "push できなかった" in "\n".join(slack.texts())

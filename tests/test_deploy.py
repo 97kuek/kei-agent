@@ -31,3 +31,16 @@ def test_no_secret_is_written_into_the_repository():
     readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
     assert "ntn_..." in readme
     assert "openssl rand -hex 32" in readme
+
+
+def test_every_launchd_script_trims_its_own_launchd_log():
+    """launchd の出力は回らない。どのプロセスも起動のたびに、自分の plist が書く先を切り詰める。"""
+    import re
+
+    for script in sorted(DEPLOY.glob("run*.sh")):
+        body = script.read_text(encoding="utf-8")
+        label = "assistant" if script.name == "run.sh" else script.stem.removeprefix("run-")
+        plist = (DEPLOY / f"com.kei-agent.{label}.plist.template").read_text(encoding="utf-8")
+        log = re.search(r"__LOG_DIR__/([\w.-]+)</string>", plist).group(1)
+        assert 'source "$REPO/deploy/_common.sh"' in body, script.name
+        assert f"trim_launchd_log {log}" in body, script.name

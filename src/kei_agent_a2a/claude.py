@@ -1,4 +1,4 @@
-"""エージェントが選択済み provider を1回動かす（大学・研究で共通）。docs/agents.md
+"""エージェントが選択済み provider を1回動かす（大学・研究で共通）。docs/architecture.md の「振り分けと A2A」
 
 どのエージェントも、同じやり方で provider を動かす。
 
@@ -16,7 +16,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import signal
 from collections.abc import Sequence
 from contextlib import suppress
@@ -32,6 +31,7 @@ from kei_agent.codex_app_server import AppServerClient
 from kei_agent.config import Config
 from kei_agent.model_policy import ModelPolicyError, ResolvedModel, UseCase, resolve, resolve_selected
 from kei_agent.provider_permissions import connector_profile
+from kei_agent.research import FIELDS as RESULT_FIELDS
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope
 
@@ -100,9 +100,11 @@ async def run(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater,
         ask["prompt"], on_activity=on_activity,
     )
     log.info("claude が終わりました: %s（エラー: %s）", ws.channel_name, result.is_error)
+    # 受け取る側が読む項目だけを渡す（検証前の途中の文など、内部の項目は外に出さない）
+    data = {key: value for key, value in asdict(result).items() if key in RESULT_FIELDS}
     return envelope.reply(
         text=result.text,
-        data=asdict(result),
+        data=data,
         ok=not result.is_error,
         limit_reset_at=result.limit_reset_at,
         cost_usd=result.cost_usd,
@@ -189,7 +191,7 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plu
     読み込まないと claude から見えない。そこでここだけ `--setting-sources user` を使い、
     **使ってよい道具を名指しで並べる**（Bash や書き込み、送信の道具は断る）。
 
-    柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/agents.md）。
+    柵の作り方がほかと違うので、使うのはこの関数だけにする（docs/architecture.md の「振り分けと A2A」）。
     """
     recipe = None
     if store is not None and agent:
@@ -220,48 +222,74 @@ async def ask_connector(config: Config, prompt: str, allowed: Sequence[str], plu
     except TimeoutError:
         await _stop(proc)
         raise ConnectorError(f"連携の返事が {timeout_minutes} 分で返りませんでした") from None
+    except asyncio.CancelledError:
+        # 頼んだ側が取り消したときも、claude と中で動いているものを残さない
+        _kill_group(proc)
+        raise
     if proc.returncode:
         raise ConnectorError(f"連携を使えませんでした: {err.decode('utf-8', 'replace').strip()[:300]}")
     return out.decode("utf-8", "replace").strip()
 
 
-async def _stop(proc) -> None:
-    """claude と、その中で動いているものを止めて、後始末まで待つ。"""
+def _kill_group(proc) -> None:
+    """claude と、その中で動いているものを止める（待たない）。"""
     with suppress(OSError, ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
+
+
+async def _stop(proc) -> None:
+    """claude と、その中で動いているものを止めて、後始末まで待つ。"""
+    _kill_group(proc)
     with suppress(TimeoutError, ProcessLookupError):
         await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
 
 
+def _json_values(text: str, opener: str) -> list[object]:
+    """文の中にある、`opener`（`[` か `{`）で始まる JSON を、外側のものだけ前から順に。
+
+    各位置から1度だけ読み、読めた値の中は飛ばす（全部の括弧の組を試さない）。
+    """
+    decoder = json.JSONDecoder()
+    found: list[object] = []
+    position = text.find(opener)
+    while position >= 0:
+        try:
+            value, end = decoder.raw_decode(text, position)
+        except ValueError:
+            position = text.find(opener, position + 1)
+            continue
+        found.append(value)
+        position = text.find(opener, end)
+    return found
+
+
 def json_reply(text: str) -> list[dict]:
-    """連携に JSON で答えさせたときの、返事の読み取り（前後に文が付いていても拾う）。
+    """連携に JSON で答えさせたときの、返事の読み取り（前後に文やコードの囲みが付いていても拾う）。
 
     「接続が拒否されました」のような文を「予定0件」と取り違えないよう、JSON の配列が
-    見つからなければ断る。前置きに角括弧があっても、後ろから順に読めるものを探す。
+    見つからなければ断る。前置きに角括弧があっても、読めるものを探す。
 
     後ろに出典（`[1, 2]`）のような別の配列が付くことがあるので、**中身のある配列を優先**する。
     先に見つけた `[1, 2]` を返すと、予定があるのに0件として返してしまう。
+    中身のある配列が複数あるときは、後ろのもの（答えの本体は最後に来る）。
     """
     text = text or ""
-    starts = [m.start() for m in re.finditer(r"\[", text)]
-    ends = [m.end() for m in re.finditer(r"\]", text)]
-    empty = None
-    for start in reversed(starts):
-        for end in reversed([e for e in ends if e > start]):
-            try:
-                found = json.loads(text[start:end])
-            except ValueError:
-                continue
-            if not isinstance(found, list):
-                continue
-            items = [item for item in found if isinstance(item, dict)]
-            if items:
-                return items
-            if empty is None:
-                empty = items
-    if empty is not None:
-        return empty
+    lists = [value for value in _json_values(text, "[") if isinstance(value, list)]
+    for found in reversed(lists):
+        items = [item for item in found if isinstance(item, dict)]
+        if items:
+            return items
+    if lists:
+        return []
     raise ConnectorError(f"連携の返事を読めません（JSON の配列がありません）: {text[:200]}")
+
+
+def json_object(text: str, key: str) -> dict:
+    """連携の返事から、`key` を持つ JSON オブジェクトを拾う（コードの囲みや前置きが付いていても読む）。"""
+    for value in _json_values(text or "", "{"):
+        if isinstance(value, dict) and key in value:
+            return value
+    raise ValueError("JSON オブジェクトがありません")
 
 
 async def finish(updater: TaskUpdater, payload: str) -> None:

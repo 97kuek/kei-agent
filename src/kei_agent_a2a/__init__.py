@@ -1,5 +1,6 @@
-"""A2A サーバーの土台。大学エージェントと研究エージェントで共通の部分だけを置く。
+"""A2A サーバーの土台。大学・研究・仕事のエージェントで共通の部分だけを置く。
 
-エージェントごとの中身（名刺と、頼まれた仕事のこなし方）は `kei_agent_course` と
-`kei_agent_research` にある。ここは「127.0.0.1 で待ち受け、合言葉を確かめ、名刺と JSON-RPC を返す」だけ。
+エージェントごとの中身（名刺に載せる仕事と、そのこなし方）は `kei_agent_course`・`kei_agent_research`・
+`kei_agent_work` にある。ここは待ち受け（`server.py`）、名刺の形（`card.py`）、仕事の受け付け
+（`executor.py`）、provider の動かし方（`claude.py`）、返事の封筒（`envelope.py`）。
 """

@@ -1,4 +1,4 @@
-"""Slack から Kei Agent 自身を直す流れ（docs/design.md の10章）。
+"""Slack から Kei Agent 自身を直す流れ（docs/architecture.md）。
 
 `#00_kei-agent` のスレッドで案を決め、手元の git worktree で直し、確認を通ってから
 main に取り込んで push し、作業がなくなってから自分を再起動する。
@@ -124,7 +124,7 @@ def run_checks(worktree: Path) -> CommandResult:
     """テストと ruff。依頼者が差分を見て「いいよ」と言ったあとに、sandbox の外で動かす。
 
     エージェント（大学・研究・仕事）のテストは、依存のグループを入れないと黙って飛ばされるので、
-    ここで全部のグループを指定する（docs/agents.md）。
+    ここで全部のグループを指定する（docs/architecture.md の「振り分けと A2A」）。
     """
     outputs = []
     pytest_args = ["uv", "run", "--frozen", *AGENT_GROUPS, "pytest", "-q"]
@@ -157,12 +157,30 @@ def restart_agents(config: Config) -> list[str]:
     return done
 
 
+class PushError(RuntimeError):
+    """取り込んだが push できなかった。`undone` は手元の main を元に戻せたか。"""
+
+    def __init__(self, output: str, undone: bool):
+        super().__init__(output)
+        self.output = output
+        self.undone = undone
+
+
 def merge_and_push(config: Config, branch: str) -> str:
-    """main に早送りで取り込み、GitHub に push する。取り込んだコミットを返す。"""
+    """main に早送りで取り込み、GitHub に push する。取り込んだコミットを返す。
+
+    push できなければ、手元の main を取り込む前に戻して PushError にする
+    （手元だけ進んで GitHub とずれたまま再起動しない）。
+    """
     repo = config.repo_root
+    base = head(repo)
     git(repo, "merge", "--ff-only", branch)
-    git(repo, "push", "origin", "main")
-    return head(repo)
+    merged = head(repo)
+    pushed = git(repo, "push", "origin", "main", check=False)
+    if not pushed.ok:
+        undone = git(repo, "reset", "--keep", base, check=False).ok
+        raise PushError(pushed.output[:1000], undone)
+    return merged
 
 
 def diff_text(repo: Path, base: str, ref: str) -> str:
@@ -199,20 +217,20 @@ def mark_pending(config: Config, previous: str, thread_ts: str) -> None:
     pending_path(config).write_text(f"{previous}\n0\n{thread_ts}\n", encoding="utf-8")
 
 
-def read_pending(config: Config) -> tuple[str, str] | None:
-    path = pending_path(config)
+def _read_marker(path: Path) -> tuple[str, str] | None:
+    """update-pending / update-rolled-back の (前のコミット, スレッド)。3行目がスレッド。"""
     if not path.exists():
         return None
     lines = path.read_text(encoding="utf-8").splitlines()
     return (lines[0] if lines else "", lines[2] if len(lines) > 2 else "")
+
+
+def read_pending(config: Config) -> tuple[str, str] | None:
+    return _read_marker(pending_path(config))
 
 
 def read_rolled_back(config: Config) -> tuple[str, str] | None:
-    path = rolled_back_path(config)
-    if not path.exists():
-        return None
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return (lines[0] if lines else "", lines[2] if len(lines) > 2 else "")
+    return _read_marker(rolled_back_path(config))
 
 
 FIX_PROMPT = """\

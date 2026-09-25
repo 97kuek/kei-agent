@@ -98,11 +98,13 @@ def test_toggl_records_one_completed_taskless_entry():
 
     toggl.record_completed("大学 / マルチメディア工学A", "大学 / マルチメディア工学A", started, 1500)
 
+    # bulk の本文は配列そのもの（{"items": [...]} だと 400 cannot unmarshal object になる）
     assert posted == [(
         "/organizations/7/workspaces/8/time-entries/bulk",
-        {"items": [{"project_id": 41, "description": "大学 / マルチメディア工学A",
-                    "start": "2026-09-23T10:00:00+00:00", "duration": 1500, "type": "activity"}]},
+        [{"project_id": 41, "description": "大学 / マルチメディア工学A",
+          "start": "2026-09-23T10:00:00+00:00", "duration": 1500, "type": "activity"}],
     )]
+    assert isinstance(posted[0][1], list)
 
 
 class FakeToggl:

@@ -8,6 +8,16 @@ from kei_agent.jobs import REQUESTS_DIR
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task
 
+# Notion API 2026-03-11 で消えたキー。送ったら落として気づけるようにする
+_LEGACY_NOTION_KEYS = {"after": "position.after_block", "archived": "in_trash"}
+
+
+def check_notion_body(body: dict | None) -> None:
+    """旧 API のキー（after / archived）を送っていたら AssertionError にする。"""
+    for key, new in _LEGACY_NOTION_KEYS.items():
+        if body and key in body:
+            raise AssertionError(f"Notion API 2026-03-11 では「{key}」ではなく「{new}」を使う: {body}")
+
 
 class FakePueue:
     def __init__(self):
@@ -19,7 +29,8 @@ class FakePueue:
     async def add(self, cwd, command, label):
         task_id = len(self.added)
         self.added.append((cwd, command, label))
-        self.task_status[task_id] = {"status": {"Queued": {"enqueued_at": "2026-09-17T10:00:00+09:00"}}}
+        self.task_status[task_id] = {"label": label,
+                                     "status": {"Queued": {"enqueued_at": "2026-09-17T10:00:00+09:00"}}}
         return task_id
 
     async def kill(self, task_id):
@@ -195,7 +206,6 @@ class FakeNotion:
         self.bodies: dict[str, str] = {}
         self.results: dict[str, str] = {}
         self.notes: list[Note] = []
-        self.appended: list[tuple[str, str]] = []
         self.themes: dict[str, str] = {}
         self.fail = False
         self._n = 0
@@ -276,14 +286,3 @@ class FakeNotion:
     def upcoming_milestones(self, today, limit=5):
         self._check()
         return [{"name": "中間発表", "due": "2026-10-01", "url": "https://notion.example/m1"}]
-
-    def create_note(self, title, kind, day, markdown, slack_url=None, file=None):
-        self._check()
-        note = Note(f"note-{len(self.notes) + 1}", title, kind, day, f"https://notion.example/note-{len(self.notes) + 1}",
-                    markdown)
-        self.notes.append(note)
-        return note
-
-    def append_markdown(self, page_id, markdown):
-        self._check()
-        self.appended.append((page_id, markdown))

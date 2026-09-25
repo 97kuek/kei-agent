@@ -1,8 +1,10 @@
-"""研究エージェントの Agent Card（何ができるかを書いた名刺）。"""
+"""研究エージェントの Agent Card（何ができるかを書いた名刺）。形は `kei_agent_a2a.card`。"""
 
 from __future__ import annotations
 
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.types import AgentCard, AgentSkill
+
+from kei_agent_a2a.card import agent_card
 
 # 仕事の名前。オーケストレーターはこの id を指定して頼む
 RUN_CLAUDE = "run-claude"
@@ -12,26 +14,15 @@ LIST_JOBS = "list-jobs"
 CANCEL_JOB = "cancel-job"
 FORGET_JOB = "forget-job"
 
-VERSION = "0.1.0"
-RPC_PATH = "/a2a"
-
 
 def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺を作る。base_url は `http://127.0.0.1:8788` のような、外から見える住所。"""
-    return AgentCard(
-        name="Kei Agent（研究）",
-        description="研究テーマのディレクトリで claude または codex を sandbox の中で動かし、長い処理を pueue のジョブにする。"
-                    "会話の続け方と Slack への見せ方、ジョブの行き先の管理はオーケストレーターが持つ",
-        version=VERSION,
-        supported_interfaces=[AgentInterface(
-            url=base_url.rstrip("/") + RPC_PATH,
-            protocol_binding="JSONRPC",
-            protocol_version="1.0",
-        )],
-        # 固定の利用者向け状態を流しながら返す（数分〜数十分かかることがある）
-        capabilities=AgentCapabilities(streaming=True, push_notifications=False),
-        default_input_modes=["application/json"],
-        default_output_modes=["application/json"],
+    return agent_card(
+        "Kei Agent（研究）",
+        "研究テーマのディレクトリで claude または codex を sandbox の中で動かし、長い処理を pueue のジョブにする。"
+        "会話の続け方と Slack への見せ方、ジョブの行き先の管理はオーケストレーターが持つ",
+        base_url,
+        input_modes=("application/json",),
         skills=[
             AgentSkill(
                 id=RUN_CLAUDE,

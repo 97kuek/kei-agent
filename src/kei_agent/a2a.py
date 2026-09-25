@@ -1,7 +1,7 @@
 """ほかのエージェントに仕事を頼む口（A2A のクライアント）。
 
 Kei Agent 本体はオーケストレーターなので、A2A の呼ぶ側だけを持つ。相手の名刺を読み、
-JSON-RPC で `SendMessage` し、終わるまで `GetTask` で見に行く（docs/design.md の11章）。
+JSON-RPC で `SendMessage` し、終わるまで `GetTask` で見に行く（docs/architecture.md）。
 
 依存を増やさないよう、SDK は使わずに aiohttp で薄く書いている。
 仕様: https://a2a-protocol.org/latest/specification/
@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import aiohttp
+from aiohttp.http_exceptions import LineTooLong
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ class NotReachable(A2AError):
 
 # 相手が落ちている・住所が違う・途中で切れた、はすべて A2AError にして返す
 # （呼ぶ側が aiohttp を知らずに済むように）
-NETWORK_ERRORS = (aiohttp.ClientError, OSError, TimeoutError, asyncio.TimeoutError)
+# LineTooLong（上限を超える1行）は ClientError ではないので、別に並べる
+NETWORK_ERRORS = (aiohttp.ClientError, LineTooLong, OSError, TimeoutError, asyncio.TimeoutError)
 
 
 @dataclass
@@ -260,8 +262,12 @@ class Agent:
                         seen = message
                         await on_progress(message)
         except NETWORK_ERRORS as e:
-            raise A2AError(f"{skill} の途中でつながりが切れました（{self.base_url}）: "
-                           f"{type(e).__name__}: {e}") from None
+            # まだ何も届いていないうちにつながらなかったなら、_call と同じくやり直してよい。
+            # 経過が届いたあとに切れたときは、相手が動いているかもしれないので二重に頼まない
+            fresh = not (task_id or state or seen)
+            broken = NotReachable if fresh and isinstance(e, aiohttp.ClientConnectionError) else A2AError
+            raise broken(f"{skill} の途中でつながりが切れました（{self.base_url}）: "
+                         f"{type(e).__name__}: {e}") from None
         if state not in DONE_STATES:
             raise A2AError(f"{skill} の返事が、終わる前に切れました（{state or '状態不明'}）")
         return TaskResult(state=state, text=answer, task_id=task_id, status_text=answer)

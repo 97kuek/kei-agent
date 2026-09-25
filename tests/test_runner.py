@@ -107,18 +107,6 @@ def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skil
     }
 
 
-def test_codex_skill_installer_adopts_its_legacy_research_link(config, tmp_path):
-    contract = resolve_contract(config, request(config, provider="codex"))
-    source = next(path for path in contract.skill_dir.iterdir() if (path / "SKILL.md").is_file())
-    target = tmp_path / ".agents" / "skills"
-    target.mkdir(parents=True)
-    (target / source.name).symlink_to(source, target_is_directory=True)
-
-    runner.install_agent_skills(contract, tmp_path)
-
-    assert (target / ".kei-agent-managed-skills.json").is_file()
-
-
 def test_router_skill_installation_removes_previously_managed_agent_skills(config, tmp_path):
     research = resolve_contract(config, request(config, provider="codex"))
     router_contract = resolve_contract(config, request(
@@ -136,8 +124,8 @@ def test_execution_request_has_no_model_or_effort_override_fields(config):
 
 
 def test_resolved_recipe_is_the_only_model_and_effort_sent_to_codex(config):
-    command = runner.build_model_command(config, themes.resolve(config, "vlm"), None,
-                                         resolve("research", "codex", UseCase.RESEARCH_EXECUTE))
+    command = runner.build_command(config, runner.ExecutionRequest(
+        themes.resolve(config, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "", ""))
 
     assert command.count("gpt-6-sol") == 1
     assert "model_reasoning_effort=high" in command
@@ -209,8 +197,10 @@ def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
     from kei_agent.model_policy import UseCase, resolve
 
     ws = themes.resolve(config, "vlm")
-    thinking = runner.build_model_command(config, ws, None, resolve("research", "claude", UseCase.RESEARCH_EXECUTE))
-    no_thinking = runner.build_model_command(config, ws, None, resolve("router", "claude", UseCase.ROUTING))
+    thinking = runner.build_command(config, runner.ExecutionRequest(
+        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
+    no_thinking = runner.build_command(config, runner.ExecutionRequest(
+        ws, resolve("router", "claude", UseCase.ROUTING), None, "", ""))
 
     assert thinking[thinking.index("--model"):thinking.index("--model") + 2] == ["--model", "claude-sonnet-5"]
     assert thinking[thinking.index("--effort"):thinking.index("--effort") + 2] == ["--effort", "high"]
@@ -316,6 +306,24 @@ def test_env_strips_secrets_and_adds_thread(config):
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "keep"
     assert env["KEI_AGENT_CHANNEL"] == "C1" and env["KEI_AGENT_THREAD_TS"] == "123.456"
     assert "KEI_AGENT_PLUGIN_DIR" not in env
+
+
+def test_env_strips_kei_agent_tokens_but_keeps_the_gateway_password():
+    env = guard.strip_env({
+        "KEI_AGENT_A2A_TOKEN": "a2a-secret",
+        "KEI_AGENT_FUTURE_TOKEN": "future-secret",
+        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway",
+        "KEI_AGENT_CONFIG": "/tmp/config.toml",
+    })
+    assert env == {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway", "KEI_AGENT_CONFIG": "/tmp/config.toml"}
+
+
+def test_default_deny_read_follows_the_state_dir(tmp_path):
+    from kei_agent.config import load_config
+    toml = tmp_path / "config.toml"
+    toml.write_text(f'state_dir = "{tmp_path / "state"}"\n')
+    paths = load_config(toml, env={}).deny_read
+    assert (tmp_path / "state" / "secrets").resolve() in paths
 
 
 def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
@@ -428,6 +436,42 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
         await asyncio.sleep(0.1)
     else:
         pytest.fail(f"claude が残したプロセス {pid} が生きています")
+
+
+async def test_run_claude_keeps_a_successful_result_even_if_it_had_to_be_killed(config, tmp_path, monkeypatch):
+    """result まで届いたあと claude 自身が終わらず、猶予のあとで止めた回も、答えは捨てない。"""
+    fake = tmp_path / "fake-claude-hang.sh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "cat > /dev/null\n"
+        'printf \'{"type":"result","subtype":"success","session_id":"s1","result":"ok","is_error":false}\\n\'\n'
+        "exec sleep 60\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
+    config = replace(config, claude_bin=str(fake))
+    ws = themes.resolve(config, "vlm")
+    themes.ensure_workspace(ws)
+
+    result = await asyncio.wait_for(
+        runner.run_model(config, runner.ExecutionRequest(
+            ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "hi"),
+        timeout=10,
+    )
+
+    assert result.text == "ok" and not result.is_error
+
+
+def test_killed_run_without_a_result_is_still_an_error():
+    result = runner.finalize_run_result(runner.RunResult(text="途中"), returncode=-9)
+    assert result.is_error and result.text == ""
+
+
+def test_codex_missing_rollout_is_a_missing_session():
+    """Codex の resume で会話が見つからないときも、Slack の履歴から戻せるようにする。"""
+    result = runner.finalize_run_result(runner.RunResult(
+        is_error=True, errors=["Error: thread/resume failed: no rollout found for thread id abc"]), returncode=1)
+    assert result.session_missing and result.failure_kind == "session_missing"
 
 
 async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_path):
@@ -596,7 +640,7 @@ def test_research_runner_uses_only_the_scoped_notion_mcp(config):
 
     mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["research-notion"]
     assert mcp["url"] == config.notion_gateway_url
-    assert mcp["headers"]["Authorization"] == "Bearer ${KEI_AGENT_NOTION_GATEWAY_TOKEN}"
+    assert mcp["headers"]["Authorization"] == "${KEI_AGENT_NOTION_GATEWAY_AUTH}"
     assert "--strict-mcp-config" in cmd
 
 
@@ -617,3 +661,12 @@ def test_research_env_carries_the_gateway_token_but_not_the_notion_token(config)
     assert "NOTION_TOKEN" not in env
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
     assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer scoped"
+
+
+def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config):
+    """合言葉そのものは子に渡さないので、ヘッダーは渡している GATEWAY_AUTH を展開する。"""
+    header = runner.notion_mcp_config(config)["mcpServers"][runner.NOTION_MCP]["headers"]["Authorization"]
+    env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1")
+
+    name = header.removeprefix("${").removesuffix("}")
+    assert env[name] == "Bearer s3cret" and runner.GATEWAY_TOKEN_ENV not in env

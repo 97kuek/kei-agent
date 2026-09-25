@@ -105,6 +105,112 @@ async def test_time_card_starts_stops_and_keeps_one_active_timer(env, store):
     assert any(name == "chat_update" for name, _ in slack.calls)
 
 
+async def test_time_card_uses_the_raw_channel_name_for_the_domain(env, store):
+    """ボタンの body にチャンネル名がないときも、番号付きの名前で大学・仕事を見分ける。"""
+    assistant, slack, _, _ = env
+    slack.channels["C3"] = "30_work"
+    await assistant.on_time_action({"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C3"},
+                                    "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]})
+
+    entry = assistant.time_tracker.active("UME")
+    assert entry is not None and entry.domain == "work" and entry.description == "仕事 / work"
+
+
+async def test_stale_stop_button_does_not_stop_the_timer_of_another_channel(env, store):
+    assistant, slack, _, _ = env
+    start = {"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1", "name": "10_vlm"},
+             "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]}
+    await assistant.on_time_action(start)
+    running = assistant.time_tracker.active("UME")
+
+    await assistant.on_time_action({**start, "actions": [{"action_id": "kei_agent_time_stop", "value": "old-entry"}]})
+
+    assert assistant.time_tracker.active("UME") == running
+
+
+async def test_toggl_failure_is_logged_and_kept_for_retry(env, store, monkeypatch, caplog):
+    from kei_agent import assistant as assistant_module
+    from kei_agent.timelog import TogglError
+
+    class BrokenToggl:
+        def record_completed(self, *args):
+            raise TogglError("POST /time-entries/bulk: 400 invalid")
+
+    assistant, slack, _, _ = env
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: BrokenToggl())
+    start = {"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1", "name": "30_work"},
+             "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]}
+    await assistant.on_time_action(start)
+    entry = assistant.time_tracker.active("UME")
+    await assistant.on_time_action({**start, "actions": [{"action_id": "kei_agent_time_stop", "value": entry.id}]})
+
+    assert store.time_entry(entry.id)["toggl_state"] == "pending"
+    assert "400 invalid" in caplog.text
+
+
+async def test_without_toggl_the_notion_log_is_still_recorded(env, store, monkeypatch):
+    from kei_agent import assistant as assistant_module
+
+    assistant, slack, _, _ = env
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: None)
+    recorded = []
+
+    async def record(entry, started_at, minutes, slack_url):
+        recorded.append(entry.id)
+
+    monkeypatch.setattr(assistant, "_record_research_time", record)
+    start = {"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1", "name": "10_vlm"},
+             "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]}
+    await assistant.on_time_action(start)
+    entry = assistant.time_tracker.active("UME")
+    await assistant.on_time_action({**start, "actions": [{"action_id": "kei_agent_time_stop", "value": entry.id}]})
+
+    row = store.time_entry(entry.id)
+    assert recorded == [entry.id] and row["toggl_state"] == "not_configured" and row["notion_state"] == "done"
+
+
+def test_research_time_goes_to_the_gateway_root_not_the_mcp_path(config):
+    from kei_agent.assistant import gateway_endpoint
+
+    assert gateway_endpoint("http://127.0.0.1:8791/mcp", "time-logs") == "http://127.0.0.1:8791/time-logs"
+    assert gateway_endpoint("http://127.0.0.1:8791/mcp/", "/time-logs") == "http://127.0.0.1:8791/time-logs"
+
+
+async def test_deleted_time_card_is_posted_again(env, store):
+    assistant, slack, _, _ = env
+    store.upsert_time_card("C1", "gone.1")
+
+    async def missing(**kw):
+        raise RuntimeError("message_not_found")
+
+    slack.chat_update = missing
+    await assistant.on_time_action({"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1", "name": "10_vlm"},
+                                    "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]})
+
+    assert store.time_card("C1")["message_ts"] != "gone.1"
+
+
+async def test_job_loop_keeps_retrying_time_entries_when_jobs_fail(env, config, monkeypatch):
+    assistant, slack, claude, pueue = env
+    retried = 0
+
+    async def broken_poll():
+        raise RuntimeError("pueued is not running")
+
+    async def retry():
+        nonlocal retried
+        retried += 1
+        if retried >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(assistant, "poll_jobs", broken_poll)
+    monkeypatch.setattr(assistant, "retry_time_entries", retry)
+    object.__setattr__(assistant.config, "job_poll_seconds", 0)
+    with pytest.raises(asyncio.CancelledError):
+        await assistant.job_loop()
+    assert retried == 2
+
+
 async def test_mention_from_other_user_is_ignored(env):
     assistant, slack, claude, _ = env
     await assistant.on_mention({"channel": "C1", "user": "USOMEONE", "ts": "10.1", "text": "<@UBOT> hi"})
@@ -902,7 +1008,7 @@ async def test_next_request_after_an_error_carries_the_stalled_request(env, stor
     assert claude.calls[2]["session_id"] == "s2" and claude.calls[2]["prompt"] == "次"
 
 
-# Slack の外からの依頼（声のレイヤ。docs/design.md の12章）
+# Slack の外からの依頼（声のレイヤ。docs/architecture.md）
 
 async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
     assistant, slack, claude, _ = env
@@ -1939,3 +2045,119 @@ async def test_a_dead_voice_layer_does_not_break_slack(env, store):
 
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
     assert not any("頼めなかった" in (t or "") for t in slack.texts())
+
+
+async def test_explicit_use_case_survives_the_handoff_memo(env, store, monkeypatch):
+    """引き継いだスレッドの最初の回でも、先頭の [[research-design]] を読み取って分類器に回さない。"""
+    from kei_agent import model_classifier
+
+    assistant, _, claude, _ = env
+    classified = []
+
+    async def classify(_config, _store, prompt, **_kw):
+        classified.append(prompt)
+        raise AssertionError("明示指定があるのに分類器に回った")
+
+    monkeypatch.setattr(model_classifier, "classify_research", classify)
+    store.upsert_thread("C1", "10.1", "vlm", None)
+    store.update_thread("C1", "10.1", handoff_memo="前のスレッドの要点: 実験Aは終わった\n\n")
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",
+                                "text": "[[research-design]] 次の実験を考えて"})
+    await settle(assistant)
+
+    assert classified == []
+    prompt = claude.calls[-1]["prompt"]
+    assert "[[research-design]]" not in prompt and "実験Aは終わった" in prompt and "次の実験を考えて" in prompt
+
+
+async def test_unselected_provider_tells_where_to_choose(env, config):
+    from dataclasses import replace as dc_replace
+
+    from kei_agent.config import AgentProfile
+
+    assistant, slack, claude, _ = env
+    profiles = dict(config.agent_profiles) | {"research": dc_replace(config.agent_profiles["research"], provider="")}
+    object.__setattr__(assistant.config, "agent_profiles", profiles)
+    assert isinstance(profiles["research"], AgentProfile)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    shown = "\n".join(slack.streamed() + slack.texts())
+    assert "App Home の設定で選んで" in shown and claude.calls == []
+
+
+def _toggl(text="", channel="C1", name="10_vlm", user="UME"):
+    return {"user_id": user, "channel_id": channel, "channel_name": name, "text": text, "trigger_id": "trig"}
+
+
+async def test_toggl_command_toggles_in_the_same_channel(env, store):
+    assistant, slack, _, _ = env
+
+    started = await assistant.on_time_command(_toggl())
+    await settle(assistant)
+    entry = assistant.time_tracker.active("UME")
+    assert entry is not None and entry.description == "研究 / vlm" and "始めた" in started
+
+    stopped = await assistant.on_time_command(_toggl())
+    await settle(assistant)
+    assert assistant.time_tracker.active("UME") is None and "止めた" in stopped
+    # カードを置いていないチャンネルに、コマンドで新しいカードを投稿しない
+    assert store.time_card("C1") is None
+
+
+async def test_toggl_command_in_another_channel_switches_the_timer(env, store):
+    assistant, slack, _, _ = env
+    await assistant.on_time_command(_toggl())
+    first = assistant.time_tracker.active("UME")
+
+    await assistant.on_time_command(_toggl(channel="C3", name="30_work"))
+    await settle(assistant)
+
+    now = assistant.time_tracker.active("UME")
+    assert now.channel_id == "C3" and now.domain == "work"
+    assert store.time_entry(first.id)["ended_at"] is not None
+
+
+async def test_toggl_command_explicit_stop_and_start(env, store):
+    assistant, slack, _, _ = env
+    assert "計測していない" in await assistant.on_time_command(_toggl("stop"))
+    await assistant.on_time_command(_toggl("開始"))
+    first = assistant.time_tracker.active("UME")
+    # start は計測中でも同じチャンネルで止めずに、動いていることを伝えるだけ
+    reply = await assistant.on_time_command(_toggl("start"))
+    assert assistant.time_tracker.active("UME") == first and "計測中" in reply
+    await assistant.on_time_command(_toggl("停止"))
+    assert assistant.time_tracker.active("UME") is None
+
+
+async def test_toggl_command_rejects_other_channels_and_users(env):
+    assistant, slack, _, _ = env
+    assert "10_" in await assistant.on_time_command(_toggl(name="overview"))
+    assert "利用できません" in await assistant.on_time_command(_toggl(user="USOMEONE"))
+    assert assistant.time_tracker.active("UME") is None
+
+
+async def test_toggl_command_opens_a_course_picker_in_the_course_channel(env, monkeypatch):
+    assistant, slack, _, _ = env
+    opened, updated = [], []
+
+    async def views_open(**kw):
+        opened.append(kw)
+        return {"view": {"id": "V1"}}
+
+    async def views_update(**kw):
+        updated.append(kw)
+        return {}
+
+    async def ask_course(skill, **params):
+        from kei_agent.agents import Reply
+        return Reply(ok=True, data={"items": [{"id": "P1", "subject": "信号処理"}]})
+
+    slack.views_open, slack.views_update = views_open, views_update
+    monkeypatch.setattr(assistant, "ask_course", ask_course)
+
+    reply = await assistant.on_time_command(_toggl(channel="C2", name="20_course"))
+    await settle(assistant)
+
+    assert opened and opened[0]["trigger_id"] == "trig" and "科目" in reply
+    assert updated and updated[0]["view_id"] == "V1" and "信号処理" in str(updated[0]["view"])

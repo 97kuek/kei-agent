@@ -54,6 +54,17 @@ def test_each_plugin_ships_its_hook(agent):
     ("research", "mcp__claude_ai_Notion__notion-search", False),
     ("research", "mcp__claude_ai_Notion__notion-update-page", False),
     ("research", "Read", True),
+    # 研究: 名前に notion を含む server はゲートウェイのほか全部断る（大文字や別名も）
+    ("research", "mcp__work-notion__notion-search", False),
+    ("research", "mcp__NOTION__search", False),
+    ("research", "mcp__research-notion-evil__search", False),
+    # 担当外の連携への書き込みは断る。読むだけなら allowlist に任せる
+    ("course", "mcp__claude_ai_Slack__slack_send_message", False),
+    ("course", "mcp__claude_ai_Microsoft_365__outlook_create_draft", False),
+    ("course", "mcp__claude_ai_Slack__slack_read_channel", True),
+    ("work", "mcp__claude_ai_Notion__notion-update-page", False),
+    ("work", "mcp__claude_ai_Box__upload_file", False),
+    ("work", "mcp__claude_ai_Slack__slack_search_public", True),
 ])
 def test_hook_policy(agent, tool, allowed):
     result = run_policy(agent, {"tool_name": tool, "tool_input": {}})
@@ -70,6 +81,22 @@ def test_research_hook_refuses_reaching_for_the_raw_notion_token(command):
     result = run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}})
 
     assert result.returncode == DENY
+
+
+@pytest.mark.parametrize("command", [
+    "echo $NOTION_COURSE_TOKEN",
+    "printenv | grep MY_NOTION_API_TOKEN",
+])
+def test_research_hook_refuses_other_raw_notion_tokens(command):
+    result = run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}})
+
+    assert result.returncode == DENY
+
+
+def test_research_hook_lets_the_gateway_token_name_through():
+    assert run_policy("research", {
+        "tool_name": "Bash",
+        "tool_input": {"command": 'test -n "$KEI_AGENT_NOTION_GATEWAY_TOKEN"'}}).returncode == ALLOW
 
 
 def test_research_hook_lets_the_gateway_token_through():

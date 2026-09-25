@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from kei_agent.slack_text import escape
 
@@ -50,8 +50,13 @@ def _at(value: str) -> datetime | None:
         return None
 
 
-def day_label(day: datetime) -> str:
-    return f"{day.month}/{day.day}（{WEEKDAYS[day.weekday()]}）"
+def weekday(day: date) -> str:
+    return WEEKDAYS[day.weekday()]
+
+
+def day_label(day: date) -> str:
+    """9/25（金）の形。datetime も渡せる。"""
+    return f"{day.month}/{day.day}（{weekday(day)}）"
 
 
 def entries(classes: list[dict], events: list[dict], dues: list[dict], now: datetime) -> list[Entry]:

@@ -254,3 +254,18 @@ async def test_a_job_outside_the_research_directory_is_refused(job_server):
     with pytest.raises(RuntimeError, match="ジョブを動かしてよい場所ではありません"):
         await remote.add("/tmp", "rm -rf /", "kei-agent-9")
     assert pueue.calls == []
+
+
+def test_the_research_root_itself_is_not_a_theme_directory(config):
+    """研究テーマを並べた場所そのものは、どのテーマでもないので断る。テーマの中と overview は通す。"""
+    from kei_agent_research.executor import ResearchExecutor
+
+    executor = ResearchExecutor(config, pueue=FakePueue())
+    theme = config.research_root / "vlm"
+    theme.mkdir(parents=True)
+    config.overview_dir.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="ジョブを動かしてよい場所ではありません"):
+        executor._theme_dir(str(config.research_root))
+    assert executor._theme_dir(str(theme)) == theme.resolve()
+    assert executor._theme_dir(str(config.overview_dir)) == config.overview_dir.resolve()

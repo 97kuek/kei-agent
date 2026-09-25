@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 # Moodle が締切に付ける言い回し。同じ活動が「開始」と「終了」で2件入るので、終わりのほうだけを締切として扱う
-_DUE_WORDS = ("終了", "提出期限", "締切", "締め切り", "期限", "due", "close", "ends")
-_START_WORDS = ("開始", "オープン", "opens", "starts")
+# 末尾が締切の言い回しなら、名前の途中に「開始」があっても締切（「開始前アンケート の 終了」）
+_DUE_SUFFIX = re.compile(r"(提出期限|終了|終了日時|締切|締め切り|期限)\s*$")
+_DUE_WORDS = re.compile(r"終了|提出期限|締切|締め切り|期限|\b(due|closes?|ends?)\b", re.IGNORECASE)
+_START_WORDS = re.compile(r"開始|オープン|\b(opens?|starts?)\b", re.IGNORECASE)
+# 行の折り返し（CRLF か LF のあとに空白1つ）
+_FOLD = re.compile(rb"\r?\n[ \t]")
 # 科目名の末尾に付く履修コード（`…(2019ZZ2600000126)`）
 _COURSE_CODE = re.compile(r"\s*[（(][0-9A-Z]{6,}[）)]\s*$")
 _UNESCAPE = {"\\n": "\n", "\\N": "\n", "\\,": ",", "\\;": ";", "\\\\": "\\"}
@@ -35,9 +39,11 @@ class Event:
     @property
     def kind(self) -> str:
         """`due`（締切）／`start`（受付や公開の開始）／`other`（それ以外）。"""
-        if any(word in self.summary for word in _START_WORDS):
+        if _DUE_SUFFIX.search(self.summary):
+            return "due"
+        if _START_WORDS.search(self.summary):
             return "start"
-        if any(word in self.summary for word in _DUE_WORDS):
+        if _DUE_WORDS.search(self.summary):
             return "due"
         return "other"
 
@@ -49,6 +55,11 @@ class Event:
     def course_name(self) -> str:
         """科目名（末尾の履修コードを外したもの）。"""
         return _COURSE_CODE.sub("", self.course).strip()
+
+
+def unfold_bytes(data: bytes) -> bytes:
+    """折り返しを、文字に直す前に外す（折り返しは75バイトごとなので、日本語の1文字が途中で切れる）。"""
+    return _FOLD.sub(b"", data)
 
 
 def unfold(text: str) -> list[str]:
@@ -116,9 +127,13 @@ def parse(text: str) -> list[Event]:
 
 
 def due_events(text: str, since: date | None = None, days: int = 90) -> list[Event]:
-    """締切らしい予定を、近い順に。過ぎたものと、先すぎるものは落とす。"""
-    start = datetime.combine(since or date.today(), datetime.min.time())
-    end = start + timedelta(days=days)
+    """締切らしい予定を、近い順に。過ぎたものと、先すぎるものは落とす。
+
+    since を省くと今から数える（今日の朝に過ぎた締切は入れない）。
+    """
+    day_start = datetime.combine(since or date.today(), datetime.min.time())
+    end = day_start + timedelta(days=days)
+    start = day_start if since is not None else max(day_start, datetime.now())
     found = [e for e in parse(text)
              if e.is_due and e.starts_at is not None and start <= e.starts_at <= end]
     return sorted(found, key=lambda e: e.starts_at)

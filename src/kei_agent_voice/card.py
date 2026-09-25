@@ -22,7 +22,7 @@ def build_card(base_url: str) -> AgentCard:
             protocol_binding="JSONRPC",
             protocol_version="1.0",
         )],
-        # 本体は投げっぱなしにする（机の上のロボットに Slack を待たせない。docs/voice.md）
+        # 本体は投げっぱなしにする（机の上のロボットに Slack を待たせない。docs/architecture.md の「声のレイヤ」）
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["application/json"],
         default_output_modes=["application/json"],

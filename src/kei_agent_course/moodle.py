@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from kei_agent_course.ics import Event, due_events, parse
+from kei_agent_course.ics import Event, due_events, parse, unfold_bytes
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +35,13 @@ def fetch(url: str, timeout: float = TIMEOUT_SECONDS) -> str:
     """カレンダーの書き出しを読む。"""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8", "replace")
+            text = unfold_bytes(resp.read()).decode("utf-8", "replace")
     except (urllib.error.URLError, TimeoutError) as e:
         raise MoodleError(f"カレンダーを読めません: {e}") from None
     if "BEGIN:VCALENDAR" not in text:
         raise MoodleError("カレンダーの中身が ics ではありません（URL が切れているかもしれません）")
     return text
+
 
 def due(url: str, since: date | None = None, days: int = WINDOW_DAYS) -> list[Event]:
     """締切の近い課題を、近い順に。"""

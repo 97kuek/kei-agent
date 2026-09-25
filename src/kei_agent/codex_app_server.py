@@ -4,20 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
+import os
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from kei_agent import guard
 from kei_agent.agent_policy import AppPolicy
-from kei_agent.codex_runtime import discover_enabled_mcp_names_strict
-from kei_agent.provider_permissions import PROFILE_NAME, PermissionProfile
-from kei_agent.runner import RunResult, parse_limit
+from kei_agent.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile
+from kei_agent.runner import RunResult, codex_instructions_setting, parse_limit, verify_codex_profile
 
 # App connector の検索結果は、Box のプレビューなどで標準の64KiBを超えることがある。
 # JSON-RPC 1行を十分に読める上限。これを超えた場合はメモリを使い続けず、利用者向けのエラーにする。
 APP_SERVER_LINE_LIMIT = 8 * 1024 * 1024
+# App Server から来る問い合わせ（承認など）への断り。人に聞けないので、すべて断る
+DECLINES: dict[str, dict[str, str]] = {
+    "item/commandExecution/requestApproval": {"decision": "decline"},
+    "item/fileChange/requestApproval": {"decision": "decline"},
+    "mcpServer/elicitation/request": {"action": "decline"},
+}
+# 断り方が決まっていない問い合わせは、JSON-RPC の「知らないメソッド」で返す
+METHOD_NOT_FOUND = -32601
 
 
 class AppServerUnavailable(RuntimeError):
@@ -61,7 +71,7 @@ def build_command(codex_bin: str, app_ids: Sequence[str] = (), read_only: bool =
         for setting in profile.config_overrides:
             command += ["-c", setting]
     if instructions:
-        command += ["-c", "developer_instructions=" + __import__("json").dumps(instructions, ensure_ascii=False)]
+        command += ["-c", codex_instructions_setting(instructions)]
     if app_ids:
         command += ["-c", "apps._default.enabled=false"]
         for app_id in disabled_app_ids:
@@ -116,6 +126,43 @@ def apply_app_event(result: RunResult, event: dict[str, Any], turn_id: str) -> b
     return False
 
 
+def server_request_reply(event: dict[str, Any]) -> dict[str, Any]:
+    """App Server からの問い合わせに返す答え。承認は断り、それ以外は知らないと返す。"""
+    method = str(event.get("method") or "")
+    if method in DECLINES:
+        return {"id": event["id"], "result": DECLINES[method]}
+    return {"id": event["id"], "error": {"code": METHOD_NOT_FOUND, "message": f"unsupported: {method}"}}
+
+
+def _is_server_request(event: dict[str, Any]) -> bool:
+    return "method" in event and "id" in event
+
+
+async def discover_enabled_mcp_names_strict(codex_bin: str = "codex") -> frozenset[str]:
+    """App 実行前にユーザー設定の MCP を列挙する。読めなければ安全側で停止。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            codex_bin, "mcp", "list", "--json",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        entries = json.loads(stdout)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Codex MCP の設定を確認できません") from exc
+    if proc.returncode or not isinstance(entries, list):
+        raise RuntimeError("Codex MCP の設定を確認できません")
+    names: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("enabled"), bool):
+            raise RuntimeError("Codex MCP の設定を確認できません")
+        if entry["enabled"]:
+            name = entry.get("name")
+            if not isinstance(name, str):
+                raise RuntimeError("Codex MCP の設定を確認できません")
+            names.add(name)
+    return frozenset(names)
+
+
 class AppServerClient:
     """一時プロセスだけを使う App Server JSON-RPC client。"""
 
@@ -126,20 +173,10 @@ class AppServerClient:
 
     async def _verify_profile(self, cwd: Path, profile: PermissionProfile) -> None:
         """App Server 起動前に同じ権限 profile が OS で実行可能か確かめる。"""
-        command = [self.codex_bin, "sandbox", "-P", PROFILE_NAME, "-C", str(cwd)]
-        for setting in profile.config_overrides:
-            command += ["-c", setting]
-        command += ["--", "/usr/bin/true"]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *command, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(proc.wait(), timeout=10)
-        except (OSError, TimeoutError) as exc:
-            raise AppServerUnavailable("Codex の権限を強制できません") from exc
-        if proc.returncode != 0:
-            raise AppServerUnavailable("Codex の権限を強制できません")
+            await verify_codex_profile(self.codex_bin, cwd, profile)
+        except CapabilityUnavailable as exc:
+            raise AppServerUnavailable(str(exc)) from exc
 
     async def _start(self, app_ids: Sequence[str] = (), read_only: bool = False,
                      instructions: str = "", profile: PermissionProfile | None = None,
@@ -151,30 +188,49 @@ class AppServerClient:
                            disabled_mcp_names, disabled_app_ids, read_only_app_ids),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            # Slack などの鍵を App Server とその子（connector や Bash）に渡さない
+            env=guard.strip_env(dict(os.environ)),
             limit=APP_SERVER_LINE_LIMIT,
         )
-        await self._request(proc, "initialize", {
-            "clientInfo": {"name": "kei_agent", "title": "Kei Agent", "version": "1"},
-            "capabilities": {"experimentalApi": True},
-        })
-        await self._notify(proc, "initialized", {})
+        try:
+            await self._request(proc, "initialize", {
+                "clientInfo": {"name": "kei_agent", "title": "Kei Agent", "version": "1"},
+                "capabilities": {"experimentalApi": True},
+            })
+            await self._notify(proc, "initialized", {})
+        except BaseException:
+            # 呼び出し元には proc が渡らないので、ここで止めないと残り続ける
+            await self._stop(proc)
+            raise
         return proc
 
-    async def _notify(self, proc, method: str, params: dict[str, Any]) -> None:
+    async def _send(self, proc, message: dict[str, Any]) -> None:
         assert proc.stdin is not None
-        proc.stdin.write((__import__("json").dumps({"method": method, "params": params}) + "\n").encode())
+        proc.stdin.write((json.dumps(message) + "\n").encode())
         await proc.stdin.drain()
+
+    async def _notify(self, proc, method: str, params: dict[str, Any]) -> None:
+        await self._send(proc, {"method": method, "params": params})
+
+    async def _next_event(self, proc) -> dict[str, Any] | None:
+        """次の通知か返事。問い合わせにはその場で断りを返す。終わりなら None。"""
+        while raw := await self._readline(proc):
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if _is_server_request(event):
+                await self._send(proc, server_request_reply(event))
+                continue
+            return event
+        return None
 
     async def _request(self, proc, method: str, params: dict[str, Any], pending: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         request_id = next(self._ids)
-        assert proc.stdin is not None and proc.stdout is not None
-        proc.stdin.write((__import__("json").dumps({"method": method, "id": request_id, "params": params}) + "\n").encode())
-        await proc.stdin.drain()
-        while raw := await self._readline(proc):
-            try:
-                event = __import__("json").loads(raw)
-            except ValueError:
-                continue
+        await self._send(proc, {"method": method, "id": request_id, "params": params})
+        while (event := await self._next_event(proc)) is not None:
             if event.get("id") != request_id:
                 if pending is not None:
                     pending.append(event)
@@ -192,59 +248,59 @@ class AppServerClient:
             await self._stop(proc)
 
     async def run(self, prompt: str, policy: AppPolicy, model: str, reasoning_effort: str,
-                  on_activity: Callable[[str], Awaitable[None]] | None = None,
-                  on_text: Callable[[str], Awaitable[None]] | None = None,
                   instructions: str = "", cwd: Path | None = None,
                   profile: PermissionProfile | None = None) -> RunResult:
         result = RunResult()
         proc = None
         try:
-            if profile is None or cwd is None:
-                raise AppServerUnavailable("Codex の権限 profile と作業場が未設定です")
-            await self._verify_profile(cwd, profile)
-            installed = await self.installed()
-            app_ids = resolve_apps(installed, policy)
-            read_only_app_ids = tuple(str(item["id"]) for item in installed
-                                      if item.get("runtimeName") in policy.read_only_app_names and item.get("id"))
-            disabled_app_ids = tuple(str(item["id"]) for item in installed
-                                     if item.get("id") and item["id"] not in app_ids)
-            mcp_names = await discover_enabled_mcp_names_strict(self.codex_bin)
-            proc = await self._start(app_ids, policy.read_only, instructions, profile,
-                                     sorted(mcp_names), disabled_app_ids, read_only_app_ids)
-            # 設定をかけた二つ目の process でも readiness を確認する。
-            active_apps = (await self._request(proc, "app/installed", {"forceRefresh": True})).get("apps") or []
-            resolve_apps(active_apps, policy)
-            if any(item.get("enabled") and item.get("callable") and item.get("id") not in app_ids
-                   for item in active_apps):
-                raise AppServerUnavailable("許可外の Codex App が有効です")
-            thread_params: dict[str, Any] = build_thread_params(model, cwd, PROFILE_NAME)
-            pending: list[dict[str, Any]] = []
-            thread = await self._request(proc, "thread/start", thread_params, pending)
-            thread_id = str((thread.get("thread") or {}).get("id") or "")
-            if not thread_id:
-                raise AppServerUnavailable("Codex thread を開始できません")
-            result.session_id = thread_id
-            turn = await self._request(proc, "turn/start", {"threadId": thread_id, "input": build_turn_input(prompt, app_ids),
-                                                               "reasoningEffort": reasoning_effort}, pending)
-            turn_id = str((turn.get("turn") or {}).get("id") or "")
-            assert proc.stdout is not None
-            while True:
-                if pending:
-                    event = pending.pop(0)
-                else:
-                    raw = await self._readline(proc)
-                    if not raw:
+            # 1行ごとの上限とは別に、全体の上限時間で止める（途中経過が流れ続けても終わるように）
+            async with asyncio.timeout(self.timeout_seconds):
+                if profile is None or cwd is None:
+                    raise AppServerUnavailable("Codex の権限 profile と作業場が未設定です")
+                await self._verify_profile(cwd, profile)
+                installed = await self.installed()
+                app_ids = resolve_apps(installed, policy)
+                read_only_app_ids = tuple(str(item["id"]) for item in installed
+                                          if item.get("runtimeName") in policy.read_only_app_names and item.get("id"))
+                disabled_app_ids = tuple(str(item["id"]) for item in installed
+                                         if item.get("id") and item["id"] not in app_ids)
+                mcp_names = await discover_enabled_mcp_names_strict(self.codex_bin)
+                proc = await self._start(app_ids, policy.read_only, instructions, profile,
+                                         sorted(mcp_names), disabled_app_ids, read_only_app_ids)
+                # 設定をかけた二つ目の process でも readiness を確認する。
+                active_apps = (await self._request(proc, "app/installed", {"forceRefresh": True})).get("apps") or []
+                resolve_apps(active_apps, policy)
+                if any(item.get("enabled") and item.get("callable") and item.get("id") not in app_ids
+                       for item in active_apps):
+                    raise AppServerUnavailable("許可外の Codex App が有効です")
+                thread_params: dict[str, Any] = build_thread_params(model, cwd, PROFILE_NAME)
+                pending: list[dict[str, Any]] = []
+                thread = await self._request(proc, "thread/start", thread_params, pending)
+                thread_id = str((thread.get("thread") or {}).get("id") or "")
+                if not thread_id:
+                    raise AppServerUnavailable("Codex thread を開始できません")
+                result.session_id = thread_id
+                turn = await self._request(proc, "turn/start", {
+                    "threadId": thread_id, "input": build_turn_input(prompt, app_ids),
+                    "reasoningEffort": reasoning_effort}, pending)
+                turn_id = str((turn.get("turn") or {}).get("id") or "")
+                while True:
+                    event = pending.pop(0) if pending else await self._next_event(proc)
+                    if event is None:
                         break
-                    try:
-                        event = __import__("json").loads(raw)
-                    except ValueError:
-                        continue
-                if apply_app_event(result, event, turn_id):
-                    return result
+                    if apply_app_event(result, event, turn_id):
+                        return result
+                result.is_error = True
+                result.errors.append("Codex App Server の実行が終了しました")
+                return result
+        except TimeoutError:
             result.is_error = True
-            result.errors.append("Codex App Server の実行が終了しました")
+            result.timed_out = True
+            result.failure_kind = "timeout"
+            result.text = ""
+            result.errors.append(f"Codex App Server が {self.timeout_seconds:.0f} 秒で終わりませんでした")
             return result
-        except (AppServerUnavailable, TimeoutError, RuntimeError) as exc:
+        except (AppServerUnavailable, RuntimeError) as exc:
             result.is_error = True
             result.errors.append(str(exc))
             return result

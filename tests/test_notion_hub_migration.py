@@ -1,6 +1,7 @@
 """Legacy Daily/Retro migration is audited before it can mutate either store."""
 
 import pytest
+from fakes import check_notion_body
 
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import RESEARCH_HOME_ID
@@ -51,6 +52,7 @@ class LegacyNotion:
         return self.blocks[page_id]
 
     def request(self, method, path, body=None):
+        check_notion_body(body)
         if method == "GET" and path.startswith("/pages/"):
             return next(page for page in self.pages if page["id"] == path.removeprefix("/pages/"))
         self.writes.append((method, path, body))
@@ -223,3 +225,50 @@ def test_relinking_all_legacy_review_threads_is_transactional(tmp_path):
     assert count == 2
     assert store.notion_link("C1", "1.1")["page_id"] == "day-21"
     assert store.notion_link("C1", "2.2")["page_id"] == "day-21"
+
+
+def test_old_research_view_is_moved_to_trash_with_current_api():
+    from kei_agent.notion_hub_migration import _archive_research_view
+
+    notion = LegacyNotion()
+    notion.allow_writes = True
+    notion.blocks[RESEARCH_HOME_ID] = [
+        {"id": "h", "type": "heading_2", "heading_2": {"rich_text": rich("最近の Daily と振り返り")}},
+        {"id": "v", "type": "child_database", "child_database": {"title": "最近の Daily と振り返り"}},
+    ]
+    patched = []
+    original = notion.request
+
+    def request(method, path, body=None):
+        if method == "PATCH" and path.startswith("/blocks/"):
+            check_notion_body(body)
+            patched.append((path, body))
+            return {}
+        return original(method, path, body)
+    notion.request = request
+    _archive_research_view(notion)
+    assert patched == [("/blocks/v", {"in_trash": True}), ("/blocks/h", {"in_trash": True})]
+
+
+def test_apply_into_existing_day_does_not_duplicate_managed_marker():
+    from datetime import datetime
+
+    from test_notion_hub import FakeDayNotion
+
+    from kei_agent.notion_hub import MANAGED_END, HubState, HubStore
+
+    hub = HubStore(FakeDayNotion(), HubState("home", "calendar-ds", "daily-ds"))
+    row = hub.upsert_day("振り返り", "2026-09-21", "Retro", "今の振り返り", None, None)
+    hub.append_review_conclusion(row.id, "決めたこと", datetime(2026, 9, 21, 21))
+    notion = LegacyNotion()
+    notion.note("r1", "2026-09-21", "振り返り", "旧い振り返り")
+    manifest = audit_legacy_notes(notion, "notes-ds")
+    notion.allow_writes = True
+
+    report = apply_legacy_notes(notion, hub, manifest, FakeStore())
+
+    body = hub.day_body("2026-09-21")
+    assert report.unresolved == ()
+    assert body.count(MANAGED_END) == 2  # Daily とレトプラに1つずつ
+    assert body.count("決めたこと") == 1
+    assert body.count("今の振り返り") == 1 and "旧い振り返り" in body

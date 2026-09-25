@@ -3,7 +3,7 @@
 渡ってくるのは「何が起きたか」だけ。言い方と顔は `events.py` が決め、
 **喋るのは Realtime のセッション**（`session.py` → `live.py`）に頼む。
 
-本体は返事を待たない（投げっぱなし。docs/voice.md の4節）ので、ここは**すぐ返す**。
+本体は返事を待たない（投げっぱなし。docs/architecture.md の「声のレイヤ」）ので、ここは**すぐ返す**。
 喋り終わるまで返さないと、Slack の処理が机の上のロボットの再生時間に引きずられる。
 
 **マイクを閉じているあいだは喋らない**（繋がりが無いので喋る口が無い）。顔だけ変える。
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -45,6 +46,39 @@ def event_of(text: str, metadata: dict) -> dict:
         if isinstance(found, dict):
             return found
     return {k: v for k, v in metadata.items() if k != "skill"}
+
+
+def current(held: dict, now: datetime | None = None) -> dict:
+    """古くなったものを捨てて返す。終わった数は**その日のぶん**、上限はやり直しの時刻まで。"""
+    now = now or datetime.now()
+    today = now.date().isoformat()
+    until = _reset_at(str(held.get("limited_until") or ""))
+    if held.get("day") != today:
+        if held.get("day") and until is None:
+            # やり直しの時刻が読めなかった上限は、日が変わったら忘れる
+            held.pop("limited", None)
+        held.pop("done", None)
+        held.pop("failed", None)
+        held["day"] = today
+    if held.get("limited") and until is not None and _passed(until, now):
+        held.pop("limited", None)
+        held.pop("limited_until", None)
+    return held
+
+
+def _reset_at(at: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(at)
+    except ValueError:
+        return None
+
+
+def _passed(reset: datetime, now: datetime) -> bool:
+    if reset.tzinfo is not None:
+        now = now.astimezone() if now.tzinfo is None else now
+    elif now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+    return now >= reset
 
 
 class VoiceExecutor(AgentExecutor):
@@ -80,8 +114,9 @@ class VoiceExecutor(AgentExecutor):
         await updater.complete(updater.new_agent_message(
             [Part(text=envelope.reply("受け取ったよ", {"spoke": found.speaks, "face": found.face}))]))
 
-    def _hold(self, event: dict) -> None:
-        """速い道で使えるように、押されてきたものを手元に置く（docs/voice.md の3節）。"""
+    def _hold(self, event: dict, now: datetime | None = None) -> None:
+        """速い道で使えるように、押されてきたものを手元に置く（docs/architecture.md の「声のレイヤ」）。"""
+        current(self.held, now)
         kind = str(event.get("kind") or "")
         if kind == "schedule":
             self.held["schedule"] = event
@@ -92,8 +127,9 @@ class VoiceExecutor(AgentExecutor):
             self.held[kind] = int(self.held.get(kind) or 0) + 1
         elif kind == "limited":
             self.held["limited"] = True
+            self.held["limited_until"] = str(event.get("reset_at") or "")
         elif kind == "listen" and self.session is not None:
-            # 常に録らない。Slack から入れたときだけ開ける（docs/voice.md の7節）
+            # 常に録らない。Slack から入れたときだけ開ける（docs/architecture.md の「声のレイヤ」）
             self.session.set_listening(bool(event.get("on")))
 
     def _react(self, found: events.Reaction) -> None:

@@ -1,4 +1,4 @@
-"""エージェントの返事の形（全エージェント共通の封筒）。docs/agents.md
+"""エージェントの返事の形（全エージェント共通の封筒）。docs/architecture.md の「振り分けと A2A」
 
     {"ok": true, "text": "人が読む文", "data": {}, "limit_reset_at": null, "cost_usd": 0.02}
 

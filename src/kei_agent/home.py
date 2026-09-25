@@ -1,6 +1,6 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
-置くのは、テーマごとに許可した接続先と、決まった時刻の処理の時刻だけ（docs/design.md の9章）。
+置くのは、テーマごとに許可した接続先と、決まった時刻の処理の時刻だけ（docs/architecture.md）。
 基本の接続先など `config.toml` の柵は出さない。
 """
 
@@ -126,7 +126,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         {"type": "context", "elements": [{"type": "mrkdwn", "text":
             "*知らせる*: 作業が終わったときなどに、机の上で声に出します。"
             "Stack-chan がいればそちら、いなければ Mac のスピーカーで鳴らします\n"
-            "*聞く*: マイクを開けて、「けい」と呼びかけたら答えます。"
+            "*聞く*: マイクを開けて、話しかけると答えます。"
             "**切っている間はマイクを閉じます**（講義中などに録られないように）"}]},
         {"type": "actions", "elements": [
             _button("知らせるのを止める" if settings.voice_enabled(store) else "知らせる",

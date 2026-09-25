@@ -4,6 +4,7 @@ import json
 from datetime import date, datetime
 
 import pytest
+from fakes import check_notion_body
 
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubSetup, HubState, HubStore, load_hub
@@ -39,20 +40,28 @@ def test_hub_schema_check_reads_only_own_home_and_sources():
     assert not any("course" in path or "research" in path for path in paths)
 
 
-def test_calendar_lookup_includes_old_dates_for_stable_id_matching():
+def test_calendar_lookup_filters_by_window_but_keeps_cleared_dates():
+    def row(row_id, day):
+        return {"id": row_id, "properties": {
+            "出典 ID": {"rich_text": [{"plain_text": row_id}]},
+            "日付": {"date": {"start": day} if day else None},
+            "同期状態": {"select": {"name": "確認済み"}},
+        }}
+
     class CalendarNotion:
         def paginate(self, method, path, body):
-            assert body["filter"] == {"property": "出典", "select": {"equals": "Outlook"}}
-            return [{"id": "old", "properties": {
-                "出典 ID": {"rich_text": [{"plain_text": "event-1"}]},
-                "日付": {"date": {"start": "2026-09-20"}},
-                "同期状態": {"select": {"name": "確認済み"}},
-            }}]
+            assert body["filter"] == {"and": [
+                {"property": "出典", "select": {"equals": "Outlook"}},
+                {"or": [
+                    {"property": "日付", "date": {"on_or_after": "2026-08-01"}},
+                    {"property": "日付", "date": {"is_empty": True}},
+                ]},
+            ]}
+            return [row("old", "2026-09-20"), row("cleared", None), row("far", "2027-01-05T10:00:00+09:00")]
 
     hub = HubStore(CalendarNotion(), HubState("home", "calendar-ds", "daily-ds"))
-    rows = hub.calendar_rows("Outlook", date(2026, 9, 24), date(2026, 10, 23))
-    assert rows[0]["出典 ID"] == "event-1"
-    assert rows[0]["日付"] == "2026-09-20"
+    rows = hub.calendar_rows("Outlook", date(2026, 8, 1), date(2026, 11, 30))
+    assert [(r["出典 ID"], r["日付"]) for r in rows] == [("old", "2026-09-20"), ("cleared", "")]
 
 
 class FakeHubNotion:
@@ -264,9 +273,10 @@ class FakeDayNotion:
         return [row for row in self.rows if row["properties"]["対象日"]["date"]["start"] == day]
 
     def children(self, page_id):
-        return [b for b in self.blocks.get(page_id, []) if not b.get("archived")]
+        return [b for b in self.blocks.get(page_id, []) if not b.get("in_trash")]
 
     def request(self, method, path, body=None):
+        check_notion_body(body)
         self.writes.append((method, path, body))
         if (method, path) == ("POST", "/pages"):
             page = {"id": f"day-{len(self.rows) + 1}", "url": f"https://notion.so/day-{len(self.rows) + 1}",
@@ -284,7 +294,7 @@ class FakeDayNotion:
         if method == "PATCH" and path.endswith("/children"):
             page_id = path.split("/")[2]
             added = self._numbered(body["children"])
-            before = body.get("after")
+            before = ((body.get("position") or {}).get("after_block") or {}).get("id")
             if before:
                 index = next(i for i, block in enumerate(self.blocks[page_id]) if block["id"] == before)
                 self.blocks[page_id][index + 1:index + 1] = added
@@ -296,7 +306,7 @@ class FakeDayNotion:
             for blocks in self.blocks.values():
                 for block in blocks:
                     if block["id"] == block_id:
-                        block["archived"] = body["archived"]
+                        block["in_trash"] = body["in_trash"]
                         return block
         raise AssertionError((method, path, body))
 

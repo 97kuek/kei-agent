@@ -6,7 +6,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, themes, timelog, work
+from kei_agent import course, morning, themes, timelog, work
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.notion import NotionError
@@ -23,10 +23,6 @@ DONE = "完了"
 
 def _ts(value: float | None) -> str:
     return datetime.fromtimestamp(value).strftime("%m/%d %H:%M") if value else "-"
-
-
-def _weekday(at: datetime) -> str:
-    return "月火水木金土日"[at.weekday()]
 
 
 def _at(value: str) -> datetime | None:
@@ -108,9 +104,9 @@ class DigestBuilder:
         rest = [i for i in items if _due_day(i) and _due_day(i) > at.date()]
         lines.append(f"- 今日が期限だったもの: {_dues(today) or 'なし'}")
         lines.append(f"- 残っている締切: {_dues(rest, with_day=True) or 'なし'}")
-        classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=_weekday(tomorrow))
+        classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=morning.weekday(tomorrow))
         names = [str(c.get("subject") or "") for c in (classes.data.get("items") or [])] if classes.ok else []
-        lines.append(f"- 明日（{_weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
+        lines.append(f"- 明日（{morning.weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
         return [*lines, ""]
 
     async def _work(self, now: float) -> list[str]:

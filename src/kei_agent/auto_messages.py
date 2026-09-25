@@ -80,13 +80,6 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     )
 
 
-def rules_update_prompt(rules: str) -> str:
-    """会話の途中で prompts/system.md が変わったときに、依頼の前に付ける文。"""
-    return (f"{HEADER} Kei Agent としての振る舞いの決まりが更新されました。"
-            "この会話を始めたときの決まりより、こちらを優先してください。\n\n"
-            f"<rules>\n{rules.strip()}\n</rules>\n\n---\n\n")
-
-
 def domain_resume_prompt(decisions) -> str:
     """接続先の申し出に依頼者が答えたあと、会話を再開するときに渡す文。"""
     lines = [f"{HEADER} 接続先の申し出に、依頼者が答えました。"]

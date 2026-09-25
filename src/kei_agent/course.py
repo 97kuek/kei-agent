@@ -3,7 +3,7 @@
 オーケストレーター（Kei Agent 本体）は、言われたことがどの仕事にあたるかだけを決めて A2A で頼み、
 返ってきた中身を Slack 向けの形にして出す。本体では claude を動かさない。
 定型（取り込む・締切・実績）に当てはまらない質問は `ask` に回し、**大学エージェント自身の claude** が
-Box と Notion を読んで答える（docs/agents.md）。
+Box と Notion を読んで答える（docs/architecture.md の「振り分けと A2A」）。
 
 締切は封筒の `data.items` で返ってくるので、見せ方はここで決める（スレッドへの返事、朝の一覧、
 24時間前の知らせ）。
@@ -22,18 +22,15 @@ from kei_agent.auto_messages import history_prompt
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape
+from kei_agent_course.skills import ASK, LIST_DUE, SYNC_ASSIGNMENTS, TIME_REPORT
+from kei_agent_course.skills import LIST_CALENDAR_ASSIGNMENTS as LIST_CALENDAR_ASSIGNMENTS
+from kei_agent_course.skills import LIST_CLASSES as LIST_CLASSES
 
 log = logging.getLogger(__name__)
 
-# 大学エージェントの仕事の名前（src/kei_agent_course/card.py と同じもの）。
-# あちらは a2a-sdk に依存していて本体からは読み込めないので、文字列で持つ
-SYNC_ASSIGNMENTS = "sync-assignments"
-LIST_DUE = "list-due"
-LIST_CALENDAR_ASSIGNMENTS = "list-calendar-assignments"
-LIST_CLASSES = "list-classes"
-TIME_REPORT = "time-report"
-# 定型に当てはまらない質問の窓口（どのエージェントでも同じ名前。docs/agents.md）
-ASK = "ask"
+# 大学エージェントの仕事の名前は kei_agent_course.skills（a2a-sdk に依存しない）から読む。
+# 朝のまとめ（digest.py）と定期処理（schedule.py）も course.<名前> で使うので、ここから出す
+
 # config.toml の [a2a.agents] で書いたエージェントの名前
 AGENT = "course"
 

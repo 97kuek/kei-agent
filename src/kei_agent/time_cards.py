@@ -74,3 +74,13 @@ def course_view(channel_id: str, courses: list[dict]) -> dict:
                     "label": {"type": "plain_text", "text": "今学期の履修科目"},
                     "element": {"type": "static_select", "action_id": "select", "options": options}}],
     }
+
+
+def course_loading_view(channel_id: str, text: str = "今学期の履修科目を読み込んでいるよ…") -> dict:
+    """科目の一覧が届くまで出しておく画面。trigger_id は3秒で切れるので、先に開いて後から差し替える。"""
+    return {
+        "type": "modal", "callback_id": COURSE_CALLBACK, "private_metadata": channel_id,
+        "title": {"type": "plain_text", "text": "科目を選ぶ"},
+        "close": {"type": "plain_text", "text": "閉じる"},
+        "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": text}}],
+    }

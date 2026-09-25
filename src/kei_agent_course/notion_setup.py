@@ -1,12 +1,10 @@
 """授業ホームの正本 DB を作り、既存 schema の不足だけを補う。
 
 研究ホームとは別のコネクト（トークン）で動かし、授業のページだけに接続する。
-研究のデータベースには触れない（docs/design.md の11章）。
+研究のデータベースには触れない（docs/architecture.md）。
 
 使い方:
     NOTION_COURSE_TOKEN=... uv run --group course kei-agent-course-setup <授業ホームのページID>
-
-ビューの作成と表示列の統一は `kei-agent-course-layout` が担う。
 """
 
 from __future__ import annotations
@@ -16,10 +14,12 @@ import json
 import os
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError, Setup
+from kei_agent_course import notion_props, periods
 from kei_agent_course.course_identity import normalize_course_name
 
 # 科目の台帳。学期のあいだ変わらないもの
@@ -46,6 +46,7 @@ COURSES = {
             {"name": "春学期", "color": "green"},
             {"name": "秋学期", "color": "orange"},
             {"name": "通年", "color": "blue"},
+            {"name": "春ク", "color": "pink"},
             {"name": "夏ク", "color": "green"},
             {"name": "秋ク", "color": "orange"},
             {"name": "冬ク", "color": "purple"},
@@ -164,7 +165,7 @@ AUTUMN_2026 = [
 class CourseSetup(Setup):
     """授業ホームの下に正本6 DBを作る（すでにあれば、足りない項目だけ足す）。"""
 
-    def run(self, courses: list[tuple[str, str, int | None]] | None = None) -> None:
+    def run(self, courses: list[tuple[str, str, int | None]] | None = None, year: int | None = None) -> None:
         titles = [
             block["child_database"]["title"] for block in self.notion.children(self.home)
             if block["type"] == "child_database"
@@ -176,7 +177,7 @@ class CourseSetup(Setup):
         for key, (title, spec) in SPECS.items():
             self.database(key, self.home, title, spec)
         for name, weekday, period in courses or []:
-            self.add_course(name, weekday, period)
+            self.add_course(name, weekday, period, year=year)
 
     def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
         """正本 schema に不足を補い、既存 title alias は同じ property ID で改名する。"""
@@ -201,33 +202,40 @@ class CourseSetup(Setup):
         return super().database(key, parent, title, spec)
 
     def add_course(self, name: str, weekday: str, period: int | None = None,
-                   term: str = "秋学期") -> None:
-        """科目を1つ足す（同じ名前があれば何もしない）。曜日と時限は別の列に入れる。"""
+                   term: str = periods.AUTUMN, year: int | None = None) -> None:
+        """科目を1つ足す（同じ年度・同じ名前があれば何もしない）。曜日と時限は別の列に入れる。
+
+        年度を省くと今日の年度にする。年度が無いと、次の年も「履修中」の科目として出てしまう。
+        """
+        year = year or periods.academic_year(date.today())
         db = self.state["databases"]["courses"]
         for row in self.notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
-            if (row.get("properties", {}).get("状態", {}).get("select") or {}).get("name") == "終了":
+            props = row.get("properties", {})
+            if notion_props.select(props.get("状態")) == "終了":
                 continue
-            title = "".join(part.get("plain_text") or part.get("text", {}).get("content", "")
-                            for part in row.get("properties", {}).get("科目名", {}).get("title") or [])
-            if normalize_course_name(title) == normalize_course_name(name):
+            if notion_props.number(props.get("年度")) not in (None, year):
+                continue
+            if normalize_course_name(notion_props.plain(props.get("科目名"))) == normalize_course_name(name):
                 return
         self.notion.request("POST", "/pages", {
             "parent": {"type": "data_source_id", "data_source_id": db["data_source_id"]},
             "properties": {
-                "科目名": {"title": [{"text": {"content": name}}]},
+                "科目名": notion_props.title(name),
+                "年度": {"number": year},
                 "曜日": {"select": {"name": weekday}},
                 "時限": {"number": period},
                 "学期": {"select": {"name": term}},
                 "状態": {"select": {"name": "履修中"}},
             },
         })
-        self.log.append(f"科目を追加: {name}（{weekday}{period or ''}）")
+        self.log.append(f"科目を追加: {name}（{year}年度 {weekday}{period or ''}）")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-course-setup")
     parser.add_argument("home_page_id", help="授業ホームのページID（URL の末尾32文字）")
-    parser.add_argument("--seed", action="store_true", help="2026年度秋学期の履修科目を入れる")
+    parser.add_argument("--seed", type=int, metavar="年度",
+                        help="秋学期の履修科目（AUTUMN_2026）を、その年度の科目として入れる")
     args = parser.parse_args(argv)
     token = os.environ.get("NOTION_COURSE_TOKEN")
     if not token:
@@ -235,7 +243,7 @@ def main(argv: list[str] | None = None) -> None:
     state_path = Path(load_config().state_dir) / "notion-course.json"
     setup = CourseSetup(Notion(token), args.home_page_id, state_path)
     try:
-        setup.run(AUTUMN_2026 if args.seed else None)
+        setup.run(AUTUMN_2026 if args.seed else None, year=args.seed)
     except NotionError as e:
         sys.exit(f"Notion で失敗しました: {e}")
     finally:

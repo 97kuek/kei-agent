@@ -16,14 +16,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import Config
-from kei_agent.notion import Notion, NotionError, schema_problems
+from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, schema_problems
 
 log = logging.getLogger(__name__)
 
 # Notion のテキストの上限（1つの rich_text あたり）
 TEXT_LIMIT = 2000
-# 1回のリクエストで足せるブロックの上限
-BLOCKS_PER_REQUEST = 100
 # 1つの段落に入れられる rich_text の要素数
 RICH_TEXT_ITEMS = 100
 # 入れ子のブロックをたどる深さ
@@ -69,7 +67,7 @@ def parse_slack_permalink(url: str | None) -> tuple[str, str] | None:
 
 # Markdown とブロックの変換（Daily や Task の本文に使う、よく出てくる形だけ）
 
-def _rich(text: str) -> list[dict]:
+def rich_text(text: str) -> list[dict]:
     """**太字** と `コード` だけを装飾に変え、上限ごとに分ける。"""
     parts = []
     for token in re.split(r"(\*\*[^*]+\*\*|`[^`]+`)", text):
@@ -89,7 +87,7 @@ def _rich(text: str) -> list[dict]:
 
 
 def _block(kind: str, text: str, **extra) -> dict:
-    return {"type": kind, kind: {"rich_text": _rich(text), **extra}}
+    return {"type": kind, kind: {"rich_text": rich_text(text), **extra}}
 
 
 def markdown_to_blocks(markdown: str) -> list[dict]:
@@ -143,12 +141,12 @@ def _prop(props: dict, name: str) -> dict:
         return props[name]
     except KeyError:
         raise NotionError(
-            f"Notion のプロパティ「{name}」が見つかりません。docs/notion-layout.md と照らして直してください"
+            f"Notion のプロパティ「{name}」が見つかりません。docs/architecture.md の「Notion」 と照らして直してください"
         ) from None
 
 
-def _plain(rich_text: list[dict]) -> str:
-    return "".join(t.get("plain_text") or t.get("text", {}).get("content", "") for t in rich_text)
+def plain_text(items: list[dict]) -> str:
+    return "".join(t.get("plain_text") or t.get("text", {}).get("content", "") for t in items)
 
 
 def blocks_to_markdown(blocks: list[dict], children: Callable[[str], list[dict]] | None = None,
@@ -159,7 +157,7 @@ def blocks_to_markdown(blocks: list[dict], children: Callable[[str], list[dict]]
     for b in blocks:
         kind = b.get("type")
         data = b.get(kind) or {}
-        text = _plain(data.get("rich_text", []))
+        text = plain_text(data.get("rich_text", []))
         number = number + 1 if kind == "numbered_list_item" else 0
         if kind in ("heading_1", "heading_2", "heading_3"):
             lines.append("#" * int(kind[-1]) + " " + text)
@@ -228,12 +226,8 @@ class NotionStore:
             "properties": properties,
             "children": blocks[:BLOCKS_PER_REQUEST],
         })
-        self.append_blocks(page["id"], blocks[BLOCKS_PER_REQUEST:])
+        append_blocks(self.notion, page["id"], blocks[BLOCKS_PER_REQUEST:])
         return page
-
-    def append_blocks(self, block_id: str, blocks: list[dict]) -> None:
-        for i in range(0, len(blocks), BLOCKS_PER_REQUEST):
-            self.notion.request("PATCH", f"/blocks/{block_id}/children", {"children": blocks[i:i + BLOCKS_PER_REQUEST]})
 
     def page_markdown(self, page_id: str) -> str:
         return blocks_to_markdown(self.notion.children(page_id), self.notion.children)
@@ -247,7 +241,7 @@ class NotionStore:
     def theme_name(self, page_id: str) -> str:
         if page_id not in self._theme_names:
             page = self.notion.request("GET", f"/pages/{page_id}")
-            self._theme_names[page_id] = _plain(_prop(page["properties"], "名前")["title"])
+            self._theme_names[page_id] = plain_text(_prop(page["properties"], "名前")["title"])
         return self._theme_names[page_id]
 
     def ensure_theme(self, name: str, slack_url: str, directory: str) -> bool:
@@ -255,10 +249,10 @@ class NotionStore:
         if self.theme_page_id(name):
             return False
         self._create_page("themes", {
-            "名前": {"title": _rich(name)},
+            "名前": {"title": rich_text(name)},
             "状態": {"select": {"name": "進行中"}},
             "Slack": {"url": slack_url},
-            "ディレクトリ": {"rich_text": _rich(directory)},
+            "ディレクトリ": {"rich_text": rich_text(directory)},
         })
         return True
 
@@ -266,7 +260,7 @@ class NotionStore:
 
     def _task(self, page: dict) -> Task:
         props = page["properties"]
-        title = _plain(_prop(props, "タイトル")["title"])
+        title = plain_text(_prop(props, "タイトル")["title"])
         status = (_prop(props, "状態").get("status") or {}).get("name", "")
         assignee = (_prop(props, "担当").get("select") or {}).get("name")
         priority = (_prop(props, "優先度").get("select") or {}).get("name")
@@ -306,7 +300,7 @@ class NotionStore:
             return existing
         theme_id = self.theme_page_id(theme_name)
         properties = {
-            "タイトル": {"title": _rich(title)},
+            "タイトル": {"title": rich_text(title)},
             "状態": {"status": {"name": "今夜やる"}},
             "担当": {"select": {"name": "Kei Agent"}},
             "Slack": {"url": slack_url},
@@ -329,7 +323,7 @@ class NotionStore:
         if status:
             properties["状態"] = {"status": {"name": status}}
         if result is not None:
-            properties["結果"] = {"rich_text": _rich(result[:RESULT_LIMIT])}
+            properties["結果"] = {"rich_text": rich_text(result[:RESULT_LIMIT])}
         if slack_url:
             properties["Slack"] = {"url": slack_url}
         self.notion.request("PATCH", f"/pages/{page_id}", {"properties": properties})
@@ -361,7 +355,7 @@ class NotionStore:
     def _note(self, page: dict, with_body: bool) -> Note:
         props = page["properties"]
         note = Note(
-            page["id"], _plain(_prop(props, "タイトル")["title"]),
+            page["id"], plain_text(_prop(props, "タイトル")["title"]),
             (_prop(props, "種類").get("select") or {}).get("name"),
             (_prop(props, "日付").get("date") or {}).get("start"),
             page.get("url"),
@@ -369,23 +363,6 @@ class NotionStore:
         if with_body:
             note.body = self.page_markdown(page["id"])
         return note
-
-    def create_note(self, title: str, kind: str, day: str, markdown: str, slack_url: str | None = None,
-                    file: str | None = None) -> Note:
-        properties = {
-            "タイトル": {"title": _rich(title)},
-            "種類": {"select": {"name": kind}},
-            "日付": {"date": {"start": day}},
-            "書いた人": {"select": {"name": "Kei Agent"}},
-        }
-        if slack_url:
-            properties["Slack"] = {"url": slack_url}
-        if file:
-            properties["ファイル"] = {"rich_text": _rich(file)}
-        return self._note(self._create_page("notes", properties, markdown), with_body=False)
-
-    def append_markdown(self, page_id: str, markdown: str) -> None:
-        self.append_blocks(page_id, markdown_to_blocks(markdown))
 
     def notes_edited_since(self, since: datetime, kinds: list[str]) -> list[Note]:
         rows = self._query("notes", {
@@ -402,7 +379,7 @@ class NotionStore:
             "filter": {"property": "期日", "date": {"on_or_after": today.isoformat()}},
             "sorts": [{"property": "期日", "direction": "ascending"}],
         })
-        return [{"name": _plain(_prop(r["properties"], "名前")["title"]),
+        return [{"name": plain_text(_prop(r["properties"], "名前")["title"]),
                  "due": (_prop(r["properties"], "期日").get("date") or {}).get("start"),
                  "url": r.get("url")} for r in rows[:limit]]
 

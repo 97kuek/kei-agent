@@ -1,4 +1,4 @@
-"""Realtime API に渡す道具（docs/voice.md の3節）。
+"""Realtime API に渡す道具（docs/architecture.md の「声のレイヤ」）。
 
 モデルは依頼者のことを何も知らない。予定・締切・研究テーマは**こちらから道具として渡す**。
 渡さないかぎり、何を聞かれても答えられない。
@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta
 from kei_agent import ask as asks
 from kei_agent.config import Config
 from kei_agent.store import Store
+from kei_agent_voice.executor import current
 from kei_agent_voice.handoff import Handoff
 
 log = logging.getLogger(__name__)
@@ -115,16 +116,26 @@ class Draft:
 class Tools:
     """道具の中身。`held` は本体が押してきたもの（`executor.held`）。"""
 
-    def __init__(self, held: dict, config: Config, handoff: Handoff | None = None):
+    def __init__(self, held: dict, config: Config, handoff: Handoff | None = None,
+                 store: Store | None = None):
         self.held = held
         self.config = config
-        self.handoff = handoff or Handoff(config, Store(config.db_path))
+        # sqlite はつないだスレッドでしか使えない。立ち上げ（app.py）が開いたものを、同じループで使う
+        self._handoff = handoff
+        self._store = store
         self.draft: Draft | None = None
 
-    def call(self, name: str, arguments: dict, now: datetime | None = None) -> str:
+    @property
+    def handoff(self) -> Handoff:
+        if self._handoff is None:
+            self._handoff = Handoff(self.config, self._store or Store(self.config.db_path))
+        return self._handoff
+
+    async def call(self, name: str, arguments: dict, now: datetime | None = None) -> str:
         """道具を呼ぶ。**返すのは、モデルが読み上げられる短い文**。
 
         知らない道具や失敗は、例外にせず文で返す（会話を止める方が悪い）。
+        ループの上で呼ぶ（ask_agent は待つあいだループを止めない）。
         """
         now = now or datetime.now()
         try:
@@ -132,9 +143,9 @@ class Tools:
                 return self.get_schedule(str(arguments.get("day") or "today"),
                                           str(arguments.get("kind") or "all"), now)
             if name == "get_status":
-                return self.get_status()
+                return self.get_status(now)
             if name == "ask_agent":
-                return self.ask_agent(str(arguments.get("agent") or "research"),
+                return await self.ask_agent(str(arguments.get("agent") or "research"),
                                       str(arguments.get("question") or ""),
                                       str(arguments.get("theme") or ""))
             if name == "propose_request":
@@ -156,11 +167,12 @@ class Tools:
         wanted = _within(items, day, now)
         if not wanted:
             return f"{_day_word(day)}は、{_kind_word(kind)}が入っていない。"
-        lines = [_line(i, day) for i in wanted[:MAX_ITEMS]]
+        lines = [_line(i, day, now) for i in wanted[:MAX_ITEMS]]
         more = f"（ほかに{len(wanted) - MAX_ITEMS}件）" if len(wanted) > MAX_ITEMS else ""
         return f"{_day_word(day)}の{_kind_word(kind)}: " + "、".join(lines) + more
 
-    def get_status(self) -> str:
+    def get_status(self, now: datetime | None = None) -> str:
+        current(self.held, now)
         if self.held.get("limited"):
             return "いま Claude の上限に当たっていて、止まっている。"
         running = int(self.held.get("running") or 0)
@@ -183,12 +195,10 @@ class Tools:
 
     # 調べる（時間がかかる）
 
-    def ask_agent(self, actor: str, question: str, theme: str = "") -> str:
+    async def ask_agent(self, actor: str, question: str, theme: str = "") -> str:
         if not question.strip():
             return "何を調べるか分からなかった。"
-        # Live はこの同期関数を worker thread で呼ぶため、Realtime の受信を止めない。
-        import asyncio
-        return asyncio.run(self.handoff.ask(actor, question, theme))
+        return await self.handoff.ask(actor, question, theme)
 
     # 依頼（下書き → 渡す）
 
@@ -239,9 +249,9 @@ def _within(items: list[dict], day: str, now: datetime) -> list[dict]:
     return sorted(wanted, key=lambda i: (_date_of(i, now), str(i.get("at") or "")))
 
 
-def _line(item: dict, day: str) -> str:
+def _line(item: dict, day: str, now: datetime) -> str:
     when = str(item.get("at") or "")
     text = str(item.get("text") or "")
     if day == "week":
-        return f"{_date_of(item, datetime.now()):%m月%d日} {when} {text}".strip()
+        return f"{_date_of(item, now):%m月%d日} {when} {text}".strip()
     return f"{when} {text}".strip()

@@ -37,25 +37,52 @@ class OutputError(ValueError):
 
 
 def _contains_local_path(text: str) -> bool:
-    """Web URL は残し、ローカルの絶対・相対パスだけを拒否する。"""
-    local_candidate = _WEB_URL.sub("", text)
-    return bool(_LOCAL_PATH.search(local_candidate) or _RELATIVE_LOCAL_PATH.search(local_candidate))
+    """Web URL は残し、手元の絶対パス（file URI、~/、/...）だけを見つける。
+
+    テーマの作業用ディレクトリの中の相対パス（``outputs/fig.png`` など）は、
+    プロンプトがファイル名を書くよう頼んでいるので拒否しない。
+    """
+    return bool(_LOCAL_PATH.search(_WEB_URL.sub("", text)))
 
 
 def _forbidden(text: str) -> bool:
     return bool(_contains_local_path(text) or _INTERNAL_PROGRESS.search(text))
 
 
+# 置き換えるときのパス。読点・句点・括弧・引用符でパスが終わったとみなす
+_PATH_CHARS = r"[^\s、。，,)）\]}」』>`'\"]"
+_HIDE_LOCAL_PATH = re.compile(rf"(?:file://|~/|(?<![\w.:/-])/){_PATH_CHARS}+")
+
+
+def _hide_local_paths(text: str) -> str:
+    """Web URL を避けて、手元の絶対パスをファイル名だけに置き換える。"""
+    def hide(match: re.Match[str]) -> str:
+        return match.group(0).rstrip("/").rsplit("/", 1)[-1]
+
+    pieces, last = [], 0
+    for url in _WEB_URL.finditer(text):
+        pieces += [_HIDE_LOCAL_PATH.sub(hide, text[last:url.start()]), url.group(0)]
+        last = url.end()
+    pieces.append(_HIDE_LOCAL_PATH.sub(hide, text[last:]))
+    return "".join(pieces)
+
+
 def finalize_conversation(text: str) -> str:
-    """final marker 内だけを利用者向け本文として採用する。"""
+    """final marker 内だけを利用者向け本文として採用する。
+
+    marker で最終回答を切り出すので、本文の言い回しでは捨てない。手元の絶対パスだけは
+    返答ごと捨てずにファイル名へ置き換える。
+    """
     normalized = text.strip().replace("\r\n", "\n")
     if normalized.count(FINAL_OPEN) != 1 or normalized.count(FINAL_CLOSE) != 1:
-        raise OutputError("conversation contract")
+        raise OutputError("final marker がちょうど1組ではない")
     _before, marked = normalized.split(FINAL_OPEN, 1)
-    body, close, tail = marked.partition(FINAL_CLOSE)
-    if not close or tail.strip() or not body.strip() or _forbidden(body):
-        raise OutputError("conversation contract")
-    return body.strip()
+    body, _close, tail = marked.partition(FINAL_CLOSE)
+    if tail.strip():
+        raise OutputError("final marker の後ろに文がある")
+    if not body.strip():
+        raise OutputError("final marker の中が空")
+    return _hide_local_paths(body.strip())
 
 
 def validate_structured_response(text: str) -> str:
@@ -110,5 +137,6 @@ def safe_failure(kind: str = "conversation") -> str:
         "review": "⚠️ 振り返りを利用者向けの形に整えられなかったよ。もう一度頼んでね。",
         "connection": "⚠️ 接続に失敗したよ。少し時間を置いてもう一度頼んでね。",
         "timeout": "⚠️ 時間がかかりすぎたよ。少し時間を置いてもう一度頼んでね。",
+        "provider": "⚠️ 使う AI（Claude か Codex）がまだ選ばれていないよ。App Home の設定で選んでからもう一度頼んでね。",
     }
     return messages.get(kind, messages["conversation"])

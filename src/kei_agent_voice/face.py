@@ -1,10 +1,9 @@
-"""机の上のロボットの顔（docs/voice.md の5節）。
+"""机の上のロボットの顔（docs/architecture.md の「声のレイヤ」）。
 
 **声はもうここを通らない。** Realtime API が音をそのまま返すので、合成した wav を投げる口
-（`POST /play_wav`）は使わない。残っているのは**顔と首**だけ。
+（`POST /play_wav`）は使わない。残っているのは**顔**だけ。
 
 `stackchan-atama` の口のうち、使うもの:
-- `GET /status`                   … 生きているか
 - `GET /face?expression=<6種>`    … 表情
 
 まだ買っていないので、住所（`KEI_AGENT_STACKCHAN_URL`）を書かないあいだは何もしない。
@@ -31,13 +30,6 @@ class Face:
     def __init__(self, url: str = "", env: dict | None = None):
         env = os.environ if env is None else env
         self.url = (url or env.get(URL_ENV, "")).rstrip("/")
-
-    @property
-    def present(self) -> bool:
-        """机の上にいるか。住所を書いていなければ、いつも False。"""
-        if not self.url:
-            return False
-        return self._get("/status")
 
     def show(self, expression: str) -> bool:
         """表情を変える。いなければ何もしない（`False` を返すだけ）。"""

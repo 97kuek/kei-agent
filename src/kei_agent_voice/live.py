@@ -1,4 +1,4 @@
-"""声で話す相手（OpenAI Realtime API）。音をそのままやりとりする（docs/voice.md の3節）。
+"""声で話す相手（OpenAI Realtime API）。音をそのままやりとりする（docs/architecture.md の「声のレイヤ」）。
 
 **`gpt-live-1` ではなく Realtime API を使う。** 名前は似ているが別物で、こちらが用途に合う。
 
@@ -36,12 +36,15 @@ import base64
 import json
 import logging
 import os
-from collections.abc import Callable
+import time
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 import aiohttp
 
 from kei_agent_voice import audio
-from kei_agent_voice.tools import Tools
+from kei_agent_voice.audio import Unavailable
+from kei_agent_voice.tools import DEFINITIONS, Tools
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +59,15 @@ DEFAULT_VOICE = "cedar"
 EAGERNESS = "high"
 # 鳴らした長さの見積りを、この分だけ少なめに言う（超えるとサーバーが断る）
 TRUNCATE_MARGIN_MS = 100
+# 繋ぎ直すまでの待ち。切れるたびに倍にして、上限で止める
+BACKOFF_SECONDS = 1.0
+BACKOFF_MAX_SECONDS = 60.0
+# これより長く繋がっていたら、待ちを最初に戻す（60分で切れるのはふつうのこと）
+STABLE_SECONDS = 60.0
+# 鍵を断られた。繋ぎ直しても同じなので諦める
+REJECTED = (401, 403)
+# 通知1件にかけてよい時間（繋がらない・終わらないまま次の通知を待たせない）
+SAY_ONCE_SECONDS = 60.0
 
 INSTRUCTIONS = """# Role and Objective
 あなたは「Kei」。依頼者本人の分身で、机の上のロボットの声として話す。
@@ -93,10 +105,6 @@ INSTRUCTIONS = """# Role and Objective
 """
 
 
-class Unavailable(Exception):
-    """繋げない（鍵が無い、断られた）。"""
-
-
 def _session(voice: str, tools: list[dict]) -> dict:
     """`session.update` に渡すもの。**繋いだ直後に1回だけ**送る。"""
     return {
@@ -132,6 +140,33 @@ def _session(voice: str, tools: list[dict]) -> dict:
     }
 
 
+def _notice(text: str) -> dict:
+    """本体から来た知らせを、会話に1件足す形。"""
+    return {
+        "type": "conversation.item.create",
+        "item": {"type": "message", "role": "user",
+                 "content": [{"type": "input_text", "text": f"（お知らせ）{text}"}]},
+    }
+
+
+async def _events(ws) -> AsyncIterator[dict]:
+    """届いたイベント。文字で、読めるものだけ。"""
+    async for message in ws:
+        if message.type is not aiohttp.WSMsgType.TEXT:
+            continue
+        try:
+            event = json.loads(message.data)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            yield event
+
+
+def _calls(event: dict) -> list[dict]:
+    outputs = ((event.get("response") or {}).get("output") or [])
+    return [o for o in outputs if isinstance(o, dict) and o.get("type") == "function_call"]
+
+
 class Live:
     """Realtime API との1本の繋がり。`run` を回している間だけ喋る。"""
 
@@ -147,69 +182,84 @@ class Live:
         self.speaking_item = ""
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._notices: asyncio.Queue[str] = asyncio.Queue()
+        # 返事を作っていないあいだだけ立つ。知らせはこれを待ってから頼む（重ねて頼むと断られる）
+        self._idle = asyncio.Event()
+        self._idle.set()
+        # 道具を答えている途中のもの（受け取りを止めないよう、別に走らせる）
+        self._tool_tasks: set[asyncio.Task] = set()
 
     # 繋ぐ
 
-    async def run(self, on_said: Callable[[str, str], None] | None = None) -> None:
-        """繋いで、マイクと口を回す。切れたら**黙って繋ぎ直す**（60分で切れる）。"""
+    def _require_key(self) -> None:
         if not self.key:
             raise Unavailable(f"{KEY_ENV} が置かれていません（deploy/README.md を見てください）")
-        while True:
-            try:
-                await self._once(on_said)
-            except Unavailable:
-                raise
-            except (aiohttp.ClientError, TimeoutError, OSError) as e:
-                log.warning("繋ぎ直します: %s", e)
-                await asyncio.sleep(2)
 
-    async def _once(self, on_said: Callable[[str, str], None] | None) -> None:
+    @asynccontextmanager
+    async def _connect(self, tools: list[dict]):
+        """繋いで、人格・声・道具を**1回だけ**入れる。"""
         headers = {"Authorization": f"Bearer {self.key}"}
         async with (
             aiohttp.ClientSession(headers=headers) as http,
             http.ws_connect(f"{URL}?model={self.model}", heartbeat=20) as ws,
         ):
+            await ws.send_json(_session(self.voice, tools))
+            yield ws
+
+    async def run(self, on_said: Callable[[str, str], None] | None = None) -> None:
+        """繋いで、マイクと口を回す。切れたら**間を空けて繋ぎ直す**（60分で切れる）。"""
+        self._require_key()
+        delay = BACKOFF_SECONDS
+        while True:
+            began = time.monotonic()
+            try:
+                await self._once(on_said)
+                log.info("声の繋がりが切れました。繋ぎ直します")
+            except aiohttp.WSServerHandshakeError as e:
+                if e.status in REJECTED:
+                    raise Unavailable(f"鍵を断られました（{e.status}）。{KEY_ENV} を確かめてください") from e
+                log.warning("繋ぎ直します: %s", e)
+            except (aiohttp.ClientError, TimeoutError, OSError) as e:
+                log.warning("繋ぎ直します: %s", e)
+            if time.monotonic() - began >= STABLE_SECONDS:
+                delay = BACKOFF_SECONDS
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, BACKOFF_MAX_SECONDS)
+
+    async def _once(self, on_said: Callable[[str, str], None] | None) -> None:
+        async with self._connect(DEFINITIONS) as ws:
             self._ws = ws
-            await ws.send_json(_session(self.voice, self.tools_definitions))
+            self._idle.set()
             log.info("声で繋がりました（%s / %s）", self.model, self.voice)
             mic = asyncio.create_task(self._send_microphone())
             notices = asyncio.create_task(self._send_notices())
+            receiving = asyncio.create_task(self._receive(ws, on_said))
             try:
-                await self._receive(ws, on_said)
+                await asyncio.wait({mic, receiving}, return_when=asyncio.FIRST_COMPLETED)
+                if mic.done():
+                    # マイクが先に止まった。聞いているふりを続けない
+                    mic.result()
+                    raise Unavailable("マイクが閉じました")
+                receiving.result()
             finally:
-                for task in (mic, notices):
+                tasks = [mic, notices, receiving, *self._tool_tasks]
+                for task in tasks:
                     task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
                 self.speaker.stop()
                 self._ws = None
 
     async def say_once(self, text: str,
                        on_said: Callable[[str, str], None] | None = None) -> None:
         """マイクを開かず、通知1件を読み上げて接続を閉じる。"""
-        if not self.key:
-            raise Unavailable(f"{KEY_ENV} が置かれていません（deploy/README.md を見てください）")
+        self._require_key()
         # 途中で「聞く」に切り替わっても、会話の接続と再生を上書きしない。
         speaker = audio.Speaker()
         transcript = ""
-        headers = {"Authorization": f"Bearer {self.key}"}
         try:
-            async with (
-                aiohttp.ClientSession(headers=headers) as http,
-                http.ws_connect(f"{URL}?model={self.model}", heartbeat=20) as ws,
-            ):
-                await ws.send_json(_session(self.voice, []))
-                await ws.send_json({
-                    "type": "conversation.item.create",
-                    "item": {"type": "message", "role": "user",
-                             "content": [{"type": "input_text", "text": f"（お知らせ）{text}"}]},
-                })
+            async with asyncio.timeout(SAY_ONCE_SECONDS), self._connect([]) as ws:
+                await ws.send_json(_notice(text))
                 await ws.send_json({"type": "response.create"})
-                async for message in ws:
-                    if message.type is not aiohttp.WSMsgType.TEXT:
-                        continue
-                    try:
-                        event = json.loads(message.data)
-                    except ValueError:
-                        continue
+                async for event in _events(ws):
                     kind = event.get("type", "")
                     if kind == "response.output_audio.delta":
                         speaker.write(base64.b64decode(event.get("delta") or ""))
@@ -229,13 +279,10 @@ class Live:
                             on_said("Kei", transcript.strip() or text)
                         return
                 raise Unavailable("通知の音声応答が完了する前に接続が閉じました")
+        except TimeoutError as e:
+            raise Unavailable("通知の音声応答が時間内に終わりませんでした") from e
         finally:
             speaker.stop()
-
-    @property
-    def tools_definitions(self) -> list[dict]:
-        from kei_agent_voice.tools import DEFINITIONS
-        return DEFINITIONS
 
     # 送る
 
@@ -263,29 +310,25 @@ class Live:
     async def _send_notices(self) -> None:
         while True:
             text = await self._notices.get()
+            # 返事の途中で頼むと断られる。喋り終わってから
+            await self._idle.wait()
             if self._ws is None:
                 continue
-            await self._ws.send_json({
-                "type": "conversation.item.create",
-                "item": {"type": "message", "role": "user",
-                         "content": [{"type": "input_text", "text": f"（お知らせ）{text}"}]},
-            })
+            self._idle.clear()
+            await self._ws.send_json(_notice(text))
             await self._ws.send_json({"type": "response.create"})
 
     # 受ける
 
     async def _receive(self, ws, on_said: Callable[[str, str], None] | None) -> None:
-        said: list[str] = []
-        async for message in ws:
-            if message.type is not aiohttp.WSMsgType.TEXT:
-                continue
-            try:
-                event = json.loads(message.data)
-            except ValueError:
-                continue
+        async for event in _events(ws):
             kind = event.get("type", "")
             if kind == "response.output_audio.delta":
-                self.speaking_item = str(event.get("item_id") or self.speaking_item)
+                item = str(event.get("item_id") or self.speaking_item)
+                if item != self.speaking_item:
+                    # 割り込みで伝える長さは、返事の中の位置。返事ごとに数え直す
+                    self.speaker.begin_item()
+                    self.speaking_item = item
                 self.speaker.write(base64.b64decode(event.get("delta") or ""))
             elif kind == "input_audio_buffer.speech_started":
                 await self._interrupt(ws)
@@ -293,14 +336,19 @@ class Live:
                 text = str(event.get("transcript") or "").strip()
                 if text and on_said:
                     on_said("Kei", text)
-                said.append(text)
             elif kind == "conversation.item.input_audio_transcription.completed":
                 text = str(event.get("transcript") or "").strip()
                 if text and on_said:
                     on_said("依頼者", text)
+            elif kind == "response.created":
+                self._idle.clear()
             elif kind == "response.done":
-                await self._answer_tools(ws, event)
+                self._idle.set()
+                if _calls(event):
+                    self._answer_later(ws, event)
             elif kind == "error":
+                # 頼んだ返事が断られると response.done は来ない。知らせを止めたままにしない
+                self._idle.set()
                 log.warning("声のやりとりで断られました: %s", json.dumps(
                     event.get("error") or event, ensure_ascii=False)[:300])
 
@@ -322,13 +370,22 @@ class Live:
             "audio_end_ms": max(played - TRUNCATE_MARGIN_MS, 0),
         })
 
+    def _answer_later(self, ws, event: dict) -> None:
+        """道具の答えは別に走らせる（ask_agent は数秒かかる。そのあいだも割り込みを受ける）。"""
+        task = asyncio.create_task(self._answer_tools(ws, event))
+        self._tool_tasks.add(task)
+        task.add_done_callback(self._tool_done)
+
+    def _tool_done(self, task: asyncio.Task) -> None:
+        self._tool_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.warning("道具の答えを返せませんでした: %s", task.exception())
+
     async def _answer_tools(self, ws, event: dict) -> None:
         """道具を呼ばれていたら、答えを返して続きを喋らせる。"""
-        outputs = ((event.get("response") or {}).get("output") or [])
-        calls = [o for o in outputs if isinstance(o, dict) and o.get("type") == "function_call"]
+        calls = _calls(event)
         if not calls:
             return
-        loop = asyncio.get_running_loop()
         for call in calls:
             name = str(call.get("name") or "")
             try:
@@ -336,8 +393,7 @@ class Live:
             except ValueError:
                 arguments = {}
             log.info("道具を呼ばれました: %s %s", name, json.dumps(arguments, ensure_ascii=False)[:120])
-            # 道具の中で Codex を動かすことがあるので、別のスレッドに出す
-            answer = await loop.run_in_executor(None, self.tools.call, name, arguments)
+            answer = await self.tools.call(name, arguments)
             await ws.send_json({
                 "type": "conversation.item.create",
                 "item": {"type": "function_call_output",
@@ -345,7 +401,11 @@ class Live:
                          "output": json.dumps({"text": answer}, ensure_ascii=False)},
             })
         # これを送らないとモデルは黙ったまま
+        self._idle.clear()
         await ws.send_json({"type": "response.create"})
 
     def close(self) -> None:
+        """聞くのをやめる。溜まった知らせも捨てる（次に繋いだときに古い知らせを喋らない）。"""
+        while not self._notices.empty():
+            self._notices.get_nowait()
         self.speaker.close()

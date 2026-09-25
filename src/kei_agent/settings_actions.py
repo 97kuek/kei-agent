@@ -1,4 +1,4 @@
-"""Slack から設定を変える操作: 接続先の申し出のボタンと、App Home（docs/design.md の9章）。
+"""Slack から設定を変える操作: 接続先の申し出のボタンと、App Home（docs/architecture.md）。
 
 Assistant に混ぜて使う。self.slack、self.store、self.config、self.submit などは Assistant のもの。
 """
@@ -9,6 +9,7 @@ import logging
 
 from kei_agent import home, settings, themes
 from kei_agent.auto_messages import domain_resume_prompt
+from kei_agent.config import HHMM
 from kei_agent.request import Request
 from kei_agent.themes import ChannelKind, Workspace
 
@@ -122,8 +123,11 @@ class SettingsActions:
                                         view=home.build_add_domain_modal(self._theme_names()))
             return
         elif kind == "kei_agent_home_time" and name in settings.SCHEDULE_NAMES:
-            _, enabled = settings.schedule_setting(self.config, self.store, name)
-            settings.set_schedule(self.store, name, action.get("selected_time", ""), enabled)
+            # 時刻を消されたら変えずに、表示だけ元の時刻に戻す
+            selected = action.get("selected_time") or ""
+            if HHMM.match(selected):
+                _, enabled = settings.schedule_setting(self.config, self.store, name)
+                settings.set_schedule(self.store, name, selected, enabled)
         elif kind == "kei_agent_home_toggle" and name in settings.SCHEDULE_NAMES:
             hhmm, enabled = settings.schedule_setting(self.config, self.store, name)
             settings.set_schedule(self.store, name, hhmm, not enabled)
@@ -135,7 +139,8 @@ class SettingsActions:
             self.notify_listening(on)
         elif kind == "kei_agent_home_provider" and name in {"research", "course", "work", "router", "self_fix"}:
             provider = ((action.get("selected_option") or {}).get("value") or "")
-            settings.set_agent_provider(self.store, name, provider)
+            if provider:
+                settings.set_agent_provider(self.store, name, provider)
         else:
             return
         await self.publish_home(user)

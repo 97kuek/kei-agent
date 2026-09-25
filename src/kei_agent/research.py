@@ -1,7 +1,7 @@
 """研究エージェント（A2A）に、選択済み provider の1回分を頼む。
 
 `[a2a.agents]` に `research` を書いたときだけ使う。書かなければ、今までどおり同じプロセスで
-`runner.run_model` を動かす（docs/design.md の11章）。
+`runner.run_model` を動かす（docs/architecture.md）。
 
 頼み方も返事も JSON。数分〜数十分かかることがあるため、A2A の SendStreamingMessage を使う。
 入力欄の下に出すのは固定の利用者向け状態だけで、道具名や返答の断片は出さない。
@@ -69,12 +69,6 @@ def has_explicit_use_case(prompt: str) -> bool:
 
 def is_manual_use_case(use_case: UseCase) -> bool:
     return use_case in {UseCase.MANUAL_ASTRA, UseCase.MANUAL_FABLE}
-
-
-def prepare(config: Config, ws: Workspace, prompt: str) -> tuple[Workspace, str]:
-    # compatibility: caller now resolves use case separately; workspace に model を載せない。
-    _, clean_prompt = use_case_for_prompt(prompt)
-    return ws, clean_prompt
 
 
 def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str, thread_ts: str,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
@@ -10,7 +11,11 @@ from zoneinfo import ZoneInfo
 
 from kei_agent.notion_hub import HubStore
 
+log = logging.getLogger(__name__)
+
 JST = ZoneInfo("Asia/Tokyo")
+# 既存行を探すとき、取得範囲の前後に広げる日数
+MATCH_MARGIN_DAYS = 60
 
 
 class IncompleteSnapshot(ValueError):
@@ -90,17 +95,24 @@ def sync_calendar(hub: HubStore, snapshot: CalendarSnapshot, checked_at: datetim
     items = _validated(snapshot)
     window_start = checked_at.astimezone(JST).date()
     window_end = window_start + timedelta(days=29)
-    if any(not window_start <= date.fromisoformat(item.start[:10]) <= window_end for item in items):
-        raise IncompleteSnapshot("30日間の取得範囲外に予定が含まれています")
-    rows = hub.calendar_rows(snapshot.source, window_start, window_end)
+    inside = tuple(item for item in items if window_start <= date.fromisoformat(item.start[:10]) <= window_end)
+    if len(inside) != len(items):
+        # 範囲外の1件で全体を止めず、その行だけ書かない
+        log.warning("%s: 30日間の取得範囲外の予定 %d 件を反映しません", snapshot.source, len(items) - len(inside))
+        items = inside
+    # 日付を動かした予定も同じ行に戻せるよう、範囲の前後も照合に使う
+    rows = hub.calendar_rows(snapshot.source, window_start - timedelta(days=MATCH_MARGIN_DAYS),
+                             window_end + timedelta(days=MATCH_MARGIN_DAYS))
     by_id = {}
-    row_dates = {}
+    row_dates: dict[str, date | None] = {}
     for row in rows:
         source_id = row.get("出典 ID") or ""
         if not source_id or source_id in by_id:
             raise IncompleteSnapshot("既存カレンダー行の出典 ID が欠落または重複しています")
+        raw = str(row.get("日付") or "")
         try:
-            row_dates[source_id] = date.fromisoformat(str(row.get("日付") or "")[:10])
+            # 手で日付を消した行は、次の同期で書き直す（止めない）
+            row_dates[source_id] = date.fromisoformat(raw[:10]) if raw else None
         except ValueError:
             raise IncompleteSnapshot("既存カレンダー行の日付が不正です") from None
         by_id[source_id] = row
@@ -114,8 +126,9 @@ def sync_calendar(hub: HubStore, snapshot: CalendarSnapshot, checked_at: datetim
             created += 1
     current_ids = {item.source_id for item in items}
     for source_id, row in by_id.items():
-        if (source_id not in current_ids
-                and window_start <= row_dates[source_id] <= window_end
+        day = row_dates[source_id]
+        if (source_id not in current_ids and day is not None
+                and window_start <= day <= window_end
                 and row.get("同期状態") != "要確認"):
             hub.calendar_mark_stale(row["id"])
             stale += 1

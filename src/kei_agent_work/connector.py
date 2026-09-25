@@ -15,7 +15,6 @@ Entra ID にアプリを登録しなくても Outlook を読める。
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -130,7 +129,8 @@ async def calendar_snapshot(config: Config, days: int = 30, today: date | None =
         text = await claude.ask_connector(config, prompt, ALLOWED, config.agent_plugin_dir(AGENT),
                                           DENY, TIMEOUT_MINUTES, store=store or Store(config.db_path), agent=AGENT,
                                           provider=provider)
-        raw = json.loads(text)
+        # events() と同じく、```json の囲みや前置きが付いても読む
+        raw = claude.json_object(text, "items")
     except claude.ConnectorError as e:
         raise WorkCalendarError(f"Outlook の完全な予定一覧を確認できません: {e}", e.limit_reset_at) from None
     except ValueError as e:

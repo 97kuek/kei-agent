@@ -1,6 +1,7 @@
 import pytest
 
-from kei_agent.review_output import ReviewOutputError, validate_review_reply
+from kei_agent.response_output import OutputError as ReviewOutputError
+from kei_agent.response_output import validate_review as validate_review_reply
 
 VALID = """**今日の成果**
 なし
@@ -37,10 +38,15 @@ def test_rejects_extra_footer_after_contract():
     "**今日の成果**\n/tmp/private.md\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
     "**今日の成果**\nfile:///private/private.md\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
     "**今日の成果**\n~/.config/private\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
-    "**今日の成果**\nレビューを reviews/2026-09-24.md に保存しました\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
     "**今日の成果**\nBash で材料を読みました。\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
     "**今日の成果**\nSkill を使って調査中です。\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
 ])
 def test_rejects_empty_or_internal_review_content(text):
     with pytest.raises(ReviewOutputError, match="指定形式"):
         validate_review_reply(text)
+
+
+def test_accepts_workspace_file_names():
+    text = "**今日の成果**\n振り返りを reviews/2026-09-24.md にまとめた\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？"
+
+    assert validate_review_reply(text) == text

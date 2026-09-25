@@ -176,7 +176,7 @@ async def _git(repo: Path, *args: str, timeout: float = GIT_TIMEOUT_SECONDS) -> 
 async def backup(config: Config, day: str | None = None, store: Store | None = None) -> dict:
     """研究データと、Kei Agent 自身のもの（研究全体の作業場と状態）を、それぞれ Git に保存する。
 
-    2つに分かれているのは、置き場所を分けたから（docs/design.md）。研究のバックアップが
+    2つに分かれているのは、置き場所を分けたから（docs/architecture.md）。研究のバックアップが
     通っても Kei Agent 側が未設定なことがあるので、そこは止めずに結果に入れて知らせる。
     """
     await asyncio.to_thread(dump_state, config, store)

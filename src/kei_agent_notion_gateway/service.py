@@ -96,7 +96,7 @@ class ResearchNotion:
     def archive(self, target_id: str) -> dict:
         """ページをアーカイブする（Notion にはゴミ箱があるので、消すのはこれ）。"""
         self._begin(target_id)
-        return self._call("archive", "PATCH", f"/pages/{target_id}", {"archived": True}, target_id)
+        return self._call("archive", "PATCH", f"/pages/{target_id}", {"in_trash": True}, target_id)
 
     def move(self, source_id: str, destination_id: str) -> dict:
         self._begin(source_id, destination_id)
