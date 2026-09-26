@@ -3,7 +3,8 @@
 
 一の柵は `--allowedTools` と sandbox。ここで見るのは、そこをすり抜けうる2つだけ。
 
-- 生の Notion トークン（`NOTION_TOKEN` など）に手を伸ばす Bash（研究 claude には渡していないが、置き場所を探されると困る）
+- Notion の鍵（`NOTION_TOKEN` やゲートウェイの親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN`）に手を伸ばす Bash
+  （研究 claude には渡していないが、置き場所を探されると困る。研究が持つのは研究用の合言葉だけ）
 - `research-notion` 以外の Notion（研究ホームの外まで届いてしまう）
 
 ファイルと Bash の範囲は sandbox が見る。同じ判定をここに書き足さない。
@@ -20,10 +21,9 @@ ALLOW, DENY = 0, 2
 
 # 研究ホームの外まで届く Notion。使ってよいのはゲートウェイ（mcp__research-notion__*）だけ
 GATEWAY_SERVER = "research-notion"
-# 生の Notion トークン（NOTION_TOKEN、NOTION_COURSE_TOKEN など）を読む・渡すコマンド。
-# ゲートウェイの合言葉（KEI_AGENT_NOTION_GATEWAY_TOKEN）だけは研究 claude が持ってよい
+# Notion の鍵（NOTION_TOKEN、KEI_AGENT_NOTION_GATEWAY_TOKEN など）を読む・渡すコマンド。
+# 研究 claude の合言葉（KEI_AGENT_NOTION_GATEWAY_AUTH）は研究ホームにしか届かないので当たらない
 RAW_TOKEN = re.compile(r"(?<![A-Za-z0-9_])(?:[A-Z0-9_]*_)?NOTION_[A-Z0-9_]*TOKEN(?![A-Za-z0-9_])")
-GATEWAY_TOKEN = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
 # コマンドが入りうるところ（Bash と、その仲間の tool）
 COMMAND_KEYS = ("command", "cmd", "script")
 
@@ -37,7 +37,7 @@ def mcp_server(tool: str) -> str:
 
 
 def raw_token(command: str) -> bool:
-    return any(match.group(0) != GATEWAY_TOKEN for match in RAW_TOKEN.finditer(command))
+    return RAW_TOKEN.search(command) is not None
 
 
 def decide(event: dict) -> tuple[int, str]:
@@ -53,7 +53,7 @@ def decide(event: dict) -> tuple[int, str]:
         return ALLOW, ""
     for key in COMMAND_KEYS:
         if raw_token(str(tool_input.get(key) or "")):
-            return DENY, ("生の NOTION_TOKEN は使えません"
+            return DENY, ("Notion の鍵は使えません"
                           "（Notion は research-notion のゲートウェイから操作してください）")
     return ALLOW, ""
 

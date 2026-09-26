@@ -29,7 +29,6 @@ from kei_agent_course.skills import (
     LIST_CLASSES,
     LIST_CURRENT_COURSES,
     LIST_DUE,
-    RECORD_STUDY_TIME,
     SYNC_ASSIGNMENTS,
     TIME_REPORT,
 )
@@ -37,7 +36,7 @@ from kei_agent_course.skills import (
 log = logging.getLogger(__name__)
 
 SKILLS = (SYNC_ASSIGNMENTS, LIST_DUE, LIST_CALENDAR_ASSIGNMENTS, LIST_CLASSES,
-          LIST_CURRENT_COURSES, RECORD_STUDY_TIME, TIME_REPORT, ASK)
+          LIST_CURRENT_COURSES, TIME_REPORT, ASK)
 NO_ICS = ("Moodle のカレンダーの URL がありません。Moodle のカレンダー画面で「カレンダーをエクスポートする」から "
           f"URL を作って、秘密情報のファイルの {moodle.ICS_ENV} に入れてください")
 # 一度に返す締切の数（声やスレッドで読める長さに収める）
@@ -79,7 +78,7 @@ class CourseExecutor(SkillExecutor):
         handlers = {SYNC_ASSIGNMENTS: self._sync_assignments, LIST_DUE: self._list_due,
                     LIST_CALENDAR_ASSIGNMENTS: self._list_calendar_assignments,
                     LIST_CLASSES: self._list_classes, LIST_CURRENT_COURSES: self._list_current_courses,
-                    RECORD_STUDY_TIME: self._record_study_time, TIME_REPORT: self._time_report, ASK: self._ask}
+                    TIME_REPORT: self._time_report, ASK: self._ask}
         await handlers[skill](updater, metadata, text)
 
     async def _due_events(self, updater: TaskUpdater, days: int) -> list[Event] | None:
@@ -156,26 +155,6 @@ class CourseExecutor(SkillExecutor):
             await self._fail(updater, str(e))
             return
         await self._done(updater, f"今学期の履修科目は {len(items)} 件", {"items": items})
-
-    async def _record_study_time(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
-        entry_id = str(metadata.get("entry_id") or "").strip()
-        started_at = str(metadata.get("started_at") or "").strip()
-        try:
-            minutes = int(metadata.get("duration_minutes"))
-        except (TypeError, ValueError):
-            minutes = 0
-        if not entry_id or not started_at or not 1 <= minutes <= 24 * 60:
-            await self._fail(updater, "学習時間の記録内容が不正です")
-            return
-        try:
-            result = await asyncio.to_thread(
-                notion_sync.record_study_time, entry_id, started_at, minutes,
-                str(metadata.get("course_page_id") or ""), str(metadata.get("memo") or "")[:1000],
-                str(metadata.get("slack_url") or ""))
-        except (notion_sync.SyncError, NotionError) as e:
-            await self._fail(updater, str(e))
-            return
-        await self._done(updater, "学習ログに記録したよ", result)
 
     async def _time_report(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """Toggl の記録を、科目ごと・課題ごとに集計して返す。"""

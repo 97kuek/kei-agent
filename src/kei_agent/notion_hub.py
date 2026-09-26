@@ -6,19 +6,26 @@ import hashlib
 import json
 import logging
 import os
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, write_json_atomic
+from kei_agent.config import notion_id
+from kei_agent.notion import (
+    BLOCKS_PER_REQUEST,
+    GATEWAY_TOKEN_ENV,
+    Notion,
+    NotionError,
+    append_blocks,
+    gateway_notion,
+    write_json_atomic,
+)
 from kei_agent.notion_store import Note, blocks_to_markdown, markdown_to_blocks, plain_text, rich_text, summarize
 
 log = logging.getLogger(__name__)
 
-HUB_HOME_ID = "3e54fb5d2d07808dbe29fdbe67a4de56"
-RESEARCH_HOME_ID = "3de4fb5d2d0780b9a193f4604d5ea09c"
-COURSE_HOME_ID = "3e14fb5d2d07805ab7b2c01aab6b39a7"
 
 DAILY_PROPERTIES = {
     "日付": {"title": {}},
@@ -27,8 +34,6 @@ DAILY_PROPERTIES = {
     "対象日": {"date": {}},
     "Daily Slack": {"url": {}},
     "レトプラ Slack": {"url": {}},
-    "Daily ファイル": {"rich_text": {}},
-    "レトプラ ファイル": {"rich_text": {}},
     "移行元 ID": {"rich_text": {}},
 }
 CALENDAR_REQUIRED = {"名前": "title", "日付": "date", "タグ": "multi_select"}
@@ -42,6 +47,32 @@ CALENDAR_ADDITIONS = {
     "元の状態": {"rich_text": {}},
 }
 MANAGED_END = "— Kei Agent の本文ここまで —"
+# 研究・大学・仕事の時間を1つにまとめる DB。記録 ID で1回だけ作る
+TIME_TITLE = "時間記録"
+TIME_DOMAINS = {"research": "研究", "course": "大学", "work": "仕事"}
+TIME_SOURCES = ("Slack", "Toggl")
+TIME_PROPERTIES = {
+    "名前": {"title": {}},
+    "領域": {"select": {"options": [{"name": name} for name in TIME_DOMAINS.values()]}},
+    "テーマ": {"rich_text": {}},
+    "開始": {"date": {}},
+    "分": {"number": {"format": "number"}},
+    "メモ": {"rich_text": {}},
+    "Slack": {"url": {}},
+    "記録 ID": {"rich_text": {}},
+    "出典": {"select": {"options": [{"name": name} for name in TIME_SOURCES]}},
+}
+TIME_CHART_NAME = "週ごとの時間"
+
+
+def section_blocks(markdown: str) -> list[dict]:
+    """日別記録の区画に入れるブロック。見出し2は区画の区切りなので、本文の見出し1・2は3にそろえる。"""
+    blocks = []
+    for block in markdown_to_blocks(markdown):
+        if block["type"] in ("heading_1", "heading_2"):
+            block = {"type": "heading_3", "heading_3": block[block["type"]]}
+        blocks.append(block)
+    return blocks
 
 
 @dataclass(frozen=True)
@@ -56,6 +87,9 @@ class HubState:
     task_view_id: str = ""
     assignment_view_id: str = ""
     daily_view_id: str = ""
+    time_db_id: str = ""
+    time_ds_id: str = ""
+    time_chart_view_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,13 +103,15 @@ class HubSetup:
     """全接続を読取で確認してから不足分だけ作る。重複を推測しない。"""
 
     def __init__(self, notion: Notion, home_id: str, state_path: Path, *,
-                 research_home_id: str = RESEARCH_HOME_ID,
-                 course_home_id: str = COURSE_HOME_ID):
+                 research_home_id: str,
+                 course_home_id: str):
         self.notion = notion
         self.home_id = home_id
         self.state_path = state_path
         self.research_home_id = research_home_id
         self.course_home_id = course_home_id
+        # 止めるほどではない失敗（グラフのビューなど）。呼び出し側が表示する
+        self.warnings: list[str] = []
 
     def _page(self, page_id: str, label: str) -> None:
         try:
@@ -96,7 +132,7 @@ class HubSetup:
             raise NotionError(f"{label} の正本データベースが見つかりません")
         db_id = matches[0]["id"]
         db = self.notion.request("GET", f"/databases/{db_id}")
-        if db.get("parent", {}).get("page_id") != parent:
+        if notion_id(db.get("parent", {}).get("page_id")) != notion_id(parent):
             raise NotionError(f"{label} の親ページが想定と異なります。正本を確認してください")
         sources = db.get("data_sources") or []
         if len(sources) != 1:
@@ -155,7 +191,7 @@ class HubSetup:
                 saved = HubState(**json.loads(self.state_path.read_text(encoding="utf-8")))
             except (OSError, ValueError, TypeError) as e:
                 raise NotionError(f"共通ホームの状態ファイルを確認できません: {e}") from None
-            if saved.home_id != self.home_id:
+            if notion_id(saved.home_id) != notion_id(self.home_id):
                 raise NotionError("共通ホームの状態ファイルの親ページが異なります")
             saved_views = {"研究 Task": saved.task_view_id, "授業課題": saved.assignment_view_id}
             saved_daily_id = saved.daily_view_id
@@ -174,10 +210,11 @@ class HubSetup:
                 parent_id = full.get("parent", {}).get("database_id")
                 if parent_id:
                     parent = self.notion.request("GET", f"/databases/{parent_id}")
-                    belongs_here = parent.get("parent", {}).get("page_id") == self.home_id
+                    belongs_here = notion_id(parent.get("parent", {}).get("page_id")) == notion_id(self.home_id)
                 else:
                     # テスト用 fake と旧応答のみ。実 API の view は parent.database_id を返す。
-                    belongs_here = full.get("create_database", {}).get("parent", {}).get("page_id") == self.home_id
+                    created_in = full.get("create_database", {}).get("parent", {}).get("page_id")
+                    belongs_here = notion_id(created_in) == notion_id(self.home_id)
                 if belongs_here:
                     matches.append(full)
             if len(matches) > 1:
@@ -188,11 +225,57 @@ class HubSetup:
                 raise NotionError(f"{name} の保存済みリンクドビューを確認できません")
         return calendar, daily, tasks, assignments, existing_views
 
+    def _time_source(self) -> _Source | None:
+        found = self._source(self.home_id, (TIME_TITLE,), TIME_TITLE, required={}, optional=True)
+        if found:
+            for name, spec in TIME_PROPERTIES.items():
+                actual = found.properties.get(name)
+                if actual and actual.get("type") != next(iter(spec)):
+                    raise NotionError(f"時間記録の「{name}」の型が異なります")
+        return found
+
+    def _time_chart(self, source: _Source, saved_id: str) -> str:
+        """週ごと・領域ごとの縦棒グラフ。作れなくても setup は止めない（warnings に残す）。"""
+        try:
+            if saved_id:
+                with suppress(NotionError, KeyError):
+                    if self.notion.request("GET", f"/views/{saved_id}").get("id") == saved_id:
+                        return saved_id
+            response = self.notion.request("GET", f"/views?database_id={source.database_id}")
+            for view in response.get("results", []):
+                full = self.notion.request("GET", f"/views/{view['id']}")
+                if full.get("name") == TIME_CHART_NAME and full.get("type") == "chart":
+                    return full["id"]
+            props = source.properties
+            created = self.notion.request("POST", "/views", {
+                "database_id": source.database_id,
+                "data_source_id": source.data_source_id,
+                "name": TIME_CHART_NAME,
+                "type": "chart",
+                "configuration": {
+                    "type": "chart",
+                    "chart_type": "column",
+                    "x_axis": {"type": "date", "property_id": props["開始"]["id"], "group_by": "week",
+                               "sort": {"type": "ascending"}},
+                    "y_axis": {"aggregator": "sum", "property_id": props["分"]["id"]},
+                    "stack_by": {"type": "select", "property_id": props["領域"]["id"],
+                                 "sort": {"type": "manual"}},
+                },
+            })
+            return created["id"]
+        except (NotionError, KeyError, TypeError) as e:
+            message = f"時間記録のグラフを作れませんでした（Notion の画面で作ってください）: {e}"
+            log.warning(message)
+            self.warnings.append(message)
+            return ""
+
     def inspect(self) -> list[str]:
         calendar, daily, tasks, assignments, views = self._preflight()
+        time_source = self._time_source()
         return [
             f"今月の予定／予定カレンダー: {calendar.database_id}",
             f"日別記録: {daily.database_id if daily else '未作成'}",
+            f"時間記録: {time_source.database_id if time_source else '未作成'}",
             f"研究 Task: {tasks.database_id}",
             f"授業課題: {assignments.database_id}",
             f"親ページのリンクドビュー: {', '.join(views) if views else '未作成'}",
@@ -248,10 +331,29 @@ class HubSetup:
                         {"property": "状態", "status": {"does_not_equal": status}},
                     ]},
                 })
+        time_source = self._time_source()
+        if time_source is None:
+            created = self.notion.request("POST", "/databases", {
+                "parent": {"type": "page_id", "page_id": self.home_id},
+                "title": [{"text": {"content": TIME_TITLE}}],
+                "initial_data_source": {"properties": TIME_PROPERTIES},
+            })
+            time_source = self._time_source()
+            if time_source is None or time_source.database_id != created["id"]:
+                raise NotionError("作成した時間記録を再確認できません")
+        missing_time = {n: p for n, p in TIME_PROPERTIES.items() if n not in time_source.properties}
+        if missing_time:
+            self.notion.request("PATCH", f"/data_sources/{time_source.data_source_id}", {"properties": missing_time})
+            time_source = self._time_source()
+        saved_chart = ""
+        if self.state_path.exists():
+            saved_chart = HubState(**json.loads(self.state_path.read_text(encoding="utf-8"))).time_chart_view_id
+        chart_id = self._time_chart(time_source, saved_chart)
         state = HubState(self.home_id, calendar.data_source_id, daily.data_source_id,
                          calendar.database_id, daily.database_id,
                          tasks.data_source_id, assignments.data_source_id,
-                         views["研究 Task"]["id"], views["授業課題"]["id"], daily_view_id)
+                         views["研究 Task"]["id"], views["授業課題"]["id"], daily_view_id,
+                         time_source.database_id, time_source.data_source_id, chart_id)
         write_json_atomic(self.state_path, state.__dict__)
         return state
 
@@ -276,6 +378,11 @@ class HubStore:
             for name, kind in required.items():
                 if props.get(name, {}).get("type") != kind:
                     problems.append(f"{label} の「{name}」が {kind} ではありません")
+        if self.state.time_ds_id:
+            props = self.notion.request("GET", f"/data_sources/{self.state.time_ds_id}").get("properties", {})
+            for name, spec in TIME_PROPERTIES.items():
+                if props.get(name, {}).get("type") != next(iter(spec)):
+                    problems.append(f"時間記録の「{name}」が {next(iter(spec))} ではありません")
         return problems
 
     def _day_rows(self, day: str) -> list[dict]:
@@ -312,7 +419,7 @@ class HubStore:
         return matches[0]
 
     def upsert_day(self, kind: Literal["Daily", "振り返り"], day: str, title: str,
-                   markdown: str, slack_url: str | None, file: str | None) -> Note:
+                   markdown: str, slack_url: str | None) -> Note:
         if kind not in ("Daily", "振り返り"):
             raise ValueError(f"未知の記録種類: {kind}")
         date.fromisoformat(day)
@@ -331,9 +438,8 @@ class HubStore:
         properties = {
             column: {"rich_text": rich_text(summary)},
             f"{column} Slack": {"url": slack_url},
-            f"{column} ファイル": {"rich_text": rich_text(file or "")},
         }
-        content = markdown_to_blocks(markdown)
+        content = section_blocks(markdown)
         if existing is None:
             properties.update({
                 "日付": {"title": rich_text(day)},
@@ -414,7 +520,7 @@ class HubStore:
         if any(block.get("type") == "heading_3" and
                plain_text(block["heading_3"].get("rich_text", [])) == marker for block in section):
             return
-        append_blocks(self.notion, page_id, markdown_to_blocks(f"### {marker}\n{text}"),
+        append_blocks(self.notion, page_id, section_blocks(f"### {marker}\n{text}"),
                       section[-1]["id"] if section else heading["id"])
         summary = plain_text(page["properties"]["レトプラ"].get("rich_text", []))
         self.notion.request("PATCH", f"/pages/{page_id}", {"properties": {
@@ -431,6 +537,101 @@ class HubStore:
         return [Note(row["id"], plain_text(row["properties"]["日付"]["title"]), "振り返り",
                      row["properties"]["対象日"]["date"]["start"], row.get("url"),
                      self.day_body(row["properties"]["対象日"]["date"]["start"])) for row in rows]
+
+    def section_text(self, day: str, kind: Literal["Daily", "振り返り"]) -> str:
+        """その日の区画全体（Kei Agent の本文、貼られた結論、手書きの追記）。境界の行だけ除く。"""
+        page = self._day(day)
+        if page is None:
+            return ""
+        _, content = self._section(self.notion.children(page["id"]), "Daily" if kind == "Daily" else "レトプラ")
+        kept = [block for block in content
+                if not (block.get("type") == "paragraph"
+                        and plain_text(block["paragraph"].get("rich_text", [])) == MANAGED_END)]
+        return blocks_to_markdown(kept, self.notion.children)
+
+    def review_text(self, day: str) -> str:
+        """その日のレトプラ全体（翌朝の Daily の材料）。"""
+        return self.section_text(day, "振り返り")
+
+    def append_to_section(self, day: str, kind: Literal["Daily", "振り返り"], markdown: str) -> None:
+        """区画の末尾（境界と追記のあと）に足す。Kei Agent の本文は書き換えないので、作り直しても残る。"""
+        page = self._day(day)
+        if page is None:
+            raise NotionError(f"{day} の日別記録がありません")
+        heading, section = self._section(self.notion.children(page["id"]), "Daily" if kind == "Daily" else "レトプラ")
+        self._managed_end(section)
+        append_blocks(self.notion, page["id"], section_blocks(markdown),
+                      section[-1]["id"] if section else heading["id"])
+
+    # 時間記録
+
+    @property
+    def has_time_db(self) -> bool:
+        """時間記録が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
+        return bool(self.state.time_ds_id)
+
+    def _time_ds(self) -> str:
+        if not self.state.time_ds_id:
+            raise NotionError("時間記録が未作成です。kei-agent-hub-setup --apply を実行してください")
+        return self.state.time_ds_id
+
+    def time_url(self) -> str:
+        return f"https://www.notion.so/{self.state.time_db_id.replace('-', '')}" if self.state.time_db_id else ""
+
+    def record_time(self, entry_id: str, domain: str, label: str, started_at: str, minutes: int,
+                    memo: str = "", slack_url: str = "", source: str = "Slack") -> str:
+        """1件を記録 ID で1回だけ作る。同じ ID があれば中身だけ直す。返り値はページ ID。"""
+        ds_id = self._time_ds()
+        domain = TIME_DOMAINS.get(domain, domain)
+        if domain not in TIME_DOMAINS.values() or source not in TIME_SOURCES:
+            raise ValueError(f"未知の領域か出典です: {domain} / {source}")
+        if not entry_id or minutes <= 0:
+            raise ValueError("記録 ID と正の分を指定してください")
+        datetime.fromisoformat(started_at)
+        properties = {
+            "名前": {"title": rich_text(f"{domain} / {label}".strip())},
+            "領域": {"select": {"name": domain}},
+            "テーマ": {"rich_text": rich_text(label)},
+            "開始": {"date": {"start": started_at}},
+            "分": {"number": int(minutes)},
+            "メモ": {"rich_text": rich_text(memo or "")},
+            "Slack": {"url": slack_url or None},
+            "記録 ID": {"rich_text": rich_text(entry_id)},
+            "出典": {"select": {"name": source}},
+        }
+        rows = self.notion.paginate("POST", f"/data_sources/{ds_id}/query", {
+            "filter": {"property": "記録 ID", "rich_text": {"equals": entry_id}}, "page_size": 10})
+        if len(rows) > 1:
+            raise NotionError(f"時間記録の {entry_id} が重複しています。正本を確認してください")
+        if rows:
+            self.notion.request("PATCH", f"/pages/{rows[0]['id']}", {"properties": properties})
+            return rows[0]["id"]
+        page = self.notion.request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": ds_id}, "properties": properties})
+        return page["id"]
+
+    def time_ids_since(self, since: date) -> set[str]:
+        """その日以降に始まった記録の記録 ID（取り込みの重複を避ける）。"""
+        rows = self.notion.paginate("POST", f"/data_sources/{self._time_ds()}/query", {
+            "filter": {"property": "開始", "date": {"on_or_after": since.isoformat()}}, "page_size": 100})
+        return {plain_text(row["properties"].get("記録 ID", {}).get("rich_text") or []) for row in rows}
+
+    def time_minutes_by_domain(self, start: date, days: int = 7) -> dict[str, float]:
+        """start から days 日ぶんの合計（分）を領域ごとに。"""
+        rows = self.notion.paginate("POST", f"/data_sources/{self._time_ds()}/query", {
+            "filter": {"and": [
+                {"property": "開始", "date": {"on_or_after": start.isoformat()}},
+                {"property": "開始", "date": {"before": (start + timedelta(days=days)).isoformat()}},
+            ]},
+            "page_size": 100,
+        })
+        totals: dict[str, float] = {}
+        for row in rows:
+            props = row.get("properties", {})
+            domain = (props.get("領域", {}).get("select") or {}).get("name") or "-"
+            minutes = props.get("分", {}).get("number") or 0
+            totals[domain] = totals.get(domain, 0) + float(minutes)
+        return totals
 
     def calendar_rows(self, source: str, window_start: date, window_end: date) -> list[dict]:
         """その出典の行のうち、日付が範囲内か空のもの。"""
@@ -485,8 +686,7 @@ class HubStore:
 def load_hub(config, env: dict[str, str] | None = None) -> HubStore | None:
     """設定済みの本体接続だけを使う。研究 Notion DB への代替保存はしない。"""
     env = dict(os.environ) if env is None else env
-    token = env.get("NOTION_TOKEN")
-    if not token or not config.hub_state_path.exists():
+    if not env.get(GATEWAY_TOKEN_ENV) or not config.hub_state_path.exists():
         log.warning("共通 Notion ホームが未設定です。日別記録への保存は行いません")
         return None
     try:
@@ -495,10 +695,10 @@ def load_hub(config, env: dict[str, str] | None = None) -> HubStore | None:
     except (OSError, ValueError, TypeError) as e:
         log.error("共通 Notion ホームの状態ファイルを読めません: %s", e)
         return None
-    if state.home_id != HUB_HOME_ID:
+    if notion_id(state.home_id) != config.notion.hub_home:
         log.error("共通 Notion ホームのページ ID が設定と一致しません")
         return None
-    return HubStore(Notion(token), state)
+    return HubStore(gateway_notion("kei-agent", env, config), state)
 
 
 def main() -> None:
@@ -511,17 +711,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-hub-setup")
     parser.add_argument("--apply", action="store_true", help="確認済みの親ページへ変更を適用する")
     args = parser.parse_args()
-    token = os.environ.get("NOTION_TOKEN")
-    if not token:
-        parser.error("NOTION_TOKEN がありません")
     config = load_config()
-    setup = HubSetup(Notion(token), HUB_HOME_ID, config.hub_state_path)
+    try:
+        notion = gateway_notion("kei-agent", config=config)
+    except NotionError as error:
+        parser.error(str(error))
+    setup = HubSetup(notion, config.notion.hub_home, config.hub_state_path,
+                     research_home_id=config.notion.research_home, course_home_id=config.notion.course_home)
     try:
         details = setup.inspect()
         print("\n".join(details))
         if args.apply:
             state = setup.run()
-            print(f"適用完了: 日別記録 {state.daily_ds_id}、カレンダー {state.calendar_ds_id}")
+            print(f"適用完了: 日別記録 {state.daily_ds_id}、カレンダー {state.calendar_ds_id}、"
+                  f"時間記録 {state.time_ds_id}")
+            for warning in setup.warnings:
+                print(f"注意: {warning}")
         else:
             print("読取専用の確認です。変更するには --apply が必要です")
     except NotionError as error:

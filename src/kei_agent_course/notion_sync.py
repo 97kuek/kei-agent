@@ -6,7 +6,9 @@
 取り込むのは「授業」に入れた履修科目の締切だけにする（Moodle のカレンダーには、
 新入生向けの資料など、履修していない科目の締切も並ぶため）。
 
-使い方（手で動かすとき）:
+Notion はゲートウェイ経由（client は course）で、授業ホームの中だけに届く。
+
+使い方（手で動かすとき。Notion ゲートウェイが動いていること）:
     source ~/.config/zsh/local/kei-agent.zsh
     uv run --group course kei-agent-course-sync
 """
@@ -15,14 +17,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import load_config
-from kei_agent.notion import Notion, NotionError
+from kei_agent.notion import Notion, NotionError, gateway_notion
 from kei_agent_course import periods
 from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.ics import Event
@@ -30,14 +31,12 @@ from kei_agent_course.notion_props import number, plain, select
 
 log = logging.getLogger(__name__)
 
-TOKEN_ENV = "NOTION_COURSE_TOKEN"
 STATE_NAME = "notion-course.json"
-NO_TOKEN = f"{TOKEN_ENV} がありません（授業用のコネクトのトークンを、秘密情報のファイルに入れてください）"
-NO_STATE = "授業用の Notion がまだありません（kei-agent-course-setup <授業ホームのページID> を実行してください）"
+NO_STATE = "授業用の Notion がまだありません（kei-agent-course-setup を実行してください）"
 # 1回の取り込みで書き込む上限。ics を読み違えたときに、大量の行を作ってしまわないようにする
 MAX_WRITES = 50
 TITLE_LIMIT = 200
-REQUIRED_DATABASES = frozenset({"courses", "assignments", "study_logs", "grades", "requirements", "gpa"})
+REQUIRED_DATABASES = frozenset({"courses", "assignments", "grades", "requirements", "gpa"})
 _QUOTED_DUE = re.compile(r"^「(?P<title>.+)」の提出期限$")
 _ASSIGNMENT_SECTIONS = ("やること", "提出物", "進捗メモ", "資料・リンク")
 
@@ -129,8 +128,6 @@ class CourseNotion:
         self.notion = notion
         self.courses = state["databases"]["courses"]["data_source_id"]
         self.assignments = state["databases"]["assignments"]["data_source_id"]
-        self.study_logs = (state["databases"].get("study_logs") or {}).get("data_source_id", "")
-        self._recorded_study_ids: set[str] = set()
 
     def _rows(self, data_source_id: str) -> list[dict]:
         return self.notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
@@ -220,38 +217,6 @@ class CourseNotion:
         """時間カードの候補。曜日で絞らず、今学期に履修中の科目だけ返す。"""
         return self.courses_on(on=on)
 
-    def record_study_time(self, entry_id: str, started_at: str, duration_minutes: int,
-                          course_page_id: str = "", memo: str = "", slack_url: str = "") -> dict:
-        """学習ログを記録IDで一度だけ作る。"""
-        if not self.study_logs:
-            raise SyncError("「学習ログ」がありません。kei-agent-course-setup をもう一度実行してください")
-        if entry_id in self._recorded_study_ids:
-            return {"entry_id": entry_id, "notion_url": ""}
-        for row in self._rows(self.study_logs):
-            if plain(row.get("properties", {}).get("Kei Agent 記録ID")) == entry_id:
-                self._recorded_study_ids.add(entry_id)
-                return {"entry_id": entry_id, "notion_url": row.get("url", "")}
-        title = "大学の学習"
-        if course_page_id:
-            for row in self._rows(self.courses):
-                if row.get("id") == course_page_id:
-                    title = plain(row.get("properties", {}).get("科目名")) or title
-                    break
-        props = {
-            "タイトル": {"title": [{"text": {"content": title}}]},
-            "Kei Agent 記録ID": {"rich_text": [{"text": {"content": entry_id}}]},
-            "日付": {"date": {"start": started_at}},
-            "時間（分）": {"number": duration_minutes},
-            "メモ": {"rich_text": [{"text": {"content": memo}}]} if memo else {"rich_text": []},
-            "Slack": {"url": slack_url} if slack_url else {"url": None},
-        }
-        if course_page_id:
-            props["科目"] = {"relation": [{"id": course_page_id}]}
-        page = self.notion.request("POST", "/pages", {
-            "parent": {"type": "data_source_id", "data_source_id": self.study_logs}, "properties": props})
-        self._recorded_study_ids.add(entry_id)
-        return {"entry_id": entry_id, "notion_url": page.get("url", "")}
-
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
         return {uid: row for row in self._rows(self.assignments)
@@ -333,38 +298,23 @@ class CourseNotion:
         return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
 
 
-def _client(token: str = "", state: dict | None = None) -> CourseNotion:
-    """トークンと状態は、省くと環境変数とファイルから読む。"""
-    token = token or course_token()
-    if not token:
-        raise SyncError(NO_TOKEN)
-    return CourseNotion(Notion(token), state or read_state())
+def _client(state: dict | None = None) -> CourseNotion:
+    """Notion はゲートウェイ経由（client は course。授業ホームの中だけに届く）。状態は省くとファイルから読む。"""
+    return CourseNotion(gateway_notion("course"), state or read_state())
 
 
-def courses_on(weekday: str = "", on: date | None = None, token: str = "",
-               state: dict | None = None) -> list[dict]:
+def courses_on(weekday: str = "", on: date | None = None, state: dict | None = None) -> list[dict]:
     """履修中の科目（曜日・時限つき）。朝のまとめで、時限を時刻に直すのに使う。"""
-    return _client(token, state).courses_on(weekday, on)
+    return _client(state).courses_on(weekday, on)
 
 
-def current_courses(on: date | None = None, token: str = "", state: dict | None = None) -> list[dict]:
-    return _client(token, state).current_courses(on)
+def current_courses(on: date | None = None, state: dict | None = None) -> list[dict]:
+    return _client(state).current_courses(on)
 
 
-def record_study_time(entry_id: str, started_at: str, duration_minutes: int, course_page_id: str = "",
-                      memo: str = "", slack_url: str = "", token: str = "", state: dict | None = None) -> dict:
-    return _client(token, state).record_study_time(
-        entry_id, started_at, duration_minutes, course_page_id, memo, slack_url)
-
-
-def course_names(token: str = "", state: dict | None = None) -> set[str]:
+def course_names(state: dict | None = None) -> set[str]:
     """「授業」に入れてある科目の名前（Toggl のプロジェクト名と突き合わせるのに使う）。"""
-    return set(_client(token, state).course_ids())
-
-
-def course_token(env: dict[str, str] | None = None) -> str:
-    """授業ホーム用トークンを読む。値は返すだけで表示しない。"""
-    return (dict(os.environ) if env is None else env).get(TOKEN_ENV, "")
+    return set(_client(state).course_ids())
 
 
 def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
@@ -375,15 +325,14 @@ def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
                         - {""}))
 
 
-def list_calendar_assignments(days: int, today: date | None = None, *,
-                              token: str = "", state: dict | None = None) -> dict:
+def list_calendar_assignments(days: int, today: date | None = None, *, state: dict | None = None) -> dict:
     """A2A 用 read-only 契約。接続できないときに空の完全 snapshot を返さない。"""
-    return _client(token, state).calendar_assignments(days, today or date.today())
+    return _client(state).calendar_assignments(days, today or date.today())
 
 
-def sync(events: list[Event], known_only: bool = True, token: str = "", state: dict | None = None) -> Result:
+def sync(events: list[Event], known_only: bool = True, state: dict | None = None) -> Result:
     """締切を Notion に反映する。"""
-    return _client(token, state).sync(events, known_only=known_only)
+    return _client(state).sync(events, known_only=known_only)
 
 
 def main(argv: list[str] | None = None) -> None:

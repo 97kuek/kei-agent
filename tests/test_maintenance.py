@@ -20,11 +20,6 @@ def age(path, days):
 def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
-    digest_dir = config.overview_dir / ".kei-agent" / "digest"
-    digest_dir.mkdir(parents=True)
-    (digest_dir / "old.md").write_text("x")
-    (digest_dir / "new.md").write_text("x")
-    age(digest_dir / "old.md", 40)
 
     projects = tmp_path / "claude-projects"
     theme_project = projects / maintenance.claude_project_dir_name(ws.cwd.resolve())
@@ -37,8 +32,7 @@ def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
 
     removed = maintenance.cleanup(config, projects)
 
-    assert removed == {"digests": 1, "sessions": 1, "thread_logs": 0, "worktrees": 0}
-    assert not (digest_dir / "old.md").exists() and (digest_dir / "new.md").exists()
+    assert removed == {"sessions": 1, "thread_logs": 0, "worktrees": 0}
     assert not (theme_project / "old.jsonl").exists() and (theme_project / "new.jsonl").exists()
     assert (other_project / "old.jsonl").exists()  # ほかのプロジェクトには触らない
 
@@ -166,20 +160,6 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
         await maintenance._git(repo, "push", "-q", timeout=0.3)
 
 
-def test_cleanup_removes_old_voice_logs(config, tmp_path):
-    """声の会話の控えも、Daily の材料と同じ日数で消す。"""
-    voice = config.overview_dir / "voice"
-    voice.mkdir(parents=True)
-    old, new = voice / "2026-01-01.md", voice / "2026-09-19.md"
-    for path in (old, new):
-        path.write_text("会話")
-    os.utime(old, (time.time() - 40 * 86400,) * 2)
-
-    removed = maintenance.cleanup(config, tmp_path / "projects")
-
-    assert removed["digests"] == 1 and not old.exists() and new.exists()
-
-
 def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path, monkeypatch):
     """取り込みや失敗で使い終わった worktree と、案を考えるときの一時ディレクトリを片付ける。"""
     from kei_agent import improve
@@ -221,7 +201,7 @@ async def test_dump_state_works_from_another_thread(config, store):
 
 
 async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
-    """Daily・振り返り・backlog と状態は ~/research の外にあるので、別のリポジトリに保存する。"""
+    """Kei Agent 自身のもの（overview の作業場と状態）は ~/research の外にあるので、別のリポジトリに保存する。"""
     def repo(path, remote_name):
         remote = tmp_path / remote_name
         git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
@@ -238,14 +218,14 @@ async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
 
     research_remote = repo(config.research_root, "research.git")
     agent_remote = repo(config.agent_root, "agent.git")
-    (config.overview_dir / "reviews").mkdir(parents=True)
-    (config.overview_dir / "reviews" / "2026-09-18.md").write_text("# 振り返り")
+    config.overview_dir.mkdir(parents=True)
+    (config.overview_dir / "CLAUDE.md").write_text("# 研究全体")
 
     detail = await maintenance.backup(config, "2026-09-18")
 
     assert detail["agent_root"]["committed"] is True
     agent_files = git(agent_remote, "ls-tree", "-r", "--name-only", "main")
-    assert "overview/reviews/2026-09-18.md" in agent_files
+    assert "overview/CLAUDE.md" in agent_files
     assert "state/kei-agent.sql" in agent_files          # 状態の書き出しもこちら側
     research_files = git(research_remote, "ls-tree", "-r", "--name-only", "main")
     assert "kei-agent.sql" not in research_files

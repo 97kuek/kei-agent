@@ -1,1 +1,1 @@
-"""研究ホームだけを操作できる Notion MCP gateway。"""
+"""Kei Agent の Notion ゲートウェイ。Notion を呼ぶのはここだけで、client ごとに届くホームを絞る。"""

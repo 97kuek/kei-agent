@@ -1,8 +1,11 @@
 """Notion の「研究ホーム」を作る（docs/architecture.md の「Notion」）。Kei Agent が読み書きするときの接続も兼ねる。
 
-使い方:
+使い方（Notion ゲートウェイが動いていること）:
     source ~/.config/zsh/local/kei-agent.zsh
-    uv run kei-agent-notion-setup <研究ホームのページID>
+    uv run kei-agent-notion-setup [<研究ホームのページID>]
+
+Notion を直接呼べるのはゲートウェイ（`kei-agent-notion-gateway`）だけ。ここからは
+`gateway_notion()` でゲートウェイの `/notion/v1` を呼び、どのホームを触れるかはゲートウェイが決める。
 
 何度実行しても、すでにあるデータベース・ビュー・見出しは作り直さない。作ったものの ID は
 ~/.local/state/kei-agent/notion.json に保存する。
@@ -11,19 +14,29 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import http.client
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from kei_agent.config import load_config
+from kei_agent.config import Config, load_config
 
+NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"
+# ゲートウェイの親の合言葉。これ自体は子プロセスに渡さず、名前ごとの合言葉を作るのにだけ使う
+GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
+# ゲートウェイの利用者。どのホームに届くかはゲートウェイ側（kei_agent_notion_gateway.clients）が決める
+GATEWAY_CLIENTS = ("kei-agent", "research", "course")
+NO_GATEWAY = (f"{GATEWAY_TOKEN_ENV} がありません。Notion は Notion ゲートウェイ経由でだけ使えます"
+              "（deploy/README.md の「秘密情報」）")
 # Notion の上限はおよそ 3 リクエスト/秒。少し余裕をみて間隔をあける
 MIN_INTERVAL_SECONDS = 0.34
 # 429 や 5xx で待って試す回数
@@ -35,39 +48,84 @@ BLOCKS_PER_REQUEST = 100
 
 
 class NotionError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", status: int | None = None):
+        super().__init__(message)
+        # Notion（またはゲートウェイ）が返した HTTP の状態。つながらなかったときは None
+        self.status = status
+
+
+def gateway_client_token(master: str, client: str) -> str:
+    """利用者ごとの合言葉（親の合言葉で client 名を HMAC-SHA256 したもの）。"""
+    return hmac.new(master.encode(), client.encode(), hashlib.sha256).hexdigest()
+
+
+def gateway_notion(client: str, env: dict[str, str] | None = None, config: Config | None = None) -> Notion:
+    """ゲートウェイの `/notion/v1` を呼ぶ Notion。client の名前で届くホームが決まる。"""
+    if client not in GATEWAY_CLIENTS:
+        raise ValueError(f"未知のゲートウェイ利用者: {client}")
+    env = dict(os.environ) if env is None else env
+    master = env.get(GATEWAY_TOKEN_ENV, "").strip()
+    if not master:
+        raise NotionError(NO_GATEWAY)
+    config = config or load_config()
+    return Notion(gateway_client_token(master, client), base_url=config.notion_gateway_api)
 
 
 class Notion:
-    def __init__(self, token: str):
+    def __init__(self, token: str, base_url: str = NOTION_API):
         self.token = token
+        self.base_url = base_url.rstrip("/")
         self._last_request = 0.0
+        # ゲートウェイでは複数のスレッドから呼ぶので、間隔の計算を1つずつにする
+        self._pace = threading.Lock()
 
-    def request(self, method: str, path: str, body: dict | None = None) -> dict:
-        """Notion を1回呼ぶ。混んでいるとき（429）、一時的な失敗（5xx）、切断やタイムアウトは、待ってから試し直す。"""
-        for attempt in range(MAX_RETRIES + 1):
+    def _wait_turn(self) -> None:
+        with self._pace:
             wait = MIN_INTERVAL_SECONDS - (time.monotonic() - self._last_request)
             if wait > 0:
                 time.sleep(wait)
             self._last_request = time.monotonic()
+
+    def forward(self, method: str, path: str, data: bytes | None) -> tuple[int, bytes, dict[str, str]]:
+        """1回だけ送り、Notion の返事（状態・本文・Retry-After）をそのまま返す。ゲートウェイ用。"""
+        self._wait_turn()
+        req = urllib.request.Request(self.base_url + path, method=method, data=data, headers=self._headers())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.status, resp.read(), {}
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read()
+            except (OSError, http.client.HTTPException):
+                body = b""
+            headers = {"Retry-After": e.headers["Retry-After"]} if e.headers.get("Retry-After") else {}
+            return e.code, body, headers
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Notion-Version": NOTION_VERSION,
+            "Content-Type": "application/json",
+        }
+
+    def request(self, method: str, path: str, body: dict | None = None) -> dict:
+        """Notion を1回呼ぶ。混んでいるとき（429）、一時的な失敗（5xx）、切断やタイムアウトは、待ってから試し直す。"""
+        for attempt in range(MAX_RETRIES + 1):
+            self._wait_turn()
             try:
                 return self._send(method, path, body)
             except _Retryable as e:
                 if attempt == MAX_RETRIES:
-                    raise NotionError(f"{method} {path}: {e}") from None
+                    raise NotionError(f"{method} {path}: {e}", e.status) from None
                 time.sleep(e.retry_after if e.retry_after is not None else 2 ** attempt)
         raise AssertionError("到達しない")
 
     def _send(self, method: str, path: str, body: dict | None) -> dict:
         req = urllib.request.Request(
-            "https://api.notion.com/v1" + path,
+            self.base_url + path,
             method=method,
             data=json.dumps(body).encode() if body is not None else None,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Notion-Version": NOTION_VERSION,
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
         )
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -78,16 +136,22 @@ class Notion:
             except (OSError, http.client.HTTPException):
                 detail = ""
             if e.code == 429 or e.code >= 500:
-                raise _Retryable(f"{e.code} {detail}", _retry_after(e)) from None
-            raise NotionError(f"{method} {path}: {e.code} {detail}") from None
+                raise _Retryable(f"{e.code} {detail}", _retry_after(e), e.code) from None
+            raise NotionError(f"{method} {path}: {e.code} {detail}", e.code) from None
         except json.JSONDecodeError as e:
             raise NotionError(f"{method} {path}: 応答を JSON として読めません: {e}") from None
         except (http.client.HTTPException, OSError) as e:
             # 切断・途中切れ・タイムアウト（URLError と TimeoutError も OSError）。Notion 側で書き込みが
-            # 済んでいるかもしれないので、試し直すのは読むだけ・消すだけの要求に限る（二重にページを作らない）
-            if _safe_to_resend(method, path):
-                raise _Retryable(f"接続エラー: {e!r}", None) from None
-            raise NotionError(f"{method} {path}: 接続エラー（書き込みが済んだか分からない）: {e!r}") from None
+            # 済んでいるかもしれないので、試し直すのは読むだけ・消すだけの要求に限る（二重にページを作らない）。
+            # つながりもしなかった（ゲートウェイの再起動中など）なら何も届いていないので、書き込みでも試し直す
+            refused = isinstance(getattr(e, "reason", e), ConnectionRefusedError)
+            if refused or safe_to_resend(method, path):
+                raise _Retryable(f"接続エラー: {e!r}{self._hint()}", None) from None
+            raise NotionError(f"{method} {path}: 接続エラー（書き込みが済んだか分からない）: {e!r}{self._hint()}") from None
+
+    def _hint(self) -> str:
+        """ゲートウェイにつながらないときは、どこを見ればよいかを添える。"""
+        return "" if self.base_url == NOTION_API else "（Notion ゲートウェイが動いているか確かめてください）"
 
     def paginate(self, method: str, path: str, body: dict | None = None) -> list[dict]:
         """`has_more` をたどって全部集める。GET はクエリ、POST は本文にカーソルを入れる。"""
@@ -111,9 +175,10 @@ class Notion:
 
 
 
-def _safe_to_resend(method: str, path: str) -> bool:
+def safe_to_resend(method: str, path: str) -> bool:
     """同じ要求をもう一度送っても結果が変わらないか。POST でも検索と DB の問い合わせは読むだけ。"""
-    return method in ("GET", "DELETE") or path.rstrip("/").endswith(("/query", "/search")) or path == "/search"
+    path = path.split("?", 1)[0].rstrip("/")
+    return method in ("GET", "DELETE") or path.endswith(("/query", "/search")) or path == "/search"
 
 def append_blocks(notion, block_id: str, blocks: list[dict], after: str | None = None) -> list[dict]:
     """ブロックを 100 件ずつ足す。`after` を渡すとそのブロックの直後に、順番を保って入れる。"""
@@ -133,9 +198,10 @@ def append_blocks(notion, block_id: str, blocks: list[dict], after: str | None =
 
 
 class _Retryable(RuntimeError):
-    def __init__(self, message: str, retry_after: float | None):
+    def __init__(self, message: str, retry_after: float | None, status: int | None = None):
         super().__init__(message)
         self.retry_after = retry_after
+        self.status = status
 
 
 def _retry_after(error: urllib.error.HTTPError) -> float | None:
@@ -504,13 +570,18 @@ class Setup:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-notion-setup")
-    parser.add_argument("home_page_id", help="研究ホームのページID（URL の末尾32文字）")
+    parser.add_argument("home_page_id", nargs="?", default="",
+                        help="研究ホームのページID（省くと config.toml の [notion] research_home）")
     args = parser.parse_args()
-    token = os.environ.get("NOTION_TOKEN")
-    if not token:
-        sys.exit("NOTION_TOKEN が設定されていません（deploy/README.md を参照）")
     config = load_config()
-    setup = Setup(Notion(token), args.home_page_id, config.state_dir / "notion.json")
+    try:
+        notion = gateway_notion("kei-agent", config=config)
+    except NotionError as e:
+        sys.exit(str(e))
+    home = args.home_page_id or config.notion.research_home
+    if not home:
+        sys.exit("研究ホームのページ ID がありません（config.toml の [notion] research_home）")
+    setup = Setup(notion, home, config.state_dir / "notion.json")
     try:
         setup.run()
     finally:

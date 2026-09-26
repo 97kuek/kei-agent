@@ -165,7 +165,7 @@ def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
     assert [(p["曜日"]["select"]["name"], p["時限"]["number"]) for p in added] == [("月", 2), ("他", None)]
 
     created = [b["title"][0]["text"]["content"] for m, p, b in calls if m == "POST" and p == "/databases"]
-    assert created == ["授業", "課題", "学習ログ", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"]
+    assert created == ["授業", "課題", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"]
     assignments = next(b for m, p, b in calls if m == "POST" and p == "/databases"
                        and b["title"][0]["text"]["content"] == "課題")
     relation = assignments["initial_data_source"]["properties"]["科目"]["relation"]
@@ -176,7 +176,7 @@ def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
     requirements = next(b for m, p, b in calls if m == "POST" and p == "/databases"
                         and b["title"][0]["text"]["content"] == "🎓 単位要件")
     assert requirements["initial_data_source"]["properties"]["算入成績"]["relation"]["data_source_id"] == "ds-db-📊 成績履歴"
-    assert set(setup.state["databases"]) == {"courses", "assignments", "study_logs", "grades", "requirements", "gpa"}
+    assert set(setup.state["databases"]) == {"courses", "assignments", "grades", "requirements", "gpa"}
 
 
 def _event(summary):
@@ -262,9 +262,23 @@ def test_add_course_writes_the_academic_year_and_seed_takes_a_year(tmp_path, mon
     setup.add_course("データベース", "月", 2, year=2026)
     assert posts[0]["properties"]["年度"] == {"number": 2026}
 
-    seeded = []
-    monkeypatch.setattr(notion_setup, "load_config", lambda: type("C", (), {"state_dir": str(tmp_path)})())
-    monkeypatch.setattr(notion_setup.CourseSetup, "run", lambda self, courses=None, year=None: seeded.append(year))
-    monkeypatch.setenv("NOTION_COURSE_TOKEN", "x")
-    notion_setup.main(["home", "--seed", "2027"])
-    assert seeded == [2027]
+    seeded, clients = [], []
+    fake_config = type("C", (), {"state_dir": str(tmp_path),
+                                 "notion": type("N", (), {"course_home": "course-home"})()})()
+    monkeypatch.setattr(notion_setup, "load_config", lambda: fake_config)
+    monkeypatch.setattr(notion_setup, "gateway_notion",
+                        lambda client, config=None: clients.append(client) or _Notion())
+    monkeypatch.setattr(notion_setup.CourseSetup, "run",
+                        lambda self, courses=None, year=None: seeded.append((self.home, year)))
+    notion_setup.main(["--seed", "2027"])
+    assert seeded == [("course-home", 2027)]
+    # Notion にはゲートウェイの course（授業ホームだけに届く）として届く
+    assert clients == ["course"]
+
+
+def test_course_setup_without_the_gateway_password_says_so(tmp_path, monkeypatch, config):
+    from kei_agent_course import notion_setup
+
+    monkeypatch.setattr(notion_setup, "load_config", lambda: config)
+    with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
+        notion_setup.main(["course-home"])

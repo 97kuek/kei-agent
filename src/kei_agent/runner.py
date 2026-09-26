@@ -19,6 +19,7 @@ from kei_agent import guard, run_hooks
 from kei_agent.config import Config, path_without_venv
 from kei_agent.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.model_policy import ResolvedModel, validate_resolved
+from kei_agent.notion import gateway_client_token
 from kei_agent.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
 from kei_agent.themes import Workspace
 
@@ -40,10 +41,12 @@ EXIT_GRACE_SECONDS = 5
 SESSION_MISSING_MARKERS = ("No conversation found", "no rollout found for")
 # このファイルが動かすのは研究の claude だけ。skill も MCP も研究のものに限る
 AGENT = "research"
-# 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）。合言葉は claude が環境変数から入れる
+# 研究ホームだけに届く Notion（src/kei_agent_notion_gateway）。合言葉は claude が環境変数から入れる
 NOTION_MCP = "research-notion"
 GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
 GATEWAY_AUTH_ENV = "KEI_AGENT_NOTION_GATEWAY_AUTH"
+# ゲートウェイでの研究の利用者名。この名前の合言葉は研究ホームにしか届かない
+GATEWAY_CLIENT = "research"
 
 
 def system_prompt_text(config: Config) -> str:
@@ -68,7 +71,7 @@ def notion_mcp_config(config: Config) -> dict:
     return {"mcpServers": {NOTION_MCP: {
         "type": "http",
         "url": config.notion_gateway_url,
-        # build_env は合言葉そのもの（GATEWAY_TOKEN_ENV）を子に渡さず、ヘッダーの値だけを GATEWAY_AUTH_ENV に置く
+        # build_env は親の合言葉（GATEWAY_TOKEN_ENV）を子に渡さず、研究用の合言葉のヘッダーだけを GATEWAY_AUTH_ENV に置く
         "headers": {"Authorization": f"${{{GATEWAY_AUTH_ENV}}}"},
     }}}
 
@@ -259,15 +262,14 @@ def install_skill_directory(source_root: Path, cwd: Path) -> None:
 
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str,
               *, include_gateway_auth: bool = True) -> dict[str, str]:
+    """子の環境。Notion の鍵は、研究ホームにしか届かない研究用の合言葉（ヘッダーの値）だけを渡す。"""
     env = guard.strip_env(base)
-    token = env.pop(GATEWAY_TOKEN_ENV, "")
+    master = base.get(GATEWAY_TOKEN_ENV, "").strip()
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
-    if include_gateway_auth and token:
-        env[GATEWAY_AUTH_ENV] = f"Bearer {token}"
-    else:
-        env.pop(GATEWAY_AUTH_ENV, None)
+    if include_gateway_auth and master:
+        env[GATEWAY_AUTH_ENV] = f"Bearer {gateway_client_token(master, GATEWAY_CLIENT)}"
     return env
 
 

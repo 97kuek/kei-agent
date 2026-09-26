@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections import defaultdict
 from collections.abc import Coroutine
@@ -20,8 +19,6 @@ from contextlib import contextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-
-import aiohttp
 
 from kei_agent import (
     a2a,
@@ -156,9 +153,10 @@ def time_domain(channel_name: str) -> str:
     return "course" if channel_name.startswith("20_") else "work" if channel_name.startswith("30_") else "research"
 
 
-def gateway_endpoint(mcp_url: str, path: str) -> str:
-    """Notion gateway の MCP の URL（…/mcp）から、同じサーバーの別の口を作る。"""
-    return f"{mcp_url.rstrip('/').removesuffix('/mcp')}/{path.lstrip('/')}"
+def time_label(entry: TimeEntry) -> str:
+    """時間記録の「テーマ」。大学は選んだ科目、ほかはチャンネルのテーマ名。"""
+    return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
+
 
 class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
@@ -377,7 +375,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             return
         toggl = load_toggl() if entry.toggl_state not in ("done", "not_configured") else None
         if entry.toggl_state not in ("done", "not_configured") and toggl is None:
-            # Toggl を使わない運用でも、Notion の学習ログ・研究ログは残す
+            # Toggl を使わない運用でも、共通ホームの時間記録には残す
             self.store.set_time_delivery(entry.id, toggl_state="not_configured")
         if toggl is not None:
             try:
@@ -396,8 +394,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             else:
                 self.store.set_time_delivery(entry.id, toggl_state="done")
         entry = self.time_tracker.entry(entry.id) or entry
-        if entry.domain == "work":
-            self.store.set_time_delivery(entry.id, notion_state="not_required")
+        hub = self.hub
+        if hub is None or not hub.has_time_db:
+            # 共通ホームが使えない間は保留にして、使えるようになってから送る（知らせは起動時の1回だけ）
+            if entry.notion_state != "pending":
+                self.store.set_time_delivery(entry.id, notion_state="pending")
             return
         card = self.store.time_card(entry.channel_id)
         slack_url = ""
@@ -407,33 +408,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         minutes = max(1, int((entry.ended_at - entry.started_at + 59) // 60))
         started_at = datetime.fromtimestamp(entry.started_at).astimezone().isoformat()
         try:
-            if entry.domain == "course":
-                reply = await self.ask_course("record-study-time", entry_id=entry.id, started_at=started_at,
-                                              duration_minutes=minutes, course_page_id=entry.course_page_id,
-                                              memo=entry.memo, slack_url=slack_url)
-                if not reply.ok:
-                    raise RuntimeError("大学エージェントが学習ログを記録できませんでした")
-            else:
-                await self._record_research_time(entry, started_at, minutes, slack_url)
+            await asyncio.to_thread(hub.record_time, entry.id, entry.domain, time_label(entry), started_at,
+                                    minutes, entry.memo, slack_url, "Slack")
         except Exception:
             log.warning("Notion の時間記録は後で再試行します", exc_info=True)
             self.store.set_time_delivery(entry.id, notion_state="pending")
         else:
             self.store.set_time_delivery(entry.id, notion_state="done")
-
-    async def _record_research_time(self, entry: TimeEntry, started_at: str, minutes: int, slack_url: str) -> None:
-        token = os.environ.get("KEI_AGENT_NOTION_GATEWAY_TOKEN", "")
-        if not token:
-            raise RuntimeError("研究 Notion gateway の合言葉がありません")
-        async with (aiohttp.ClientSession() as session,
-                    session.post(gateway_endpoint(self.config.notion_gateway_url, "time-logs"), headers={
-                        "Authorization": f"Bearer {token}"}, json={
-                            "entry_id": entry.id, "started_at": started_at, "duration_minutes": minutes,
-                            "theme": themes.theme_name(entry.channel_name), "memo": entry.memo,
-                            "slack_url": slack_url,
-                        }, timeout=aiohttp.ClientTimeout(total=30)) as response):
-            if response.status // 100 != 2:
-                raise RuntimeError(f"研究 Notion gateway: HTTP {response.status}")
 
     async def retry_time_entries(self) -> None:
         """ネットワーク切断などで保留になった記録だけを、次の定期確認で再送する。"""
@@ -629,7 +610,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         created = themes.ensure_workspace(ws)
         self.registered_themes.add(name)
         if ws.kind is ChannelKind.IMPROVE:
-            text = f"Kei Agent です。このチャンネルでメンションされた要望は `{self.config.backlog_path}` に記録します。"
+            text = ("Kei Agent です。このチャンネルでメンションされた要望は、要約して公開の GitHub issue にします"
+                    "（Slack の文はそのまま載せません）。")
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
         elif ws.kind is ChannelKind.COURSE:
@@ -707,7 +689,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if self.hub is None:
             await self.notify_trouble(
                 "共通 Notion ホームを利用できません。親ページの共有と hub state を確認してください。"
-                "Daily とレトプラはローカルファイルだけに残します")
+                "Daily とレトプラは Slack にだけ出し、時間の記録は Notion への送信を保留します")
             return ["共通 Notion ホームを利用できません"]
         try:
             problems = await asyncio.to_thread(self.hub.schema_problems)
@@ -720,6 +702,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             self.hub = None
             await self.notify_trouble("共通 Notion ホームの項目を確認してください:\n"
                                       + "\n".join(f"• {p}" for p in problems))
+        elif not self.hub.has_time_db:
+            await self.notify_trouble(
+                "共通 Notion ホームに「時間記録」がまだありません。kei-agent-hub-setup --apply で作って再起動してください"
+                "（それまで時間は Toggl にだけ送り、Notion への送信は保留します）")
         return problems
 
     async def register_theme(self, channel: str, ws: Workspace) -> None:

@@ -102,7 +102,7 @@ async def test_card_tells_what_the_agent_can_do(server):
     assert card["name"].startswith("Kei Agent")
     assert [s["id"] for s in card["skills"]] == [
         "sync-assignments", "list-due", "list-calendar-assignments", "list-classes",
-        "list-current-courses", "record-study-time", "ask", "time-report"]
+        "list-current-courses", "ask", "time-report"]
     # 自由な質問（ask）は claude を動かすので、流しながら返す
     assert card["capabilities"].get("streaming") is True
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
@@ -164,7 +164,7 @@ async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, 
 
     assert not result.ok
     assert "次ページ" in json.loads(result.answer)["text"]
-    assert "NOTION_COURSE_TOKEN" not in result.answer
+    assert "TOKEN" not in result.answer
 
 
 async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):

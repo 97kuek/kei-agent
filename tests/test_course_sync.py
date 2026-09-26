@@ -307,23 +307,6 @@ def test_next_weekday_is_today_or_later():
     assert periods.next_weekday("他", friday) == friday
 
 
-def test_study_time_log_is_idempotent_and_relates_the_course():
-    notion = FakeNotion(courses=COURSE_ROWS)
-    course = notion_sync.CourseNotion(notion, STATE)
-
-    first = course.record_study_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "page-db", "復習",
-                                     "https://slack.example/p1")
-    second = course.record_study_time("entry-1", "2026-09-23T10:00:00+09:00", 25, "page-db", "復習",
-                                      "https://slack.example/p1")
-
-    assert first == second == {"entry_id": "entry-1", "notion_url": ""}
-    posts = [call for call in notion.calls if call[:2] == ("POST", "/pages")]
-    assert len(posts) == 1
-    props = posts[0][2]["properties"]
-    assert props["科目"]["relation"] == [{"id": "page-db"}]
-    assert props["Kei Agent 記録ID"]["rich_text"][0]["text"]["content"] == "entry-1"
-
-
 def test_waseda_periods_turn_into_times():
     from datetime import date
 
@@ -381,3 +364,20 @@ def test_course_tools_read_box_and_fully_manage_the_course_notion():
     # Box への書き込みと、別のエージェントを動かす道具は、名指しでも断る
     for name in ("mcp__claude_ai_Box__upload_file", "mcp__claude_ai_Notion__notion-spawn-session"):
         assert name in tools.DENY and name not in tools.ALLOWED
+
+
+def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):
+    """授業の Notion は、ゲートウェイの course（授業ホームだけに届く）の合言葉で呼ぶ。"""
+    from kei_agent.notion import gateway_client_token
+
+    monkeypatch.setenv("KEI_AGENT_NOTION_GATEWAY_TOKEN", "master")
+    client = notion_sync._client(STATE)
+    assert client.notion.base_url.endswith("/notion/v1")
+    assert client.notion.token == gateway_client_token("master", "course")
+
+
+def test_course_notion_without_the_gateway_password_is_a_notion_error():
+    from kei_agent.notion import NotionError
+
+    with pytest.raises(NotionError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
+        notion_sync.courses_on("月", state=STATE)

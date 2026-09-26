@@ -54,15 +54,10 @@ def remove_older_than(paths: list[Path], cutoff: float) -> int:
 
 def cleanup(config: Config, claude_projects: Path, now: float | None = None,
             keep_worktrees: frozenset[str] = frozenset(), keep_scratch: frozenset[str] = frozenset()) -> dict:
-    """Daily の材料、Claude のセッションの記録、使い終わった worktree のうち、古いものを消す。"""
+    """Claude のセッションの記録、スレッドのログ、使い終わった worktree のうち、古いものを消す。"""
     now = time.time() if now is None else now
     m = config.maintenance
     root = config.research_root
-
-    digests = list((config.overview_dir / ".kei-agent" / "digest").glob("*.md"))
-    # 声の会話の全文（控えは Daily の材料と同じ日数で消す）
-    digests += list((config.overview_dir / "voice").glob("*.md"))
-    removed_digests = remove_older_than(digests, now - m.digest_retention_days * 86400)
 
     # 消すのは、Kei Agent が claude を動かす場所に対応するセッションだけ。ほかのプロジェクトには触らない
     workspaces = [p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")] if root.is_dir() else []
@@ -80,8 +75,7 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     logs = [p for ws in workspaces for p in (ws / ".kei-agent" / "threads").glob("*.md")]
     removed_logs = remove_older_than(logs, now - m.thread_log_retention_days * 86400)
     removed_worktrees = remove_finished_worktrees(config, keep_worktrees, keep_scratch)
-    return {"digests": removed_digests, "sessions": removed_sessions, "thread_logs": removed_logs,
-            "worktrees": removed_worktrees}
+    return {"sessions": removed_sessions, "thread_logs": removed_logs, "worktrees": removed_worktrees}
 
 
 def remove_finished_worktrees(config: Config, keep_worktrees: frozenset[str],
@@ -190,7 +184,7 @@ async def _backup_agent_root(config: Config, d: date) -> dict:
     """Kei Agent 側の保存。支度ができていなければ、止めずに理由を返す。
 
     研究側の保存は通っているので、ここで例外にすると毎晩の保守そのものが失敗になる。
-    いっぽう黙って飛ばすと、Daily と振り返りがどこにも残らないまま進むので、理由は必ず返す。
+    いっぽう黙って飛ばすと、状態の書き出しがどこにも残らないまま進むので、理由は必ず返す。
     """
     root = config.agent_root
     if not (root / ".git").is_dir():

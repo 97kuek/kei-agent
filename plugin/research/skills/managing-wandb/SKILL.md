@@ -13,4 +13,4 @@ W&Bは実験のメトリクス、run、artifactの索引として使い、詳細
 - MCPの接続や権限が不明なときは、`wandb` CLI/SDKのローカル設定を勝手に探さず、未接続として説明する
 - 外部に送るデータはプロジェクト名、run名、数値メトリクスなど必要最小限にし、学生情報・秘密情報・raw datasetは送らない
 
-実験をNotionへ記録するときは、W&Bのrun URL、commit、主要指標、結論だけを研究ホームの研究ログへ投影する。完全なstdoutやcheckpointはNotionに貼らない。
+実験をNotionへ記録するときは、W&Bのrun URL、commit、主要指標、結論だけを、その実験のTaskの「結果」かノート（種類「考察」）に書く。完全なstdoutやcheckpointはNotionに貼らない。

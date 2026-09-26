@@ -37,11 +37,18 @@ DAILY_REPLY = """**今日のタスク**
 
 
 class FakeHub:
+    has_time_db = True
+
     def __init__(self):
         self.notes = []
         self.appended = []
+        self.reviews: dict[str, str] = {}
+        self.edited: list[Note] = []
+        self.minutes: dict[str, float] = {}
+        self.known: set[str] = set()
+        self.recorded = []
 
-    def upsert_day(self, kind, day, title, markdown, slack_url, file):
+    def upsert_day(self, kind, day, title, markdown, slack_url):
         note = Note(f"hub-{day}", title, kind, day, f"https://notion.example/hub/{day}", markdown)
         self.notes.append(note)
         return note
@@ -50,10 +57,30 @@ class FakeHub:
         self.appended.append((page_id, text))
 
     def reviews_edited_since(self, since):
-        return []
+        return list(self.edited)
+
+    def review_text(self, day):
+        return self.reviews.get(day, "")
+
+    def time_minutes_by_domain(self, start, days=7):
+        return dict(self.minutes)
+
+    def time_url(self):
+        return "https://www.notion.so/timedb"
+
+    def time_ids_since(self, since):
+        return set(self.known)
+
+    def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
+        self.recorded.append((entry_id, domain, label, minutes, source))
 
     def schema_problems(self):
         return []
+
+
+def material(prompt: str) -> str:
+    """プロンプトに入れた材料の部分だけ。"""
+    return prompt.split(schedule_module.MATERIAL_START, 1)[1].split(schedule_module.MATERIAL_END, 1)[0]
 
 
 @pytest.fixture
@@ -152,6 +179,23 @@ async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
     assert assistant.hub is None
     assert assistant.notion is not None
     assert notices
+
+
+async def test_missing_time_db_is_reported_but_keeps_the_hub(env, monkeypatch):
+    """時間記録がまだ無いだけなら、日別記録は使い続け、作り方を一度だけ知らせる。"""
+    _, assistant, *_ = env
+    notices = []
+
+    async def notice(text):
+        notices.append(text)
+
+    monkeypatch.setattr(assistant, "notify_trouble", notice)
+    hub = assistant.hub
+    hub.has_time_db = False
+    assert await assistant.check_hub_schema() == []
+    assert assistant.hub is hub
+    notice_text, = notices
+    assert "時間記録" in notice_text and "kei-agent-hub-setup --apply" in notice_text
 
 
 async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env, monkeypatch):
@@ -407,8 +451,10 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
 
     call, = claude.calls
     assert call["cwd"] == config.overview_dir
-    digest = config.overview_dir / ".kei-agent" / "digest" / "2026-09-18-daily.md"
-    text = digest.read_text()
+    # 材料はファイルにせず、プロンプトにそのまま入れる。Daily のファイルもグラフも作らせない
+    assert not (config.overview_dir / ".kei-agent" / "digest").exists()
+    assert "daily/" not in call["prompt"] and "outputs/" not in call["prompt"]
+    text = material(call["prompt"])
     assert "10.1.md" in text
     # 先行研究はテーマのチャンネルに流すので、Daily の材料には入れない（2026-09-22）
     assert "先行研究" not in text
@@ -425,6 +471,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
     assert [n.kind for n in assistant.notion.notes] == ["考察"]
     assert detail["notion_url"] == note.url
+    assert not (config.overview_dir / "daily").exists()
 
 
 async def test_daily_posts_only_four_bold_sections(env):
@@ -486,22 +533,21 @@ async def test_digest_skips_theme_never_asked(env, config, store):
     assert "just-invited" not in stalled and "なし" in stalled
 
 
-async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config, store):
+async def test_review_is_saved_only_to_the_day_row_and_syncs_conclusion(env, config, store):
     scheduler, assistant, slack, claude = env
-    review = config.overview_dir / "reviews" / "2026-09-18.md"
-
-    def write_review(cwd):
-        review.parent.mkdir(parents=True, exist_ok=True)
-        review.write_text("# 振り返り 2026-09-18\n\n## Codex での振り返り\n")
-
-    claude.behaviors = [{"text": REVIEW_REPLY, "side_effect": write_review}]
+    claude.behaviors = [{"text": REVIEW_REPLY}]
     await scheduler.run_review("2026-09-18")
 
-    assert "reviews/2026-09-18.md" in claude.calls[0]["prompt"]
+    prompt = claude.calls[0]["prompt"]
+    # 材料はプロンプトに入れ、振り返りのファイルは書かせない（Notion の日別記録だけに残す）
+    assert "reviews/" not in prompt and "今日が期日の Task" in material(prompt)
     texts = slack.texts()
     assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == REVIEW_REPLY
     note = assistant.hub.notes[-1]
-    assert note.kind == "振り返り" and "## Codex での振り返り" in note.body
+    # 日別記録には、振り返るときの問いも残す（Slack には出さない）
+    assert note.kind == "振り返り" and note.body.startswith(REVIEW_REPLY)
+    assert "振り返りの問い" in note.body and "明日やることは何か" in note.body
+    assert "振り返りの問い" not in "".join(texts)
     assert len(texts) == 2
     assert assistant.notion.notes == []
 
@@ -512,6 +558,7 @@ async def test_review_prepares_file_and_notion_and_syncs_conclusion(env, config,
         await asyncio.gather(*list(assistant.tasks))
     (page_id, conclusion), = assistant.hub.appended
     assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in conclusion
+    assert not (config.overview_dir / "reviews").exists()
 
 
 async def test_review_never_posts_model_progress_narration(env):
@@ -534,8 +581,8 @@ async def test_review_does_not_post_extra_footer(env):
     assert slack.texts() == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
 
 
-async def test_review_without_hub_never_writes_research_notes(env):
-    scheduler, assistant, _slack, claude = env
+async def test_review_without_hub_never_writes_research_notes(env, config):
+    scheduler, assistant, slack, claude = env
     assistant.hub = None
     claude.behaviors = [{"text": REVIEW_REPLY}]
 
@@ -543,6 +590,27 @@ async def test_review_without_hub_never_writes_research_notes(env):
 
     assert result["notion_url"] is None
     assert assistant.notion.notes == []
+    # Slack には出し、日別記録に残せなかったことを知らせる。代わりのファイルは作らない
+    assert REVIEW_REPLY in slack.texts()
+    notice = slack.posted()[-1]
+    assert notice["channel"] == "C9" and "日別記録に保存できませんでした" in notice["text"]
+    assert not (config.overview_dir / "reviews").exists()
+
+
+async def test_daily_without_hub_still_posts_and_says_so(env, config):
+    scheduler, assistant, slack, claude = env
+    assistant.hub = None
+    claude.behaviors = [{"text": DAILY_REPLY}]
+
+    result = await scheduler.run_daily("2026-09-24")
+
+    assert result["status"] == "posted" and result["notion_url"] is None
+    assert DAILY_REPLY in slack.texts()
+    assert any("Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in t
+               for t in slack.texts())
+    assert not (config.overview_dir / "daily").exists()
+    # 人の時間は読めないと材料に書く（落ちない）
+    assert "共通 Notion ホームが使えない" in material(claude.calls[0]["prompt"])
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):
@@ -599,7 +667,7 @@ async def test_maintenance_reports_backup_failure(env, config):
     scheduler, assistant, slack, claude = env
     config.research_root.mkdir(parents=True, exist_ok=True)  # Git のリポジトリではない
     detail = await scheduler.run_maintenance("2026-09-18")
-    assert detail["status"] == "error" and detail["removed"] == {"digests": 0, "sessions": 0, "thread_logs": 0, "worktrees": 0}
+    assert detail["status"] == "error" and detail["removed"] == {"sessions": 0, "thread_logs": 0, "worktrees": 0}
     assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
 
@@ -937,3 +1005,111 @@ def test_the_voice_layer_gets_a_week_not_just_today():
     assert [e.text for e in week] == ["データベース", "信号処理", "締切: 実験 第3回レポート"]
     # 範囲の外は入らない
     assert "来月の授業" not in [e.text for e in week]
+
+
+# 材料の中身（digest.py）
+
+async def test_digest_reads_yesterday_review_and_week_time_from_the_hub(env, config, store):
+    """前日の振り返りは日別記録から、今週の時間は時間記録と runs から読む（手元のファイルは見ない）。"""
+    from kei_agent.digest import DigestBuilder
+
+    _, assistant, *_ = env
+    now = datetime(2026, 9, 18, 8, 0)
+    assistant.hub.reviews["2026-09-17"] = "**今日の成果**\n条件Bを回した\n\n### Slack に貼った結論\n順番が効く"
+    # 前日の行は「前日の振り返り」に丸ごと入れるので、ノートとしては重ねない
+    assistant.hub.edited = [Note("hub-2026-09-17", "Retro", "振り返り", "2026-09-17",
+                                 "https://notion.example/hub/2026-09-17", "前日の行の全文")]
+    assistant.hub.minutes = {"研究": 90, "大学": 30}
+    run = store.start_run("C1", "1.1", "vlm", "message")
+    store.end_run(run, False, None)
+    start = datetime(2026, 9, 15, 10, 0).timestamp()
+    store.conn.execute("UPDATE runs SET started_at = ?, ended_at = ? WHERE id = ?", (start, start + 1800, run))
+    store.conn.commit()
+
+    text = await DigestBuilder(config, store, assistant).build(
+        now.timestamp() - 86400, now.timestamp(), "Daily の材料", set())
+
+    review = text.split("## 前日の振り返り")[1].split("\n## ")[0]
+    assert "条件Bを回した" in review and "順番が効く" in review
+    assert "前日の行の全文" not in text
+    week = text.split("## 時間（今週）")[1].split("\n## ")[0]
+    assert "合計 2.0 時間（研究 1.5 時間、大学 0.5 時間）" in week
+    assert "Kei Agent の稼働: 0.5 時間" in week
+    assert "https://www.notion.so/timedb" in week
+
+
+async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
+    """材料が長すぎるときは長い本文から削り、今日のタスクの元になる一覧は残す。"""
+    from kei_agent import digest
+    from kei_agent.digest import DigestBuilder
+
+    _, assistant, *_ = env
+    today = datetime.now().date()
+    task = assistant.notion.add_task("今日の締切の Task", "vlm", status="未着手")
+    task.due = today.isoformat()
+    for i in range(40):
+        assistant.notion.notes.append(Note(f"note-{i}", f"考察{i}", "考察", "2026-09-17",
+                                           f"https://notion.example/note-{i}", "あ" * 2000))
+
+    text = await DigestBuilder(config, store, assistant).build(
+        time.time() - 86400, time.time(), "Daily の材料", set())
+
+    assert len(text) <= digest.MAX_DIGEST_CHARS + 200
+    assert "今日の締切の Task" in text
+    assert digest.TRUNCATED in text
+
+
+async def test_maintenance_imports_toggl_only_entries(env, store, monkeypatch):
+    """Toggl のアプリで直接測った分は、毎晩の保守で時間記録に入れる。Slack から送った分は重ねない。"""
+    from kei_agent import maintenance, timelog
+
+    scheduler, assistant, *_ = env
+    started = time.time() - 3600
+    entry = store.start_time_entry("e1", "UME", "research", "C1", "vlm", "", "", "研究 / vlm", started, "done")[0]
+    store.finish_time_entry("UME", started + 1500)
+
+    class Toggl:
+        def entries(self, since, until):
+            iso = datetime.fromtimestamp(entry["started_at"]).astimezone().isoformat()
+            return [{"id": 1, "start": iso, "duration": 1500, "project": {"name": "研究 / vlm"}},
+                    {"id": 2, "start": "2026-09-17T10:00:00+09:00", "duration": 600,
+                     "project": {"name": "仕事/定例"}}]
+
+    monkeypatch.setattr(timelog, "load_toggl", lambda: Toggl())
+    monkeypatch.setattr(maintenance, "cleanup", lambda *a: {})
+    object.__setattr__(scheduler.config.maintenance, "backup", False)
+
+    detail = await scheduler.run_maintenance("2026-09-18")
+
+    assert assistant.hub.recorded == [("toggl:2", "仕事", "定例", 10, "Toggl")]
+    assert detail["toggl"]["imported"] == 1 and detail["toggl"]["own"] == 1
+
+
+async def test_toggl_import_failure_does_not_stop_maintenance(env, monkeypatch):
+    from kei_agent import maintenance, timelog
+
+    scheduler, assistant, *_ = env
+
+    class Broken:
+        def entries(self, since, until):
+            raise timelog.TogglError("GET /time-entries: 503")
+
+    monkeypatch.setattr(timelog, "load_toggl", lambda: Broken())
+    monkeypatch.setattr(maintenance, "cleanup", lambda *a: {})
+    object.__setattr__(scheduler.config.maintenance, "backup", False)
+
+    detail = await scheduler.run_maintenance("2026-09-18")
+
+    assert detail["status"] == "done"
+    assert detail["toggl"]["status"] == "error" and "503" in detail["toggl"]["error"]
+
+
+async def test_toggl_import_waits_for_the_time_db(env, monkeypatch):
+    from kei_agent import timelog
+
+    scheduler, assistant, *_ = env
+    monkeypatch.setattr(timelog, "load_toggl", lambda: pytest.fail("時間記録が無いのに Toggl を読んだ"))
+    assistant.hub.has_time_db = False
+    assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}
+    assistant.hub = None
+    assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}

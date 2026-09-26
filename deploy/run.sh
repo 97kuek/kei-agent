@@ -16,6 +16,7 @@ export KEI_AGENT_LOG_FILE="$HOME/Library/Logs/kei-agent/kei-agent.log"
 
 REPO="${0:A:h:h}"
 source "$REPO/deploy/_common.sh"
+drop_notion_secrets
 trim_launchd_log launchd.log
 cd "$REPO"
 

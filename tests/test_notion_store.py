@@ -91,12 +91,17 @@ def test_create_night_task_links_theme(state):
     assert task.theme_names == ["vlm"]
 
 
-def test_load_notion_needs_token_and_state(config, tmp_path):
+def test_load_notion_needs_gateway_token_and_state(config, tmp_path):
+    gateway = {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}
     assert load_notion(config, env={}) is None
-    assert load_notion(config, env={"NOTION_TOKEN": "ntn_x"}) is None  # 状態のファイルがない
+    assert load_notion(config, env={"NOTION_TOKEN": "ntn_x"}) is None  # 素のトークンでは直接つながない
+    assert load_notion(config, env=gateway) is None  # 状態のファイルがない
     config.state_dir.mkdir(parents=True, exist_ok=True)
     (config.state_dir / "notion.json").write_text(json.dumps({"databases": {}}))
-    assert isinstance(load_notion(config, env={"NOTION_TOKEN": "ntn_x"}), NotionStore)
+    store = load_notion(config, env=gateway)
+    assert isinstance(store, NotionStore)
+    assert store.notion.base_url == "http://127.0.0.1:8791/notion/v1"
+    assert store.notion.token != "master"
 
 
 def test_store_requires_setup(tmp_path):

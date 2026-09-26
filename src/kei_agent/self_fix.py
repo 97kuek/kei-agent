@@ -1,6 +1,7 @@
 """Slack から Kei Agent 自身を直す流れ（docs/architecture.md）。
 
 #00_kei-agent で案を話し合い、合意したら worktree で直し、差分を見せてから main に取り込んで入れ替わる。
+新しい要望は要約して公開の GitHub issue にし、取り込めたら閉じる（issues.py）。
 部品（git の操作、確認、合図）は improve.py、柵は guard.py にある。
 
 Assistant に混ぜて使う。self.slack、self.store、self.config、self.run などは Assistant のもの。
@@ -11,10 +12,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 
-from kei_agent import guard, improve, runner
+from kei_agent import guard, improve, issues, runner
 from kei_agent.auto_messages import history_prompt
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.request import Request
@@ -31,7 +31,11 @@ class SelfFix:
     async def improve(self, req: Request, ws: Workspace) -> runner.RunResult | None:
         """#00_kei-agent のやりとり。案を考えるときはコードを読むだけで、書き込めるのは一時ディレクトリだけ。"""
         if req.trigger == "message" and req.message_ts == req.thread_ts:
-            await self.record_backlog(req)
+            # やり直しの回（上限・再起動）でも、最初の要望の文を残す
+            row = self.store.request_improvement(req.channel, req.thread_ts, req.text, None)
+            if not row["issue_number"]:
+                # issue にするのは裏で進め、案を考えるのを待たせない
+                self.spawn(self.file_issue(req, row["request"]))
         scratch = self.config.state_dir / "improve" / req.thread_ts
         scratch.mkdir(parents=True, exist_ok=True)
         ws = replace(ws, cwd=scratch)
@@ -249,21 +253,48 @@ class SelfFix:
         self.store.update_improvement(row["channel"], thread_ts, status="done")
         await self.post(req, f"✅ 新しい版で起動したよ（`{(row['merge_commit'] or '')[:7]}`）。"
                              f"うまくいかなければ `{previous[:7]}` に戻せる。")
-        await asyncio.to_thread(improve.mark_backlog_done, self.config, row["request"])
+        await self.close_issue(row)
 
-    async def record_backlog(self, req: Request) -> None:
-        path = self.config.backlog_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            path.write_text(f"# Kei Agent への要望\n\n`#{req.channel_name}` で受け付けた要望。新しいものが下。\n",
-                            encoding="utf-8")
-        link = ""
+    async def file_issue(self, req: Request, request: str) -> None:
+        """新しい要望を、要約した公開の GitHub issue にする。原文は Slack に残し、issue にもファイルにも書かない。"""
+        if not request.strip():
+            await self.post(req, "要望の文がないので、GitHub の issue にはしなかったよ。")
+            return
         try:
-            link = f"（[Slack]({await self.permalink(req.channel, req.message_ts or req.thread_ts)})）"
-        except Exception:
-            log.debug("パーマリンクを取得できません", exc_info=True)
-        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        body = req.text.replace("\n", "\n  ")
-        with path.open("a", encoding="utf-8") as f:
-            f.write(f"\n- [ ] {stamp} {body} {link}\n")
-        await self.post(req, f"要望を `{path}` に記録したよ。")
+            # 作って番号を残すまでは、入れ替え（再起動）を待たせる。途中で止まると issue が二重にできる
+            with self.claude_running():
+                summary = await issues.summarize(self.config, self.store, request)
+                issue = await issues.create(self.config, summary)
+                self.store.request_improvement(req.channel, req.thread_ts, request, issue.number)
+        except issues.NoProvider:
+            await self.post(req, "自己改善の AI（Claude か Codex）がまだ選ばれていないので、要望は GitHub の issue に"
+                                 "しなかったよ。App Home の設定で選んでね。")
+            return
+        except issues.IssueError as e:
+            await self.notify_trouble(_trouble("要望を GitHub の issue にできませんでした", e))
+            return
+        except Exception as e:
+            log.exception("要望を GitHub の issue にできません")
+            await self.notify_trouble(f"要望を GitHub の issue にできませんでした: {type(e).__name__}: {e}")
+            return
+        await self.post(req, f"要望を要約して、公開の GitHub issue <{issue.url}|#{issue.number}> にしたよ"
+                             "（元の文は載せていない）。")
+
+    async def close_issue(self, row) -> None:
+        """取り込めた要望の issue を、取り込んだコミットを添えて閉じる。issue にしていない要望は何もしない。"""
+        number = row["issue_number"]
+        if not number:
+            return
+        try:
+            await issues.close(self.config, number, row["merge_commit"] or "")
+        except issues.IssueError as e:
+            await self.notify_trouble(_trouble(f"issue #{number} を閉じられませんでした", e))
+        except Exception as e:
+            # 起動の途中で呼ばれるので、何があっても起動は止めない
+            log.exception("issue を閉じられません")
+            await self.notify_trouble(f"issue #{number} を閉じられませんでした: {type(e).__name__}: {e}")
+
+
+def _trouble(head: str, e: issues.IssueError) -> str:
+    """知らせの文。改善チャンネルには理由まで、gh の出力などの中身はログにだけ残る（trouble_notice が「: 」の後ろを落とす）。"""
+    return f"{head}（{e.reason}）" + (f": {e.detail}" if e.detail else "")

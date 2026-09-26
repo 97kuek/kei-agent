@@ -72,7 +72,7 @@ class TimeTracker:
             uuid.uuid4().hex, context.user_id, context.domain, context.channel_id, context.channel_name,
             context.course_page_id, context.course_name, project_label(context.domain, label),
             time.time() if started_at is None else started_at,
-            "not_required" if context.domain == "work" else "pending",
+            "pending",
         )
         return _entry(entry), _entry(previous) if previous is not None else None
 

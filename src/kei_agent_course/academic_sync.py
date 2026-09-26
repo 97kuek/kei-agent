@@ -7,17 +7,16 @@
 from __future__ import annotations
 
 import argparse
-import os
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent.notion import Notion
+from kei_agent.notion import Notion, NotionError, gateway_notion
 from kei_agent_course import periods
 from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
 from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.notion_props import number, plain, select, text, title
-from kei_agent_course.notion_sync import TOKEN_ENV, read_state
+from kei_agent_course.notion_sync import read_state
 
 # 成績の学期 → GPA の期間。夏ク・秋ク・通年は公表値と照合済み。冬クはどちらに入るか確かめていないので結ばない
 _GPA_TERMS = {**periods.GRADE_TERMS, "夏ク": periods.SPRING, "秋ク": periods.AUTUMN,
@@ -348,11 +347,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.apply:
         print("Notion へ反映するには --apply を付けてください")
         return 2
-    token = os.environ.get(TOKEN_ENV, "")
-    if not token:
-        raise SystemExit(f"{TOKEN_ENV} が設定されていません")
+    try:
+        notion = gateway_notion("course")
+    except NotionError as e:
+        raise SystemExit(str(e)) from None
     state = read_state()
-    notion = Notion(token)
     result = AcademicSync(notion, state).sync(record)
     links = reconcile_academic_history(notion, state, apply=True)
     print("作成 " + "・".join(f"{key} {count} 件" for key, count in result.created.items()))

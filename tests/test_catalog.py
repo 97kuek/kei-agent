@@ -42,3 +42,14 @@ def test_catalog_inspection_never_calls_notion_request_with_write_method():
 
     assert names == ("情報通信ネットワークB", "既知の科目")
     assert all(method == "POST" and path.endswith("/query") for method, path, _ in notion.calls)
+
+
+def test_catalog_cli_needs_the_gateway_before_reading_moodle(monkeypatch):
+    import pytest
+
+    from kei_agent_course import catalog, moodle
+
+    monkeypatch.setenv("MOODLE_ICS_URL", "https://example.invalid/calendar.ics")
+    monkeypatch.setattr(moodle, "events", lambda url: (_ for _ in ()).throw(AssertionError("moodle")))
+    with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
+        catalog.main()

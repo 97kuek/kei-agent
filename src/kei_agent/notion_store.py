@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import Config
-from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, schema_problems
+from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, gateway_notion, schema_problems
 
 log = logging.getLogger(__name__)
 
@@ -385,14 +385,10 @@ class NotionStore:
 
 
 def load_notion(config: Config, env: dict[str, str] | None = None) -> NotionStore | None:
-    """NOTION_TOKEN と kei-agent-notion-setup の状態がそろっていれば NotionStore を返す。"""
+    """ゲートウェイの合言葉と kei-agent-notion-setup の状態がそろっていれば NotionStore を返す。"""
     env = dict(os.environ) if env is None else env
-    token = env.get("NOTION_TOKEN")
-    if not token:
-        log.warning("NOTION_TOKEN がないので、Notion にはつながない")
-        return None
     try:
-        return NotionStore(Notion(token), config.state_dir / "notion.json")
+        return NotionStore(gateway_notion("kei-agent", env, config), config.state_dir / "notion.json")
     except NotionError as e:
         log.warning("Notion にはつながない: %s", e)
         return None

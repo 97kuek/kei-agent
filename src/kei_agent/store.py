@@ -247,6 +247,8 @@ def _schedule_status(detail: str | None) -> str:
 
 # あとから足した列。既存のデータベースにも同じ形を用意する
 ADDED_COLUMNS = {
+    # 要望から作った GitHub issue の番号（improve.py）
+    "improvements": {"issue_number": "INTEGER"},
     # ジョブが作るはずのファイル（JSON の配列）。終わったときに、あるかどうかを確かめる
     "jobs": {"expects": "TEXT"},
     # Kei Agent の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
@@ -386,6 +388,21 @@ class Store:
                 (channel, thread_ts, request, now, now),
             )
         return self.update_improvement(channel, thread_ts, **values)
+
+    def request_improvement(self, channel: str, thread_ts: str, request: str,
+                            issue_number: int | None) -> sqlite3.Row:
+        """要望を受けた時点の行（planning）。着手したら start_improvement が working にする。"""
+        now = time.time()
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO improvements (channel, thread_ts, request, status, issue_number, created_at, updated_at)
+                   VALUES (?, ?, ?, 'planning', ?, ?, ?)
+                   ON CONFLICT (thread_ts) DO UPDATE SET
+                     issue_number = COALESCE(excluded.issue_number, improvements.issue_number),
+                     updated_at = excluded.updated_at""",
+                (channel, thread_ts, request, issue_number, now, now),
+            )
+        return self.improvement(channel, thread_ts)
 
     def update_improvement(self, channel: str, thread_ts: str, **values) -> sqlite3.Row:
         if values:
@@ -906,6 +923,20 @@ class Store:
         return self.conn.execute(
             """SELECT * FROM time_entries WHERE ended_at IS NOT NULL
                AND (toggl_state = 'pending' OR notion_state = 'pending') ORDER BY started_at"""
+        ).fetchall()
+
+    def finished_time_entries(self, since: float, until: float) -> list[sqlite3.Row]:
+        """止めた記録のうち、since〜until に始まったもの（Toggl の取り込みで自分の分を除く）。"""
+        return self.conn.execute(
+            """SELECT * FROM time_entries WHERE ended_at IS NOT NULL
+               AND started_at >= ? AND started_at < ? ORDER BY started_at""", (since, until)
+        ).fetchall()
+
+    def unsent_work_time_entries(self) -> list[sqlite3.Row]:
+        """前は Notion に書かなかった仕事の記録（not_required）。時間記録への移行で送る。"""
+        return self.conn.execute(
+            """SELECT * FROM time_entries WHERE domain = 'work' AND notion_state = 'not_required'
+               AND ended_at IS NOT NULL ORDER BY started_at"""
         ).fetchall()
 
     def upsert_time_card(self, channel: str, message_ts: str) -> None:

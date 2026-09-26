@@ -4,8 +4,9 @@
 
 - マイクの開け閉め（Slack の App Home から押される。**既定は閉じたまま**）
 - 本体から来た知らせを、同じ声で喋らせる
-- 話した中身を控えに残す（`journal.py`）
 - 机の上のロボットの顔を変える（`face.py`。まだ買っていないので、ふだんは何もしない）
+
+話した中身は残さない（依頼は Slack のスレッドに残る）。
 
 前は自分で文字起こしをして、言葉で道を振り分けて、音声合成していた。**全部やめた**。
 言葉で振り分けていたせいで、「明日の予定」にも「今週の予定」にも**今日の予定を答えていた**
@@ -20,7 +21,7 @@ import logging
 
 from kei_agent.config import Config, load_config
 from kei_agent.store import Store
-from kei_agent_voice import journal, live
+from kei_agent_voice import live
 from kei_agent_voice.face import Face
 from kei_agent_voice.tools import Tools
 
@@ -81,7 +82,7 @@ class VoiceSession:
         while True:
             text = await self._notices.get()
             try:
-                await self.brain.say_once(text, on_said=self._write)
+                await self.brain.say_once(text)
             except live.Unavailable as e:
                 log.warning("知らせを喋れません: %s", e)
             except Exception:
@@ -91,7 +92,7 @@ class VoiceSession:
 
     async def _talk(self) -> None:
         try:
-            await self.brain.run(on_said=self._write)
+            await self.brain.run()
         except asyncio.CancelledError:
             raise
         except live.Unavailable as e:
@@ -110,6 +111,3 @@ class VoiceSession:
             self.brain.announce(text)
         else:
             self._notices.put_nowait(text)
-
-    def _write(self, who: str, text: str) -> None:
-        journal.append(self.config.overview_dir, who, text)

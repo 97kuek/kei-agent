@@ -308,14 +308,26 @@ def test_env_strips_secrets_and_adds_thread(config):
     assert "KEI_AGENT_PLUGIN_DIR" not in env
 
 
-def test_env_strips_kei_agent_tokens_but_keeps_the_gateway_password():
+def test_env_strips_kei_agent_tokens_and_every_notion_key():
+    """Notion の鍵もゲートウェイの親の合言葉も、どの子（大学・仕事・Codex も）にも渡さない。"""
     env = guard.strip_env({
         "KEI_AGENT_A2A_TOKEN": "a2a-secret",
         "KEI_AGENT_FUTURE_TOKEN": "future-secret",
         "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway",
+        "KEI_AGENT_NOTION_GATEWAY_AUTH": "Bearer stray",
+        "NOTION_TOKEN": "ntn_raw",
+        "NOTION_COURSE_TOKEN": "ntn_course",
         "KEI_AGENT_CONFIG": "/tmp/config.toml",
     })
-    assert env == {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway", "KEI_AGENT_CONFIG": "/tmp/config.toml"}
+    assert env == {"KEI_AGENT_CONFIG": "/tmp/config.toml"}
+
+
+def test_default_deny_read_covers_the_connector_profiles(tmp_path):
+    """研究の Bash から、大学・仕事の連携を付けたプロファイルを読ませない。"""
+    from kei_agent.config import load_config
+    paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
+    assert any(p.endswith("/.claude-personal") for p in paths)
+    assert any(p.endswith("/.claude-work") for p in paths)
 
 
 def test_default_deny_read_follows_the_state_dir(tmp_path):
@@ -327,8 +339,11 @@ def test_default_deny_read_follows_the_state_dir(tmp_path):
 
 
 def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
+    from kei_agent.notion import gateway_client_token
+
     env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1")
-    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer gateway-secret"
+    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('gateway-secret', 'research')}"
+    assert "gateway-secret" not in env.values()
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
 
 
@@ -651,22 +666,31 @@ def test_research_settings_allow_the_gateway_tools(config):
     assert "mcp__research-notion" in allow
 
 
-def test_research_env_carries_the_gateway_token_but_not_the_notion_token(config):
+def test_research_env_carries_only_the_research_token_never_the_master(config):
+    """研究の子が持つのは研究ホームにしか届かない合言葉だけ。親の合言葉があれば全部のホームに届いてしまう。"""
+    from kei_agent.notion import gateway_client_token
+
     env = runner.build_env(config, {
         "PATH": "/bin",
         "NOTION_TOKEN": "ntn_raw",
-        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "scoped",
+        "NOTION_COURSE_TOKEN": "ntn_course",
+        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master",
+        "KEI_AGENT_NOTION_GATEWAY_AUTH": "Bearer stray",
     }, "C1", "1.2")
 
-    assert "NOTION_TOKEN" not in env
+    assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
-    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == "Bearer scoped"
+    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', 'research')}"
+    assert not any("master" in value for value in env.values())
 
 
 def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config):
     """合言葉そのものは子に渡さないので、ヘッダーは渡している GATEWAY_AUTH を展開する。"""
+    from kei_agent.notion import gateway_client_token
+
     header = runner.notion_mcp_config(config)["mcpServers"][runner.NOTION_MCP]["headers"]["Authorization"]
     env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1")
 
     name = header.removeprefix("${").removesuffix("}")
-    assert env[name] == "Bearer s3cret" and runner.GATEWAY_TOKEN_ENV not in env
+    assert env[name] == f"Bearer {gateway_client_token('s3cret', 'research')}"
+    assert runner.GATEWAY_TOKEN_ENV not in env

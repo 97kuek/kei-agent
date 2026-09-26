@@ -63,7 +63,6 @@ unanswered_hours = 24
 enabled = true
 time = "22:00"
 backup = true
-digest_retention_days = 30
 session_retention_days = 90
 
 [a2a]
@@ -79,10 +78,17 @@ research = "http://127.0.0.1:8788"
 work = "http://127.0.0.1:8789"
 voice = "http://127.0.0.1:8790"
 
+[notion]
+# Notion のホームのページ ID（URL の末尾32文字）。Notion を触るのはゲートウェイだけで、
+# 研究は research_home、大学は course_home、本体と手で動かす setup は3つすべての下だけを通す
+hub_home = "3e54fb5d2d07808dbe29fdbe67a4de56"       # 共通ホーム（Keitaro Ueki）
+research_home = "3de4fb5d2d0780b9a193f4604d5ea09c"  # 研究ホーム（notion.json の home_page_id）
+course_home = "3e14fb5d2d07805ab7b2c01aab6b39a7"    # 授業ホーム（notion-course.json の home_page_id）
+
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["overview", "research-overview", "research-strategy"]
-# Kei Agent の改善: 要望を ~/research/_overview/backlog.md に記録するだけ
+# Kei Agent の改善: 要望は要約して公開の GitHub issue にする（原文は Slack に残る）
 # チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
 improve = ["research-agent", "kei-agent"]
 # 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない

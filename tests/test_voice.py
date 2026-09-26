@@ -680,8 +680,6 @@ def _session_for(config, brain=None, face=None):
 
 async def test_notice_is_spoken_with_short_session_when_not_listening(config):
     """非会話中の通知は受信順に鳴らし、呼び出し元を待たせない。"""
-    from kei_agent_voice import journal
-
     brain, face = _FakeBrain(), _FakeFace()
     brain.notice_release.clear()
     s = _session_for(config, brain, face)
@@ -698,17 +696,13 @@ async def test_notice_is_spoken_with_short_session_when_not_listening(config):
         assert await asyncio.wait_for(brain.notice_finished.get(), 1) == "一件目"
         assert await asyncio.wait_for(brain.notice_finished.get(), 1) == "二件目"
         assert brain.said_once == ["一件目", "二件目"]
-        body = next((config.overview_dir / journal.VOICE_DIR).glob("*.md")).read_text()
-        assert body.count("一件目") == body.count("二件目") == 1
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     assert s._notice_worker.done()
 
 
-async def test_notice_uses_existing_connection_and_journals_once(config):
-    from kei_agent_voice import journal
-
+async def test_notice_uses_existing_connection(config):
     brain = _FakeBrain()
     s = _session_for(config, brain)
     task = asyncio.create_task(s.run(listening=True))
@@ -717,8 +711,6 @@ async def test_notice_uses_existing_connection_and_journals_once(config):
         await asyncio.sleep(0)
         s.announce("終わったよ。")
         assert brain.announced == ["終わったよ。"] and brain.said_once == []
-        body = next((config.overview_dir / journal.VOICE_DIR).glob("*.md")).read_text()
-        assert body.count("終わったよ。") == 1
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -776,17 +768,22 @@ async def test_turning_the_microphone_on_connects_and_off_disconnects(config):
     assert s.listening is False
 
 
-async def test_what_was_said_is_written_down(config):
-    from kei_agent_voice import journal
-
-    s = _session_for(config)
-    s._write("依頼者", "今日はよく寝られなかった")
-    s._write("Kei", "そうか、それはしんどいね。")
-
-    written = list((config.overview_dir / journal.VOICE_DIR).glob("*.md"))
-    assert len(written) == 1
-    body = written[0].read_text(encoding="utf-8")
-    assert "今日はよく寝られなかった" in body and "しんどいね" in body
+async def test_the_conversation_is_not_written_down(config):
+    """声の会話は残さない（依頼は Slack のスレッドに残る）。控えを受け取る口も渡さない。"""
+    brain = _FakeBrain()
+    s = _session_for(config, brain)
+    task = asyncio.create_task(s.run(listening=True))
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert brain.ran == 1 and brain.on_said is None
+        s.set_listening(False)
+        s.announce("終わったよ。")
+        await asyncio.wait_for(brain.notice_finished.get(), 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert not (config.overview_dir / "voice").exists()
 
 
 # 直した欠陥

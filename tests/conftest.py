@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 
 import pytest
+from fakes import FakeGitHub
 
-from kei_agent import model_classifier, research
+from kei_agent import issues, model_classifier, research
 from kei_agent.config import REPO_ROOT, AgentProfile, Config
 from kei_agent.store import Store
 
@@ -62,3 +63,19 @@ def fake_model_classifier(monkeypatch):
 
     monkeypatch.setattr(model_classifier, "classify_course", course)
     monkeypatch.setattr(model_classifier, "classify_work", work)
+
+
+@pytest.fixture(autouse=True)
+def fake_github(monkeypatch):
+    """要望の issue 化で、本物の gh（公開リポジトリ）と要約のモデルを動かさない。
+
+    確かめたいテストは、引数に `fake_github` を書いて偽物を受け取る。
+    """
+    github = FakeGitHub()
+    monkeypatch.setattr(issues, "gh", github)
+
+    async def summarize(_config, _store, _text: str):
+        return issues.Summary("Kei Agent への要望", "- 要望の要約")
+
+    monkeypatch.setattr(issues, "summarize", summarize)
+    return github

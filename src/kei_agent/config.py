@@ -80,12 +80,31 @@ class MaintenanceConfig:
     time: str = "22:00"
     # ~/research を Git でコミットして push する（deploy/backup-init.sh で準備する）
     backup: bool = True
-    # Daily と振り返りの材料のファイルを残す日数
-    digest_retention_days: int = 30
     # テーマのディレクトリで動かした Claude のセッションの記録を残す日数
     session_retention_days: int = 90
     # スレッドのログ（.kei-agent/threads/*.md）を残す日数
     thread_log_retention_days: int = 180
+
+
+def notion_id(value: str) -> str:
+    """Notion の ID を比べられる形にする（ハイフンを外して小文字）。"""
+    return str(value or "").replace("-", "").strip().lower()
+
+
+@dataclass(frozen=True)
+class NotionConfig:
+    """Notion のホームのページ ID（`[notion]`）。ゲートウェイはこの下だけを通す。"""
+    # 共通ホーム（本体だけ）
+    hub_home: str = ""
+    # 研究ホーム（kei-agent-notion-setup の notion.json と同じ）
+    research_home: str = ""
+    # 授業ホーム（kei-agent-course-setup の notion-course.json と同じ）
+    course_home: str = ""
+
+
+def _notion(data: dict) -> NotionConfig:
+    _check_keys(data, {f.name for f in fields(NotionConfig)}, "[notion]")
+    return NotionConfig(**{key: notion_id(str(value)) for key, value in data.items()})
 
 
 @dataclass(frozen=True)
@@ -137,6 +156,7 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=lambda: ScheduleConfig())
     maintenance: MaintenanceConfig = field(default_factory=lambda: MaintenanceConfig())
     a2a: A2AConfig = field(default_factory=lambda: A2AConfig())
+    notion: NotionConfig = field(default_factory=lambda: NotionConfig())
     # エージェント同士の合言葉（環境変数 KEI_AGENT_A2A_TOKEN）
     a2a_token: str = ""
 
@@ -161,8 +181,13 @@ class Config:
 
     @property
     def notion_gateway_url(self) -> str:
-        """研究 Claude がつなぐ Notion ゲートウェイ（src/kei_agent_notion_gateway）。"""
+        """Notion ゲートウェイの MCP の口（src/kei_agent_notion_gateway）。"""
         return "http://127.0.0.1:8791/mcp"
+
+    @property
+    def notion_gateway_api(self) -> str:
+        """同じゲートウェイの、決まった処理用の Notion API の口（`/notion/v1`）。"""
+        return gateway_endpoint(self.notion_gateway_url, "notion/v1")
 
     @property
     def system_prompt_path(self) -> Path:
@@ -177,10 +202,10 @@ class Config:
         """
         return self.agent_root / "overview"
 
-    @property
-    def backlog_path(self) -> Path:
-        # 公開しているコードのリポジトリには書かない（バックアップの対象には入る）
-        return self.overview_dir / "backlog.md"
+
+def gateway_endpoint(mcp_url: str, path: str) -> str:
+    """Notion gateway の MCP の URL（…/mcp）から、同じサーバーの別の口を作る。"""
+    return f"{mcp_url.rstrip('/').removesuffix('/mcp')}/{path.lstrip('/')}"
 
 
 class ConfigError(ValueError):
@@ -191,7 +216,7 @@ class ConfigError(ValueError):
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a",
+    "schedule", "maintenance", "a2a", "notion",
 }
 AGENTS_KEYS = MODEL_ACTORS
 AGENT_PROFILE_KEYS = {"provider", "connectors"}
@@ -316,5 +341,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         schedule=_section(ScheduleConfig, schedule, "schedule"),
         maintenance=_section(MaintenanceConfig, data.get("maintenance", {}), "maintenance"),
         a2a=_a2a(data.get("a2a", {})),
+        notion=_notion(data.get("notion", {})),
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
     )

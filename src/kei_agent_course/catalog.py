@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from kei_agent.notion import Notion, NotionError
+from kei_agent.notion import NotionError, gateway_notion
 from kei_agent_course import moodle, notion_sync
 from kei_agent_course.course_identity import normalize_course_name
 from kei_agent_course.ics import Event
@@ -40,13 +40,12 @@ def main(argv: list[str] | None = None) -> None:
     url = moodle.ics_url()
     if not url:
         sys.exit(f"{moodle.ICS_ENV} がありません")
-    token = notion_sync.course_token()
-    if not token:
-        sys.exit(notion_sync.NO_TOKEN)
     try:
+        # Notion はゲートウェイの course（授業ホームだけに届く）として読む。つながらなければ Moodle も読まない
+        notion = gateway_notion("course")
         report = compare_course_catalog(
             moodle.events(url),
-            notion_sync.course_catalog(Notion(token), notion_sync.read_state()),
+            notion_sync.course_catalog(notion, notion_sync.read_state()),
         )
     except (notion_sync.SyncError, NotionError, moodle.MoodleError) as error:
         sys.exit(str(error))

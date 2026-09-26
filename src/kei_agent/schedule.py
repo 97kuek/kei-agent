@@ -14,11 +14,10 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import course, maintenance, morning, research, settings, themes, work
+from kei_agent import course, digest, maintenance, morning, research, settings, themes, timelog, work
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.config import Config
-from kei_agent.digest import DigestBuilder
 from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
@@ -44,6 +43,13 @@ HUB_RETRY_SECONDS = 3600
 # Outlook の全件取得を独立に確かめる経路がまだない（kei_agent_work は verified_complete を返さない）。
 # 聞いても必ず捨てるので、できるまでは work に聞かない（毎日・毎時 claude を回さない）
 OUTLOOK_SYNC_ENABLED = False
+# Daily と Retro & Planning の材料は、ファイルにせずプロンプトのこの間に入れる
+MATERIAL_START = "--- 材料ここから ---"
+MATERIAL_END = "--- 材料ここまで ---"
+# 振り返るときの問い（Codex のアプリなどで振り返る材料）。Slack には出さず、日別記録のレトプラにだけ残す
+REVIEW_QUESTIONS = ("### 振り返りの問い\n"
+                    "1. 今日分かったことは何か（〜について、など具体的に）\n"
+                    "2. 明日やることは何か")
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -83,10 +89,6 @@ class Scheduler:
         # 締切が近いものを最後に見に行った時刻（起動直後に1回見る）
         self._due_checked = 0.0
         self._hub_calendar_checked = 0.0
-
-    @property
-    def overview_dir(self) -> Path:
-        return self.config.overview_dir
 
     @property
     def overview_channel_name(self) -> str:
@@ -354,27 +356,28 @@ class Scheduler:
                 outcomes[domain] = "error"
         return outcomes
 
-    async def _write_digest(self, kind: str, day: str, since: float, ids: dict[str, str]) -> Path:
-        path = self.overview_dir / ".kei-agent" / "digest" / f"{day}-{kind}.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
+    async def _material(self, kind: str, day: str, since: float, ids: dict[str, str]) -> str:
+        """プロンプトに入れる材料（上限の字数で切ったもの）。ファイルには残さない。"""
         title = {"daily": f"Daily の材料 {day}", "review": f"Retro & Planning の材料 {day}"}[kind]
-        text = await DigestBuilder(self.config, self.store, self.assistant).build(
+        text = await digest.DigestBuilder(self.config, self.store, self.assistant).build(
             since, time.time(), title, set(ids), domains=kind == "review")
-        path.write_text(text, encoding="utf-8")
-        return path
+        return (f"{MATERIAL_START}\n{text.strip()}\n{MATERIAL_END}\n"
+                f"（材料は {digest.MAX_DIGEST_CHARS} 字までで、超えた分は後ろのノートから省いています）")
 
     async def _save_note(self, channel: str, thread_ts: str, title: str, kind: str, day: str,
-                         markdown: str, file: str) -> Note | None:
+                         markdown: str) -> Note | None:
+        """共通ホームの日別記録に1日1行で残す。残せなくても Slack には出ているので、知らせるだけにする。"""
         hub = self.assistant.hub
         if not markdown.strip():
             return None
         if hub is None:
             await self.assistant.notify_trouble(
-                f"{title} はローカルに残しましたが、日別記録には保存できません。共通 Notion ホームの共有を確認してください")
+                f"{title} を日別記録に保存できませんでした。共通 Notion ホームが使えません"
+                "（Slack には出ています。共有と kei-agent-hub-setup を確認してください）")
             return None
         try:
             link = await self.assistant.permalink(channel, thread_ts)
-            return await asyncio.to_thread(hub.upsert_day, kind, day, title, markdown, link, file)
+            return await asyncio.to_thread(hub.upsert_day, kind, day, title, markdown, link)
         except NotionError as e:
             await self.assistant.notify_trouble(f"{title} を日別記録に保存できませんでした: {e}")
             return None
@@ -386,12 +389,14 @@ class Scheduler:
             return {"status": "no_channel"}
         last = self.store.last_schedule("daily", before_day=day)
         since = last["ran_at"] if last else time.time() - 86400
-        digest = await self._write_digest("daily", day, since, ids)
+        material = await self._material("daily", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
             f"[Kei Agent の定期処理: Daily {day}]\n"
-            f"`{digest}` に前回の Daily からの材料があります。材料と、そこに書かれたスレッドのログや振り返りのファイル、"
-            "Notion のノートと Task を読み、今日の議論の起点になる Daily を書いてください。\n\n"
+            "次は前回の Daily からの材料です。\n\n"
+            f"{material}\n\n"
+            "材料（Notion のノートと Task を含む）と、そこに書かれたスレッドのログを読み、"
+            "今日の議論の起点になる Daily を書いてください。\n\n"
             "**次の4つを、この順と見出しで書いてください。**ほかの見出しは足さないでください。\n"
             "スマホでも読めるように、全体を1画面に収めます。\n\n"
             "**今日のタスク**\n"
@@ -401,14 +406,13 @@ class Scheduler:
             "夜間に終わったジョブと Task。無ければ1行で。\n\n"
             "**確認待ち・期日・止まっているテーマ・返事待ち**\n"
             "確認待ちの Task、期日が近い Task とマイルストーン、止まっているテーマ、返事待ちのスレッド、"
-            "研究時間の気になる点。**何も無いものはまとめて1行にする**（「いずれもなし」）。\n\n"
+            "今週の時間の気になる点。**何も無いものはまとめて1行にする**（「いずれもなし」）。\n\n"
             "**今日考えるとよい問い**\n"
             "2〜3個。番号を振る。前日のスレッドの結果と、振り返り・考察のノートを踏まえる。\n\n"
             "**前日の動きの説明と、先行研究の新着は書かないでください。**前者は長くなって読み飛ばすため、"
             "後者はテーマのチャンネルに別で流れているためです（朝の予定に「どのテーマに新着があったか」だけ出ます）。\n\n"
-            "月曜なら、材料に書かれている研究時間の CSV から、人の時間と Kei Agent の稼働時間を重ねた"
-            "折れ線グラフを作り、`outputs/` に保存してください（月曜以外は作らなくてよい）。\n\n"
-            f"同じ内容を `daily/{day}.md` に保存してください。Slack に出す本文は、次の marker の間にだけ書いてください。"
+            "返答は Kei Agent がそのまま共通 Notion ホームの日別記録に保存します。ファイルは作らないでください。\n"
+            "Slack に出す本文は、次の marker の間にだけ書いてください。"
             "marker の外には何も書かず、作業手順・tool 名・ファイル名は本文に入れません。\n"
             "<<kei-agent-final>>\n（ここに4 section）\n<<kei-agent-final-end>>"
         )
@@ -424,7 +428,7 @@ class Scheduler:
             self.store.record_notice(key)
         note = None
         if not result.is_error:
-            note = await self._save_note(channel, thread_ts, title, "Daily", day, result.text, f"daily/{day}.md")
+            note = await self._save_note(channel, thread_ts, title, "Daily", day, result.text)
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None, "morning": gathered}
 
@@ -434,17 +438,13 @@ class Scheduler:
         if channel is None:
             return {"status": "no_channel"}
         since = datetime.combine(date.fromisoformat(day), dtime(0, 0)).timestamp()
-        digest = await self._write_digest("review", day, since, ids)
-        review_path = self.overview_dir / "reviews" / f"{day}.md"
+        material = await self._material("review", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
         prompt = (
             f"[Kei Agent の定期処理: Retro & Planning {day}]\n"
-            f"`{digest}` に今日の材料があります。材料と、そこに書かれたスレッドのログを読み、"
-            f"Codex App で振り返るための材料を `reviews/{day}.md` に書いてください。形式:\n\n"
-            f"```markdown\n# Retro & Planning {day}\n\n## 今日やったこと\n"
-            "（研究・大学・仕事ごとに、何をして何が分かったか）\n\n"
-            "## 振り返りの問い\n1. 今日分かったことは何か（〜について、など具体的に）\n2. 明日やることは何か\n\n"
-            "## Codex での振り返り\n（ここに Codex で話した結論を書く）\n```\n\n"
+            "次は今日の材料です。\n\n"
+            f"{material}\n\n"
+            "材料と、そこに書かれたスレッドのログを読み、今日を振り返ってください。\n\n"
             "**Slack への返答は、次の2つの見出しと最後の1行だけ**にしてください。"
             "ほかの見出しや説明を足さないでください。\n\n"
             "**今日の成果**\n"
@@ -454,8 +454,9 @@ class Scheduler:
             "同じ Task のうち**終わっていないもの**を1行ずつ。無ければ「なし」。\n\n"
             "最後に、次の1行をそのまま書いてください。\n"
             "夜間に実行したいタスクはありますか？\n\n"
-            "このあと、このスレッドに振り返りの結論が貼られたら、その内容を "
-            f"`reviews/{day}.md` の「Codex での振り返り」に追記し、追記したことだけを短く返してください。\n\n"
+            "返答は Kei Agent がそのまま共通 Notion ホームの日別記録（レトプラ）に保存します。ファイルは作らないでください。"
+            "このあと、このスレッドに振り返りの結論が貼られたら、Kei Agent が同じ日別記録に追記します。"
+            "ファイルには書かず、受け取ったことだけを短く返してください。\n\n"
             "Slack に出す本文は次の marker の間にだけ書いてください。marker の外には何も書かず、"
             "作業手順・tool 名・ファイル名・provider 名は本文に入れません。\n"
             "<<kei-agent-final>>\n（ここに指定の3 block）\n<<kei-agent-final-end>>"
@@ -470,9 +471,10 @@ class Scheduler:
         )
         note = None
         if not result.is_error:
-            markdown = review_path.read_text(encoding="utf-8") if review_path.exists() else result.text
-            note = await self._save_note(channel, thread_ts, title, "振り返り", day, markdown, f"reviews/{day}.md")
+            note = await self._save_note(channel, thread_ts, title, "振り返り", day,
+                                         f"{result.text}\n\n{REVIEW_QUESTIONS}")
             if note:
+                # このスレッドに貼られた結論を、同じ行のレトプラに足す（assistant.sync_review_conclusion）
                 self.store.link_notion(channel, thread_ts, note.id, "review")
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None}
@@ -495,6 +497,7 @@ class Scheduler:
         # エージェントの claude の会話も、セッションの記録と同じ日数で忘れる
         detail["agent_sessions"] = self.store.drop_old_agent_sessions(
             time.time() - self.config.maintenance.session_retention_days * 86400)
+        detail["toggl"] = await self.import_toggl()
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)
@@ -504,15 +507,35 @@ class Scheduler:
                 detail = {**detail, "status": "error", "error": str(e)}
         return detail
 
+    async def import_toggl(self) -> dict:
+        """Toggl のアプリで直接測った記録を、共通ホームの時間記録に入れる。失敗しても保守は続ける。"""
+        hub = self.assistant.hub
+        if hub is None or not hub.has_time_db:
+            return {"status": "skipped", "reason": "no_hub"}
+        toggl = timelog.load_toggl()
+        if toggl is None:
+            return {"status": "skipped", "reason": "no_toggl"}
+        until = date.today()
+        since = until - timedelta(days=timelog.IMPORT_DAYS - 1)
+        # Slack で測った分（Toggl にも送ってある）。SQLite は別スレッドから触れないので、先に読む
+        rows = self.store.finished_time_entries(
+            datetime.combine(since, dtime(0, 0)).timestamp() - 86400, time.time() + 86400)
+        own = [(r["started_at"], r["ended_at"] - r["started_at"]) for r in rows]
+        try:
+            return await asyncio.to_thread(timelog.import_toggl, toggl, hub, own, since, until)
+        except Exception as e:
+            log.exception("Toggl の記録を時間記録に取り込めませんでした")
+            return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+
     async def _warn_unsaved(self, agent: dict) -> None:
-        """Kei Agent 側（Daily・振り返り・backlog・状態）が保存できていないときに知らせる。"""
+        """Kei Agent 側（状態の書き出しなど）が保存できていないときに知らせる。"""
         why = {
             "not_a_repo": "Git のリポジトリになっていません",
             "no_remote": "push 先（origin）が登録されていません",
         }.get(str(agent.get("status") or ""))
         if why:
             await self.assistant.notify_trouble(
-                f"Daily と振り返りが保存できていません: `{agent.get('path')}` が{why}。"
+                f"Kei Agent 側のデータ（状態の書き出しなど）が保存できていません: `{agent.get('path')}` が{why}。"
                 "非公開のリポジトリを作って `git remote add origin <URL>` してください")
 
     # 授業（大学エージェント）

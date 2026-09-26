@@ -23,6 +23,8 @@ DEFAULT_DENY_READ = (
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
+    "~/.claude-personal",    # 大学の連携を付けた個人アカウントのプロファイル（deploy/README.md）
+    "~/.claude-work",        # 仕事の連携を付けた会社アカウントのプロファイル
     "~/.codex",              # Codex の認証情報とローカル設定
     "~/.config/gh",          # バックアップ先への push 権限
     "~/.netrc",
@@ -30,15 +32,15 @@ DEFAULT_DENY_READ = (
     "~/.config/git/credentials",
 )
 
-# claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする
-STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_ALLOWED_", "KEI_AGENT_A2A_",
+# claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする。
+# Notion の鍵（NOTION_TOKEN）もゲートウェイの親の合言葉（KEI_AGENT_NOTION_GATEWAY_TOKEN）も、どの子にも渡さない。
+# 研究の claude には runner.build_env が研究用の合言葉だけを足す
+STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_NOTION_", "KEI_AGENT_ALLOWED_", "KEI_AGENT_A2A_",
                          "CLAUDECODE", "CLAUDE_CODE_", "VIRTUAL_ENV",
                          # ドメインごとの鍵（Box・Moodle・Microsoft・Toggl）。エージェントの claude にも渡さない
                          "BOX_", "MOODLE_", "MS_", "TOGGL_", "OPENAI_API_KEY", "CODEX_API_KEY")
-# 上の prefix に当たっても、子プロセスに残すもの。
-# 研究の claude が持つ Notion の鍵は、研究ホームだけを操作できるゲートウェイの合言葉だけ
-# （生の NOTION_TOKEN は NOTION_ の prefix で落ちる）
-KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "KEI_AGENT_NOTION_GATEWAY_TOKEN")
+# 上の prefix に当たっても、子プロセスに残すもの
+KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 # prefix で書けない、Kei Agent 自身の合言葉（KEI_AGENT_*_TOKEN など）。あとから増えても渡さない
 _KEI_AGENT_SECRET_ENV = re.compile(r"^KEI_AGENT_\w*(?:TOKEN|SECRET|PASSWORD|API_KEY)$")
 

@@ -9,3 +9,9 @@ trim_launchd_log() {
     : > "$log"
   fi
 }
+
+# Notion の鍵を持つのは Notion ゲートウェイ（run-notion-gateway.sh）だけ。ほかのプロセスは、
+# 共通の秘密情報を読んだあとで消す（Notion には client ごとの合言葉でゲートウェイを通して届く）
+drop_notion_secrets() {
+  unset NOTION_TOKEN NOTION_COURSE_TOKEN
+}

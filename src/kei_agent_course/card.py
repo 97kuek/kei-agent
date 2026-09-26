@@ -11,7 +11,6 @@ from kei_agent_course.skills import (
     LIST_CLASSES,
     LIST_CURRENT_COURSES,
     LIST_DUE,
-    RECORD_STUDY_TIME,
     SYNC_ASSIGNMENTS,
     TIME_REPORT,
 )
@@ -65,12 +64,6 @@ def build_card(base_url: str) -> AgentCard:
                 description="今学期に履修中の科目だけを JSON で返す（items: id/subject/weekday/period）",
                 tags=["notion", "course"],
                 examples=["履修中の授業", "今学期の科目"],
-            ),
-            AgentSkill(
-                id=RECORD_STUDY_TIME,
-                name="学習時間を記録する",
-                description="大学ホームの学習ログに、Kei Agent の確定済み時間を記録する",
-                tags=["notion", "time"], examples=[],
             ),
             AgentSkill(
                 id=ASK,

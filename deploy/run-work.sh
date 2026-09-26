@@ -17,6 +17,7 @@ source "$SECRETS"
 
 REPO="${0:A:h:h}"
 source "$REPO/deploy/_common.sh"
+drop_notion_secrets
 
 # ログは launchd の標準出力（~/Library/Logs/kei-agent/work-launchd.log）に出る
 trim_launchd_log work-launchd.log

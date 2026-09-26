@@ -126,3 +126,47 @@ def test_state_write_is_atomic(tmp_path, monkeypatch):
     # 書き損じても元の中身が残り、一時ファイルも残らない
     assert json.loads(path.read_text()) == {"a": 1}
     assert [p.name for p in path.parent.iterdir()] == ["hub.json"]
+
+
+def test_http_errors_carry_the_status(monkeypatch):
+    """ゲートウェイは「見つからない」と「Notion が落ちている」を状態で見分ける。"""
+    import urllib.error
+
+    def fake(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"code":"object_not_found"}'))
+
+    monkeypatch.setattr(notion_mod.urllib.request, "urlopen", fake)
+    with pytest.raises(NotionError) as error:
+        Notion("t").request("GET", "/pages/x")
+    assert error.value.status == 404
+
+
+def test_a_refused_connection_is_resent_even_for_a_write(monkeypatch):
+    """つながりもしなかった（ゲートウェイの再起動中など）なら何も届いていないので、書き込みでも送り直してよい。"""
+    import urllib.error
+
+    fake, calls = _urlopen([urllib.error.URLError(ConnectionRefusedError(61, "refused")),
+                            json.dumps({"id": "p"}).encode()])
+    monkeypatch.setattr(notion_mod.urllib.request, "urlopen", fake)
+    assert Notion("t", base_url="http://127.0.0.1:8791/notion/v1").request("POST", "/pages", {"parent": {}}) == {
+        "id": "p"}
+    assert len(calls) == 2
+
+
+def test_a_lost_gateway_connection_says_where_to_look(monkeypatch):
+    fake, _ = _urlopen([ConnectionResetError("reset")])
+    monkeypatch.setattr(notion_mod.urllib.request, "urlopen", fake)
+    with pytest.raises(NotionError, match="Notion ゲートウェイが動いているか"):
+        Notion("t", base_url="http://127.0.0.1:8791/notion/v1").request("POST", "/pages", {"parent": {}})
+
+
+def test_gateway_notion_uses_the_client_token_never_the_master(config):
+    from kei_agent.notion import gateway_client_token, gateway_notion
+
+    notion = gateway_notion("course", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)
+    assert notion.base_url == "http://127.0.0.1:8791/notion/v1"
+    assert notion.token == gateway_client_token("master", "course") != "master"
+    with pytest.raises(NotionError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
+        gateway_notion("course", {}, config)
+    with pytest.raises(ValueError):
+        gateway_notion("someone", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)

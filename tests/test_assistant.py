@@ -148,17 +148,46 @@ async def test_toggl_failure_is_logged_and_kept_for_retry(env, store, monkeypatc
     assert "400 invalid" in caplog.text
 
 
+class FakeTimeHub:
+    """共通ホームの時間記録の代わり。"""
+
+    has_time_db = True
+
+    def __init__(self, fail=None):
+        self.recorded = []
+        self.fail = fail
+
+    def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
+        if self.fail is not None:
+            raise self.fail
+        self.recorded.append({"id": entry_id, "domain": domain, "label": label, "started_at": started_at,
+                              "minutes": minutes, "memo": memo, "slack_url": slack_url, "source": source})
+
+
+class RecordingToggl:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def record_completed(self, project, description, started_at, seconds):
+        self.calls.append(("toggl", project))
+
+
+async def _measure(assistant, channel_id, name, domain="research", course=("", "")):
+    from kei_agent.time_tracking import TimerContext
+
+    entry, _ = assistant.time_tracker.start(TimerContext("UME", domain, channel_id, name, *course),
+                                            started_at=time.time() - 1500)
+    stopped = assistant.time_tracker.stop("UME", ended_at=entry.started_at + 1500)
+    await assistant._after_timer_change(stopped=stopped, post_cards=False)
+    return stopped
+
+
 async def test_without_toggl_the_notion_log_is_still_recorded(env, store, monkeypatch):
     from kei_agent import assistant as assistant_module
 
     assistant, slack, _, _ = env
     monkeypatch.setattr(assistant_module, "load_toggl", lambda: None)
-    recorded = []
-
-    async def record(entry, started_at, minutes, slack_url):
-        recorded.append(entry.id)
-
-    monkeypatch.setattr(assistant, "_record_research_time", record)
+    assistant.hub = FakeTimeHub()
     start = {"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1", "name": "10_vlm"},
              "actions": [{"action_id": "kei_agent_time_start", "value": "start"}]}
     await assistant.on_time_action(start)
@@ -166,14 +195,94 @@ async def test_without_toggl_the_notion_log_is_still_recorded(env, store, monkey
     await assistant.on_time_action({**start, "actions": [{"action_id": "kei_agent_time_stop", "value": entry.id}]})
 
     row = store.time_entry(entry.id)
-    assert recorded == [entry.id] and row["toggl_state"] == "not_configured" and row["notion_state"] == "done"
+    recorded, = assistant.hub.recorded
+    assert (recorded["id"], recorded["domain"], recorded["label"], recorded["source"]) == (
+        entry.id, "research", "vlm", "Slack")
+    assert recorded["slack_url"].startswith("https://example.slack.com/archives/C1/")
+    assert row["toggl_state"] == "not_configured" and row["notion_state"] == "done"
 
 
-def test_research_time_goes_to_the_gateway_root_not_the_mcp_path(config):
-    from kei_agent.assistant import gateway_endpoint
+async def test_every_domain_goes_to_the_hub_after_toggl(env, store, monkeypatch):
+    """研究・大学・仕事のどれも、Toggl に送ってから共通ホームの時間記録に1件ずつ書く。"""
+    from kei_agent import assistant as assistant_module
 
-    assert gateway_endpoint("http://127.0.0.1:8791/mcp", "time-logs") == "http://127.0.0.1:8791/time-logs"
-    assert gateway_endpoint("http://127.0.0.1:8791/mcp/", "/time-logs") == "http://127.0.0.1:8791/time-logs"
+    assistant, slack, _, _ = env
+    calls = []
+    hub = FakeTimeHub()
+    original = hub.record_time
+
+    def record_time(*args, **kwargs):
+        calls.append(("notion", args[0]))
+        original(*args, **kwargs)
+
+    hub.record_time = record_time
+    assistant.hub = hub
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: RecordingToggl(calls))
+
+    research = await _measure(assistant, "C1", "vlm")
+    course = await _measure(assistant, "C2", "course", "course", ("course-page", "マルチメディア工学A"))
+    work = await _measure(assistant, "C3", "work", "work")
+
+    assert calls == [("toggl", "研究 / vlm"), ("notion", research.id), ("toggl", "大学 / マルチメディア工学A"),
+                     ("notion", course.id), ("toggl", "仕事 / work"), ("notion", work.id)]
+    assert [(r["domain"], r["label"], r["minutes"]) for r in hub.recorded] == [
+        ("research", "vlm", 25), ("course", "マルチメディア工学A", 25), ("work", "work", 25)]
+    for entry in (research, course, work):
+        row = store.time_entry(entry.id)
+        assert (row["toggl_state"], row["notion_state"]) == ("done", "done")
+
+
+async def test_without_hub_the_time_waits_quietly_and_is_sent_later(env, store, monkeypatch):
+    """共通ホームが使えない間は Notion を保留にするだけで、毎回は知らせない。使えるようになったら送る。"""
+    from kei_agent import assistant as assistant_module
+
+    assistant, slack, _, _ = env
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: None)
+    assistant.hub = None
+    entry = await _measure(assistant, "C1", "vlm")
+    await assistant.retry_time_entries()
+
+    assert store.time_entry(entry.id)["notion_state"] == "pending"
+    assert slack.posted() == []
+
+    assistant.hub = FakeTimeHub()
+    await assistant.retry_time_entries()
+
+    assert [r["id"] for r in assistant.hub.recorded] == [entry.id]
+    assert store.time_entry(entry.id)["notion_state"] == "done"
+
+
+async def test_notion_failure_is_kept_for_retry(env, store, monkeypatch):
+    from kei_agent import assistant as assistant_module
+    from kei_agent.notion import NotionError
+
+    assistant, slack, _, _ = env
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: None)
+    assistant.hub = FakeTimeHub(fail=NotionError("503"))
+    entry = await _measure(assistant, "C1", "vlm")
+    assert store.time_entry(entry.id)["notion_state"] == "pending"
+
+    assistant.hub.fail = None
+    await assistant.retry_time_entries()
+    assert store.time_entry(entry.id)["notion_state"] == "done"
+
+
+async def test_toggl_failure_holds_back_notion(env, store, monkeypatch):
+    from kei_agent import assistant as assistant_module
+    from kei_agent.timelog import TogglError
+
+    class BrokenToggl:
+        def record_completed(self, *args):
+            raise TogglError("POST /time-entries/bulk: 503")
+
+    assistant, slack, _, _ = env
+    monkeypatch.setattr(assistant_module, "load_toggl", lambda: BrokenToggl())
+    assistant.hub = FakeTimeHub()
+    entry = await _measure(assistant, "C3", "work", "work")
+
+    row = store.time_entry(entry.id)
+    assert (row["toggl_state"], row["notion_state"]) == ("pending", "pending")
+    assert assistant.hub.recorded == []
 
 
 async def test_deleted_time_card_is_posted_again(env, store):
@@ -447,18 +556,17 @@ async def test_session_is_suspended_while_awaiting_answer(env):
     assert slack.statuses() == ["processing", "suspended"]
 
 
-async def test_improve_channel_records_backlog_in_research_data(env, config):
+async def test_improve_channel_files_the_request_as_a_public_issue(env, config, fake_github):
     assistant, slack, claude, pueue = env
 
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 経過をもっと細かく"})
     await settle(assistant)
 
-    backlog = config.backlog_path.read_text()
-    assert "#kei-agent" in backlog and "経過をもっと細かく" in backlog
-    # 要望を記録したうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
+    # 要約だけを公開の issue にしたうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
+    assert len(fake_github.created()) == 1
     assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
-    assert "https://example.slack.com/archives/C9/p201" in backlog
-    assert slack.texts()[-1] == f"要望を `{config.backlog_path}` に記録したよ。"
+    assert "GitHub issue <https://github.com/97kuek/kei-agent/issues/1|#1>" in "\n".join(slack.texts())
+    assert not (config.overview_dir / "backlog.md").exists()
 
 
 async def test_thread_broadcast_reply_continues_thread(env, store):

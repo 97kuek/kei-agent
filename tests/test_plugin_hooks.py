@@ -50,7 +50,7 @@ def test_each_plugin_ships_its_hook(agent):
     ("work", "mcp__claude_ai_Microsoft_365__outlook_create_event", False),
     # 研究: Notion はゲートウェイだけ
     ("research", "mcp__research-notion__create_page", True),
-    ("research", "mcp__research-notion__archive", True),
+    ("research", "mcp__research-notion__delete_block", True),
     ("research", "mcp__claude_ai_Notion__notion-search", False),
     ("research", "mcp__claude_ai_Notion__notion-update-page", False),
     ("research", "Read", True),
@@ -84,7 +84,7 @@ def test_research_hook_refuses_reaching_for_the_raw_notion_token(command):
 
 
 @pytest.mark.parametrize("command", [
-    "echo $NOTION_COURSE_TOKEN",
+    "echo $NOTION_PERSONAL_TOKEN",
     "printenv | grep MY_NOTION_API_TOKEN",
 ])
 def test_research_hook_refuses_other_raw_notion_tokens(command):
@@ -93,17 +93,17 @@ def test_research_hook_refuses_other_raw_notion_tokens(command):
     assert result.returncode == DENY
 
 
-def test_research_hook_lets_the_gateway_token_name_through():
+def test_research_hook_refuses_the_gateway_master_token():
+    """親の合言葉があれば、どのホームの合言葉も作れてしまう。研究 claude には渡していない。"""
     assert run_policy("research", {
         "tool_name": "Bash",
-        "tool_input": {"command": 'test -n "$KEI_AGENT_NOTION_GATEWAY_TOKEN"'}}).returncode == ALLOW
+        "tool_input": {"command": 'test -n "$KEI_AGENT_NOTION_GATEWAY_TOKEN"'}}).returncode == DENY
 
 
-def test_research_hook_lets_the_gateway_token_through():
-    """ゲートウェイの合言葉は研究 claude が持ってよいもの。ふつうの Bash も止めない。"""
-    assert run_policy("research", {
-        "tool_name": "Bash",
-        "tool_input": {"command": "python3 train.py --epochs 3"}}).returncode == ALLOW
+def test_research_hook_lets_ordinary_commands_through():
+    """研究用の合言葉（研究ホームにしか届かない）の名前や、ふつうの Bash は止めない。"""
+    for command in ("python3 train.py --epochs 3", 'test -n "$KEI_AGENT_NOTION_GATEWAY_AUTH"'):
+        assert run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}}).returncode == ALLOW
 
 
 @pytest.mark.parametrize("agent", AGENTS)

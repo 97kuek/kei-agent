@@ -39,13 +39,14 @@ def test_reopening_store_restores_unfinished_timer(tmp_path):
     assert restored.ended_at is None
 
 
-def test_work_entry_does_not_need_notion_and_memo_is_trimmed(store):
+def test_work_entry_also_goes_to_notion_and_memo_is_trimmed(store):
+    """仕事の時間も、研究・大学と同じ共通ホームの時間記録に書く。"""
     tracker = TimeTracker(store)
     entry, _ = tracker.start(_context("work", "C30"), started_at=100.0)
 
     updated = tracker.add_memo(entry.id, "  企画の整理  ")
 
-    assert updated.notion_state == "not_required"
+    assert updated.notion_state == "pending"
     assert updated.memo == "企画の整理"
 
 

@@ -1,17 +1,16 @@
-"""研究時間の記録。
+"""Toggl と、時間の数え方。
 
-人の時間は Toggl（2.0）で自分で測り、Kei Agent の稼働時間は `runs` テーブルから数える。
-その2つを日ごと・領域ごとに並べた CSV を `<agent_root>/overview/time/` に書き、
-グラフは Claude に作ってもらう（Kei Agent は材料を用意するところまで）。
+人の時間は Slack の時間記録カードか Toggl（2.0）で測り、共通 Notion ホームの「時間記録」に1件ずつ入れる。
+週ごとの合計は Notion のグラフで見る。Kei Agent の稼働時間は `runs` テーブルから数える（手元の SQLite）。
+Toggl のアプリで直接測った記録は、毎晩の保守で「時間記録」に取り込む（`import_toggl`）。
 
 Toggl の鍵（`toggl_sk_...`）は環境変数 `TOGGL_API_TOKEN` から、宛先の組織とワークスペースの ID は
-`TOGGL_ORGANIZATION_ID` と `TOGGL_WORKSPACE_ID` から読む。どれかがなければ人の時間は空欄になる。
+`TOGGL_ORGANIZATION_ID` と `TOGGL_WORKSPACE_ID` から読む。どれかがなければ Toggl には送らず、取り込みもしない。
 ID は API から調べる手段がないので、Toggl を開いたときの URL（`/<組織>/workspaces/<ワークスペース>/`）から写す。
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import os
@@ -20,11 +19,8 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
-from kei_agent.config import Config
 from kei_agent.store import Store
-from kei_agent.themes import theme_dirs
 
 log = logging.getLogger(__name__)
 
@@ -33,13 +29,14 @@ TOGGL_API = "https://focus.toggl.com/api"
 PER_PAGE = 100
 # ページ送りが止まらなかったときの上限。1週間分でここまで行くことはない
 MAX_PAGES = 50
-TIME_DIR = "time"
 # Toggl のプロジェクト名の先頭に付ける印。ここに挙げた領域だけを数え、印のないもの
 # （アルバイト、個人開発）は捨てる。科目やテーマが増えても、このコードは変えなくてよい
 DOMAINS = ("研究", "大学", "仕事")
 DOMAIN_SEP = "/"
-# テーマのチャンネル以外（研究全体、Kei Agent の改善）で動いた分をまとめる名前
-OTHER = "そのほか"
+# Toggl のアプリで直接測った記録を、何日さかのぼって取り込むか（保守が何晩か止まっても埋まるように）
+IMPORT_DAYS = 7
+# Slack から送った記録と同じとみなす、開始と長さのずれ（秒）
+SAME_ENTRY_SECONDS = 60
 
 
 class TogglError(RuntimeError):
@@ -178,88 +175,50 @@ def _utc(day: date) -> str:
     return datetime.combine(day, datetime.min.time()).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def human_seconds(entries: list[dict]) -> dict[tuple[str, str], float]:
-    """人が作業していた秒数。(日付, テーマ) ごとに合計する。テーマはプロジェクト名。
-
-    動かしっぱなしの記録（duration が空か負）は、まだ終わっていないので数えない。休憩と消した記録も数えない。
-    """
-    totals: dict[tuple[str, str], float] = defaultdict(float)
-    for e in entries:
-        duration = e.get("duration")
-        start = e.get("start")
-        if not start or not isinstance(duration, int | float) or duration <= 0:
-            continue
-        if e.get("type") == "break" or e.get("deleted_at"):
-            continue
-        day = datetime.fromisoformat(str(start).replace("Z", "+00:00")).astimezone().date().isoformat()
-        theme = (e.get("project") or {}).get("name") or "-"
-        totals[(day, theme)] += float(duration)
-    return dict(totals)
-
-
 def load_toggl(env: dict[str, str] | None = None) -> Toggl | None:
     env = dict(os.environ) if env is None else env
     token = env.get("TOGGL_API_TOKEN")
     if not token:
-        log.info("TOGGL_API_TOKEN がないので、人の研究時間は数えない")
+        log.info("TOGGL_API_TOKEN がないので、Toggl には送らない")
         return None
     try:
         return Toggl(token, int(env["TOGGL_ORGANIZATION_ID"]), int(env["TOGGL_WORKSPACE_ID"]))
     except (KeyError, ValueError):
-        log.warning("TOGGL_ORGANIZATION_ID と TOGGL_WORKSPACE_ID が数字で入っていないので、人の研究時間は数えない")
+        log.warning("TOGGL_ORGANIZATION_ID と TOGGL_WORKSPACE_ID が数字で入っていないので、Toggl には送らない")
         return None
 
 
-def write_week(config: Config, store: Store, toggl: Toggl | None, day: date | None = None) -> Path:
-    """その週の材料を CSV に書く。Claude はこれを読んでグラフを作る。"""
-    monday = week_start(day or date.today())
-    sunday = monday + timedelta(days=6)
-    since = datetime.combine(monday, datetime.min.time()).timestamp()
-    until = datetime.combine(sunday + timedelta(days=1), datetime.min.time()).timestamp()
+def import_toggl(toggl: Toggl, hub, own: list[tuple[float, float]], since: date, until: date) -> dict:
+    """Toggl で直接測った記録を、共通ホームの「時間記録」に記録 ID「toggl:<id>」で入れる。
 
-    themes = {d.name for d in theme_dirs(config)}
-    # Kei Agent が動くのは研究だけ。テーマのチャンネル以外はまとめる
-    agent: dict[tuple[str, str, str], float] = defaultdict(float)
-    for (day_, name), seconds in assistant_seconds(store, since, until).items():
-        agent[(day_, "研究", name if name in themes else OTHER)] += seconds
-    human: dict[tuple[str, str, str], float] = defaultdict(float)
-    if toggl is not None:
-        try:
-            # Toggl にはアルバイトや個人開発の時間も入っている。印の付いたものだけを数える
-            for (day_, project), seconds in human_seconds(toggl.entries(monday, sunday)).items():
-                found = split_project(project)
-                if found:
-                    human[(day_, found[0], found[1])] += seconds
-        except TogglError as e:
-            log.warning("Toggl から読めません: %s", e)
-
-    path = config.overview_dir / TIME_DIR / f"{monday.isoformat()}.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["日付", "領域", "プロジェクト", "人の時間（分）", "Kei Agent の稼働（分）"])
-        for key in sorted(set(agent) | set(human)):
-            writer.writerow([*key, round(human.get(key, 0) / 60, 1), round(agent.get(key, 0) / 60, 1)])
-    return path
-
-
-def week_summary(path: Path) -> list[str]:
-    """CSV から、Daily の材料に入れる短い要約を作る。"""
-    if not path.exists():
-        return ["- まだ記録がない"]
-    human = agent = 0.0
-    by_domain: dict[str, float] = defaultdict(float)
-    with path.open(encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            human += float(row["人の時間（分）"])
-            agent += float(row["Kei Agent の稼働（分）"])
-            # 先週までの CSV には「領域」の列がない
-            by_domain[row.get("領域") or "研究"] += float(row["人の時間（分）"])
-    lines = [f"- 今週の合計: 人 {human / 60:.1f} 時間 / Kei Agent {agent / 60:.1f} 時間", f"- 材料: `{path}`"]
-    for domain, minutes in sorted(by_domain.items(), key=lambda kv: -kv[1]):
-        if minutes:
-            lines.append(f"  - {domain}: {minutes / 60:.1f} 時間")
-    if human == 0:
-        lines.append("- 人の時間が0。Toggl を回していないか、プロジェクト名に "
-                     f"`{'/`・`'.join(DOMAINS)}/` の印が付いていないか、`TOGGL_*` の環境変数が足りない")
-    return lines
+    own は Slack で測った記録の（開始の時刻, 秒数）。開始と長さがどちらも SAME_ENTRY_SECONDS 以内で
+    重なる Toggl の記録は、Slack から送った同じものなので飛ばす。入れ済みの ID、計測中、休憩、
+    消した記録、印のないプロジェクトも飛ばす。
+    """
+    # Notion の日付の絞り込みは時差の分ずれることがあるので、1日広く取る
+    known = hub.time_ids_since(since - timedelta(days=1))
+    counts = {"imported": 0, "own": 0, "known": 0, "unmarked": 0}
+    for e in toggl.entries(since, until):
+        duration, start = e.get("duration"), e.get("start")
+        if (e.get("id") is None or not start or not isinstance(duration, int | float) or duration <= 0
+                or e.get("type") == "break" or e.get("deleted_at")):
+            continue
+        project = str((e.get("project") or {}).get("name") or "")
+        found = split_project(project)
+        if found is None:
+            counts["unmarked"] += 1
+            continue
+        started = datetime.fromisoformat(str(start).replace("Z", "+00:00")).astimezone()
+        if any(abs(started.timestamp() - at) <= SAME_ENTRY_SECONDS
+               and abs(duration - seconds) <= SAME_ENTRY_SECONDS for at, seconds in own):
+            counts["own"] += 1
+            continue
+        entry_id = f"toggl:{e['id']}"
+        if entry_id in known:
+            counts["known"] += 1
+            continue
+        description = str(e.get("description") or "").strip()
+        hub.record_time(entry_id, found[0], found[1], started.isoformat(), max(1, round(duration / 60)),
+                        "" if description == project.strip() else description, "", "Toggl")
+        counts["imported"] += 1
+    return {"status": "done", **counts}

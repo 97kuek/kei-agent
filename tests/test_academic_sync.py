@@ -381,6 +381,16 @@ def test_academic_import_cli_dry_run_never_reads_state_or_writes(tmp_path, monke
     assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html")]) == 2
 
 
+def test_academic_import_cli_writes_only_through_the_gateway(tmp_path, monkeypatch):
+    """書き込みはゲートウェイの course（授業ホームだけに届く）として。合言葉が無ければ state も読まずに止まる。"""
+    record = AcademicRecord(grades=(), requirements=(), gpa=())
+    monkeypatch.setattr(academic_sync, "parse_academic_record", lambda *_paths: record)
+    monkeypatch.setattr(academic_sync, "read_state", lambda: (_ for _ in ()).throw(AssertionError("state")))
+
+    with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
+        academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html"), "--apply"])
+
+
 class CountingNotion:
     """読んだ回数と書き込みを数える Notion の fake。"""
 

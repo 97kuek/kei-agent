@@ -1,24 +1,24 @@
 """授業ホームの正本 DB を作り、既存 schema の不足だけを補う。
 
-研究ホームとは別のコネクト（トークン）で動かし、授業のページだけに接続する。
+Notion はゲートウェイ経由（client は course）で、授業ホームの中だけに届く。
 研究のデータベースには触れない（docs/architecture.md）。
 
-使い方:
-    NOTION_COURSE_TOKEN=... uv run --group course kei-agent-course-setup <授業ホームのページID>
+使い方（Notion ゲートウェイが動いていること）:
+    source ~/.config/zsh/local/kei-agent.zsh
+    uv run --group course kei-agent-course-setup [<授業ホームのページID>]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from kei_agent.config import load_config
-from kei_agent.notion import Notion, NotionError, Setup
+from kei_agent.notion import NotionError, Setup, gateway_notion
 from kei_agent_course import notion_props, periods
 from kei_agent_course.course_identity import normalize_course_name
 
@@ -93,20 +93,6 @@ ASSIGNMENTS = {
     "relations": {"科目": ("courses", "課題")},
 }
 
-STUDY_LOGS = {
-    "icon": "⏱️",
-    "description": "Kei Agent から記録した学習時間。記録IDで重複を防ぐ。",
-    "properties": {
-        "タイトル": {"title": {}},
-        "Kei Agent 記録ID": {"rich_text": {}},
-        "日付": {"date": {}},
-        "時間（分）": {"number": {"format": "number"}},
-        "メモ": {"rich_text": {}},
-        "Slack": {"url": {}},
-    },
-    "relations": {"科目": ("courses", "学習ログ")},
-}
-
 GRADES = {
     "icon": "📊",
     "description": "成績 HTML から取り込んだ科目ごとの派生記録。",
@@ -143,7 +129,7 @@ GPA = {
 }
 
 SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
-         "study_logs": ("学習ログ", STUDY_LOGS), "grades": ("📊 成績履歴", GRADES),
+         "grades": ("📊 成績履歴", GRADES),
          "requirements": ("🎓 単位要件", REQUIREMENTS), "gpa": ("📈 GPA推移", GPA)}
 
 # 既存の title property は増やさず、同じ property ID の表示名を改める。
@@ -233,15 +219,21 @@ class CourseSetup(Setup):
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-course-setup")
-    parser.add_argument("home_page_id", help="授業ホームのページID（URL の末尾32文字）")
+    parser.add_argument("home_page_id", nargs="?", default="",
+                        help="授業ホームのページID（省くと config.toml の [notion] course_home）")
     parser.add_argument("--seed", type=int, metavar="年度",
                         help="秋学期の履修科目（AUTUMN_2026）を、その年度の科目として入れる")
     args = parser.parse_args(argv)
-    token = os.environ.get("NOTION_COURSE_TOKEN")
-    if not token:
-        sys.exit("NOTION_COURSE_TOKEN が設定されていません（授業用のコネクトを作って、そのトークンを入れてください）")
-    state_path = Path(load_config().state_dir) / "notion-course.json"
-    setup = CourseSetup(Notion(token), args.home_page_id, state_path)
+    config = load_config()
+    home = args.home_page_id or config.notion.course_home
+    if not home:
+        sys.exit("授業ホームのページ ID がありません（config.toml の [notion] course_home）")
+    try:
+        notion = gateway_notion("course", config=config)
+    except NotionError as e:
+        sys.exit(str(e))
+    state_path = Path(config.state_dir) / "notion-course.json"
+    setup = CourseSetup(notion, home, state_path)
     try:
         setup.run(AUTUMN_2026 if args.seed else None, year=args.seed)
     except NotionError as e:
