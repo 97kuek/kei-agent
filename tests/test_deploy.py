@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
+
+import pytest
+
 from kei_agent.config import REPO_ROOT
 
 DEPLOY = REPO_ROOT / "deploy"
@@ -60,6 +64,7 @@ def test_only_the_gateway_keeps_the_notion_token():
         assert body.index("drop_notion_secrets") > body.rindex('source "$'), script.name
 
 
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="起動スクリプトは macOS の zsh で動く")
 def test_dropping_notion_secrets_keeps_the_gateway_master(tmp_path):
     """消すのは Notion の鍵だけ。ゲートウェイの親の合言葉は、client ごとの合言葉を作るのに要る。"""
     import subprocess
