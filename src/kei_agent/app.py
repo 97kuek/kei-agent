@@ -167,6 +167,35 @@ async def serve() -> None:
 
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUPS = 5
+# ネットが切れている間、Slack の接続は数秒ごとに失敗を記録する。同じものはこの秒数に1行だけ残す
+REPEAT_SECONDS = 600
+# （slack_sdk の socket_mode/aiohttp が、アプリのロガーに書く文言）
+REPEATED_MESSAGES = {"slack_bolt.AsyncApp": ("Failed to check the current session", "Failed to connect (error:")}
+
+
+class RepeatFilter(logging.Filter):
+    """同じ種類の失敗が続くときは、最初の1行と、そのあと REPEAT_SECONDS ごとに1行だけ通す（省いた数を添える）。"""
+
+    def __init__(self, prefixes: tuple[str, ...], seconds: float = REPEAT_SECONDS):
+        super().__init__()
+        self.prefixes = prefixes
+        self.seconds = seconds
+        self.last: dict[str, float] = {}
+        self.dropped: dict[str, int] = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        prefix = next((p for p in self.prefixes if message.startswith(p)), None)
+        if prefix is None:
+            return True
+        if record.created - self.last.get(prefix, float("-inf")) < self.seconds:
+            self.dropped[prefix] = self.dropped.get(prefix, 0) + 1
+            return False
+        if self.dropped.get(prefix):
+            record.msg, record.args = f"{message}（同じ失敗 {self.dropped[prefix]} 件は省いた）", ()
+        self.last[prefix] = record.created
+        self.dropped[prefix] = 0
+        return True
 
 
 def setup_logging(env: dict[str, str] | None = None) -> None:
@@ -183,6 +212,10 @@ def setup_logging(env: dict[str, str] | None = None) -> None:
         handlers=handlers or None,
         force=True,
     )
+    for name, prefixes in REPEATED_MESSAGES.items():
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, RepeatFilter) for f in logger.filters):
+            logger.addFilter(RepeatFilter(prefixes))
 
 
 def main() -> None:

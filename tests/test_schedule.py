@@ -124,6 +124,30 @@ def env(config, store, monkeypatch):
     return Scheduler(config, store, assistant), assistant, slack, claude
 
 
+async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypatch, caplog):
+    """ネットにつながらない間は、毎分の長いエラーの代わりに、始めと戻りを1行ずつ。ほかの失敗は今までどおり。"""
+    scheduler, *_ = env
+    failures = [ConnectionError("名前を引けない"), OSError("Cannot connect")]
+    outcomes = [failures[0], failures[0], None, RuntimeError("こわれた")]
+
+    async def tick(now):
+        outcome = outcomes.pop(0)
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(scheduler, "tick", tick)
+    caplog.set_level("INFO", logger="kei_agent.schedule")
+    for _ in range(4):
+        await scheduler.safe_tick(datetime(2026, 9, 26, 12, 0))
+
+    records = [(r.levelname, r.getMessage().split("（")[0]) for r in caplog.records]
+    assert records == [("WARNING", "ネットにつながらないので、定期処理はつながるまで待ちます: ConnectionError: 名前を引けない"),
+                       ("INFO", "ネットにつながったので、定期処理を続けます"),
+                       ("ERROR", "定期処理に失敗しました")]
+    assert caplog.records[-1].exc_info is not None                 # ほかの失敗は、原因をたどれるように残す
+    assert schedule_module.offline(TimeoutError()) and not schedule_module.offline(failures[1])
+
+
 def make_theme(config, name="vlm", keywords=("vision language model counting",)):
     ws = themes.resolve(config, name)
     themes.ensure_workspace(ws)

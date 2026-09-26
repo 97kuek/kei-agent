@@ -8,11 +8,14 @@ import json
 import logging
 import os
 import re
+import socket
 import time
 from contextlib import suppress
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
+
+import aiohttp
 
 from kei_agent import (
     course,
@@ -42,7 +45,7 @@ from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
-from kei_agent.slack_text import AWAITING_MARKER, clean_text, escape
+from kei_agent.slack_text import AWAITING_MARKER, clean_text, escape, format_duration
 from kei_agent.store import Store
 
 log = logging.getLogger(__name__)
@@ -87,6 +90,11 @@ def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
     return None
 
 
+def offline(error: BaseException) -> bool:
+    """ネットにつながらない（名前を引けない、つながらない、待ちきれない）ときの例外か。"""
+    return isinstance(error, (aiohttp.ClientConnectionError, ConnectionError, TimeoutError, socket.gaierror))
+
+
 def label(day: str) -> str:
     return dates.day_label(date.fromisoformat(day))
 
@@ -114,6 +122,8 @@ class Scheduler:
         self._version_checked = 0.0
         self._newer: tuple[str, float] | None = None
         self._hub_calendar_checked = 0.0
+        # ネットにつながらなくなった時刻（つながっている間は None）
+        self._offline_since: float | None = None
 
     @property
     def overview_channel_name(self) -> str:
@@ -123,11 +133,24 @@ class Scheduler:
 
     async def loop(self) -> None:
         while True:
-            try:
-                await self.tick(datetime.now())
-            except Exception:
-                log.exception("定期処理に失敗しました")
+            await self.safe_tick(datetime.now())
             await asyncio.sleep(60)
+
+    async def safe_tick(self, now: datetime) -> None:
+        """1分ごとの tick。ネットにつながらない間は、毎分の長いエラーの代わりに、始めと終わりを1行ずつ残す。"""
+        try:
+            await self.tick(now)
+        except Exception as e:
+            if not offline(e):
+                log.exception("定期処理に失敗しました")
+            elif self._offline_since is None:
+                self._offline_since = time.time()
+                log.warning("ネットにつながらないので、定期処理はつながるまで待ちます: %s: %s", type(e).__name__, e)
+            return
+        if self._offline_since is not None:
+            log.info("ネットにつながったので、定期処理を続けます（%s止まっていました）",
+                     format_duration(time.time() - self._offline_since))
+            self._offline_since = None
 
     async def tick(self, now: datetime) -> None:
         sched = self.config.schedule

@@ -118,6 +118,28 @@ def test_setup_logging_rotates_file(tmp_path):
         logging.basicConfig(force=True, handlers=[logging.NullHandler()])
 
 
+def test_repeated_slack_reconnect_failures_are_thinned_out():
+    """ネットが切れている間、Slack の接続は数秒ごとに失敗を書く。同じものは10分に1行だけ残し、省いた数を添える。"""
+    from kei_agent.app import RepeatFilter
+
+    kept = []
+    thin = RepeatFilter(("Failed to check the current session",), seconds=600)
+
+    def log(message: str, at: float) -> None:
+        record = logging.LogRecord("slack_bolt.AsyncApp", logging.ERROR, __file__, 1, message, None, None)
+        record.created = at
+        if thin.filter(record):
+            kept.append(record.getMessage())
+
+    for at in range(0, 900, 10):
+        log("Failed to check the current session (s_1) or reconnect to the server (error: DNS)", at)
+    log("A new session (s_2) has been established", 901)
+    assert kept == ["Failed to check the current session (s_1) or reconnect to the server (error: DNS)",
+                    "Failed to check the current session (s_1) or reconnect to the server (error: DNS)"
+                    "（同じ失敗 59 件は省いた）",
+                    "A new session (s_2) has been established"]
+
+
 async def test_backup_untracks_a_file_that_grew_too_large(config, monkeypatch):
     """小さいうちにコミットしたファイルが育つと、exclude では止まらず push が通らなくなる。"""
     from kei_agent import maintenance
