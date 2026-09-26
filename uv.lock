@@ -705,7 +705,6 @@ research = [
 ]
 voice = [
     { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "aiohttp" },
     { name = "uvicorn" },
 ]
 work = [
@@ -743,7 +742,6 @@ research = [
 ]
 voice = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
-    { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]
 work = [

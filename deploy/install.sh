@@ -10,19 +10,26 @@
 #         deploy/install.sh knowledge     知識エージェント（A2A サーバー）を登録
 #         deploy/install.sh voice         声のレイヤ（A2A サーバー＋マイク）を登録
 #         deploy/install.sh notion-gateway Notion ゲートウェイ（Notion に届く唯一の口）を登録
+#         deploy/install.sh <名前> print  登録する plist を表示するだけ（登録はしない）
 set -eu
 
 # 引数に course / research などを付けると、そのプロセスのほうを登録する。
-# research / course / work / knowledge の plist は、どれも deploy/run-agent.sh <名前> を呼ぶ（エージェントを足すときは、あちらの case にも足す）
+# 担当（research / course / work / knowledge / voice）は、どれも deploy/run-agent.sh <名前> で起動する
+# （担当を足すときは、あちらの case にも足す）。plist はどれも com.kei-agent.plist.template から作る
 case "${1:-}" in
-  course|research|work|knowledge|voice|notion-gateway)
-    LABEL="com.kei-agent.${1}"
+  course|research|work|knowledge|voice)
+    NAME="$1" SCRIPT="run-agent.sh" ARGUMENT="$1" LOG="$1-launchd.log"
+    shift
+    ;;
+  notion-gateway)
+    NAME="$1" SCRIPT="run-notion-gateway.sh" ARGUMENT="" LOG="notion-gateway-launchd.log"
     shift
     ;;
   *)
-    LABEL="com.kei-agent.assistant"
+    NAME="assistant" SCRIPT="run.sh" ARGUMENT="" LOG="launchd.log"
     ;;
 esac
+LABEL="com.kei-agent.$NAME"
 REPO="${0:A:h:h}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/kei-agent"
@@ -44,8 +51,24 @@ case "$REPO" in
     ;;
 esac
 
+plist=$(<"$REPO/deploy/com.kei-agent.plist.template")
+arguments=""
+if [[ -n "$ARGUMENT" ]]; then
+  arguments="    <string>$ARGUMENT</string>"$'\n'
+fi
+plist=${plist//__LABEL__/$LABEL}
+plist=${plist//__SCRIPT__/$SCRIPT}
+plist=${plist//__ARGUMENTS__/$arguments}
+plist=${plist//__LOG__/$LOG}
+plist=${plist//__LOG_DIR__/$LOG_DIR}
+plist=${plist//__REPO__/$REPO}
+if [[ "${1:-}" == "print" ]]; then
+  print -r -- "$plist"
+  exit 0
+fi
+
 mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
-sed -e "s|__REPO__|$REPO|g" -e "s|__LOG_DIR__|$LOG_DIR|g" "$REPO/deploy/$LABEL.plist.template" > "$PLIST"
+print -r -- "$plist" > "$PLIST"
 plutil -lint "$PLIST" >/dev/null
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true

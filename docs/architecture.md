@@ -4,7 +4,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 1. プロセス
 
-すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。
+すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。plist はどれも `deploy/com.kei-agent.plist.template` から作り、起動スクリプト（本体 `run.sh`、担当 `run-agent.sh <名前>`、ゲートウェイ `run-notion-gateway.sh`）は、`uv sync` で依存をそろえてから仮想環境の Python を直に起動する（`uv run` のように uv を親として常駐させない）。
 
 | プロセス | コマンド | ポート | パッケージ | 役目 |
 |---|---|---|---|---|

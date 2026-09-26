@@ -2,21 +2,15 @@
 # launchd から Kei Agent を起動する。launchd は ~/.zshrc を読まないので、ここで PATH と秘密情報を用意する。
 set -eu
 
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+REPO="${0:A:h:h}"
+source "$REPO/deploy/_common.sh"
 
-SECRETS="$HOME/.config/zsh/local/kei-agent.zsh"
-if [[ ! -r "$SECRETS" ]]; then
-  echo "秘密情報のファイルがありません: $SECRETS（deploy/README.md を参照）" >&2
-  exit 1
-fi
+require_secrets
 source "$SECRETS"
+drop_notion_secrets
 
 # ログは Kei Agent 自身が 5MB ごとに回す。launchd の標準出力には、起動に失敗したときの出力だけが残る
 export KEI_AGENT_LOG_FILE="$HOME/Library/Logs/kei-agent/kei-agent.log"
-
-REPO="${0:A:h:h}"
-source "$REPO/deploy/_common.sh"
-drop_notion_secrets
 trim_launchd_log launchd.log
 cd "$REPO"
 
@@ -39,5 +33,5 @@ if [[ -f "$PENDING" ]]; then
   fi
 fi
 
-# 声のレイヤからの問い合わせ口（A2A のサーバー）を開くので、エージェントと同じグループも入れる
-exec uv run --frozen --group agents kei-agent
+# 声のレイヤからの問い合わせ口（A2A のサーバー）を開くので、担当と同じグループも入れる
+launch agents kei-agent

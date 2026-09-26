@@ -3,22 +3,22 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.kei-agent.knowledge</string>
+  <string>__LABEL__</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>__REPO__/deploy/run-agent.sh</string>
-    <string>knowledge</string>
-  </array>
+    <string>__REPO__/deploy/__SCRIPT__</string>
+__ARGUMENTS__  </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <!-- 起動に失敗し続けたときに、再起動を詰めすぎない -->
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>__LOG_DIR__/knowledge-launchd.log</string>
+  <string>__LOG_DIR__/__LOG__</string>
   <key>StandardErrorPath</key>
-  <string>__LOG_DIR__/knowledge-launchd.log</string>
+  <string>__LOG_DIR__/__LOG__</string>
 </dict>
 </plist>

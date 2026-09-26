@@ -50,7 +50,7 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 | `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
 | `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |
-| `kei-agent-voice.zsh` | 声のレイヤ（`deploy/run-voice.sh`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
+| `kei-agent-voice.zsh` | 声のレイヤ（`deploy/run-agent.sh voice`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
 
 プロファイルは一度作ってログインしておく。
 
@@ -97,7 +97,7 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 | 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
 | ジョブ | `pueue status --group kei-agent` |
 
-コードを入れ替えたら、`deploy/restart-all.sh` で全部を起動し直す（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.*.plist.template`）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。
+コードを入れ替えたら、`deploy/restart-all.sh` で全部を起動し直す（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.plist.template`。どのプロセスも同じ雛形から作る）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。登録する中身は `deploy/install.sh <名前> print` で先に確かめられる。
 
 ## 5. Notion（最初の1回）
 
