@@ -653,6 +653,10 @@ class FakeNotionAPI:
                      and (not source or self.key(item["data_source_id"]) == self.key(source))]
             return self._ok({"object": "list", "results": found, "has_more": False, "next_cursor": None})
         if not item_id and method == "POST":
+            # 本物の API と同じく、置き場所の指定はどれか1つだけ
+            if sum(key in body for key in ("database_id", "view_id", "create_database")) != 1:
+                return self._error(400, "validation_error",
+                                   "Exactly one of database_id, view_id, or create_database must be provided.")
             database = body.get("database_id")
             if "create_database" in body:
                 page = body["create_database"]["parent"]["page_id"]

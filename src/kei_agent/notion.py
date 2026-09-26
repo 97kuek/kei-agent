@@ -308,9 +308,12 @@ THEME_PAPERS_VIEW = "先行研究"
 
 
 def theme_papers_view(papers: dict, theme_page_id: str) -> dict:
-    """テーマのページに置く表（そのテーマの論文だけ、見つけた日の新しい順）。"""
+    """テーマのページに置く表（そのテーマの論文だけ、見つけた日の新しい順）。
+
+    database_id と create_database は一緒に渡せない（新しい置き場所を作るときは data_source_id だけ）。
+    """
     return {
-        "database_id": papers["database_id"], "data_source_id": papers["data_source_id"],
+        "data_source_id": papers["data_source_id"],
         "create_database": {"parent": {"type": "page_id", "page_id": theme_page_id}},
         "name": THEME_PAPERS_VIEW, "type": "table",
         "filter": {"property": "テーマ", "relation": {"contains": theme_page_id}},

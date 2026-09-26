@@ -607,9 +607,8 @@ class HubStore:
         """その日のレトプラ全体（翌朝の Daily の材料）。"""
         return self.section_text(day, "振り返り")
 
-    # 時間記録
+    # 収集
 
-    @property
     def collect_settings(self) -> tuple[list[dict], list[str]]:
         """「収集」ページの興味と情報源（知識の担当に渡す）。"""
         page = next((block for block in self.notion.children(self.state.home_id)
@@ -618,6 +617,9 @@ class HubStore:
             raise NotionError("共通ホームに「収集」ページがありません（kei-agent-hub-setup --apply で作れます）")
         return parse_collect(self.notion.children(page["id"]))
 
+    # 時間記録
+
+    @property
     def has_time_db(self) -> bool:
         """時間記録が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
         return bool(self.state.time_ds_id)

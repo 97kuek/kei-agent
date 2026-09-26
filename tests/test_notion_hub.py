@@ -506,8 +506,10 @@ def test_record_time_rejects_unknown_domain(time_hub):
         time_hub.record_time("e1", "hobby", "x", "2026-09-21T10:00:00+09:00", 5)
 
 
-def test_record_time_without_time_db_says_so():
+def test_record_time_without_time_db_says_so(time_hub):
     hub = HubStore(FakeTimeNotion(), HubState("home", "calendar-ds", "daily-ds"))
+    # has_time_db は値として読む（assistant・schedule は `not hub.has_time_db` で見る）
+    assert hub.has_time_db is False and time_hub.has_time_db is True
     with pytest.raises(NotionError, match="時間記録"):
         hub.record_time("e1", "work", "定例", "2026-09-21T10:00:00+09:00", 5)
 
@@ -574,7 +576,7 @@ def test_day_row_has_no_local_file_columns(day_hub):
 
 
 def test_collect_page_is_made_once_and_read_back(fake_notion, tmp_path):
-    from kei_agent.notion_hub import COLLECT_TITLE, parse_collect
+    from kei_agent.notion_hub import COLLECT_TITLE
 
     hub_setup = setup(fake_notion, tmp_path)
     hub_setup.run()
@@ -582,7 +584,8 @@ def test_collect_page_is_made_once_and_read_back(fake_notion, tmp_path):
     pages = [b for b in fake_notion.blocks["home"]
              if b["type"] == "child_page" and b["child_page"]["title"] == COLLECT_TITLE]
     assert len(pages) == 1
-    interests, sources = parse_collect(fake_notion.blocks[pages[0]["id"]])
+    # 朝の読みもの（schedule.run_reading）と同じ呼び方で読む
+    interests, sources = HubStore(fake_notion, HubState("home", "calendar-ds", "daily-ds")).collect_settings()
     assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
     assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
 
