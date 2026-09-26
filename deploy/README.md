@@ -26,8 +26,8 @@ export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
 export KEI_AGENT_ALLOWED_USER_ID="U..."
 export KEI_AGENT_A2A_TOKEN="..."              # openssl rand -hex 32 で一度だけ作って貼る
-export NOTION_TOKEN="ntn_..."                 # コネクト「Kei Agent」
-export KEI_AGENT_NOTION_GATEWAY_TOKEN="..."   # openssl rand -hex 32 で一度だけ作って貼る
+export NOTION_TOKEN="ntn_..."                 # コネクト「Kei Agent」。読むのは Notion ゲートウェイだけ
+export KEI_AGENT_NOTION_GATEWAY_TOKEN="..."   # ゲートウェイの親の合言葉。openssl rand -hex 32 で一度だけ作って貼る
 # 任意
 export TOGGL_API_TOKEN="toggl_sk_..."
 export TOGGL_ORGANIZATION_ID="..."
@@ -37,13 +37,14 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 ```
 
 - `KEI_AGENT_A2A_TOKEN` と `KEI_AGENT_NOTION_GATEWAY_TOKEN` は、生成したコマンドではなく値をファイルに貼る。全プロセスが同じ値を読む必要があり、作り直すとつながらなくなる
+- Notion の鍵（`NOTION_TOKEN`）を持つのはゲートウェイだけ。ほかの起動スクリプトは読んだあとで消し、親の合言葉から作った client ごとの合言葉でゲートウェイを通す。LLM の子プロセスには親の合言葉も渡さない
 - Toggl の ID は `focus.toggl.com/<組織>/workspaces/<ワークスペース>/` の URL から写す
 
 **エージェントごとのファイル**（そのエージェントの起動スクリプトだけが読む）
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`NOTION_COURSE_TOKEN="ntn_..."`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"` |
+| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"` |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"` |
 | `kei-agent-voice.zsh` | `OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
 
@@ -79,7 +80,7 @@ deploy/install.sh course           # 127.0.0.1:8787
 deploy/install.sh research         # 127.0.0.1:8788
 deploy/install.sh work             # 127.0.0.1:8789
 deploy/install.sh voice            # 127.0.0.1:8790
-deploy/install.sh notion-gateway   # 127.0.0.1:8791（先に kei-agent-notion-setup を済ませる）
+deploy/install.sh notion-gateway   # 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
 deploy/install.sh remove           # 本体の登録を外す（エージェントは deploy/install.sh course remove など）
 ```
 
@@ -94,17 +95,20 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 
 ## 5. Notion（最初の1回）
 
-**研究ホーム**
+Notion に届くのはゲートウェイだけなので、下の setup もゲートウェイが動いていないと使えない。
 
 1. Notion でコネクト「Kei Agent」（アクセストークン方式）を作り、トークンを `NOTION_TOKEN` に貼る
-2. 空のページ「研究ホーム」を作り、コネクトに共有する
-3. 実行する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
+2. 共通ホーム（`Keitaro Ueki`）、研究ホーム、授業ホームを、どれもこのコネクトに共有する
+3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home` / `research_home` / `course_home`）に書く。ゲートウェイはこの下だけを通す
+4. ゲートウェイを動かす（`deploy/install.sh notion-gateway`。手元なら別の端末で `uv run kei-agent-notion-gateway`）
+
+**研究ホーム**: 実行する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
 
 ```zsh
-uv run kei-agent-notion-setup <研究ホームのページID>
+uv run kei-agent-notion-setup
 ```
 
-**共通ホーム**（`Keitaro Ueki`）: 同じコネクトに親ページを共有し、dry-run を確認してから反映する。
+**共通ホーム**（`Keitaro Ueki`）: dry-run を確認してから反映する。
 
 ```zsh
 uv run kei-agent-hub-setup
@@ -118,14 +122,12 @@ uv run kei-agent-hub-migrate
 uv run kei-agent-hub-migrate --apply --expected-count <確かめた件数>
 ```
 
-**授業ホーム**
-
-1. 授業用のコネクトを作り、トークンを `NOTION_COURSE_TOKEN` に貼る。「授業ホーム」をそのコネクトに共有する
-2. 6つの DB をそろえる（`--seed <年度>` で `notion_setup.py` の履修科目を入れる）
+**授業ホーム**: 6つの DB をそろえる（`--seed <年度>` で `notion_setup.py` の履修科目を入れる）
 
 ```zsh
-source ~/.config/zsh/local/kei-agent-course.zsh
-uv run --group course kei-agent-course-setup <授業ホームのページID> --seed 2026
+source ~/.config/zsh/local/kei-agent.zsh          # ゲートウェイの親の合言葉
+source ~/.config/zsh/local/kei-agent-course.zsh   # MOODLE_ICS_URL
+uv run --group course kei-agent-course-setup --seed 2026
 uv run --group course kei-agent-course-sync            # 手で締切を取り込む（--all で履修外も）
 uv run --group course kei-agent-course-inspect         # Moodle と「授業」を読むだけで照合する
 uv run --group course kei-agent-course-academic-import --dry-run <grades.html> <credits.html>
@@ -139,13 +141,14 @@ uv run kei-agent-time-cards                            # 10_/20_/30_ に時間�
 deploy/backup-init.sh                                  # ~/research を非公開リポジトリ research-data にして最初の push をする
 sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00       # 00:00 の夜間 Task のために毎晩 Mac を起こす（やめるときは sudo pmset repeat cancel）
 ffmpeg -f avfoundation -i ":default" -t 1 -f null -    # マイクの許可を先に手で通す（launchd からだと無音になることがある）
+gh auth status                                         # 要望を GitHub issue にするのに使う。ログインしていなければ gh auth login
 ```
 
 ## 7. 日々の運用
 
 - 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance>`（`--record` を付けなければ今日の本番に影響しない）
 - 声を通さず依頼を渡す: `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ）
-- 22:00 の保守は、Daily・Retro の材料（`overview/.kei-agent/digest/`）を30日、`~/research` の下のセッションの記録を90日で消し、使い終わった worktree を消してから、`~/research` → `research-data`、`~/kei-agent` → もう1つの非公開リポジトリに push する（`~/kei-agent` は自分で Git にして remote を付けておく。Git でなければ研究側だけ保存し、その旨を結果に出す）。50MB を超えるファイルはコミットから外す
+- 22:00 の保守は、`~/research` の下のセッションの記録を90日で消し、Toggl のアプリで直接測った記録を時間記録に取り込み、使い終わった worktree を消してから、`~/research` → `research-data`、`~/kei-agent` → もう1つの非公開リポジトリに push する（`~/kei-agent` は自分で Git にして remote を付けておく。Git でなければ研究側だけ保存し、その旨を結果に出す）。50MB を超えるファイルはコミットから外す
 - 別の Mac に移すときは、`research-data` を `~/research` に clone し、`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql` で状態を戻す
 
 ## 8. 困ったとき
@@ -155,7 +158,8 @@ ffmpeg -f avfoundation -i ":default" -t 1 -f null -    # マイクの許可を�
 | 起動しない | `launchctl print gui/$(id -u)/com.kei-agent.assistant \| grep -E 'state\|last exit'`、`launchd.log`。秘密情報のファイルがないと起動スクリプトが止まる |
 | 返事が来ない | App Home で provider が選ばれているか。`kei-agent.log` |
 | 大学・研究・仕事だけ失敗する | `curl -s http://127.0.0.1:8787/.well-known/agent-card.json`（ポートを替えて）と `<名前>-launchd.log`。`KEI_AGENT_A2A_TOKEN` が全プロセスで同じか |
-| 研究で Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-gateway-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` |
+| Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-gateway-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全プロセスで同じか |
+| Notion で `can't reach` と断られる | そのホームの外を触ろうとしている。ホームがコネクト「Kei Agent」に共有されているか、`config.toml` の `[notion]` が合っているか |
 | 大学・仕事の連携が見えない | エージェントのファイルの `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR`、そのプロファイルでのログイン |
 | 声が出ない・聞かない | `ffmpeg` があるか、マイクの許可、`OPENAI_API_KEY`、App Home のスイッチ、`voice-launchd.log` |
 | 上限に当たった | 何もしなくてよい。明ける時刻がスレッドに出て、明けてから自動でやり直す |

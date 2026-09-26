@@ -13,7 +13,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
 | 仕事エージェント | `kei-agent-work` | 8789 | `src/kei_agent_work/` | Microsoft 365 を読む |
 | 声のレイヤ | `kei-agent-voice` | 8790 | `src/kei_agent_voice/` | Realtime API、マイク、スピーカー |
-| 研究 Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | 研究ホームの中だけを触る MCP |
+| Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章） |
 
 `src/kei_agent_a2a/` は A2A サーバーの共通部分（`server.py`）、返事の封筒（`envelope.py`）、エージェントが provider を1回動かす処理（`claude.py`）。
 
@@ -29,7 +29,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 └── .kei-agent/           スレッドのログ、ジョブの状態（Kei Agent が書く）
 ~/course/                 大学エージェントの作業場（資料は Box に置いたまま）
 ~/kei-agent/              Kei Agent 自身のもの（agent_root）
-├── overview/             #01_overview などの作業場。daily/、reviews/、time/、voice/、backlog.md
+├── overview/             #01_overview などの作業場。Daily・レトプラ・時間はここに置かず、Notion の共通ホームに残す
 └── state/                毎晩の保守が書き出す SQLite の中身と Notion の ID
 ~/.local/state/kei-agent/ 状態（kei-agent.db、notion.json、asks/、worktrees/ など）
 ```
@@ -72,7 +72,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 | エージェント | スキル |
 |---|---|
-| 大学 | `sync-assignments` / `list-due` / `list-calendar-assignments` / `list-classes` / `list-current-courses` / `record-study-time` / `time-report` / `ask` |
+| 大学 | `sync-assignments` / `list-due` / `list-calendar-assignments` / `list-classes` / `list-current-courses` / `time-report` / `ask` |
 | 研究 | `run-claude` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` |
 | 仕事 | `list-events` / `ask` |
 | 声 | `notify` |
@@ -82,7 +82,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ### エージェントごとの中身
 
 - **研究** … 作業場で CLI を1回動かして最終結果を返す。長い処理は pueue（グループ `kei-agent`）に入れ、本体が毎分状態を見て、終わったらその会話を再開する。ジョブは作業場の中のスクリプトだけで、`--expect` で宣言したファイルができたかを確かめる。Notion はゲートウェイ経由、W&B は `managing-wandb` skill
-- **大学** … Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。Notion への定型の書き込みは Python（`NOTION_COURSE_TOKEN`）。自由な質問は provider のアカウント連携で Box（読むだけ）と Notion（授業ホームだけを共有したプロファイル）を読む。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
+- **大学** … Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問は provider のアカウント連携で Box（読むだけ）と Notion（授業ホームだけを共有したプロファイル）を読む。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
 - **仕事** … 会社アカウントのプロファイル（`CLAUDE_CONFIG_DIR`）に付いた Microsoft 365 の連携を、読む道具だけに絞って使う。送信・予定の作成・変更・削除はしない。作業場を持たないのでスレッドのログも残さない
 
 ## 5. provider とモデル
@@ -143,20 +143,30 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 項目 | いまの形 |
 |---|---|
 | 書き込み | 作業場の中と `[sandbox] allow_write`（uv のキャッシュ）だけ。sandbox を有効にして確認なしで動かす |
-| 読ませない場所 | `[sandbox] deny_read`（既定は `config.py` の `DEFAULT_DENY_READ`: 秘密情報、`~/.ssh`、`~/.claude` など） |
+| 読ませない場所 | `[sandbox] deny_read`（既定は `guard.py` の `DEFAULT_DENY_READ`: 秘密情報、`~/.ssh`、`~/.claude`、大学・仕事のプロファイルなど） |
 | 接続先 | 基本は `[sandbox] allowed_domains`。テーマごとの追加は Slack で1つずつ許可し、本体の SQLite に置く（作業場に置くとモデルが自分で足せてしまうため） |
-| 環境変数 | 子プロセスに Slack・Notion などの鍵を渡さない（`guard.strip_env`） |
-| 研究の Notion | トークンを渡さず、ゲートウェイの入口だけを渡す（下） |
+| 環境変数 | 子プロセスに Slack・Notion などの鍵を渡さない。Notion ゲートウェイの親の合言葉も、どの子にも渡さない（`guard.strip_env`） |
+| Notion | 鍵を持つのはゲートウェイだけ。ほかはすべて client ごとの合言葉でゲートウェイを通し、届くホームはゲートウェイが決める（下） |
 | 柵そのもの | `src/kei_agent/guard.py`、`config.toml`、`deploy/` は Kei Agent 自身に直させない（`PROTECTED_PATHS`） |
 | Slack から変えられないもの | 同時に動かす数、上限時間、書き込み先、読ませない場所、基本の接続先 |
 
-**研究 Notion ゲートウェイ**（`127.0.0.1:8791/mcp`）
+**Notion ゲートウェイ**（`127.0.0.1:8791`、`src/kei_agent_notion_gateway/`）
 
-- `/health` 以外は `KEI_AGENT_NOTION_GATEWAY_TOKEN` の Bearer 認証。空なら起動しない。この合言葉では Notion の API は使えない
-- 研究の実行にだけ `--mcp-config` / `--strict-mcp-config` で渡す。`NOTION_TOKEN` は渡さない
-- 対象と親が研究ホームの子孫かを Notion に問い合わせてから動く。外・親不明・循環・深すぎは断る
-- 道具は操作ごとの11個だけ（読む、検索、データソースの絞り込み、ページ作成、プロパティ更新、ブロック追加、アーカイブ、移動、複製、DB 作成、列の変更）。時間記録は MCP とは別の `/time-logs` で受ける
-- 記録は時刻・操作名・対象の ID・成否・失敗の種類だけ
+- Notion に届くのはこのプロセスだけで、`NOTION_TOKEN` を持つのもここだけ（ほかの起動スクリプトは読んだあとで消す）
+- 合言葉は client ごと。親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN` で client 名を HMAC-SHA256 したもの（`kei_agent.notion.gateway_client_token`）だけを定数時間で比べて受け付け、親そのものは通さない。`/health` 以外はどれかの合言葉が要る
+- 届くホームは `config.toml` の `[notion]` で決まる
+
+| client | 使うところ | 届くホーム | 口 |
+|---|---|---|---|
+| `kei-agent` | 本体、手で動かす setup・移行の CLI | 共通・研究・授業 | `/mcp`、`/notion/v1` |
+| `course` | 大学エージェントの決まった処理（締切・成績・setup） | 授業 | `/mcp`、`/notion/v1` |
+| `research` | 研究の LLM | 研究 | `/mcp` だけ（Bash を持つので、何でも送れる口は渡さない） |
+
+- 要求ごとに、触れる ID をすべて確かめてから送る。パスの ID、クエリの `database_id` / `data_source_id`、本文の親・移動先・テンプレート・リレーション・メンション・ページへのリンク・同期ブロック・位置の指定・ビューの置き場所・Markdown のページ参照。どれも親をたどってホームの子孫なら通す。外・見つからない・ワークスペース直下・循環・深すぎは 403（`restricted_resource`、`Kei Agent gateway: <client> can't reach <ID>`）。親子関係は60秒だけ覚え、ゲートウェイで移したものはすぐ忘れる
+- `/notion/v1/…` は Notion の API をそのまま中継し、状態・本文・`Retry-After` をそのまま返す。扱うのはページ（Markdown・移動を含む）・ブロック・データベース・データソース・ビューと検索だけで、`/users` `/comments` `/file_uploads` など分からない形は断る。検索はホームの外の結果を落とす
+- `/mcp` の道具はどの client でも同じ12個: `read`（ページはプロパティと Markdown の本文、`cursor` で続き）、`search`、`query`、`create_page`（親はページかデータソース）、`update_page`（`in_trash` も）、`append_blocks`、`replace_content`、`update_block`、`delete_block`、`create_database`、`update_data_source`、`move`。複製は Notion の API に無いので置かない。返事は短くし、長いものは切って続きの読み方を添える
+- 研究の LLM には `--mcp-config` / `--strict-mcp-config`（Codex は `mcp_servers` の設定）で `/mcp` だけを渡し、環境には研究用の合言葉のヘッダー（`KEI_AGENT_NOTION_GATEWAY_AUTH`）だけを置く
+- 記録は時刻・client・操作名・対象の ID・成否・失敗の種類だけ。本文や値は残さない
 - 止まっているときは「つながらない」と返し、別のトークンや連携に乗り換えない
 
 ## 8. 定期実行
@@ -166,12 +176,13 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 名前 | 既定 | 中身 |
 |---|---|---|
 | `literature` | 07:00 | テーマの `CLAUDE.md` の検索キーワードで arXiv の新着を探し、`papers/` にない論文だけをテーマのチャンネルに出す |
-| `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily。`daily/<日付>.md` に保存。月曜は研究時間のグラフも作る |
-| `review` | 21:00 | Retro & Planning。振り返りの材料を `reviews/<日付>.md` に書き、Slack には成果と未完了だけ |
-| `maintenance` | 22:00 | 古いファイルの整理とバックアップ（`[maintenance]`） |
+| `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily |
+| `review` | 21:00 | Retro & Planning。Slack には成果と未完了だけ |
+| `maintenance` | 22:00 | 古いファイルの整理、Toggl だけで測った時間の取り込み（11章）、バックアップ（`[maintenance]`） |
 | `night` | 00:00 | Notion の「今夜やる」Task を1件ずつ、一晩5件まで。テーマのない Task は「確認待ち」にする |
 
-- Daily と Retro & Planning は actor `router` で動き、共通ホームの「日別記録」に1日1行で保存する（ファイルも残す）
+- Daily と Retro & Planning は actor `router` で動く。材料（`digest.py`）はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りと今週の時間は共通ホームから読む
+- 返事はそのまま共通ホームの「日別記録」に1日1行で保存し、手元には残さない。保存できなければ改善チャンネルに知らせる（Slack には出ている）。Retro のスレッドに貼った結論は同じ行のレトプラに足す
 - 08:00 以降に1回、共通ホームの予定カレンダーを同期する。大学の課題は30日ぶん入れる。Outlook は取得の完全さを確かめられないので、いまは書き込まない
 - 毎分、締切24時間前の知らせを出し、24時間放置された失敗ジョブや確認待ちに一度だけ声をかける
 - スリープで逃した処理は3時間以内（`night` は12時間以内）なら起きたときに動かす。上限中は始めず、明けてから動かす
@@ -179,6 +190,9 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 9. 自己改善（`#00_kei-agent`）
 
+- 新しい要望は、`self_fix` で選んだ provider の routing recipe（read-only の一時ディレクトリ）が題（60字以内）と1〜4行の本文に要約し、`gh` で `origin` の公開 issue（ラベル `kei-agent-request`）にする。番号は SQLite の `improvements` に置く（`issues.py`）
+- URL・`/Users/`・`~/`・メンション・`#チャンネル`・秘密情報・原文と20字以上同じところを含む要約は捨てる。issue にできなければ、provider 未選択はスレッドに、それ以外は改善チャンネルに知らせる。ファイルには逃がさない
+- 取り込んだ版で起動できたら、そのコミットの短い sha を添えて issue を閉じる
 - 案を考える回は、リポジトリを読むだけ（書けるのは一時ディレクトリ）
 - `🛠 着手` で `<state_dir>/worktrees/` の git worktree を作って直す。書けるのは worktree の中だけ
 - `🛠 着手` / `📦 取り込み` は、その回が依頼者の投稿で始まったときだけ効く
@@ -189,13 +203,14 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 10. Notion
 
-トークンは3つに分かれている。
+Notion への道は2つ。
 
-| トークン | 持ち主 | 届く範囲 |
+| 鍵 | 持ち主 | 届く範囲 |
 |---|---|---|
-| `NOTION_TOKEN`（コネクト「Kei Agent」） | 本体とゲートウェイ | 研究ホームと共通ホーム |
-| `NOTION_COURSE_TOKEN` | 大学エージェント | 授業ホーム |
-| 大学エージェントのアカウント連携 | 大学の `ask` | 授業ホームだけを共有したプロファイル |
+| `NOTION_TOKEN`（コネクト「Kei Agent」。3つのホームを共有） | Notion ゲートウェイだけ | 共通・研究・授業ホーム。使う側（client）ごとに絞る（7章） |
+| 大学エージェントのアカウント連携 | 大学の `ask` の LLM | 授業ホームだけを共有したプロファイル |
+
+本体・大学エージェントの決まった処理・setup の CLI・研究の LLM は、どれも client ごとの合言葉でゲートウェイを通す。ホームのページ ID は `config.toml` の `[notion]`。
 
 データベースとプロパティは名前で読むので、Notion の画面で名前や選択肢を変えない（変えるなら `src/kei_agent/notion.py`、`notion_store.py`、`notion_hub.py`、`src/kei_agent_course/notion_setup.py` も直す）。Kei Agent は自分が作ったページと決めたプロパティだけを書き、人が書いた本文は書き換えない。
 
@@ -203,13 +218,14 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 本体だけが扱う（`src/kei_agent/notion_hub.py`）。研究ホームと授業ホームはこの下に移さず、リンクで並べる。
 
-- **日別記録** … 1日1行。`日付`、`Daily`、`レトプラ`、`対象日`、それぞれの Slack とファイル、`移行元 ID`。本文を手で足すときは「Kei Agent の本文ここまで」の下に書く
+- **日別記録** … 1日1行。`日付`、`Daily`、`レトプラ`、`対象日`、それぞれの Slack、`移行元 ID`。本文を手で足すときは「Kei Agent の本文ここまで」の下に書く
 - **予定カレンダー** … 既存の「今月の予定」に `出典`（Outlook / 課題 / 手入力）、`出典 ID`、`元 URL`、`最終確認`、`同期状態` を足したもの。手入力の行と、同期に失敗したときの既存の行は消さない
+- **時間記録** … 研究・大学・仕事の時間（11章）
 - 研究 Task と授業の課題の、今週のリンクドビュー
 
 ### 研究ホーム
 
-`kei-agent-notion-setup` が作る（ID は `notion.json`）。ホームには「自分の Task」「進行中のテーマ」「近いマイルストーン」のビューを置く。
+`kei-agent-notion-setup` が作る（作った DB の ID は `notion.json`）。ホームには「自分の Task」「進行中のテーマ」「近いマイルストーン」のビューを置く。
 
 | DB | 主なプロパティ |
 |---|---|
@@ -219,30 +235,30 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | マイルストーン | 名前、期日、テーマ、状態（予定 / 準備中 / 済み）、メモ。「中長期の方針」ページの下 |
 
 - 🌙 は Task を作る入口。外すと「未着手」に戻す。夜間は「今夜やる」を読み、「状態」と「結果」を書く
-- 研究ログ（時間記録と、実験の要約・W&B run の URL・主な指標）はゲートウェイ経由で書く。スレッドやジョブなど運用の状態は本体の SQLite が正で、Notion には置かない
+- 実験の要約（W&B run の URL・主な指標）は、研究の LLM がゲートウェイ経由でその Task の「結果」かノート（種類「考察」）に書く。スレッドやジョブなど運用の状態は本体の SQLite が正で、Notion には置かない
 - テーマの前提と検索キーワードの正は `CLAUDE.md`、論文は `papers/`。Notion には目的とリンクだけ
 
 ### 授業ホーム
 
-`kei-agent-course-setup` が6つの DB をそろえる（ID は `notion-course.json`）。
+`kei-agent-course-setup` が5つの DB をそろえる（DB の ID は `notion-course.json`）。
 
 | DB | 中身 |
 |---|---|
 | 授業 | 科目名、科目コード、学期、曜日、時限、Moodle、状態、科目群・科目区分・必選区分 |
 | 課題 | 課題名、締切、状態、授業への relation |
-| 学習ログ | 時間記録カードで測った学習時間（記録 ID で1回だけ作る） |
 | 📊 成績履歴 | 科目群、科目区分、授業名、成績、GP、単位、取得年度 |
 | 🎓 単位要件 | 大区分、要件名、所定・既得・算入・残り単位。`総合計` の行が卒業要件の全体 |
 | 📈 GPA推移 | 春学期・秋学期・通算の GPA |
 
-`授業` ← `課題` / `学習ログ` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は大学の成績 HTML をローカルで読んで入れ（`kei-agent-course-academic-import`）、HTML 自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
+`授業` ← `課題` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は大学の成績 HTML をローカルで読んで入れ（`kei-agent-course-academic-import`）、HTML 自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
 
 ## 11. 時間の記録
 
 - 人の時間は Slack の `/toggl` コマンドか固定した時間記録カード（`src/kei_agent/time_cards.py`、`time_tracking.py`）で測る。1人1本で、別のチャンネルで始めると前の計測は止まる。`/toggl` の返事は ephemeral で、新しいカードは投稿しない（カードがあれば表示を更新する）
-- 止めたらまず Toggl（`focus.toggl.com/api`、`toggl_sk_` の鍵）に送る。Toggl の環境変数が無ければ送らず（`not_configured`）Notion にだけ書く。そのあと研究はゲートウェイの `/time-logs`（MCP とは別の口）経由で研究ログ、大学は `record-study-time` で学習ログに書く。仕事は Toggl だけ
-- 送れなかったものは SQLite に保留して再送する。Toggl に届いたか分からないときだけ手で再送する
-- Kei Agent の稼働は SQLite の `runs` テーブル。週ごとの CSV（`overview/time/<月曜>.csv`）にまとめ、グラフは月曜の Daily でモデルが描く
+- 止めたらまず Toggl（`focus.toggl.com/api`、`toggl_sk_` の鍵）に送る。Toggl の環境変数が無ければ送らず（`not_configured`）Notion にだけ書く。そのあと研究・大学・仕事のどれも、共通ホームの「時間記録」に1件書く（記録 ID で1回だけ、出典 Slack）
+- 送れなかったものは SQLite に保留して再送する。共通ホームが使えない間も保留にし、使えるようになってから送る。Toggl に届いたか分からないときだけ手で再送する
+- Toggl のアプリで直接測った記録は、毎晩の保守で直近7日ぶんを「時間記録」に取り込む（プロジェクト名が `研究/` `大学/` `仕事/` で始まるものだけ。記録 ID `toggl:<id>`、出典 Toggl）。Slack から送った記録（開始と長さが1分以内で一致）は重ねない
+- 週ごとの合計は「時間記録」のグラフのビュー（週ごとの時間）で見る。Kei Agent の稼働は SQLite の `runs` テーブルから数え、今週の合計を Daily の材料に入れる
 
 ## 12. 声のレイヤ
 
@@ -258,7 +274,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 - 本体 → 声は A2A の `notify` を投げっぱなしで送る（`src/kei_agent/voice.py`）。渡すのは出来事（`schedule` `due` `working` `done` `failed` `limited` `awaiting` `listen`）だけで、言い方と顔は声のレイヤが決める
 - 「知らせる」だけのときは通知のたびに短い接続を作って読み上げ、マイクは開かない。「聞く」が入のときだけマイクを開けて会話する。どちらも既定は切で、設定は再起動後も戻る
 - `OPENAI_API_KEY` が無ければつながらないが落ちない
-- 会話は60分で切れるのでつなぎ直す。全文は `overview/voice/<日付>.md`（30日で消える）、Slack に残るのは依頼だけ
+- 会話は60分で切れるのでつなぎ直す。会話は残さず、Slack に残るのは依頼だけ
 - 声の依頼は `asks/` を信じる（書けるのは自分だけという前提）。話し手の判定はしない
 
 ## 13. コードの地図（本体）
@@ -277,5 +293,5 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | `schedule.py` / `morning.py` / `digest.py` | 定期実行、朝の予定、材料集め |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
 | `home.py` / `settings.py` / `settings_actions.py` | App Home と設定 |
-| `improve.py` / `self_fix.py` | 自己改善 |
+| `improve.py` / `self_fix.py` / `issues.py` | 自己改善、要望の GitHub issue |
 | `time_cards.py` / `time_tracking.py` / `timelog.py` | 時間記録と Toggl |

@@ -24,7 +24,7 @@ Kei Agent 本体（オーケストレーター, src/kei_agent/）
   ├─ 研究エージェント   :8788  作業場での CLI 実行 / pueue ジョブ
   ├─ 仕事エージェント   :8789  Microsoft 365（読むだけ）
   └─ 声のレイヤ         :8790  Realtime API / マイク / スピーカー
-  研究 Notion ゲートウェイ :8791（研究ホームの中だけを触る MCP）
+  Notion ゲートウェイ   :8791  Notion に届く唯一の口（使う側ごとに届くホームを絞る）
 ```
 
 各エージェントは Claude Code CLI か Codex CLI のどちらかで動く（App Home で agent ごとに選ぶ）。
