@@ -821,10 +821,11 @@ class FakeCourseAgent:
     """大学エージェントの代わり。list-due は JSON を返す。"""
     base_url = "http://127.0.0.1:8787"
 
-    def __init__(self, items, classes=None, synced=None):
+    def __init__(self, items, classes=None, synced=None, assignments=None):
         self.items = items
         self.classes = classes or []
         self.synced = synced or {}
+        self.assignments = assignments or []
         self.asked = []
 
     async def ask(self, skill, text="", params=None):
@@ -837,6 +838,8 @@ class FakeCourseAgent:
             data = {"items": self.classes}
         elif skill == "sync-assignments":
             data = dict(self.synced)
+        elif skill == "list-calendar-assignments":
+            data = {"complete": True, "items": self.assignments}
         # 返事は全エージェント共通の封筒
         envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
                     "limit_reset_at": None, "cost_usd": None}
@@ -1160,3 +1163,61 @@ async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
     assert post.get("thread_ts") and "情報 レポート" in post["text"] and "期末" not in post["text"]
     note = assistant.hub.notes[-1]
     assert "📌 明日・明後日の締切" in note.body and note.body.endswith("明日やることは何か")
+
+
+# 締切3日前の未着手、うまくいかなかったこと、起動し直していない新しい版
+
+
+async def test_unstarted_assignments_are_noticed_three_days_ahead_once(env):
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    now = datetime(2026, 10, 23, 12, 0)
+    assistant.agents["course"] = FakeCourseAgent([], assignments=[
+        {"id": "a", "title": "Assignment A", "due": "2026-10-26T00:00:00.000+09:00", "status": "未着手",
+         "url": "https://notion.so/a"},
+        {"id": "b", "title": "もう出した", "due": "2026-10-25T12:00:00.000+09:00", "status": "提出済み"},
+        {"id": "c", "title": "まだ先", "due": "2026-10-30T12:00:00.000+09:00", "status": "未着手"},
+    ])
+
+    await scheduler.notify_due_soon(now)
+    scheduler._due_checked = 0.0
+    await scheduler.notify_due_soon(now)
+
+    early = [p["text"] for p in slack.posted() if p.get("text", "").startswith("📚")]
+    assert early == ["📚 あと 2 日で締切、まだ未着手: Assignment A\n10/25（日） 24:00 まで\nhttps://notion.so/a"]
+
+
+async def test_the_morning_says_what_went_wrong_since_the_last_daily(env):
+    scheduler, assistant, slack, _ = env
+    store = scheduler.store
+    now = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
+    yesterday = (now.date() - timedelta(days=1)).isoformat()
+    store.record_schedule("daily", yesterday, {"status": "posted", "notion_url": None})
+    store.record_schedule("review", yesterday, {"status": "error"})
+    store.record_schedule("maintenance", yesterday, {"status": "done"})
+
+    note = scheduler.failure_note(now, ["課題の取り込み"])
+
+    assert note == "⚠️ うまくいかなかったこと: Daily（Notion に残せず）、Retro & Planning、課題の取り込み"
+    store.record_schedule("review", yesterday, {"status": "posted", "notion_url": "https://notion.so/r"})
+    store.record_schedule("daily", yesterday, {"status": "posted", "notion_url": "https://notion.so/d"})
+    assert scheduler.failure_note(now) == ""
+
+
+async def test_a_new_version_left_unrestarted_is_reported_once_after_an_hour(env, monkeypatch):
+    scheduler, assistant, *_ = env
+    troubles = []
+
+    async def trouble(text):
+        troubles.append(text)
+
+    monkeypatch.setattr(assistant, "notify_trouble", trouble)
+    monkeypatch.setattr(schedule_module.version, "RUNNING", "old")
+    monkeypatch.setattr(schedule_module.version, "on_disk", lambda: "new")
+    start = datetime(2026, 9, 27, 10, 0)
+
+    for minutes in (0, 30, 60, 120, 180):
+        await scheduler.notify_unrestarted(start + timedelta(minutes=minutes))
+
+    trouble, = troubles
+    assert "new" in trouble and "deploy/restart-all.sh" in trouble

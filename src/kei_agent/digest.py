@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, morning, themes, timelog, work
+from kei_agent import course, deadline, morning, themes, timelog, work
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.notion import NotionError
@@ -42,7 +42,7 @@ def _at(value: str) -> datetime | None:
 
 def _due_day(item: dict):
     at = _at(item.get("at", ""))
-    return at.date() if at else None
+    return deadline.day(at) if at else None
 
 
 def _dues(items: list[dict], with_day: bool = False) -> str:
@@ -50,9 +50,9 @@ def _dues(items: list[dict], with_day: bool = False) -> str:
     found = []
     for item in items[:MAX_DOMAIN_ITEMS]:
         at = _at(item.get("at", ""))
-        head = f"{at.month}/{at.day} " if with_day and at else ""
+        head = f"{deadline.day(at).month}/{deadline.day(at).day} " if with_day and at else ""
         course = f"{item['course']} / " if item.get("course") else ""
-        found.append(f"{head}{course}{item.get('title', '')}（{at:%H:%M}）" if at else str(item.get("title", "")))
+        found.append(f"{head}{course}{item.get('title', '')}（{deadline.clock(at)}）" if at else str(item.get("title", "")))
     rest = f"（ほか {len(items) - MAX_DOMAIN_ITEMS} 件）" if len(items) > MAX_DOMAIN_ITEMS else ""
     return "、".join(found) + rest
 

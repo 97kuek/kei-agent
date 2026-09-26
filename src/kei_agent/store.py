@@ -739,6 +739,12 @@ class Store:
         with self.conn:
             self.conn.execute("DELETE FROM schedule_runs WHERE name = ? AND day = ?", (name, day))
 
+    def schedule_runs_since(self, since: float) -> list[sqlite3.Row]:
+        """その時刻より後に記録した定期処理（古い順）。"""
+        return self.conn.execute(
+            "SELECT * FROM schedule_runs WHERE ran_at >= ? ORDER BY ran_at", (since,)
+        ).fetchall()
+
     def last_schedule(self, name: str, before_day: str | None = None) -> sqlite3.Row | None:
         if before_day is None:
             return self.conn.execute(

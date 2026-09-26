@@ -10,7 +10,8 @@ from collections.abc import Sequence
 
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
-VERSION = "0.1.0"
+from kei_agent import version
+
 # JSON-RPC の窓口（Agent Card の supported_interfaces に載せる）
 RPC_PATH = "/a2a"
 
@@ -22,7 +23,8 @@ def agent_card(name: str, description: str, base_url: str, skills: Sequence[Agen
     return AgentCard(
         name=name,
         description=description,
-        version=VERSION,
+        # 動いている版（起動したときの commit）。本体が古い版の担当を見つけて起動し直すのに使う
+        version=version.RUNNING,
         supported_interfaces=[AgentInterface(
             url=base_url.rstrip("/") + RPC_PATH,
             protocol_binding="JSONRPC",

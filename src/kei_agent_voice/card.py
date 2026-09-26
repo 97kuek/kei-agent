@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
+from kei_agent import version
+
 NOTIFY = "notify"
 
-VERSION = "0.1.0"
 RPC_PATH = "/a2a"
 
 
@@ -16,7 +17,7 @@ def build_card(base_url: str) -> AgentCard:
         name="Kei Agent（声）",
         description="机の上で喋る口。本体から出来事を受け取り、言い方と顔は自分で決める。"
                     "Stack-chan がいればそちらで、いなければ Mac のスピーカーで鳴らす",
-        version=VERSION,
+        version=version.RUNNING,
         supported_interfaces=[AgentInterface(
             url=base_url.rstrip("/") + RPC_PATH,
             protocol_binding="JSONRPC",

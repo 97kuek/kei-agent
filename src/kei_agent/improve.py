@@ -136,23 +136,33 @@ def run_checks(worktree: Path) -> CommandResult:
     return CommandResult(True, "\n\n".join(outputs))
 
 
-def restart_agents(config: Config) -> list[str]:
-    """エージェント（別プロセス）を、新しい版で起動し直す。
+def restart_service(name: str) -> bool:
+    """launchd の com.kei-agent.<name> を、新しい版で起動し直す。"""
+    label = f"com.kei-agent.{name}"
+    proc = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
+                          capture_output=True, text=True, timeout=60)
+    if proc.returncode != 0:
+        log.warning("%s を起動し直せません: %s", label, (proc.stderr or "").strip()[:200])
+    return proc.returncode == 0
 
-    本体は launchd が入れ替えるが、エージェントは動き続けてしまう（古いコードのまま）。
+
+def installed_services(home: Path | None = None) -> list[str]:
+    """launchd に登録した Kei Agent のプロセス（本体を除く）。ゲートウェイを先にする（deploy/restart-all.sh と同じ）。"""
+    agents_dir = (home or Path.home()) / "Library" / "LaunchAgents"
+    names = [path.name.removeprefix("com.kei-agent.").removesuffix(".plist")
+             for path in sorted(agents_dir.glob("com.kei-agent.*.plist"))]
+    return sorted((name for name in names if name != "assistant"), key=lambda name: name != "notion-gateway")
+
+
+def restart_agents() -> list[str]:
+    """本体のほかのプロセス（ゲートウェイ・担当・声）を、新しい版で起動し直す。
+
+    本体は launchd が入れ替えるが、ほかは動き続けてしまう（古いコードのまま）。
     取り込んだあと、本体が静かになってから呼ぶ。
     """
-    done = []
-    for name in config.a2a.agents:
-        label = f"com.kei-agent.{name}"
-        proc = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
-                              capture_output=True, text=True, timeout=60)
-        if proc.returncode == 0:
-            done.append(name)
-        else:
-            log.warning("%s を起動し直せません: %s", label, (proc.stderr or "").strip()[:200])
+    done = [name for name in installed_services() if restart_service(name)]
     if done:
-        log.info("エージェントを起動し直しました: %s", "、".join(done))
+        log.info("起動し直しました: %s", "、".join(done))
     return done
 
 

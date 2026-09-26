@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router, settings
+from kei_agent import agents, deadline, router, settings
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape
@@ -48,6 +48,9 @@ WEEKDAYS = "月火水木金土日"
 # 朝の一覧で見る先の長さ（日）と、個別に知らせる締切までの時間
 DIGEST_DAYS = 7
 SOON_HOURS = 24
+# 締切まで何日を切っても「未着手」なら知らせるか（24時間前の知らせより先に気づけるように）
+EARLY_DAYS = 3
+UNSTARTED = "未着手"
 
 
 def pick_skill(text: str) -> str:
@@ -94,10 +97,10 @@ def _day(at: datetime) -> str:
 
 def _line(item: dict, with_day: bool = True, now: datetime | None = None) -> str:
     at = _at(item)
-    head = f"{_day(at)} " if with_day else ""
+    head = f"{_day(deadline.day(at))} " if with_day else ""
     course = f"{escape(item['course'])} / " if item.get("course") else ""
     left = f"（{_left(at, now)}）" if now is not None else ""
-    return f"• {head}{at:%H:%M} {course}{escape(item.get('title', ''))}{left}"
+    return f"• {head}{deadline.clock(at)} {course}{escape(item.get('title', ''))}{left}"
 
 
 def due_text(items: list[dict], more: int = 0, now: datetime | None = None) -> str:
@@ -122,7 +125,34 @@ def soon_text(item: dict, now: datetime) -> str:
     course = f"{escape(item['course'])} / " if item.get("course") else ""
     url = f"\n{str(item['url']).split('|')[0]}" if item.get("url") else ""
     return (f"⏰ {_left(at, now)}で締切: {course}{escape(item.get('title', ''))}\n"
-            f"{_day(at)} {at:%H:%M} まで{url}")
+            f"{_day(deadline.day(at))} {deadline.clock(at)} まで{url}")
+
+
+def unstarted_items(items: list[dict], now: datetime, days: int = EARLY_DAYS) -> list[dict]:
+    """あと days 日以内に締切で、まだ「未着手」の課題（Notion の課題。過ぎたものは入れない）。"""
+    limit = now + timedelta(days=days)
+    found = []
+    for item in items:
+        try:
+            at = datetime.fromisoformat(str(item.get("due"))).replace(tzinfo=None)
+        except ValueError:
+            continue
+        if item.get("status") == UNSTARTED and now <= at <= limit:
+            found.append(item)
+    return found
+
+
+def early_text(item: dict, now: datetime) -> str:
+    """締切が近いのに、まだ手をつけていない課題を知らせる文。"""
+    at = datetime.fromisoformat(str(item["due"])).replace(tzinfo=None)
+    url = f"\n{item['url']}" if item.get("url") else ""
+    return (f"📚 {_left(at, now)}で締切、まだ未着手: {escape(item.get('title', ''))}\n"
+            f"{_day(deadline.day(at))} {deadline.clock(at)} まで{url}")
+
+
+def early_notice_key(item: dict) -> str:
+    """同じ課題を二度知らせないための目印（締切が動いたら、また知らせる）。"""
+    return f"early:{item.get('id', '')}:{item.get('due', '')}"
 
 
 def notice_key(item: dict) -> str:

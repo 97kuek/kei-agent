@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import course, digest, maintenance, morning, research, settings, themes, timelog, work
+from kei_agent import course, digest, maintenance, morning, research, settings, themes, timelog, version, work
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import (
     JST,
@@ -41,6 +41,8 @@ NIGHT_CATCH_UP_HOURS = 12
 NO_NEW_PAPERS = "NO_NEW_PAPERS"
 # 締切が近いものを知らせるために、カレンダーを見に行く間隔（秒）
 DUE_CHECK_SECONDS = 3600
+# 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
+VERSION_CHECK_SECONDS = 3600
 # 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
 NOTICE_RETENTION_DAYS = 60
 # 声のレイヤに渡す日数。「明日の予定」「今週の予定」に答えられるように1週間ぶん
@@ -96,6 +98,9 @@ class Scheduler:
         self.assistant = assistant
         # 締切が近いものを最後に見に行った時刻（起動直後に1回見る）
         self._due_checked = 0.0
+        # 取り込んだ新しい版と、それを最初に見つけた時刻
+        self._version_checked = 0.0
+        self._newer: tuple[str, float] | None = None
         self._hub_calendar_checked = 0.0
 
     @property
@@ -139,6 +144,7 @@ class Scheduler:
                 self.store.record_schedule("hub_calendar", hub_day, detail)
         await self.notify_due_soon(now)
         await self.nudge_stale_threads()
+        await self.notify_unrestarted(now)
 
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
         log.info("定期処理を始めます: %s（%s）", name, day)
@@ -599,13 +605,40 @@ class Scheduler:
         # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
         # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
         self.assistant.notify_voice("schedule", items=[
-            {"date": f"{e.at:%Y-%m-%d}", "at": f"{e.at:%H:%M}",
+            {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
              "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
             for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
-        return morning.text(classes, events, dues, now, self.morning_notes()), detail, notices
+        failed_now = [label for label, failed in (("課題の取り込み", detail.get("synced") is False),
+                                                  ("会議の書き込み", detail.get("meetings") == "error")) if failed]
+        return morning.text(classes, events, dues, now, self.morning_notes(now, failed_now)), detail, notices
 
-    def morning_notes(self) -> list[str]:
-        """時刻の無いもの（先行研究の新着など）を、1行ずつ。"""
+    def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:
+        """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で。無ければ空文字。
+
+        Daily とレトプラが何日も Notion に残っていなかったのに、気づけなかった（2026-09-26）。
+        """
+        today = now.date().isoformat()
+        last = self.store.last_schedule("daily", before_day=today)
+        since = last["ran_at"] if last else now.timestamp() - 86400
+        failed = []
+        for row in self.store.schedule_runs_since(since):
+            label = settings.SCHEDULE_LABELS.get(row["name"])
+            if label is None or (row["name"] == "daily" and row["day"] == today):
+                continue    # 定期処理でないもの、いま作っている Daily
+            detail = json.loads(row["detail"] or "{}") or {}
+            if detail.get("status") == "error":
+                failed.append(label)
+            elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):
+                failed.append(f"{label}（Notion に残せず）")
+        yesterday = (now.date() - timedelta(days=1)).isoformat()
+        if (self.assistant.hub is not None and course.AGENT in self.assistant.agents
+                and not self.store.schedule_ran("hub_calendar", yesterday)):
+            failed.append("予定カレンダーへの課題の書き込み")
+        failed += failed_now or []
+        return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
+
+    def morning_notes(self, now: datetime | None = None, failed_now: list[str] | None = None) -> list[str]:
+        """時刻の無いもの（先行研究の新着、うまくいかなかったこと）を、1行ずつ。"""
         notes = []
         last = self.store.last_schedule("literature")
         if last:
@@ -613,6 +646,9 @@ class Scheduler:
             posted = [name for name, got in themes_.items() if got.get("status") == "posted"]
             if posted:
                 notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
+        failure = self.failure_note(now or datetime.now(), failed_now)
+        if failure:
+            notes.append(failure)
         return notes
 
     async def notify_due_soon(self, now: datetime) -> None:
@@ -634,6 +670,39 @@ class Scheduler:
             await self.assistant.slack.chat_postMessage(channel=channel, text=course.soon_text(item, now))
             self.assistant.notify_voice("due", title=item.get("title"), at=item.get("at"))
             self.store.record_notice(key)
+        await self.notify_unstarted(channel, now)
+
+    async def notify_unstarted(self, channel: str, now: datetime) -> None:
+        """締切まで3日を切っても「未着手」の課題を、1件ずつ1回だけ知らせる（Notion の課題の状態を見る）。"""
+        reply = await self.assistant.ask_course(course.LIST_CALENDAR_ASSIGNMENTS, days=course.EARLY_DAYS + 1)
+        if not reply.ok:
+            return
+        for item in course.unstarted_items(reply.data.get("items") or [], now):
+            key = course.early_notice_key(item)
+            if self.store.noticed(key):
+                continue
+            await self.assistant.slack.chat_postMessage(channel=channel, text=course.early_text(item, now))
+            self.store.record_notice(key)
+
+    async def notify_unrestarted(self, now: datetime) -> None:
+        """取り込んだ新しい版で、1時間たっても起動し直していなければ、一度だけ知らせる。"""
+        if now.timestamp() - self._version_checked < VERSION_CHECK_SECONDS:
+            return
+        self._version_checked = now.timestamp()
+        disk = await asyncio.to_thread(version.on_disk)
+        if not version.differs(disk):
+            self._newer = None
+            return
+        if self._newer is None or self._newer[0] != disk:
+            # 自己改善の取り込みは、静かになってから起動し直す。見つけたばかりなら、もう少し待つ
+            self._newer = (disk, now.timestamp())
+            return
+        key = f"version:{disk}"
+        if now.timestamp() - self._newer[1] < VERSION_CHECK_SECONDS or self.store.noticed(key):
+            return
+        await self.assistant.notify_trouble(f"新しい版（{disk}）を取り込みましたが、まだ起動し直していません。"
+                                            "deploy/restart-all.sh で起動し直してください")
+        self.store.record_notice(key)
 
     # 声かけ
 

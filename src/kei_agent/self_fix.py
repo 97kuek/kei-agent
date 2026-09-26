@@ -221,7 +221,7 @@ class SelfFix:
         async def wait_then_restart() -> None:
             await self.idle.wait()
             # エージェントも同じリポジトリを読むので、一緒に入れ替える（本体だけだと古いまま動く）
-            await asyncio.to_thread(improve.restart_agents, self.config)
+            await asyncio.to_thread(improve.restart_agents)
             log.info("新しい版で起動し直すため、終了します")
             self.restart_requested.set()
 

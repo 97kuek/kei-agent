@@ -32,6 +32,7 @@ from kei_agent import (
     runner,
     settings,
     themes,
+    version,
     voice,
     work,
 )
@@ -108,6 +109,8 @@ log = logging.getLogger(__name__)
 NOTIFY_AFTER_SECONDS = 60
 # 名刺（エージェントのスキル）を読み直す間隔。入れ替えても、これだけたてば新しいスキルを使える
 SKILLS_TTL_SECONDS = 600
+# 古い版の担当を起動し直してから、名刺を読み直すまでの秒数
+STALE_RECHECK_SECONDS = 20
 # スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
 HISTORY_PAGE = 200
 HISTORY_MAX_MESSAGES = 600
@@ -648,8 +651,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         settings.drop_theme(self.store, await self.channel_name(channel))
 
     async def check_agents(self) -> dict[str, list[str]]:
-        """つないでいるエージェントの名刺を読んで、生きているかと、何ができるかを見る。"""
+        """つないでいるエージェントの名刺を読んで、生きているか、何ができるか、本体と同じ版かを見る。
+
+        古い版のまま動いている担当は起動し直す（手作業のデプロイで担当だけ起動し直し忘れると、古いコードが
+        新しい設定を読めずに止まる。2026-09-26 に大学の担当で起きた）。
+        """
         skills: dict[str, list[str]] = {}
+        stale: list[str] = []
         for name, agent in self.agents.items():
             try:
                 card = await agent.card()
@@ -661,7 +669,27 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             skills[name] = [s["id"] for s in self.agent_skills[name] if s.get("id")]
             log.info("%s のエージェントにつながりました（%s）: %s", name, card.get("name", "?"),
                      "、".join(skills[name]) or "できることなし")
+            if version.differs(str(card.get("version") or "")):
+                log.warning("%s の担当が古い版のまま動いています（本体 %s、担当 %s）", name, version.RUNNING,
+                            card.get("version"))
+                stale.append(name)
+        if stale:
+            self.spawn(self._restart_stale_agents(stale))
         return skills
+
+    async def _restart_stale_agents(self, names: list[str]) -> None:
+        """古い版の担当を起動し直し、少し待って確かめる。それでも古ければ知らせる。"""
+        for name in names:
+            await asyncio.to_thread(improve.restart_service, name)
+        await asyncio.sleep(STALE_RECHECK_SECONDS)
+        for name in names:
+            try:
+                theirs = str((await self.agents[name].card()).get("version") or "")
+            except Exception:
+                theirs = ""
+            if theirs != version.RUNNING:
+                await self.notify_trouble(f"{name} の担当が古い版のまま動いています。"
+                                          "deploy/restart-all.sh で起動し直してください")
 
     def _remember_skills(self, name: str, card: dict) -> None:
         self.agent_skills[name] = list(card.get("skills") or [])

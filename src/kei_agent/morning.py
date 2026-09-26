@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from kei_agent import deadline
 from kei_agent.slack_text import escape
 
 WEEKDAYS = "月火水木金土日"
@@ -33,9 +34,18 @@ class Entry:
     end: datetime | None = None
 
     @property
+    def day(self) -> date:
+        """並べる日。締切の 0:00 ちょうどは前の日の終わり（deadline.py）。"""
+        return deadline.day(self.at) if self.icon == DUE else self.at.date()
+
+    @property
+    def clock(self) -> str:
+        return deadline.clock(self.at) if self.icon == DUE else f"{self.at:%H:%M}"
+
+    @property
     def span(self) -> str:
         if self.end is None:
-            return f"{self.at:%H:%M}      "
+            return f"{self.clock}      "
         return f"{self.at:%H:%M}–{self.end:%H:%M}"
 
 
@@ -90,7 +100,7 @@ def upcoming(classes: list[dict], events: list[dict], dues: list[dict], now: dat
         found.append(Entry(start, MEETING, f"{escape(item.get('subject', ''))}{where}", end))
     for item in dues or []:
         at = _at(item.get("at", ""))
-        if within(at):
+        if at is not None and first <= deadline.day(at) <= last:
             course = f"{escape(item['course'])} " if item.get("course") else ""
             found.append(Entry(at, DUE, f"締切: {course}{escape(item.get('title', ''))}"))
     return sorted(found, key=lambda e: (e.at, e.icon))
@@ -102,12 +112,13 @@ def later(dues: list[dict], now: datetime, days: int = 7) -> str:
     found = []
     for item in dues or []:
         at = _at(item.get("at", ""))
-        if at and now.date() < at.date() <= limit:
+        if at and now.date() < deadline.day(at) <= limit:
             found.append((at, item))
     if not found:
         return ""
     found.sort(key=lambda pair: pair[0])
-    shown = "、".join(f"{at.month}/{at.day} {escape(item.get('title', ''))[:24]}" for at, item in found[:MAX_LATER])
+    shown = "、".join(f"{deadline.day(at).month}/{deadline.day(at).day} {escape(item.get('title', ''))[:24]}"
+                     for at, item in found[:MAX_LATER])
     rest = f"（ほか {len(found) - MAX_LATER} 件）" if len(found) > MAX_LATER else ""
     return f"このあとの締切: {shown}{rest}"
 
@@ -116,14 +127,14 @@ def soon_deadlines(dues: list[dict], now: datetime, days: int = 2) -> str:
     """いまから days 日後の終わりまでの締切（レトプラで明日の計画に使う）。無ければ空文字。"""
     limit = now.date() + timedelta(days=days)
     found = sorted(((at, item) for item in dues or []
-                    if (at := _at(item.get("at", ""))) and now <= at and at.date() <= limit),
+                    if (at := _at(item.get("at", ""))) and now <= at and deadline.day(at) <= limit),
                    key=lambda pair: pair[0])
     if not found:
         return ""
     lines = ["📌 明日・明後日の締切"]
     for at, item in found:
         course = f"{escape(item['course'])} " if item.get("course") else ""
-        lines.append(f"`{day_label(at)} {at:%H:%M}` {course}{escape(item.get('title', ''))}")
+        lines.append(f"`{day_label(deadline.day(at))} {deadline.clock(at)}` {course}{escape(item.get('title', ''))}")
     return "\n".join(lines)
 
 
