@@ -35,8 +35,12 @@ CAN_DO = ("このチャンネルでできること。\n"
 
 
 def _url(value: object) -> str:
-    # リンクの中に `|` が入ると、そこから先が表示名になってしまう
-    return str(value or "").split("|")[0]
+    """Slack のリンク。自分で <> で囲んで、どこまでが URL かを示す（すぐ後の「（Zenn）」まで URL にされないように）。
+
+    中に `|` があるとそこから先が表示名に、`<` `>` があるとそこで区切られてしまうので外す。
+    """
+    url = str(value or "").split("|")[0].replace("<", "").replace(">", "").strip()
+    return f"<{url}>" if url else ""
 
 
 def reading_text(items: list[dict], day: str) -> str:

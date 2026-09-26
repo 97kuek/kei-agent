@@ -451,7 +451,7 @@ async def test_literature_goes_through_the_knowledge_agent(env, config, store):
     post, = slack.posted()
     assert post["channel"] == "C1" and post["text"].startswith("📚 先行研究の新着 9/19（土）")
     assert "Counting with VLMs" in post["text"] and "条件Bの説明に使える" in post["text"]
-    assert post["unfurl_links"] is False
+    assert "<https://arxiv.org/abs/2609.00001>" in post["text"] and post["unfurl_links"] is False
     assert assistant.notion.papers["arXiv:2609.00001"]["themes"] == ["vlm"]
     # このスレッドの続きは知識の担当が答える
     assert store.thread_agent("C1", detail["themes"]["vlm"]["thread_ts"]) == "knowledge"
@@ -475,6 +475,8 @@ async def test_reading_posts_the_digest_to_the_knowledge_channel(env, config, st
     post, = slack.posted()
     assert post["channel"] == "C40" and post["text"].startswith("📰 今日の読みもの 9/26（土）")
     assert "1. *LLM の話*" in post["text"] and post["unfurl_links"] is False
+    # URL は <> で囲む（囲まないと、すぐ後の「（Zenn）」まで Slack が URL にしてしまう）
+    assert "<https://zenn.dev/x>（Zenn）" in post["text"]
     assert detail == {"status": "posted", "count": 1, "channel": "C40", "failed_sources": []}
     store.record_schedule("reading", "2026-09-26", detail)
     assert "読みもの: 1件（<#C40>）" in scheduler.morning_notes(datetime(2026, 9, 26, 8, 0))
