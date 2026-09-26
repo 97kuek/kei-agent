@@ -228,15 +228,10 @@ def test_relinking_all_legacy_review_threads_is_transactional(tmp_path):
     assert store.notion_link("C1", "2.2")["page_id"] == "day-21"
 
 
-def test_old_research_view_is_moved_to_trash_with_current_api():
-    from kei_agent.notion_hub_migration import _archive_research_view
-
-    notion = LegacyNotion()
+def _research_home(notion, *blocks, sources=None):
+    """研究ホームの並びと、リンクドビューが映すデータソース。PATCH は記録だけする。"""
     notion.allow_writes = True
-    notion.blocks[RESEARCH_HOME_ID] = [
-        {"id": "h", "type": "heading_2", "heading_2": {"rich_text": rich("最近の Daily と振り返り")}},
-        {"id": "v", "type": "child_database", "child_database": {"title": "最近の Daily と振り返り"}},
-    ]
+    notion.blocks[RESEARCH_HOME_ID] = list(blocks)
     patched = []
     original = notion.request
 
@@ -245,10 +240,48 @@ def test_old_research_view_is_moved_to_trash_with_current_api():
             check_notion_body(body)
             patched.append((path, body))
             return {}
+        if method == "GET" and path.startswith("/databases/"):
+            return {"data_sources": [{"id": source} for source in (sources or {})[path.removeprefix("/databases/")]]}
         return original(method, path, body)
     notion.request = request
-    _archive_research_view(notion, RESEARCH_HOME_ID)
+    return patched
+
+
+HEADING = {"id": "h", "type": "heading_2", "heading_2": {"rich_text": rich("最近の Daily と振り返り")}}
+
+
+def test_old_research_view_is_moved_to_trash_with_current_api():
+    """API ではリンクドビューの名前は Untitled で返る。見出しの直後の、ノートを映すものだけを外す。"""
+    from kei_agent.notion_hub_migration import _archive_research_view
+
+    notion = LegacyNotion()
+    patched = _research_home(
+        notion, {"id": "notes", "type": "child_database", "child_database": {"title": "ノート"}}, HEADING,
+        {"id": "v", "type": "child_database", "child_database": {"title": "Untitled"}},
+        sources={"v": ["notes-ds"]})
+    _archive_research_view(notion, RESEARCH_HOME_ID, "notes-ds")
     assert patched == [("/blocks/v", {"in_trash": True}), ("/blocks/h", {"in_trash": True})]
+
+
+def test_a_view_of_another_database_after_the_heading_is_left_alone():
+    from kei_agent.notion_hub_migration import _archive_research_view
+
+    notion = LegacyNotion()
+    patched = _research_home(
+        notion, HEADING, {"id": "v", "type": "child_database", "child_database": {"title": "Untitled"}},
+        sources={"v": ["tasks-ds"]})
+    with pytest.raises(NotionError, match="一意に同定できません"):
+        _archive_research_view(notion, RESEARCH_HOME_ID, "notes-ds")
+    assert patched == []
+
+
+def test_research_home_without_the_old_view_is_left_alone():
+    from kei_agent.notion_hub_migration import _archive_research_view
+
+    notion = LegacyNotion()
+    patched = _research_home(notion, {"id": "p", "type": "paragraph", "paragraph": {"rich_text": rich("x")}})
+    _archive_research_view(notion, RESEARCH_HOME_ID, "notes-ds")
+    assert patched == []
 
 
 def test_apply_into_existing_day_does_not_duplicate_managed_marker():

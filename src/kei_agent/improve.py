@@ -285,7 +285,7 @@ def migrate_backlog_to_issues(config: Config, dry_run: bool = True) -> list[dict
     """一度だけ使う: `overview/backlog.md` のまだ済んでいない要望を、要約した GitHub issue にする。
 
     dry_run では要約を作って返すだけ（`<state_dir>/backlog-issues.json` に控える）。dry_run=False では
-    控えた要約（なければ新しく要約）で issue を作り、番号を返す。作れたものは、もう一度呼んでも作らない。
+    控えて確かめた要約だけで issue を作り、番号を返す（要約の無いものは作らない）。作れたものは、もう一度呼んでも作らない。
     backlog.md は消さない。返す要望の原文は手元で確かめるためのもので、issue には載せない。
 
         uv run python -c 'import json; from kei_agent import config, improve; print(json.dumps(
@@ -314,8 +314,11 @@ async def _migrate_backlog(config: Config, dry_run: bool) -> list[dict]:
                         summary = issues.Summary(entry["title"], entry.get("body", ""))
                         if found := issues.problems(summary, text):
                             raise issues.IssueError("控えの要約が公開の条件に合いません", "、".join(found))
-                    else:
+                    elif dry_run:
                         summary = await issues.summarize(config, store, text)
+                    else:
+                        # 公開する前に人が見る約束なので、確かめていない要約では作らない
+                        raise issues.IssueError("確かめた要約がありません（先に dry_run で要約を作って確かめてください）")
                     entry.update(title=summary.title, body=summary.body)
                     if not dry_run:
                         entry["number"] = (await issues.create(config, summary)).number

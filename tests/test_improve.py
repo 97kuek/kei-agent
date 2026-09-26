@@ -571,10 +571,29 @@ def test_backlog_migration_reports_what_it_could_not_file(config, fake_github, m
 
     monkeypatch.setattr(issues, "summarize", summarize)
 
+    drafts = improve.migrate_backlog_to_issues(config)
+    assert "要約が公開の条件に合いません" in drafts[1]["error"]
+
     results = improve.migrate_backlog_to_issues(config, dry_run=False)
 
+    # 下書きで要約できなかったものは、本番の実行で要約し直して作らない（見て確かめていないので）
     assert [r.get("number") for r in results] == [1, None]
-    assert "要約が公開の条件に合いません" in results[1]["error"]
+    assert "確かめた要約がありません" in results[1]["error"]
+    assert [c["title"] for c in fake_github.created()] == ["経過を細かく見せる"]
+
+
+def test_backlog_migration_files_nothing_without_reviewed_drafts(config, fake_github, monkeypatch):
+    write_backlog(config)
+
+    async def summarize(config, store, text):
+        raise AssertionError("本番の実行では要約しない")
+
+    monkeypatch.setattr(issues, "summarize", summarize)
+
+    results = improve.migrate_backlog_to_issues(config, dry_run=False)
+
+    assert all("確かめた要約がありません" in r["error"] for r in results)
+    assert fake_github.created() == []
 
 
 def test_backlog_migration_without_a_backlog(config, fake_github):

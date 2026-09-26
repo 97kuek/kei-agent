@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from kei_agent.config import load_config
+from kei_agent.config import load_config, notion_id
 from kei_agent.notion import Notion, NotionError, gateway_notion, write_json_atomic
 from kei_agent.notion_hub import MANAGED_END, HubStore, load_hub
 from kei_agent.notion_store import NotionStore, blocks_to_markdown, plain_text
@@ -203,20 +203,29 @@ def _archive_parent(notion: Notion, home_id: str, found: str | None) -> str:
     return page["id"]
 
 
-def _archive_research_view(notion: Notion, research_home_id: str) -> None:
-    """対象 block を一意に同定できるときだけ旧表示を外す。ノート DB 自体は残す。"""
+def _archive_research_view(notion: Notion, research_home_id: str, notes_ds_id: str) -> None:
+    """見出し「最近の Daily と振り返り」と、その直後でノートを映すリンクドビューだけを外す。ノート DB 自体は残す。
+
+    API ではリンクドビューのブロックの名前は Untitled で返るので、名前ではなく位置と映すデータソースで見分ける。
+    """
     blocks = notion.children(research_home_id)
     title = "最近の Daily と振り返り"
-    headings = [b for b in blocks if b.get("type") == "heading_2"
-                and plain_text(b["heading_2"].get("rich_text", [])) == title]
-    linked = [b for b in blocks if b.get("type") == "child_database"
-              and b.get("child_database", {}).get("title") == title]
-    if not headings and not linked:
+    positions = [i for i, b in enumerate(blocks) if b.get("type") == "heading_2"
+                 and plain_text(b["heading_2"].get("rich_text", [])) == title]
+    if not positions:
         return
-    if len(headings) != 1 or len(linked) != 1:
+    view = blocks[positions[0] + 1] if positions[0] + 1 < len(blocks) else {}
+    if (len(positions) != 1 or view.get("type") != "child_database"
+            or not _shows_only(notion, view["id"], notes_ds_id)):
         raise NotionError("研究ホームの旧 Daily／振り返りビューを一意に同定できません")
-    for block in (linked[0], headings[0]):
+    for block in (view, blocks[positions[0]]):
         notion.request("PATCH", f"/blocks/{block['id']}", {"in_trash": True})
+
+
+def _shows_only(notion: Notion, database_id: str, data_source_id: str) -> bool:
+    """そのデータベース（リンクドビュー）が映すのが、そのデータソースだけか。"""
+    sources = notion.request("GET", f"/databases/{database_id}").get("data_sources") or []
+    return [notion_id(source.get("id")) for source in sources] == [notion_id(data_source_id)]
 
 
 def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifest,
@@ -273,7 +282,7 @@ def apply_legacy_notes(notion: Notion, hub: HubStore, manifest: MigrationManifes
     if unresolved:
         return MigrationReport(copied, moved, tuple(unresolved))
     store.relink_notion_pages(mapping)
-    _archive_research_view(notion, research_home_id)
+    _archive_research_view(notion, research_home_id, manifest.notes_ds_id)
     return MigrationReport(copied, moved, ())
 
 
