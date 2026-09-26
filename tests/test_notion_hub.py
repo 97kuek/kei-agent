@@ -155,6 +155,10 @@ class FakeHubNotion:
         if (method, path) == ("PATCH", "/views/daily-default-view"):
             self.daily_view.update(body)
             return self.daily_view
+        if method == "PATCH" and path.startswith("/views/view-"):
+            view = next(view for view in self.views if view["id"] == path.removeprefix("/views/"))
+            view.update(body)
+            return view
         if method == "POST" and path == "/views" and body.get("type") == "chart":
             if self.fail_chart:
                 raise NotionError("chart は未対応")
@@ -247,10 +251,29 @@ def test_run_creates_schema_and_linked_views_only_once(fake_notion, tmp_path):
     assert visible == ["日付", "Daily", "レトプラ"]
     for view in fake_notion.views[:2]:
         assert view["create_database"]["parent"]["page_id"] == "home"
-        assert view["filter"]["and"][0]["date"]["this_week"] == {}
+        whens = [next(iter(cond["date"])) for cond in view["filter"]["and"][0]["or"]]
+        assert whens == ["past_year", "this_week", "next_week"]
+        assert view["sorts"][0]["direction"] == "ascending"
     assert fake_notion.databases["tasks-db"]["parent"]["page_id"] == "research-home"
     assert fake_notion.databases["assignments-db"]["parent"]["page_id"] == "course-home"
     assert tmp_path.joinpath("hub.json").exists()
+
+
+def test_old_this_week_views_are_widened_once(fake_notion, tmp_path):
+    """前の絞り込み（締切が今週だけ）の表は、次の setup で一度だけ直す。"""
+    hub_setup = setup(fake_notion, tmp_path)
+    hub_setup.run()
+    for view in fake_notion.views[:2]:
+        view["filter"] = {"and": [{"property": "締切", "date": {"this_week": {}}}]}
+        view.pop("sorts")
+    writes_before = len(fake_notion.writes)
+
+    hub_setup.run()
+    patched = len(fake_notion.writes) - writes_before
+    hub_setup.run()
+
+    assert patched == 2 and len(fake_notion.writes) == writes_before + 2
+    assert all("past_year" in str(view["filter"]) for view in fake_notion.views[:2])
 
 
 def test_duplicate_linked_view_is_detected_even_with_saved_state(fake_notion, tmp_path):

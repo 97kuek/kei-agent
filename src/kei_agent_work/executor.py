@@ -45,17 +45,10 @@ class WorkExecutor(SkillExecutor):
         days = asked_days(metadata, connector.DEFAULT_DAYS, MAX_DAYS)
         try:
             provider = str(metadata.get("provider") or "")
-            if metadata.get("calendar_snapshot") is True:
-                snapshot = await connector.calendar_snapshot(
-                    self.config, days, store=self.store,
-                    **({"provider": provider} if provider else {}))
-                events = snapshot["items"]
-            else:
-                events = await connector.events(self.config, days, store=self.store,
-                                                **({"provider": provider} if provider else {}))
-                snapshot = {"complete": False, "source_count": None, "items": events}
+            events = await connector.events(self.config, days, store=self.store,
+                                            **({"provider": provider} if provider else {}))
         except connector.WorkCalendarError as e:
             await self._fail(updater, str(e), e.limit_reset_at)
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
-        await self._done(updater, f"これから {days} 日の予定は {len(events)} 件", {"days": days, **snapshot})
+        await self._done(updater, f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events})

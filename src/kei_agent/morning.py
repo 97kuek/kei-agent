@@ -112,6 +112,21 @@ def later(dues: list[dict], now: datetime, days: int = 7) -> str:
     return f"このあとの締切: {shown}{rest}"
 
 
+def soon_deadlines(dues: list[dict], now: datetime, days: int = 2) -> str:
+    """いまから days 日後の終わりまでの締切（レトプラで明日の計画に使う）。無ければ空文字。"""
+    limit = now.date() + timedelta(days=days)
+    found = sorted(((at, item) for item in dues or []
+                    if (at := _at(item.get("at", ""))) and now <= at and at.date() <= limit),
+                   key=lambda pair: pair[0])
+    if not found:
+        return ""
+    lines = ["📌 明日・明後日の締切"]
+    for at, item in found:
+        course = f"{escape(item['course'])} " if item.get("course") else ""
+        lines.append(f"`{day_label(at)} {at:%H:%M}` {course}{escape(item.get('title', ''))}")
+    return "\n".join(lines)
+
+
 def text(classes: list[dict], events: list[dict], dues: list[dict], now: datetime,
          notes: list[str] | None = None) -> str:
     """朝のまとめの本文（Slack にそのまま出せる形）。"""

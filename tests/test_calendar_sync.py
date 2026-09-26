@@ -4,7 +4,14 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent.calendar_sync import CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
+from kei_agent.calendar_sync import (
+    CalendarItem,
+    CalendarSnapshot,
+    IncompleteSnapshot,
+    SyncReport,
+    outlook_items,
+    sync_calendar,
+)
 
 
 class FakeCalendarHub:
@@ -53,18 +60,59 @@ def test_same_name_different_outlook_ids_stay_distinct_and_manual_row_is_untouch
     assert hub.rows[0] == {"id": "manual", "出典": "手入力", "出典 ID": "", "名前": "会議", "同期状態": ""}
 
 
-def test_incomplete_snapshot_does_not_touch_existing_rows():
+def test_empty_incomplete_read_does_not_flag_existing_rows():
+    """AI が読んだ一覧（全部とは言い切れない）が0件なら、読み損ねを疑って何も触らない。"""
     hub = FakeCalendarHub()
     checked = datetime.fromisoformat("2026-09-24T10:00:00+09:00")
     sync_calendar(hub, CalendarSnapshot("Outlook", True, (item("event-1"),)), checked)
     before = [row.copy() for row in hub.rows]
     writes = len(hub.writes)
 
-    with pytest.raises(IncompleteSnapshot):
-        sync_calendar(hub, CalendarSnapshot("Outlook", False, ()), checked)
+    assert sync_calendar(hub, CalendarSnapshot("Outlook", False, ()), checked, 7) == SyncReport(0, 0, 0)
 
     assert hub.rows == before
     assert len(hub.writes) == writes
+
+
+def test_incomplete_read_writes_what_it_found_and_flags_the_rest_in_its_window():
+    hub = FakeCalendarHub()
+    checked = datetime.fromisoformat("2026-09-24T10:00:00+09:00")
+    sync_calendar(hub, CalendarSnapshot("Outlook", True, (item("event-1"), item("far", day="2026-10-10"))), checked)
+
+    report = sync_calendar(hub, CalendarSnapshot("Outlook", False, (item("event-2", day="2026-09-26"),)), checked, 7)
+
+    states = {row["出典 ID"]: row["同期状態"] for row in hub.rows if row["出典"] == "Outlook"}
+    assert report == SyncReport(1, 0, 1)
+    # 7日の範囲の中で見えなくなった会議だけ「要確認」。範囲の外（10/10）は触らない
+    assert states == {"event-1": "要確認", "far": "確認済み", "event-2": "確認済み"}
+
+
+def test_long_window_keeps_far_assignments():
+    hub = FakeCalendarHub()
+    far = CalendarItem("assignment-1", "Assignment J", "2027-02-01", "", "https://notion.so/a", "", "未着手")
+
+    report = sync_calendar(hub, CalendarSnapshot("課題", True, (far,)),
+                           datetime.fromisoformat("2026-09-26T09:00:00+09:00"), 400)
+
+    assert report.created == 1
+
+
+def test_outlook_items_skip_unreadable_meetings_and_drop_join_links():
+    events = [
+        {"id": "event-1", "subject": "定例", "start": "2026-09-25T11:00", "end": "2026-09-25T12:00",
+         "url": "https://teams.microsoft.com/l/meetup-join/x", "location": "https://zoom.us/j/1"},
+        {"id": "event-2", "subject": "時刻が読めない", "start": "来週"},
+        {"id": "event-3", "subject": "", "start": "2026-09-25T13:00"},
+        {"id": "event-1", "subject": "重なった ID", "start": "2026-09-25T14:00"},
+        {"subject": "ID なし", "start": "2026-09-26T10:00", "url": "https://outlook.office.com/calendar/item/1"},
+        "壊れた行",
+    ]
+
+    first, second = outlook_items(events), outlook_items(events)
+
+    assert [i.title for i in first] == ["定例", "ID なし"]
+    assert first[0].url == "" and first[0].location == ""          # 参加リンクは載せない
+    assert first[1].source_id.startswith("fallback:") and first == second   # ID が無くても毎回同じ
 
 
 def test_missing_item_from_complete_snapshot_is_marked_not_deleted():

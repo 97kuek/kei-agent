@@ -98,6 +98,26 @@ class _Source:
     properties: dict
 
 
+def task_view_spec(due: str, done: str) -> dict:
+    """共通ホームの「今週のタスク」の表。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に。"""
+    return {
+        "filter": {"and": [
+            {"or": [{"property": due, "date": {when: {}}} for when in ("past_year", "this_week", "next_week")]},
+            {"property": "状態", "status": {"does_not_equal": done}},
+        ]},
+        "sorts": [{"property": due, "direction": "ascending"}],
+    }
+
+
+def _without_property(value):
+    """絞り込みと並べ替えから列の指し方（名前か ID か）を外す。見比べるときだけ使う。"""
+    if isinstance(value, dict):
+        return {key: _without_property(item) for key, item in value.items() if key not in ("property", "property_id")}
+    if isinstance(value, list):
+        return [_without_property(item) for item in value]
+    return value
+
+
 class HubSetup:
     """全接続を読取で確認してから不足分だけ作る。重複を推測しない。"""
 
@@ -319,17 +339,19 @@ class HubSetup:
             ("研究 Task", tasks, "期日", "完了"),
             ("授業課題", assignments, "締切", "提出済み"),
         ):
+            spec = task_view_spec(due, status)
             if name not in views:
                 views[name] = self.notion.request("POST", "/views", {
                     "data_source_id": source.data_source_id,
                     "create_database": {"parent": {"type": "page_id", "page_id": self.home_id}},
                     "name": name,
                     "type": "table",
-                    "filter": {"and": [
-                        {"property": due, "date": {"this_week": {}}},
-                        {"property": "状態", "status": {"does_not_equal": status}},
-                    ]},
+                    **spec,
                 })
+            elif any(_without_property(views[name].get(key)) != _without_property(value)
+                     for key, value in spec.items()):
+                # 前の絞り込み（締切が今週だけ）で作った表を、いまの絞り込みにそろえる
+                self.notion.request("PATCH", f"/views/{views[name]['id']}", spec)
         time_source = self._time_source()
         if time_source is None:
             created = self.notion.request("POST", "/databases", {

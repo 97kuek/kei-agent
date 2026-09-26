@@ -47,6 +47,7 @@ class FakeHub:
         self.minutes: dict[str, float] = {}
         self.known: set[str] = set()
         self.recorded = []
+        self.calendar: list[dict] = []
 
     def upsert_day(self, kind, day, title, markdown, slack_url):
         note = Note(f"hub-{day}", title, kind, day, f"https://notion.example/hub/{day}", markdown)
@@ -77,6 +78,20 @@ class FakeHub:
     def schema_problems(self):
         return []
 
+    def calendar_rows(self, source, window_start, window_end):
+        return [dict(row) for row in self.calendar if row["出典"] == source]
+
+    def calendar_upsert(self, source, item, checked_at, existing_id=None):
+        if existing_id:
+            next(row for row in self.calendar if row["id"] == existing_id).update(
+                {"名前": item.title, "日付": item.start, "同期状態": "確認済み"})
+            return
+        self.calendar.append({"id": f"cal-{len(self.calendar)}", "出典": source, "出典 ID": item.source_id,
+                              "名前": item.title, "日付": item.start, "同期状態": "確認済み"})
+
+    def calendar_mark_stale(self, row_id):
+        next(row for row in self.calendar if row["id"] == row_id)["同期状態"] = "要確認"
+
 
 def material(prompt: str) -> str:
     """プロンプトに入れた材料の部分だけ。"""
@@ -103,54 +118,33 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
     return ws
 
 
-async def test_hub_calendar_sync_skips_outlook_until_it_can_be_verified(env, monkeypatch):
+async def test_hub_calendar_copies_all_future_assignments_without_asking_work(env, monkeypatch):
+    """課題はこれからの全部を写す。会議は朝の Daily で書くので、ここでは仕事の担当（AI）に聞かない。"""
     scheduler, assistant, *_ = env
+    asked, seen = [], []
 
     async def ask_course(skill, **params):
-        return agents.Reply(data={"complete": True, "items": []})
-
-    async def ask_work(skill, **params):
-        raise AssertionError("検証できない Outlook の取得に claude を回さない")
-
-    monkeypatch.setattr(assistant, "ask_course", ask_course)
-    monkeypatch.setattr(assistant, "ask_work", ask_work)
-    monkeypatch.setattr(schedule_module, "sync_calendar", lambda *a: SyncReport(0, 0, 0))
-
-    result = await scheduler.sync_hub_calendar("2026-09-24")
-
-    assert result["course"] == "synced" and result["work"] == "disabled"
-
-
-async def test_hub_calendar_sync_keeps_course_when_outlook_is_incomplete(env, monkeypatch):
-    scheduler, assistant, *_ = env
-    monkeypatch.setattr(schedule_module, "OUTLOOK_SYNC_ENABLED", True)
-    seen = []
-
-    async def ask_course(skill, **params):
-        assert skill == "list-calendar-assignments"
+        asked.append((skill, params))
         return agents.Reply(data={"complete": True, "items": [
-            {"id": "assignment-1", "title": "課題", "due": "2026-09-25",
+            {"id": "assignment-1", "title": "課題", "due": "2027-02-01",
              "status": "未着手", "url": "https://notion.so/assignment-1"}]})
 
     async def ask_work(skill, **params):
-        assert skill == "list-events"
-        return agents.Reply(data={"complete": True, "source_count": 1, "items": [
-            {"id": "event-1", "subject": "会議", "start": "2026-09-25T11:00"}]})
+        raise AssertionError("予定カレンダーのために仕事の担当を動かさない")
 
-    def record_sync(hub, snapshot, checked_at):
-        seen.append(snapshot)
+    def record_sync(hub, snapshot, checked_at, days):
+        seen.append((snapshot.source, [i.source_id for i in snapshot.items], days))
         return SyncReport(1, 0, 0)
 
     monkeypatch.setattr(assistant, "ask_course", ask_course)
     monkeypatch.setattr(assistant, "ask_work", ask_work)
     monkeypatch.setattr(schedule_module, "sync_calendar", record_sync)
 
-    result = await scheduler.sync_hub_calendar("2026-09-24")
+    result = await scheduler.sync_hub_calendar("2026-09-26")
 
-    assert result["course"] == "synced"
-    assert result["work"] == "incomplete"
-    assert [(snapshot.source, snapshot.items[0].source_id) for snapshot in seen] == [
-        ("課題", "assignment-1")]
+    assert result == {"course": "synced", "course_counts": {"created": 1, "updated": 0, "stale": 0}}
+    assert asked == [("list-calendar-assignments", {"days": schedule_module.COURSE_CALENDAR_DAYS})]
+    assert seen == [("課題", ["assignment-1"], schedule_module.COURSE_CALENDAR_DAYS)]
 
 
 async def test_hub_calendar_sync_without_hub_does_not_call_agents(env, monkeypatch):
@@ -162,8 +156,7 @@ async def test_hub_calendar_sync_without_hub_does_not_call_agents(env, monkeypat
 
     monkeypatch.setattr(assistant, "ask_course", unexpected)
     monkeypatch.setattr(assistant, "ask_work", unexpected)
-    assert await scheduler.sync_hub_calendar("2026-09-24") == {
-        "course": "no_hub", "work": "no_hub"}
+    assert await scheduler.sync_hub_calendar("2026-09-24") == {"course": "no_hub"}
 
 
 async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
@@ -204,7 +197,7 @@ async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env
 
     async def fake_run(name, day, record=True):
         runs.append((name, day))
-        return {"course": "error", "work": "incomplete"}
+        return {"course": "error"}
 
     async def noop(*args):
         return None
@@ -219,13 +212,13 @@ async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env
     assert runs == [("hub_calendar", "2026-09-18"), ("hub_calendar", "2026-09-18")]
 
 
-async def test_hub_calendar_is_done_for_the_day_when_outlook_is_disabled(env, monkeypatch):
+async def test_hub_calendar_is_done_for_the_day_once_assignments_are_copied(env, monkeypatch):
     scheduler, assistant, *_ = env
     runs = []
 
     async def fake_run(name, day, record=True):
         runs.append((name, day))
-        return {"course": "synced", "work": "disabled"}
+        return {"course": "synced"}
 
     async def noop(*args):
         return None
@@ -828,9 +821,10 @@ class FakeCourseAgent:
     """大学エージェントの代わり。list-due は JSON を返す。"""
     base_url = "http://127.0.0.1:8787"
 
-    def __init__(self, items, classes=None):
+    def __init__(self, items, classes=None, synced=None):
         self.items = items
         self.classes = classes or []
+        self.synced = synced or {}
         self.asked = []
 
     async def ask(self, skill, text="", params=None):
@@ -841,6 +835,8 @@ class FakeCourseAgent:
             data = {"days": (params or {}).get("days"), "items": self.items}
         elif skill == "list-classes":
             data = {"items": self.classes}
+        elif skill == "sync-assignments":
+            data = dict(self.synced)
         # 返事は全エージェント共通の封筒
         envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
                     "limit_reset_at": None, "cost_usd": None}
@@ -887,7 +883,11 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     assert "10:40–12:20` 🎓 データベース" in lines[2]
     assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
     assert "空き:" not in text and "9時 " not in text
-    assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1}
+    # 読んだ会議は予定カレンダーにも書く（AI をもう一度動かさない）
+    assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1,
+                      "meetings": {"created": 1, "updated": 0, "stale": 0}}
+    assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
+    assert [skill for skill, _ in assistant.agents["work"].asked] == ["list-events"]
 
 
 # 1日の帯と空き時間（morning.py）
@@ -1113,3 +1113,50 @@ async def test_toggl_import_waits_for_the_time_db(env, monkeypatch):
     assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}
     assistant.hub = None
     assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}
+
+
+# Moodle の取り込みの知らせと、レトプラの締切
+
+
+async def test_scheduled_sync_announces_new_and_changed_assignments(env):
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    assistant.agents["course"] = FakeCourseAgent([], synced={
+        "added": ["10/26 00:00 情報 / Assignment A"], "updated": ["11/02 00:00 情報 / Assignment B"]})
+
+    assert await scheduler.sync_assignments() is True
+
+    post = slack.posted()[-1]
+    assert post["channel"] == "C7"
+    assert post["text"] == ("📚 Moodle の課題\n• 新しい: 10/26 00:00 情報 / Assignment A\n"
+                            "• 締切が変わった: 11/02 00:00 情報 / Assignment B")
+
+
+async def test_scheduled_sync_stays_quiet_without_changes(env):
+    scheduler, assistant, slack, _ = env
+    slack.channels["C7"] = "20_course"
+    assistant.agents["course"] = FakeCourseAgent([])
+    before = len(slack.posted())
+
+    assert await scheduler.sync_assignments() is True
+    assert len(slack.posted()) == before
+
+
+async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
+    """明日の計画に使うので、振り返りの前に取り込み、明日・明後日の締切をスレッドと日別記録に並べる。"""
+    scheduler, assistant, slack, claude = env
+    claude.behaviors = [{"text": REVIEW_REPLY}]
+    tomorrow = (datetime.now() + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0)
+    later = datetime.now() + timedelta(days=10)
+    agent = FakeCourseAgent([due_item(tomorrow.isoformat(), "レポート", "情報"),
+                             due_item(later.isoformat(), "期末", "情報", uid="2@moodle")])
+    assistant.agents["course"] = agent
+
+    result = await scheduler.run_review("2026-09-26")
+
+    skills = [skill for skill, _ in agent.asked]
+    assert result["synced"] is True and skills.index("sync-assignments") < skills.index("list-due")
+    post, = [p for p in slack.posted() if p.get("text", "").startswith("📌 明日・明後日の締切")]
+    assert post.get("thread_ts") and "情報 レポート" in post["text"] and "期末" not in post["text"]
+    note = assistant.hub.notes[-1]
+    assert "📌 明日・明後日の締切" in note.body and note.body.endswith("明日やることは何か")
