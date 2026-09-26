@@ -338,7 +338,7 @@ def test_nonzero_exit_discards_even_a_result_text():
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
     """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
-    text = config.system_prompt_path.read_text(encoding="utf-8")
+    text = (config.repo_root / "prompts" / "system.md").read_text(encoding="utf-8")
     assert "自動で" in text and "続き" in text and "止まる" in text
 
 

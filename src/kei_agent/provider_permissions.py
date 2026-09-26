@@ -25,7 +25,6 @@ class CapabilityUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class PermissionProfile:
-    grants: frozenset[str]
     filesystem: dict[str, str]
     network_domains: dict[str, str]
     config_overrides: tuple[str, ...]
@@ -89,8 +88,7 @@ def preflight(config: Config, contract: ExecutionContract, runtime: Runtime,
     filesystem = _filesystem(config, contract)
 
     if runtime == "claude_cli":
-        return PermissionProfile(contract.capabilities, filesystem, network_domains, ())
+        return PermissionProfile(filesystem, network_domains, ())
     if "mcp.allowlist" in contract.capabilities and not config.notion_gateway_url:
         raise CapabilityUnavailable("Notion gateway is not configured")
-    return PermissionProfile(contract.capabilities, filesystem, network_domains,
-                             _overrides(filesystem, network_domains))
+    return PermissionProfile(filesystem, network_domains, _overrides(filesystem, network_domains))

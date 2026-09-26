@@ -93,24 +93,10 @@ def test_profile_has_only_the_provider(config, store):
     assert set(profile.__dataclass_fields__) == {"provider"}
 
 
-def test_home_profile_override_is_detectable(config, store):
-    assert not settings.has_agent_profile_override(store, "research")
-    settings.set_agent_provider(store, "research", "codex")
-    assert settings.has_agent_profile_override(store, "research")
-
-
 def test_changing_provider_updates_only_the_provider(config, store):
     settings.set_agent_provider(store, "research", "claude")
 
     assert settings.agent_profile(config, store, "research").provider == "claude"
-
-
-def test_resetting_a_profile_returns_to_the_config_provider(config, store):
-    settings.set_agent_provider(store, "research", "codex")
-    settings.clear_agent_profile(store, "research")
-
-    profile = settings.agent_profile(config, store, "research")
-    assert profile.provider == "claude"
 
 
 def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):

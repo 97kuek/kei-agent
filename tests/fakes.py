@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from kei_agent import runner
+from kei_agent import ask, runner
 from kei_agent.jobs import REQUESTS_DIR
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task
@@ -705,3 +705,10 @@ class FakeNotionAPI:
                           "before": day.__lt__}
                 return all(checks[op](str(bound)[:10]) for op, bound in condition.items() if op in checks)
         return True
+
+
+def pending_asks(config) -> list[tuple[Path, dict]]:
+    """置かれている依頼（kei_agent.ask が書いたファイル）を古い順に。本番は claim_asks で拾う。"""
+    directory = ask.ask_dir(config)
+    return [(path, json.loads(path.read_text(encoding="utf-8")))
+            for path in sorted(directory.glob("*.json"))] if directory.is_dir() else []

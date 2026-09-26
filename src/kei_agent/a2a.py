@@ -165,10 +165,6 @@ class Agent:
             if str(interface.get("protocolBinding", interface.get("protocol_binding", ""))).upper() == "JSONRPC":
                 self._rpc_url = interface["url"]
                 return self._rpc_url
-        # 旧い版の名刺（url だけを持つ）にも当てる
-        if card.get("url"):
-            self._rpc_url = card["url"]
-            return self._rpc_url
         raise A2AError(f"JSON-RPC の窓口が名刺にありません: {self.base_url}")
 
     async def _call(self, http: aiohttp.ClientSession, method: str, params: dict) -> dict:

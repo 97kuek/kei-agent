@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, write_request
+from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
 from kei_agent import runner
 from kei_agent.assistant import Assistant
@@ -1129,7 +1129,7 @@ async def test_ask_from_outside_starts_a_thread_and_runs(env, config):
     assert "🎤 声からの依頼" in posted[0]["text"] and "条件ごとの精度" in posted[0]["text"]
     assert claude.calls[0]["prompt"] == "条件ごとの精度を集計して"
     assert claude.calls[0]["cwd"] == config.research_root / "vlm"
-    assert ask.pending_asks(config) == []      # 拾ったら消す
+    assert pending_asks(config) == []      # 拾ったら消す
 
 
 async def test_ask_from_outside_is_retried_when_slack_post_fails(env, config, monkeypatch):
@@ -1143,7 +1143,7 @@ async def test_ask_from_outside_is_retried_when_slack_post_fails(env, config, mo
         await assistant.handle_asks()
 
     assert path.exists()
-    assert ask.pending_asks(config)[0][1]["text"] == "集計して"
+    assert pending_asks(config)[0][1]["text"] == "集計して"
 
 
 async def test_ask_from_outside_is_retried_when_submit_fails(env, config, monkeypatch):
@@ -1158,7 +1158,7 @@ async def test_ask_from_outside_is_retried_when_submit_fails(env, config, monkey
         await assistant.handle_asks()
 
     assert path.exists()
-    persisted = ask.pending_asks(config)[0][1]
+    persisted = pending_asks(config)[0][1]
     assert persisted["text"] == "集計して"
     assert persisted["thread_ts"] == "1001.000"
 
@@ -1168,7 +1168,7 @@ async def test_ask_from_outside_is_retried_when_submit_fails(env, config, monkey
     assert submit.await_count == 2
     assert submit.await_args_list[0].args[0].thread_ts == persisted["thread_ts"]
     assert submit.await_args_list[1].args[0].thread_ts == persisted["thread_ts"]
-    assert ask.pending_asks(config) == []
+    assert pending_asks(config) == []
 
 
 async def test_ask_loop_recovers_interrupted_asks_only_before_polling(env, config, monkeypatch):
@@ -1230,14 +1230,14 @@ async def test_note_from_outside_is_not_posted_again_when_completion_is_retried(
         await assistant.handle_asks()
 
     assert path.exists()
-    assert ask.pending_asks(config)[0][1]["thread_ts"] == "1001.000"
+    assert pending_asks(config)[0][1]["thread_ts"] == "1001.000"
 
     await assistant.handle_asks()
 
     notes = [text for text in slack.texts() if text.startswith("📌 声で決まったこと")]
     assert len(notes) == 1
     assert claude.calls == []
-    assert ask.pending_asks(config) == []
+    assert pending_asks(config) == []
 
 
 async def test_ask_for_an_unknown_theme_is_reported(env, config):
@@ -1250,7 +1250,7 @@ async def test_ask_for_an_unknown_theme_is_reported(env, config):
 
     assert claude.calls == []
     assert "確認が必要な問題" in "\n".join(slack.texts())
-    assert ask.pending_asks(config) == []
+    assert pending_asks(config) == []
 
 
 def _mentions(slack):

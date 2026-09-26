@@ -70,8 +70,8 @@ async def stranger():
 
     async def card(request):
         # 名刺だけは読めるが、仕事の窓口は JSON を返さない
-        return PlainTextResponse(json.dumps({"url": f"http://127.0.0.1:{port}/a2a"}),
-                                 media_type="application/json")
+        interface = {"url": f"http://127.0.0.1:{port}/a2a", "protocolBinding": "JSONRPC"}
+        return PlainTextResponse(json.dumps({"supportedInterfaces": [interface]}), media_type="application/json")
 
     async def hello(request):
         return PlainTextResponse("<html>Not an agent</html>")

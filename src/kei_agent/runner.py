@@ -490,13 +490,6 @@ def kill_group(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
-async def stop_group(proc) -> None:
-    """プロセスグループごと止めて、回収まで少しだけ待つ。"""
-    kill_group(proc.pid)
-    with suppress(TimeoutError, ProcessLookupError):
-        await asyncio.wait_for(proc.wait(), timeout=EXIT_GRACE_SECONDS)
-
-
 async def run_model(
     config: Config,
     request: ExecutionRequest,

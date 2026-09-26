@@ -693,10 +693,6 @@ class Store:
             self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
                               "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
-    def delete_setting(self, key: str) -> None:
-        with self.conn:
-            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
-
     # 一度だけ知らせるもの
 
     def noticed(self, key: str) -> bool:
@@ -924,13 +920,6 @@ class Store:
         return self.conn.execute(
             """SELECT * FROM time_entries WHERE ended_at IS NOT NULL
                AND started_at >= ? AND started_at < ? ORDER BY started_at""", (since, until)
-        ).fetchall()
-
-    def unsent_work_time_entries(self) -> list[sqlite3.Row]:
-        """前は Notion に書かなかった仕事の記録（not_required）。時間記録への移行で送る。"""
-        return self.conn.execute(
-            """SELECT * FROM time_entries WHERE domain = 'work' AND notion_state = 'not_required'
-               AND ended_at IS NOT NULL ORDER BY started_at"""
         ).fetchall()
 
     def upsert_time_card(self, channel: str, message_ts: str) -> None:

@@ -57,20 +57,6 @@ def write_ask(config: Config, theme: str, text: str, kind: str = "request") -> P
     return path
 
 
-def pending_asks(config: Config) -> list[tuple[Path, dict]]:
-    """置かれている依頼を、古い順に。読めないファイルは捨てる。"""
-    directory = ask_dir(config)
-    if not directory.is_dir():
-        return []
-    asks = []
-    for path in sorted(directory.glob("*.json")):
-        try:
-            asks.append((path, json.loads(path.read_text(encoding="utf-8"))))
-        except (json.JSONDecodeError, OSError):
-            path.unlink(missing_ok=True)
-    return asks
-
-
 def recover_asks(config: Config) -> None:
     """前回のプロセスが残した claim を、起動時に限って回収する。"""
     directory = ask_dir(config)

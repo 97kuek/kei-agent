@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from fakes import pending_asks
 
 from kei_agent_voice import events
 
@@ -224,16 +225,15 @@ def test_the_status_comes_from_the_events_that_were_pushed(config):
 
 def test_a_job_is_not_handed_over_until_it_was_confirmed(config):
     """1回の思い違いで作業が動き出さないように、下書きと渡すのを分ける。"""
-    from kei_agent import ask as asks
 
     tools = _tools(config)
     spoken = tools.propose_request("10_amr-query", "学習曲線を描いて")
 
     assert "amr-query に、学習曲線を描いて、って頼むよ。いい？" in spoken
-    assert asks.pending_asks(config) == []      # 下書きだけでは何も動かない
+    assert pending_asks(config) == []      # 下書きだけでは何も動かない
 
     assert "渡した" in tools.send_request()
-    pending = asks.pending_asks(config)
+    pending = pending_asks(config)
     assert len(pending) == 1
     assert pending[0][1]["theme"] == "10_amr-query"
 

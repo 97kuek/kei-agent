@@ -50,7 +50,7 @@ def test_research_contract_uses_workspace_prompt_and_agent_skills(config):
 
     contract = resolve_contract(config, request)
 
-    prompt_path = workspace.system_prompt or config.system_prompt_path
+    prompt_path = workspace.system_prompt or config.repo_root / "prompts" / "system.md"
     assert contract.recipe == request.recipe
     assert contract.prompt_text == prompt_path.read_text(encoding="utf-8")
     assert contract.skill_dir == config.agent_plugin_dir("research") / "skills"

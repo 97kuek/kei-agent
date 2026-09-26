@@ -180,20 +180,6 @@ def set_agent_provider(store: Store, agent: str, provider: str) -> None:
     _set(store, f"agent.{agent}.provider", provider)
 
 
-def clear_agent_profile(store: Store, agent: str) -> None:
-    """App Home の provider 選択を外し、未選択へ戻す。"""
-    if agent not in MODEL_ACTORS:
-        raise ValueError(f"未知のagentです: {agent}")
-    store.delete_setting(f"agent.{agent}.provider")
-
-
-def has_agent_profile_override(store: Store, agent: str) -> bool:
-    """App Home で provider を明示選択したか。"""
-    if agent not in MODEL_ACTORS:
-        raise ValueError(f"未知のagentです: {agent}")
-    return _get(store, f"agent.{agent}.provider") is not None
-
-
 def selected_provider(config: Config, store: Store, actor: str) -> str:
     """actor が明示選択した provider。空なら実行しない。"""
     if actor not in MODEL_ACTORS:

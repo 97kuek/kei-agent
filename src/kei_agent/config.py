@@ -194,10 +194,6 @@ class Config:
         return gateway_endpoint(self.notion_gateway_url, "notion/v1")
 
     @property
-    def system_prompt_path(self) -> Path:
-        return self.repo_root / "prompts" / "system.md"
-
-    @property
     def overview_dir(self) -> Path:
         """研究全体・中長期の方針のチャンネルが書く場所。
 
