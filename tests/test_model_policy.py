@@ -152,15 +152,6 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
     assert len(set(seen + [router.workspace(config).cwd])) == 3
 
 
-def test_json_object_is_read_from_the_first_brace_block():
-    from kei_agent.router import json_object
-
-    assert json_object('はい\n{"skill": "ask"}\nどうぞ') == {"skill": "ask"}
-    assert json_object("よく分かりません") is None
-    assert json_object("{broken}") is None
-    assert json_object("[1, 2]") is None
-
-
 def test_every_actor_use_case_has_a_recipe_on_both_providers():
     """Claude でも Codex でも同じ担当が動く（知識の担当を足したときに、片方だけ忘れないように）。"""
     from kei_agent.config import MODEL_ACTORS

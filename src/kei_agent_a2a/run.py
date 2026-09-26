@@ -98,53 +98,6 @@ async def execute(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater
     )
 
 
-def _json_values(text: str, opener: str) -> list[object]:
-    """文の中にある、`opener`（`[` か `{`）で始まる JSON を、外側のものだけ前から順に。
-
-    各位置から1度だけ読み、読めた値の中は飛ばす（全部の括弧の組を試さない）。
-    """
-    decoder = json.JSONDecoder()
-    found: list[object] = []
-    position = text.find(opener)
-    while position >= 0:
-        try:
-            value, end = decoder.raw_decode(text, position)
-        except ValueError:
-            position = text.find(opener, position + 1)
-            continue
-        found.append(value)
-        position = text.find(opener, end)
-    return found
-
-
-def json_reply(text: str) -> list[dict]:
-    """AI に JSON で答えさせたときの、返事の読み取り（前後に文やコードの囲みが付いていても拾う）。
-
-    「接続が拒否されました」のような文を「予定0件」と取り違えないよう、JSON の配列が
-    見つからなければ断る（ValueError）。前置きに角括弧があっても、読めるものを探す。
-
-    後ろに出典（`[1, 2]`）のような別の配列が付くことがあるので、**中身のある配列を優先**する。
-    中身のある配列が複数あるときは、後ろのもの（答えの本体は最後に来る）。
-    """
-    text = text or ""
-    lists = [value for value in _json_values(text, "[") if isinstance(value, list)]
-    for found in reversed(lists):
-        items = [item for item in found if isinstance(item, dict)]
-        if items:
-            return items
-    if lists:
-        return []
-    raise ValueError(f"返事を読めません（JSON の配列がありません）: {text[:200]}")
-
-
-def json_object(text: str, key: str) -> dict:
-    """返事から、`key` を持つ JSON オブジェクトを拾う（コードの囲みや前置きが付いていても読む）。"""
-    for value in _json_values(text or "", "{"):
-        if isinstance(value, dict) and key in value:
-            return value
-    raise ValueError("JSON オブジェクトがありません")
-
-
 async def finish(updater: TaskUpdater, payload: str) -> None:
     """封筒を見て、A2A のタスクを終わらせる。`ok: false` なら failed にする。
 

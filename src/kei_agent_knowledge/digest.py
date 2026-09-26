@@ -21,9 +21,9 @@ from pathlib import Path
 
 from kei_agent import runner, themes
 from kei_agent.config import Config
+from kei_agent.model_json import json_object
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.themes import Workspace
-from kei_agent_a2a.run import json_object
 from kei_agent_knowledge import feeds
 
 log = logging.getLogger(__name__)

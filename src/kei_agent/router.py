@@ -9,13 +9,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 
 from kei_agent import runner
 from kei_agent.config import Config
+from kei_agent.model_json import json_object
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.themes import ChannelKind, Workspace
 
@@ -29,7 +28,6 @@ SELF = "self"
 STATUS_TEXT = "どこに聞くか選んでいる…"
 # 判定に渡す一言の長さ（長文は先頭だけで足りる）
 TEXT_LIMIT = 600
-_JSON = re.compile(r"\{.*?\}", re.DOTALL)
 
 PROMPT = """次の「言われたこと」が、どの仕事に当たるかを1つ選んでください。
 
@@ -64,25 +62,14 @@ def catalog(skills: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def json_object(text: str) -> dict | None:
-    """モデルの返事から、最初の {...} を JSON として拾う（前後に文が付いていてもよい）。"""
-    found = _JSON.search(text or "")
-    if not found:
-        return None
-    try:
-        data = json.loads(found.group(0))
-    except ValueError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def parse(text: str, allowed: set[str]) -> Choice:
     """返ってきた文から JSON を拾う。読めなければ ask に回す。
 
     エージェントをまたぐときは、仕事の名前が `course:list-due` のように「相手:仕事」になる。
     """
-    data = json_object(text)
-    if data is None:
+    try:
+        data = json_object(text, "skill")
+    except ValueError:
         return Choice()
     name = str(data.get("skill") or "")
     if name not in allowed:

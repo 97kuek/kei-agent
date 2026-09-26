@@ -157,27 +157,3 @@ async def test_failed_envelope_makes_the_a2a_task_fail():
     updater = _Updater()
     await run.finish(updater, envelope.failure("上限に達した"))
     assert updater.state == "failed"
-
-
-def test_json_reply_takes_the_outer_array_even_when_items_hold_arrays():
-    text = '```json\n[{"subject": "朝会", "attendees": [{"name": "A"}]}]\n```\n出典 [1, 2]'
-    assert run.json_reply(text) == [{"subject": "朝会", "attendees": [{"name": "A"}]}]
-
-
-def test_json_reply_prefers_the_array_that_holds_the_items():
-    assert run.json_reply('注記 [これは説明] 本文 [{"subject": "朝会"}]') == [{"subject": "朝会"}]
-    assert run.json_reply('[{"subject": "朝会"}]\n\n出典 [1, 2]') == [{"subject": "朝会"}]
-    assert run.json_reply("予定はありません。[]") == []
-
-
-def test_json_reply_reads_a_long_reply_without_trying_every_bracket_pair():
-    noise = "[注] " * 3000
-    items = [{"subject": f"会議{i}"} for i in range(300)]
-    assert run.json_reply(noise + json.dumps(items, ensure_ascii=False)) == items
-
-
-def test_json_object_tolerates_code_fences_and_preambles():
-    text = 'こちらです。\n```json\n{"complete": true, "items": []}\n```'
-    assert run.json_object(text, "items") == {"complete": True, "items": []}
-    with pytest.raises(ValueError):
-        run.json_object("予定はありません", "items")

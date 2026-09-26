@@ -16,9 +16,9 @@ from datetime import date, timedelta
 
 from kei_agent import runner, themes
 from kei_agent.config import Config
+from kei_agent.model_json import json_list
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.store import Store
-from kei_agent_a2a import run
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = 
     prompt = PROMPT.format(since=start.isoformat(), until=(start + timedelta(days=max(days, 1))).isoformat())
     text = await _read(config, store or Store(config.db_path), prompt, provider)
     try:
-        found = run.json_reply(text)
+        found = json_list(text)
     except ValueError as e:
         raise WorkCalendarError(str(e)) from None
     events_ = [_event(item) for item in found if str(item.get("start") or "").strip()]

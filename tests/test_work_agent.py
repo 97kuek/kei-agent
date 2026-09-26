@@ -126,11 +126,11 @@ async def test_without_the_connection_it_says_so(server, monkeypatch):
 
 def test_connector_reads_the_json_and_drops_the_body():
     """連携には JSON で答えさせる。会議の本文（参加リンクなど）は持ち込まない。"""
-    from kei_agent_a2a import run
+    from kei_agent.model_json import json_list
 
     text = ('はい、調べました。\n[{"subject": "定例", "start": "2026-09-25T11:00", '
             '"end": "2026-09-25T13:00", "location": "Teams", "organizer": "c@example.com"}]')
-    found = run.json_reply(text)
+    found = json_list(text)
     assert found[0]["subject"] == "定例"
     from kei_agent_work import connector
 
@@ -141,12 +141,12 @@ def test_connector_reads_the_json_and_drops_the_body():
 
 
 def test_connector_says_when_the_reply_is_not_json():
-    from kei_agent_a2a import run
+    from kei_agent.model_json import json_list
 
     with pytest.raises(ValueError, match="読めません"):
-        run.json_reply("[これは JSON ではない]")
+        json_list("[これは JSON ではない]")
     with pytest.raises(ValueError, match="JSON の配列"):
-        run.json_reply("予定はありません")
+        json_list("予定はありません")
 
 
 def test_calendar_text_escapes_values_from_outlook():

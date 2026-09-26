@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from kei_agent import runner
 from kei_agent.config import Config
+from kei_agent.model_json import json_object
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier
-from kei_agent.router import json_object, workspace
+from kei_agent.router import workspace
 
 _RESEARCH_CASES = frozenset({
     UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
@@ -26,8 +27,9 @@ class UsageLimited(RuntimeError):
 
 def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase | None:
     """形式不正・低信頼は None。呼び出し側が通常 recipe へ安全に戻す。"""
-    data = json_object(text)
-    if data is None:
+    try:
+        data = json_object(text, "use_case")
+    except ValueError:
         return None
     try:
         confidence = float(data.get("confidence"))
