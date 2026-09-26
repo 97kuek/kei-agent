@@ -132,7 +132,7 @@ class SelfFix:
         with self.claude_running():
             result = await runner.run_model(
                 self.config, runner.ExecutionRequest(ws, recipe, None, req.channel, req.thread_ts), prompt,
-                ui.activity, ui.text,
+                ui.activity,
             )
         await ui.finish(result.text, awaiting=True)
         if result.is_error:

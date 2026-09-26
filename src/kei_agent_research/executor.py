@@ -1,8 +1,9 @@
-"""頼まれた作業（claude を1回動かす／長い処理をジョブにする）をこなすところ。
+"""頼まれた作業（provider を1回動かす／長い処理をジョブにする）をこなすところ。
 
-できるのは2つ。claude を1回動かすことと、長い処理（pueue のジョブ）の出し入れ。依頼は JSON で届く。
+できるのは2つ。provider を1回動かすこと（どのエージェントでも同じ `ask`）と、長い処理（pueue のジョブ）の出し入れ。
+依頼は JSON で届く。
 
-    run-claude  {"channel_name": "amr-query", "prompt": "図を作って", "session_id": null,
+    ask         {"channel_name": "amr-query", "prompt": "図を作って", "session_id": null,
                  "channel": "C1", "thread_ts": "1.2", "allowed_domains": ["example.com"]}
     submit-job  {"cwd": "~/research/amr-query", "command": "uv run x.py", "label": "kei-agent-3"}
     list-jobs   {}
@@ -11,8 +12,8 @@
 ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、オーケストレーターが覚えている。
 ここは pueue の待ち行列を持つだけ（docs/architecture.md）。
 
-返すのは全エージェント共通の封筒（`kei_agent_a2a/envelope.py`）で、`data` には `RunResult` が入る。
-経過と柵の扱いは `kei_agent_a2a/claude.py`（大学エージェントと共通）。
+`ask` の依頼と返事の形、経過と柵の扱いは `kei_agent_a2a`（大学・仕事のエージェントと共通）。
+研究だけが違うのは、動かす場所がテーマの作業場になること。
 
 会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方は持たない。
 それはオーケストレーターの仕事（docs/architecture.md）。
@@ -27,18 +28,17 @@ from pathlib import Path
 
 from a2a.server.tasks import TaskUpdater
 
-from kei_agent import research, themes
+from kei_agent import themes
 from kei_agent.config import Config, load_config
 from kei_agent.jobs import Pueue
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.store import Store
-from kei_agent_a2a import claude
-from kei_agent_a2a.executor import SkillExecutor
-from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, RUN_CLAUDE, SUBMIT_JOB
+from kei_agent.themes import Workspace
+from kei_agent_a2a.executor import ASK, SkillExecutor
+from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
 
 log = logging.getLogger(__name__)
 
-SKILLS = (RUN_CLAUDE, SUBMIT_JOB, LIST_JOBS, CANCEL_JOB, FORGET_JOB)
+SKILLS = (ASK, SUBMIT_JOB, LIST_JOBS, CANCEL_JOB, FORGET_JOB)
 NO_JSON = "依頼は JSON で渡してください"
 
 
@@ -53,54 +53,39 @@ def _json(text: str) -> dict:
 
 
 class ResearchExecutor(SkillExecutor):
-    def __init__(self, config: Config | None = None, pueue: Pueue | None = None):
+    agent = "research"
+
+    def __init__(self, config: Config | None = None, pueue: Pueue | None = None, store: Store | None = None):
         self.config = config or load_config()
         self.pueue = pueue or Pueue(self.config)
-        self.store = Store(self.config.db_path)
+        self.store = store or Store(self.config.db_path)
         # pueue のグループは最初に使うときだけ用意する
         self._group_ready = False
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        skill = metadata.get("skill", RUN_CLAUDE)
+        skill = metadata.get("skill", ASK)
         if skill not in SKILLS:
             await self._fail(updater, f"できるのは {' / '.join(SKILLS)} です")
             return
+        if skill == ASK:
+            await self.answer(updater, text)
+            return
         try:
-            ask = claude.ask_json(text) if skill == RUN_CLAUDE else _json(text)
+            ask = _json(text)
         except ValueError as e:
             await self._fail(updater, str(e))
-            return
-        if skill == RUN_CLAUDE:
-            await self._run_agent(updater, ask)
             return
         await self._job(updater, skill, ask)
 
-    async def _run_agent(self, updater: TaskUpdater, ask: dict) -> None:
-        try:
-            ws = themes.resolve(self.config, str(ask.get("channel_name") or ""))
-        except ValueError as e:
-            await self._fail(updater, str(e))
-            return
+    def workspace(self, ask: dict) -> Workspace:
+        """研究はテーマの作業場で動かす。許可済みの接続先は、本体が依頼に添えてくる。"""
+        ws = themes.resolve(self.config, str(ask.get("channel_name") or ""))
         if ws.cwd is None:
-            await self._fail(updater, f"#{ws.channel_name} には作業用ディレクトリがありません")
-            return
-        try:
-            use_case = UseCase(str(ask.get("use_case") or UseCase.RESEARCH_EXECUTE))
-            provider = str(ask.get("provider") or "")
-            recipe = (resolve(research.AGENT, provider, use_case,
-                              manual=research.is_manual_use_case(use_case))
-                      if provider else resolve_selected(
-                          self.config, self.store, research.AGENT, use_case,
-                          manual=research.is_manual_use_case(use_case)))
-        except (ModelPolicyError, ValueError) as e:
-            await self._fail(updater, str(e))
-            return
-        read_only = bool(ask.get("read_only"))
+            raise ValueError(f"#{ws.channel_name} には作業用ディレクトリがありません")
         ws = replace(ws, allowed_domains=tuple(ask.get("allowed_domains") or ()))
-        if not read_only:
+        if not ask.get("read_only"):
             themes.ensure_workspace(ws)
-        # claude が失敗したときは、封筒の ok が false になる。A2A のタスクも failed にする
-        await claude.finish(updater, await claude.run(self.config, ws, ask, updater, recipe=recipe))
+        return ws
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""

@@ -392,15 +392,6 @@ def test_review_rerun_preserves_arbitrary_manual_append(day_hub):
     assert "手書きの追記" in body
 
 
-def test_legacy_ids_are_recorded_without_replacing_prior_ids(day_hub):
-    day_hub.upsert_day("Daily", "2026-09-21", "Daily", "朝", None)
-    day_hub.set_legacy_ids("2026-09-21", ["old-daily"])
-    day_hub.set_legacy_ids("2026-09-21", ["old-review-1", "old-review-2"])
-    stored = day_hub.notion.rows[0]["properties"]["移行元 ID"]["rich_text"]
-    assert set(json.loads(stored[0]["text"]["content"])) == {
-        "old-daily", "old-review-1", "old-review-2"}
-
-
 def test_run_creates_time_db_with_weekly_chart(fake_notion, tmp_path):
     state = setup(fake_notion, tmp_path).run()
     assert (state.time_db_id, state.time_ds_id) == ("time-db", "time-ds")
@@ -518,32 +509,14 @@ def test_section_text_reads_the_whole_daily_section(day_hub):
     assert day_hub.section_text("2026-09-25", "Daily") == ""
 
 
-def test_append_to_section_keeps_kei_agent_text_and_survives_a_rerun(day_hub):
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "今の本文", None)
-    day_hub.upsert_day("Daily", "2026-09-24", "Daily", "朝", None)
-
-    day_hub.append_to_section("2026-09-24", "振り返り", "### ローカルのファイルから\n前の本文")
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "作り直した本文", None)
-
-    review = day_hub.section_text("2026-09-24", "振り返り")
-    assert "作り直した本文" in review and "前の本文" in review and "今の本文" not in review
-    assert day_hub.section_text("2026-09-24", "Daily") == "朝"
-
-
-def test_append_to_section_needs_the_day(day_hub):
-    with pytest.raises(NotionError, match="2026-09-24"):
-        day_hub.append_to_section("2026-09-24", "Daily", "本文")
-
-
 def test_headings_inside_a_section_do_not_break_the_day_row(day_hub):
     """見出し2は区画の区切りなので、本文や貼られた結論の見出しは3にそろえて入れる。"""
     row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "# Retro\n## 今日やったこと\n- 条件B", None)
     day_hub.append_review_conclusion(row.id, "## 結論\n順番が効く", datetime(2026, 9, 24, 21))
-    day_hub.append_to_section("2026-09-24", "振り返り", "## 手元のファイル\n前の本文")
     day_hub.upsert_day("Daily", "2026-09-24", "Daily", "朝", None)
 
     review = day_hub.review_text("2026-09-24")
-    assert "条件B" in review and "順番が効く" in review and "前の本文" in review
+    assert "条件B" in review and "順番が効く" in review
     assert "### 今日やったこと" in review and "### 結論" in review
     headings = [plain_text(b["heading_2"]["rich_text"]) for b in day_hub.notion.children(row.id)
                 if b["type"] == "heading_2"]

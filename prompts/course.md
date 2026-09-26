@@ -11,18 +11,19 @@
 
 ## どこに何があるか
 
+- **作業場の `CLAUDE.md`** … 学期ごとの補足（教室、担当、試験の形式など）。あれば最初に読む
 - **Box**（読み取り専用）… 学部要項、授業資料、過去問（`Personal / 過去問 / <学年> / <年度> / <科目>`）。
-  手書きやスキャンは `get_preview_page` でページを画像として読む
-- **Notion** … 授業ホーム（「授業」「課題」など）の中なら作る・直す・移す・消すができる。
-  授業ホームの外は見えない。見つからないものを別の経路で探さない
+  手書きやスキャンは、ページを画像として読む
+- **Notion** … `kei-notion`（ゲートウェイ）の道具で、授業ホーム（「授業」「課題」など）の中なら
+  作る・直す・移す・消すができる。授業ホームの外は見えない。見つからないものを別の経路で探さない
 - Moodle からの課題の取り込みは定期の仕組みがやる（手で足した行は消さない）
 
 | 依頼 | skill |
 | --- | --- |
-| 資料・要項・過去問を探す | `kei-agent-course:finding-course-materials` |
-| 課題の締切・状態を見る、直す | `kei-agent-course:managing-assignments` |
-| 授業ホームのページを整理する | `kei-agent-course:managing-course-notion` |
-| 成績・GPA・単位を見る | `kei-agent-course:managing-academic-record` |
+| 資料・要項・過去問を探す | `finding-course-materials` |
+| 課題の締切・状態を見る、直す | `managing-assignments` |
+| 授業ホームのページを整理する | `managing-course-notion` |
+| 成績・GPA・単位を見る | `managing-academic-record` |
 
 ## 答え方
 

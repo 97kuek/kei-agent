@@ -7,19 +7,14 @@ main に取り込んで push し、作業がなくなってから自分を再起
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import json
 import logging
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import guard, issues
+from kei_agent import guard
 from kei_agent.config import Config
-from kei_agent.store import Store
 
 log = logging.getLogger(__name__)
 
@@ -33,14 +28,6 @@ MERGE_MARKER = "📦 取り込み"
 PENDING_NAME = "update-pending"
 # deploy/run.sh が、起動できずに戻したときに残すファイル
 ROLLED_BACK_NAME = "update-rolled-back"
-
-# 要望の古い控え（`overview/` の中）。issue に移したら人が消す
-BACKLOG_NAME = "backlog.md"
-# 移すときの控え（要約と、作った issue の番号）。同じ要望を二度 issue にしない
-MIGRATION_NAME = "backlog-issues.json"
-_BACKLOG_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} ")
-_BACKLOG_LINK = re.compile(r"\s*（\[Slack\]\([^)]*\)）\s*$")
-
 
 # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回。これを数えてから着手する
 REPLIES_BEFORE_START = 2
@@ -263,74 +250,6 @@ FIX_PROMPT = """\
 def push_revert(config: Config) -> None:
     """run.sh が戻した取り消しを GitHub にも送る。"""
     git(config.repo_root, "push", "origin", "main", check=False)
-
-
-def backlog_requests(path: Path) -> list[str]:
-    """backlog.md のまだ済んでいない要望（`- [ ]`）の文。日時と Slack へのリンクは外す。"""
-    items: list[list[str]] = []
-    current: list[str] | None = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("- [ ] "):
-            current = [line.removeprefix("- [ ] ")]
-            items.append(current)
-        elif current is not None and line.startswith("  "):
-            current.append(line[2:])
-        else:
-            current = None
-    texts = (_BACKLOG_LINK.sub("", _BACKLOG_STAMP.sub("", "\n".join(lines))).strip() for lines in items)
-    return [text for text in texts if text]
-
-
-def migrate_backlog_to_issues(config: Config, dry_run: bool = True) -> list[dict]:
-    """一度だけ使う: `overview/backlog.md` のまだ済んでいない要望を、要約した GitHub issue にする。
-
-    dry_run では要約を作って返すだけ（`<state_dir>/backlog-issues.json` に控える）。dry_run=False では
-    控えて確かめた要約だけで issue を作り、番号を返す（要約の無いものは作らない）。作れたものは、もう一度呼んでも作らない。
-    backlog.md は消さない。返す要望の原文は手元で確かめるためのもので、issue には載せない。
-
-        uv run python -c 'import json; from kei_agent import config, improve; print(json.dumps(
-            improve.migrate_backlog_to_issues(config.load_config()), ensure_ascii=False, indent=2))'
-    """
-    return asyncio.run(_migrate_backlog(config, dry_run))
-
-
-async def _migrate_backlog(config: Config, dry_run: bool) -> list[dict]:
-    path = config.overview_dir / BACKLOG_NAME
-    if not path.exists():
-        return []
-    saved_path = config.state_dir / MIGRATION_NAME
-    # 要望の原文は控えに書かない（鍵は原文のハッシュ）
-    saved = json.loads(saved_path.read_text(encoding="utf-8")) if saved_path.exists() else {}
-    store = Store(config.db_path)
-    results = []
-    try:
-        for text in backlog_requests(path):
-            key = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-            entry = {k: v for k, v in saved.get(key, {}).items() if k != "error"}
-            if not entry.get("number"):
-                try:
-                    if entry.get("title"):
-                        # 見て確かめた（手で直したかもしれない）要約。もう一度確かめてから使う
-                        summary = issues.Summary(entry["title"], entry.get("body", ""))
-                        if found := issues.problems(summary, text):
-                            raise issues.IssueError("控えの要約が公開の条件に合いません", "、".join(found))
-                    elif dry_run:
-                        summary = await issues.summarize(config, store, text)
-                    else:
-                        # 公開する前に人が見る約束なので、確かめていない要約では作らない
-                        raise issues.IssueError("確かめた要約がありません（先に dry_run で要約を作って確かめてください）")
-                    entry.update(title=summary.title, body=summary.body)
-                    if not dry_run:
-                        entry["number"] = (await issues.create(config, summary)).number
-                except issues.IssueError as e:
-                    entry["error"] = f"{e.reason}（{e.detail}）" if e.detail else e.reason
-                saved[key] = entry
-                saved_path.parent.mkdir(parents=True, exist_ok=True)
-                saved_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding="utf-8")
-            results.append({"request": text, **entry})
-    finally:
-        store.conn.close()
-    return results
 
 
 def subject_from(text: str, fallback: str) -> str:

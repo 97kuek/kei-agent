@@ -203,8 +203,4 @@ def selected_provider(config: Config, store: Store, actor: str) -> str:
 def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
     if agent not in MODEL_ACTORS:
         raise ValueError(f"未知のagentです: {agent}")
-    base = config.agent_profiles[agent]
-    return AgentProfile(
-        provider=selected_provider(config, store, agent),
-        connectors=base.connectors,
-    )
+    return AgentProfile(provider=selected_provider(config, store, agent))

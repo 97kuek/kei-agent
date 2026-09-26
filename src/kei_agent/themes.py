@@ -116,6 +116,22 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name)
 
 
+def agent_workspace(config: Config, agent: str) -> Workspace:
+    """大学・仕事のエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
+
+    大学は `course_root`（前提のメモの CLAUDE.md を置く）、仕事は状態の置き場の下。どちらも手元のファイルは
+    作業場を読むだけ（制限の表）。
+    """
+    if agent == "course":
+        ws = Workspace(agent, ChannelKind.COURSE, config.course_root)
+    elif agent == "work":
+        ws = Workspace(agent, ChannelKind.WORK, config.state_dir / "agents" / agent)
+    else:
+        raise ValueError(f"作業場を持たないエージェントです: {agent}")
+    ensure_workspace(ws)
+    return ws
+
+
 def theme_dirs(config: Config) -> list[Path]:
     """研究テーマの作業用ディレクトリ。
 

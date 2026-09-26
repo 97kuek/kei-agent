@@ -20,28 +20,23 @@ job_parallel = 1
 handoff_after_turns = 8
 
 # agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
-# model と effort は用途別の固定方針（src/kei_agent/model_policy.py）で決まり、ここには書かない。
+# model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
+# 制限の表（src/kei_agent/agent_policy.py）で決まり、ここには書かない。
 # Claude / Codex の間、または上位 model への自動フォールバックはしない。
 [agents.research]
 provider = ""
-# 研究ホームだけに限定した Notion gateway を実行ごとに注入する
-connectors = ["research-notion"]
 
 [agents.course]
 provider = ""
-connectors = []
 
 [agents.work]
 provider = ""
-connectors = []
 
 [agents.router]
 provider = ""
-connectors = []
 
 [agents.self_fix]
 provider = ""
-connectors = []
 
 [schedule]
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
@@ -66,8 +61,10 @@ backup = true
 session_retention_days = 90
 
 [a2a]
-# 相手を待つ時間（秒）。claude を動かす仕事には、これに claude の上限時間を足した時間まで待つ
+# 相手を待つ時間（秒）。AI を動かす仕事には、これに AI の上限時間を足した時間まで待つ
 timeout_seconds = 300
+# 本体の A2A の口。声のレイヤは担当を直接呼ばず、ここに問い合わせる（担当を呼べるのは本体だけ）
+orchestrator = "http://127.0.0.1:8786"
 # 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
 
 [a2a.agents]

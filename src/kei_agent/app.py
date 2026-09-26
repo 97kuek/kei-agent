@@ -131,6 +131,7 @@ async def serve() -> None:
     job_loop = asyncio.create_task(assistant.job_loop())
     ask_loop = asyncio.create_task(assistant.ask_loop())
     schedule_loop: asyncio.Task | None = None
+    questions_loop: asyncio.Task | None = None
     log.info("Kei Agent を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
@@ -149,13 +150,18 @@ async def serve() -> None:
         # つないでいるエージェント（A2A）の名刺を読んで、生きているかを見る
         await assistant.check_agents()
         schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
+        if config.a2a.orchestrator:
+            # 声のレイヤからの問い合わせ口（担当を呼べるのは本体だけ。questions.py）
+            from kei_agent import questions
+            questions_loop = asyncio.create_task(questions.serve(assistant, config.a2a.orchestrator))
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()
     finally:
         job_loop.cancel()
         ask_loop.cancel()
-        if schedule_loop is not None:
-            schedule_loop.cancel()
+        for loop in (schedule_loop, questions_loop):
+            if loop is not None:
+                loop.cancel()
         await handler.close_async()
 
 

@@ -56,11 +56,6 @@ class ThreadUI:
             shown = _PROGRESS_TEXTS[1]
         await self._thinking(shown)
 
-    async def text(self, chunk: str) -> None:
-        """モデルの途中 text は本文にも status にも表示しない。"""
-        if chunk.strip():
-            await self._thinking(_PROGRESS_TEXTS[2])
-
     async def finish(self, answer: str, awaiting: bool = False) -> bool:
         """まとめを本文に出し、スレッドを次の依頼待ち（返事待ちなら suspended）に戻す。
 

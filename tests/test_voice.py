@@ -815,29 +815,58 @@ async def test_ask_agent_runs_on_the_loop_with_the_lifespan_store(config, store)
     assert "調べた答え" in ws.sent[0]["item"]["output"]
 
 
-def test_tools_use_the_given_store_instead_of_opening_another(config, store):
+async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
+    """担当を呼べるのは本体だけ。声のレイヤは本体の `ask` に JSON で頼み、答えの文だけを受け取る。"""
+    from dataclasses import replace
+
+    from kei_agent import agents
+    from kei_agent_voice.handoff import Handoff
     from kei_agent_voice.tools import Tools
 
-    assert Tools({}, config, store=store).handoff.store is store
+    config = replace(config, a2a=replace(config.a2a, orchestrator="http://127.0.0.1:8786"))
+    asked = []
+
+    async def ask(agent, skill, params=None, on_progress=None, text=""):
+        asked.append((agent.base_url, skill, json.loads(text)))
+        return agents.Reply(text="今日は2コマだよ")
+
+    monkeypatch.setattr(agents, "ask", ask)
+    tools = Tools({}, config)
+    assert isinstance(tools.handoff, Handoff)
+    assert await tools.ask_agent("course", "今日の授業は？") == "今日は2コマだよ"
+    assert asked == [(config.a2a.orchestrator, "ask", {"actor": "course", "question": "今日の授業は？", "theme": ""})]
 
 
-async def test_voice_session_gets_the_lifespan_store(config, store, monkeypatch):
+async def test_voice_says_so_when_the_orchestrator_is_not_configured(config):
+    from dataclasses import replace
+
+    from kei_agent_voice.handoff import NO_ORCHESTRATOR, Handoff
+
+    local = replace(config, a2a=replace(config.a2a, orchestrator=""))
+    assert await Handoff(local).ask("work", "今日の会議は？") == NO_ORCHESTRATOR
+
+
+async def test_voice_session_starts_with_the_saved_listening_setting(config, store, monkeypatch):
+    """マイクを開けるかは、本体が App Home から押して保存した設定で始める（既定は切）。"""
+    from kei_agent import settings
     from kei_agent_voice import app
     from kei_agent_voice.executor import VoiceExecutor
 
     seen = []
 
     class FakeSession:
-        def __init__(self, held, config=None, store=None):
-            seen.append(store)
+        def __init__(self, held, config=None):
+            pass
 
         async def run(self, listening=False):
+            seen.append(listening)
             await asyncio.Event().wait()
 
     monkeypatch.setattr(app, "VoiceSession", FakeSession)
+    settings.set_listening(store, True)
     async with app._ears(VoiceExecutor(), config=config, store=store)(None):
         await asyncio.sleep(0)
-    assert seen == [store]
+    assert seen == [True]
 
 
 async def test_answering_tools_does_not_block_receiving(monkeypatch):

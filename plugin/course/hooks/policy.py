@@ -2,9 +2,12 @@
 """大学エージェントの二の柵（PreToolUse）。
 
 Box は読むだけ。アップロード・作成・移動・複製・更新・コメントを断る。
-Notion は断らない。授業ホームの外へは、専用プロファイルと Notion 側の共有設定で届かない。
-Box と Notion 以外の連携（claude.ai のコネクタ）は、書き込み・送信にあたる道具を断る。
+Notion はゲートウェイ（kei-notion）だけ。授業ホームの外へは、ゲートウェイが通さない。
+アカウントに付いた Notion 連携など、ほかの Notion は断る（授業ホームの外まで届くため）。
+Box のほかのアカウントの連携（claude.ai のコネクタ、Codex の App）は使わない。
 
+Claude と Codex で道具の名前の書き方が違うので、両方を見る
+（Codex は MCP の server の名前の `-` を `_` にし、App の道具を `mcp__codex_apps__<App>__<道具>` と呼ぶ）。
 断る理由だけを stderr に出し、tool の中身は出さない。
 """
 
@@ -15,15 +18,13 @@ import sys
 
 ALLOW, DENY = 0, 2
 
+# Box の道具（Claude は claude.ai の連携）と、Codex の App の道具
 BOX = "mcp__claude_ai_Box__"
-# 大学エージェントが使う連携。ほかの連携（Slack・Microsoft 365 など）への書き込みは断る
-OWN_CONNECTORS = frozenset({"Box", "Notion"})
-# 担当外の連携（claude.ai のコネクタ）で、名前にこれが入っていたら書き込み・外へ出す操作とみなして断る
-OTHER_WRITE_WORDS = ("send", "create", "update", "delete", "modify", "move", "upload", "post", "reply",
-                     "forward", "respond", "trash", "rename", "copy", "set_", "add", "remove", "edit",
-                     "write", "archive", "schedule", "batch", "draft", "complete", "share", "invite",
-                     "publish", "submit", "spawn")
-CLAUDE_AI = "mcp__claude_ai_"
+CODEX_APPS = "mcp__codex_apps__"
+# 授業ホームの中だけに届く Notion（ゲートウェイ）。ほかの Notion は授業ホームの外まで届く
+GATEWAY_SERVERS = frozenset({"kei-notion", "kei_notion"})
+# アカウントの連携（claude.ai のコネクタと Codex の App）。Box のほかは使わない
+ACCOUNT_CONNECTORS = ("mcp__claude_ai_", CODEX_APPS)
 # Box で通す道具（読むだけ）。ここに無い Box の道具は、名前を問わず断る
 BOX_READS = frozenset({
     "search_files_keyword", "search_folders_by_name", "search_files_metadata",
@@ -34,23 +35,55 @@ BOX_READS = frozenset({
 })
 
 
-def other_connector_write(tool: str) -> bool:
-    """担当外の claude.ai コネクタへの書き込みか。"""
-    if not tool.startswith(CLAUDE_AI):
-        return False
-    connector, _, name = tool[len(CLAUDE_AI):].partition("__")
-    return connector not in OWN_CONNECTORS and any(word in name.lower() for word in OTHER_WRITE_WORDS)
+def mcp_server(tool: str) -> str:
+    """`mcp__<server>__<tool>` の server。MCP の道具でなければ空文字。"""
+    if not tool.startswith("mcp__"):
+        return ""
+    server, _, _name = tool[len("mcp__"):].partition("__")
+    return server
+
+
+def codex_app_tool(tool: str) -> str | None:
+    """Codex の App の道具なら `<App>_<道具>`。フックには `mcp__codex_apps__<App>__<道具>` で、
+    モデルには `mcp__codex_apps__<App>_<道具>` で見えるので、どちらも同じ形にそろえる。"""
+    if not tool.startswith(CODEX_APPS):
+        return None
+    return tool[len(CODEX_APPS):].replace("__", "_")
+
+
+def box_tool(tool: str) -> str | None:
+    """Box の道具なら、その名前（search_files_keyword など）。"""
+    if tool.startswith(BOX):
+        return tool[len(BOX):]
+    app_tool = codex_app_tool(tool)
+    if app_tool is not None and app_tool.startswith("box_"):
+        return app_tool[len("box_"):]
+    return None
+
+
+def other_notion(tool: str) -> bool:
+    """ゲートウェイではない Notion か（アカウントの Notion 連携や、名前に notion を含む別の MCP）。"""
+    server = mcp_server(tool)
+    if server == "codex_apps":
+        return "notion" in tool.lower()
+    return "notion" in server.lower() and server not in GATEWAY_SERVERS
 
 
 def decide(event: dict) -> tuple[int, str]:
     tool = str(event.get("tool_name") or "")
     if not tool:
         return DENY, "どの道具を使うのか読み取れませんでした"
-    if tool.startswith(BOX) and tool[len(BOX):] not in BOX_READS:
+    if other_notion(tool):
+        return DENY, ("大学の Notion は kei-notion のゲートウェイだけを使います"
+                      "（ほかの Notion 連携は授業ホームの外まで届きます）")
+    box = box_tool(tool)
+    if box is not None:
+        if box in BOX_READS:
+            return ALLOW, ""
         return DENY, ("Box は読み取り専用です（アップロード・作成・移動・複製・更新はできません）。"
                       "残すものは Notion の授業ホームに置いてください")
-    if other_connector_write(tool):
-        return DENY, "大学エージェントは Box と Notion 以外の連携に書き込めません"
+    if tool.startswith(ACCOUNT_CONNECTORS):
+        return DENY, "大学エージェントは Box のほかの連携を使いません（Notion はゲートウェイから）"
     return ALLOW, ""
 
 

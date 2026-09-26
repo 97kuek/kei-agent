@@ -40,9 +40,11 @@ from kei_agent.auto_messages import (
     interrupted_prompt,
     job_resume_prompt,
     job_status_label,
+    today_line,
 )
 from kei_agent.config import Config
 from kei_agent.course import CourseChannel
+from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
 from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
@@ -147,6 +149,11 @@ class ThemeRuns:
 
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
+# 大学・仕事で、メンションだけで本文が無いときの質問
+AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて", "work": "今日の予定は？"}
+# 声からの問い合わせの用途（読むだけ。軽い recipe で答える）
+VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT, "course": UseCase.COURSE_EXPLAIN,
+                   "work": UseCase.WORK_SINGLE_SOURCE}
 
 def time_domain(channel_name: str) -> str:
     """チャンネル名の番号から、時間記録の領域を決める。"""
@@ -763,25 +770,26 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             await self.notify_trouble(f"🌙 を外した Task を Notion で取り消せませんでした: {e}")
 
     async def run_agent(self, ws: Workspace, prompt: str, session_id: str | None = None,
-                         channel: str = "", thread_ts: str = "",
-                         on_activity=None, on_text=None, *, provider: str | None = None,
-                         use_case: UseCase | None = None, request_text: str | None = None) -> runner.RunResult:
-        """claude を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
+                        channel: str = "", thread_ts: str = "",
+                        on_activity=None, *, provider: str | None = None,
+                        use_case: UseCase | None = None, request_text: str | None = None,
+                        read_only: bool = False) -> runner.RunResult:
+        """研究・自己改善の AI を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
 
         `use_case` を渡せば分類しない。`request_text` は分類に使う依頼者の文（引き継ぎメモや履歴の
         前置きを付ける前のもの）。渡さなければ prompt で分類する。
 
-        どちらで動かしても、同じ `config.toml` の柵（sandbox、読ませない場所、接続先）で動く。
+        どちらで動かしても、同じ制限の表（agent_policy.py）と `config.toml` の柵で動く。
         """
         actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else research.AGENT
         agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
+        provider = provider or settings.selected_provider(self.config, self.store, actor)
+        if provider not in PROVIDERS:
+            # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
+            return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
         if actor == "self_fix":
             use_case = UseCase.SELF_FIX_DESIGN
         else:
-            provider = provider or settings.selected_provider(self.config, self.store, actor)
-            if provider not in PROVIDERS:
-                # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
-                return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
             if use_case is None and research.has_explicit_use_case(prompt):
                 use_case, prompt = research.use_case_for_prompt(prompt)
             if use_case is None:
@@ -793,21 +801,40 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                     return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
                                             limit_reset_at=e.reset_at)
         try:
-            recipe = (resolve(actor, provider, use_case,
-                              manual=actor == research.AGENT and research.is_manual_use_case(use_case))
-                      if provider else resolve_selected(
-                          self.config, self.store, actor, use_case,
-                          manual=actor == research.AGENT and research.is_manual_use_case(use_case)))
+            recipe = resolve(actor, provider, use_case,
+                             manual=actor == research.AGENT and research.is_manual_use_case(use_case))
         except ModelPolicyError as e:
             return runner.RunResult(is_error=True, errors=[str(e)])
         with self.claude_running():
             if agent is not None:
                 return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
-                                          use_case, on_activity, on_text, provider=recipe.provider)
+                                          use_case, on_activity, provider=recipe.provider, read_only=read_only)
             return await runner.run_model(
-                self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts), prompt,
-                on_activity, on_text,
+                self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts, read_only),
+                prompt, on_activity,
             )
+
+    async def ask_agent(self, actor: str, prompt: str, session_id: str | None = None,
+                        channel: str = "", thread_ts: str = "", on_activity=None, *,
+                        provider: str | None = None, read_only: bool = False,
+                        use_case: UseCase | None = None) -> runner.RunResult:
+        """大学・仕事のエージェントに自由な依頼（`ask`）を1回頼む。結果は研究の run_agent と同じ形。
+
+        用途を渡さなければ、エージェントがその担当の分類器で決める。
+        """
+        agent = self.agents.get(actor)
+        if agent is None:
+            await self.notify_trouble(f"{actor} のエージェントの住所が config.toml の [a2a.agents] にありません")
+            return runner.RunResult(is_error=True, errors=[f"{actor} のエージェントの住所がありません"])
+        provider = provider or settings.selected_provider(self.config, self.store, actor)
+        if provider not in PROVIDERS:
+            return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
+        payload = {"prompt": prompt, "session_id": session_id, "channel": channel, "thread_ts": thread_ts,
+                   "provider": provider, "read_only": read_only}
+        if use_case is not None:
+            payload["use_case"] = use_case.value
+        with self.claude_running():
+            return await agents.run_ask(agent, payload, on_activity)
 
     # 決まった時刻の処理から使う（schedule.py）
 
@@ -1111,17 +1138,20 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             await ui.keep_working()
         return result
 
-    async def _converse(self, req: Request, ws: Workspace, prompt: str, ui: ThreadUI | None) -> runner.RunResult:
-        """このスレッドの会話の続きとして claude を動かす。会話が失われていたら、Slack の履歴から戻す。
+    async def _converse(self, req: Request, ws: Workspace | None, prompt: str, ui: ThreadUI | None,
+                        actor: str | None = None) -> runner.RunResult:
+        """このスレッドの会話の続きとして担当の AI を動かす。会話が失われていたら、Slack の履歴から戻す。
 
+        研究・自己改善は run_agent、大学・仕事はそのエージェントの `ask` に頼む。会話の続け方
+        （session の版、履歴からの戻し、session が消えていたときのやり直し）はどの担当も同じ。
         ui がなければ、経過を Slack に見せずに動かす（引き継ぎメモを書かせるときなど）。
         """
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else research.AGENT
+        actor = actor or ("self_fix" if ws is not None and ws.kind is ChannelKind.IMPROVE else research.AGENT)
         provider = settings.selected_provider(self.config, self.store, actor)
-        version = runner.system_prompt_version(self.config)
+        version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
         prior_provider = self.store.last_provider(req.channel, req.thread_ts, actor)
         # [[research-design]] などの指定は依頼者の文の先頭にある。前置きを付ける前に読み取る
@@ -1136,17 +1166,23 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if stalled or (row is not None and row["session_id"] and not session_id) or (
             prior_provider is not None and prior_provider != provider
         ):
-            # 止まった回は claude 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
+            # 止まった回は provider 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts,
                                     stalled if stalled and stalled != req.text else None, dropped=dropped)
             session_id = None
 
-        on_activity, on_text = (ui.activity, ui.text) if ui is not None else (None, None)
+        on_activity = ui.activity if ui is not None else None
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
+            # 今日の日付と曜日は、どの担当にも同じ形で先頭に付ける（「今日の授業は？」に答えられるように）
+            prompt = today_line() + prompt
+            if actor in (course.AGENT, work.AGENT):
+                return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
+                                            on_activity, provider=provider)
+            assert ws is not None
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
-                                        on_activity, on_text, provider=provider,
+                                        on_activity, provider=provider,
                                         use_case=use_case, request_text=request_text)
 
         result = await attempt(prompt, session_id)
@@ -1165,6 +1201,73 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 self.store.set_prompt_version(req.channel, req.thread_ts, version)
             else:
                 self.store.set_last_provider(req.channel, req.thread_ts, actor, provider)
+        return result
+
+    async def answer_question(self, actor: str, question: str, theme: str = "") -> str:
+        """声のレイヤからの問い合わせ（本体の A2A の口、questions.py）。
+
+        担当を呼べるのは本体だけ。どの担当にも読むだけで頼み、Slack に出すときと同じ出力の確認を通す。
+        """
+        if actor not in VOICE_USE_CASES:
+            return "研究、授業、仕事のどれを調べるか分からなかった。"
+        if not question.strip():
+            return "何を調べるか分からなかった。"
+        prompt = today_line() + question.strip()
+        use_case = VOICE_USE_CASES[actor]
+        if actor == research.AGENT:
+            if not theme.strip():
+                return "どの研究テーマを調べるかも教えて。"
+            try:
+                ws = themes.resolve(self.config, theme.strip().lstrip("#"))
+            except ValueError:
+                return "その研究テーマは使えない名前だった。"
+            if ws.kind is not ChannelKind.THEME:
+                return "その名前は研究テーマではなかった。"
+            result = await self.run_agent(ws, prompt, use_case=use_case, read_only=True)
+        else:
+            result = await self.ask_agent(actor, prompt, read_only=True, use_case=use_case)
+        answer, _ = self.render_reply(result)
+        return answer
+
+    async def converse_with_agent(self, req: Request, actor: str) -> runner.RunResult:
+        """大学・仕事の自由な質問。研究と同じ流れ（会話の続き・経過・上限・出力の確認・再起動からのやり直し）。
+
+        研究と違って本体に作業場を持たないので、添付の保存・スレッドのログ・出力の添付はない。
+        スレッドのロックと同時実行の上限は、呼び出し側（_dispatch）が持つ。
+        """
+        ui = self.thread_ui(req)
+        await ui.start()
+        run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
+        # 途中で終了させられても、次の起動で拾ってやり直せるように控えておく
+        in_flight = self.store.start_in_flight(req.to_payload())
+        try:
+            result = await self._converse(req, None, req.text or AGENT_DEFAULT_QUESTIONS[actor], ui, actor=actor)
+        except asyncio.CancelledError:
+            self.store.end_run(run_id, is_error=True, cost_usd=None)
+            raise
+        except Exception:
+            self.store.finish_deferred(in_flight)
+            self.store.end_run(run_id, is_error=True, cost_usd=None)
+            raise
+        self.store.finish_deferred(in_flight)
+        self.store.end_run(run_id, result.is_error, result.cost_usd)
+        if req.trigger in ("message", "voice"):
+            self.store.count_turn(req.channel, req.thread_ts)
+        self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
+        if result.limit_reset_at is not None:
+            await self.defer_for_limit(req, result.limit_reset_at, result.provider or "")
+            self.store.set_awaiting(req.channel, req.thread_ts, True)
+            await ui.finish("")
+            await self.mark_answered(req, failed=True)
+            return result
+        answer, _ = self.render_reply(result)
+        awaiting = result.is_error or AWAITING_MARKER in result.text
+        self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
+        streamed = await ui.finish(answer, awaiting and not result.is_error)
+        if not streamed:
+            for chunk in split_text(answer):
+                await self.post(req, chunk, markdown=True)
+        await self.mark_answered(req, result.is_error)
         return result
 
     async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,

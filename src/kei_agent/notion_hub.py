@@ -34,7 +34,6 @@ DAILY_PROPERTIES = {
     "対象日": {"date": {}},
     "Daily Slack": {"url": {}},
     "レトプラ Slack": {"url": {}},
-    "移行元 ID": {"rich_text": {}},
 }
 CALENDAR_REQUIRED = {"名前": "title", "日付": "date", "タグ": "multi_select"}
 CALENDAR_ADDITIONS = {
@@ -476,35 +475,6 @@ class HubStore:
             return ""
         return blocks_to_markdown(self.notion.children(page["id"]), self.notion.children)
 
-    def set_legacy_ids(self, day: str, ids: list[str]) -> None:
-        page = self._day(day)
-        if page is None:
-            raise NotionError(f"{day} の移行先が見つかりません")
-        raw = plain_text(page.get("properties", {}).get("移行元 ID", {}).get("rich_text") or [])
-        try:
-            prior = json.loads(raw) if raw else []
-        except ValueError:
-            raise NotionError(f"{day} の移行元 ID を読めません") from None
-        if not isinstance(prior, list) or not all(isinstance(item, str) for item in prior):
-            raise NotionError(f"{day} の移行元 ID が不正です")
-        merged = sorted(set(prior) | set(ids))
-        if merged == sorted(prior):
-            return
-        payload = json.dumps(merged, ensure_ascii=False)
-        if len(payload) > 2000:
-            raise NotionError(f"{day} の移行元 ID が Notion の文字数上限を超えます")
-        self.notion.request("PATCH", f"/pages/{page['id']}", {"properties": {
-            "移行元 ID": {"rich_text": rich_text(payload)}}})
-
-    def section_body(self, day: str, kind: Literal["Daily", "振り返り"]) -> str:
-        """Kei Agent が書く本文（境界より前）だけ。境界と、その後の手書き・結論は含めない。"""
-        page = self._day(day)
-        if page is None:
-            return ""
-        blocks = self.notion.children(page["id"])
-        _, content = self._section(blocks, "Daily" if kind == "Daily" else "レトプラ")
-        return blocks_to_markdown(content[:self._managed_end(content)], self.notion.children)
-
     def append_review_conclusion(self, page_id: str, text: str, stamp: datetime,
                                  message_id: str | None = None) -> None:
         if not text.strip():
@@ -552,16 +522,6 @@ class HubStore:
     def review_text(self, day: str) -> str:
         """その日のレトプラ全体（翌朝の Daily の材料）。"""
         return self.section_text(day, "振り返り")
-
-    def append_to_section(self, day: str, kind: Literal["Daily", "振り返り"], markdown: str) -> None:
-        """区画の末尾（境界と追記のあと）に足す。Kei Agent の本文は書き換えないので、作り直しても残る。"""
-        page = self._day(day)
-        if page is None:
-            raise NotionError(f"{day} の日別記録がありません")
-        heading, section = self._section(self.notion.children(page["id"]), "Daily" if kind == "Daily" else "レトプラ")
-        self._managed_end(section)
-        append_blocks(self.notion, page["id"], section_blocks(markdown),
-                      section[-1]["id"] if section else heading["id"])
 
     # 時間記録
 

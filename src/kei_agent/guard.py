@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from kei_agent.agent_policy import AgentPolicy
     from kei_agent.config import Config
     from kei_agent.themes import Workspace
 
@@ -43,6 +44,14 @@ STRIPPED_ENV_PREFIXES = ("SLACK_", "NOTION_", "KEI_AGENT_NOTION_", "KEI_AGENT_AL
 KEPT_CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 # prefix で書けない、Kei Agent 自身の合言葉（KEI_AGENT_*_TOKEN など）。あとから増えても渡さない
 _KEI_AGENT_SECRET_ENV = re.compile(r"^KEI_AGENT_\w*(?:TOKEN|SECRET|PASSWORD|API_KEY)$")
+
+# 制限の表で持たないときに、名指しで断る Claude の道具（ユーザー設定に広い許可があっても、断るほうが強い）
+SEARCH_TOOLS = ("Glob", "Grep")
+# Edit の許可は Write と NotebookEdit にも効くので、書けない担当ではまとめて断る
+EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
+SUBAGENT_TOOLS = ("Task", "Agent")
+# アカウントに付いた Notion 連携（claude.ai）。Notion はゲートウェイだけを使う
+ACCOUNT_NOTION = "mcp__claude_ai_Notion"
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
 PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.toml", "deploy/")
@@ -94,8 +103,52 @@ def read_roots(config: Config, ws: Workspace) -> tuple[Path, ...]:
     return (ws.cwd,)                  # テーマと、自分を直すときの worktree
 
 
-def build_settings(config: Config, ws: Workspace, *, read_only: bool = False) -> dict:
-    """実行境界で確定した read-only 権限だけを Claude に渡す。"""
+def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> dict[str, list[str]]:
+    """制限の表から、Claude に許す道具と断る道具を作る（dontAsk なので、許していないものは使えない）。
+
+    アカウントの連携を使う担当はユーザー設定を読むので、そこに広い許可があっても効かないよう、
+    表にない道具は名指しで断る。
+    """
+    from kei_agent.agent_policy import NOTION_MCP
+
+    assert ws.cwd is not None
+    allow: list[str] = []
+    if policy.files == "none":
+        # 読めるのは自分の作業場だけ（前提のメモ）。探す道具は渡さない
+        allow.append(_abs_rule("Read", ws.cwd))
+    else:
+        allow += [_abs_rule("Read", root) for root in read_roots(config, ws)] + ["Glob", "Grep"]
+    if policy.files == "write":
+        allow.append(_abs_rule("Edit", ws.cwd))
+    if policy.shell:
+        allow.append("Bash")
+    if policy.web:
+        allow += ["WebSearch", "WebFetch"]
+    if policy.plugin:
+        allow.append("Skill")
+    allow.append("TodoWrite")
+    if policy.notion_tools is None:
+        allow.append(f"mcp__{NOTION_MCP}")
+    else:
+        allow += [f"mcp__{NOTION_MCP}__{tool}" for tool in policy.notion_tools]
+    for connector in policy.connectors:
+        allow += connector.claude_names()
+    deny = [# 秘密情報の置き場所。sandbox は Bash にしか効かないので、読む道具（Read・Grep・Glob）でも塞ぐ。
+            # フォルダ（~/.ssh）とファイル（~/.netrc）の両方の書き方で書く
+            *(rule for path in config.deny_read for rule in (f"Read(/{path})", _abs_rule("Read", path))),
+            *(SEARCH_TOOLS if policy.files == "none" else ()),
+            *(EDIT_TOOLS if policy.files != "write" else ()),
+            *(() if policy.shell else ("Bash",)),
+            *(() if policy.web else ("WebSearch", "WebFetch")),
+            *(() if policy.plugin else ("Skill",)),
+            *SUBAGENT_TOOLS,
+            # Notion はゲートウェイだけ。アカウントに付いた Notion 連携は、どの担当にも使わせない
+            ACCOUNT_NOTION]
+    return {"allow": allow, "deny": deny}
+
+
+def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
+    """実行境界で確定した権限だけを Claude に渡す。"""
     assert ws.cwd is not None
     return {
         "sandbox": {
@@ -113,21 +166,7 @@ def build_settings(config: Config, ws: Workspace, *, read_only: bool = False) ->
                 "denyRead": [str(p) for p in config.deny_read],
             },
         },
-        "permissions": {
-            "allow": [
-                *[_abs_rule("Read", root) for root in read_roots(config, ws)],
-                *([] if read_only else [_abs_rule("Edit", ws.cwd)]),
-                "Glob",
-                "Grep",
-                *([] if read_only else ["Bash"]),
-                "WebSearch",
-                "WebFetch",
-                "Skill",
-                "TodoWrite",
-                # 研究ホームだけを操作できる Notion（src/kei_agent_notion_gateway）
-                *([] if read_only else ["mcp__research-notion"]),
-            ],
-        },
+        "permissions": claude_permissions(config, ws, policy),
     }
 
 

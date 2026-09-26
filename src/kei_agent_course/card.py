@@ -68,9 +68,9 @@ def build_card(base_url: str) -> AgentCard:
             AgentSkill(
                 id=ASK,
                 name="授業のことに答える",
-                description="定型に当てはまらない質問に、自分の claude が答える。Box の学部要項・過去問と、"
+                description="定型に当てはまらない質問に、選択済み provider が答える。Box の学部要項・過去問と、"
                             "Notion の授業・課題を読んで、根拠（ファイル名と URL）を付けて返す",
-                tags=["box", "notion", "claude"],
+                tags=["box", "notion"],
                 examples=["情報セキュリティBの過去問ある？", "卒業に必要な単位数は？", "この課題の出し方どうだった？"],
             ),
             AgentSkill(

@@ -11,7 +11,8 @@
 #         deploy/install.sh notion-gateway Notion ゲートウェイ（Notion に届く唯一の口）を登録
 set -eu
 
-# 引数に course / research などを付けると、そのプロセスのほうを登録する
+# 引数に course / research などを付けると、そのプロセスのほうを登録する。
+# research / course / work の plist は、どれも deploy/run-agent.sh <名前> を呼ぶ（エージェントを足すときは、あちらの case にも足す）
 case "${1:-}" in
   course|research|work|voice|notion-gateway)
     LABEL="com.kei-agent.${1}"

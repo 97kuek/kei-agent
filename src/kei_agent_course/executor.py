@@ -19,9 +19,8 @@ from kei_agent.config import Config, load_config
 from kei_agent.notion import NotionError
 from kei_agent.store import Store
 from kei_agent.timelog import TogglError
-from kei_agent_a2a import claude
 from kei_agent_a2a.executor import SkillExecutor, asked_days
-from kei_agent_course import moodle, notion_sync, periods, toggl_report, tools
+from kei_agent_course import moodle, notion_sync, periods, toggl_report
 from kei_agent_course.ics import Event
 from kei_agent_course.skills import (
     ASK,
@@ -64,6 +63,8 @@ def due_data(events: list[Event], days: int) -> dict:
 
 
 class CourseExecutor(SkillExecutor):
+    agent = "course"
+
     def __init__(self, config: Config | None = None, store: Store | None = None):
         self.config = config or load_config()
         self.store = store or Store(self.config.db_path)
@@ -174,25 +175,5 @@ class CourseExecutor(SkillExecutor):
         await self._done(updater, text + note)
 
     async def _ask(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        """定型に当てはまらない質問に、自分の claude が答える（連携で Box と Notion を読む）。"""
-        question = claude.ask_prompt(text)
-        if not question:
-            await self._fail(updater, "質問が空です")
-            return
-        prompt = (f"今日は {date.today().isoformat()}（{periods.weekday_of(date.today())}曜）。"
-                  f"次の質問に答えてください。\n\n{question}")
-        from kei_agent.model_classifier import UsageLimited, classify_course
-        try:
-            use_case = await classify_course(self.config, self.store, question)
-        except UsageLimited as e:
-            await self._fail(updater, str(e))
-            return
-        try:
-            answer = await claude.ask_connector(
-                self.config, prompt, tools.ALLOWED, self.config.agent_plugin_dir(tools.AGENT),
-                tools.DENY, tools.TIMEOUT_MINUTES, store=self.store, agent=tools.AGENT,
-                use_case=use_case, provider=str(metadata.get("provider") or ""))
-        except claude.ConnectorError as e:
-            await self._fail(updater, str(e), e.limit_reset_at)
-            return
-        await self._done(updater, answer)
+        """定型に当てはまらない質問。Box と、ゲートウェイ経由の授業ホームを読んで答える（どの担当とも同じ ask）。"""
+        await self.answer(updater, text)

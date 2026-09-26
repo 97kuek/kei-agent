@@ -5,9 +5,9 @@ from __future__ import annotations
 from a2a.types import AgentCard, AgentSkill
 
 from kei_agent_a2a.card import agent_card
+from kei_agent_a2a.executor import ASK
 
 # 仕事の名前。オーケストレーターはこの id を指定して頼む
-RUN_CLAUDE = "run-claude"
 # 長い処理（ジョブ）。pueue を持つのはこちら側で、行き先の管理（どのスレッドのジョブか）は本体
 SUBMIT_JOB = "submit-job"
 LIST_JOBS = "list-jobs"
@@ -19,18 +19,18 @@ def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺を作る。base_url は `http://127.0.0.1:8788` のような、外から見える住所。"""
     return agent_card(
         "Kei Agent（研究）",
-        "研究テーマのディレクトリで claude または codex を sandbox の中で動かし、長い処理を pueue のジョブにする。"
+        "研究テーマのディレクトリで Claude または Codex を sandbox の中で動かし、長い処理を pueue のジョブにする。"
         "会話の続け方と Slack への見せ方、ジョブの行き先の管理はオーケストレーターが持つ",
         base_url,
         input_modes=("application/json",),
         skills=[
             AgentSkill(
-                id=RUN_CLAUDE,
+                id=ASK,
                 name="研究用 provider を1回動かす",
                 description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、"
                             "そのテーマのディレクトリで選択済み provider を1回動かして、結果を JSON で返す。"
                             "途中の状態は固定の利用者向け文だけをタスクの状態に流す",
-                tags=["claude", "sandbox"],
+                tags=["claude", "codex", "sandbox"],
                 examples=['{"channel_name": "amr-query", "prompt": "図を作って"}'],
             ),
             AgentSkill(

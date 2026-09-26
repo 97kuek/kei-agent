@@ -14,7 +14,7 @@ def build_card(base_url: str) -> AgentCard:
     """このエージェントの名刺。base_url は `http://127.0.0.1:8789` のような、外から見える住所。"""
     return agent_card(
         "Kei Agent（仕事）",
-        "会社のアカウントの Outlook・SharePoint・Teams を読む。読み取り専用で、"
+        "会社のアカウントの Outlook・Teams・SharePoint を読む。読み取り専用で、"
         "件名・時間・相手・場所・リンクを、始まる順に返す（1行ずつ並べる形に合わせる）",
         base_url,
         skills=[
@@ -29,9 +29,9 @@ def build_card(base_url: str) -> AgentCard:
             AgentSkill(
                 id=ASK,
                 name="会社のことに答える",
-                description="定型に当てはまらない質問に、自分の claude が答える。Outlook のメール、"
-                            "SharePoint の資料、Teams のやりとりを読んで答える（長い本文は要約する）",
-                tags=["outlook", "sharepoint", "teams"],
+                description="定型に当てはまらない質問に、選択済み provider が答える。Outlook の予定・メール、"
+                            "Teams のやりとり、SharePoint の資料、人と空き時間を読んで答える（長い本文は要約する）",
+                tags=["outlook", "teams", "sharepoint"],
                 examples=["ゆうちょ案件の直近のやりとりは？", "先週のメールで急ぎのものある？",
                           "この資料どこにある？"],
             ),

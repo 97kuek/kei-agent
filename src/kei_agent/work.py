@@ -1,23 +1,21 @@
 """仕事のチャンネル（#30_work）の依頼を、仕事エージェントに取り次ぐ。
 
-いまできるのは Outlook の予定を読むことだけ。返ってくるのは封筒の `data.items` なので、
+定型は Outlook の予定を読むこと。返ってくるのは封筒の `data.items` なので、
 見せ方（今日・明日・今週）はここで決める。
 
 `list-events` から作る一覧は、件名・時間・場所・リンクまで（1行ずつ並べるため）。自由な質問の返事は
-仕事エージェントの claude が組み立てる（長さの加減は prompts/work.md）
-（docs/architecture.md）。
+仕事エージェントが選択済み provider で組み立てる（長さの加減は prompts/work.md）。会話の続け方は研究と同じ
+（Assistant.converse_with_agent）。
 
 Assistant に混ぜて使う。self.agents、self.post などは Assistant のもの。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router, runner, settings
-from kei_agent.auto_messages import history_prompt
+from kei_agent import agents, router, settings
 from kei_agent.request import Request
 from kei_agent.response_output import safe_failure
 from kei_agent.slack_text import escape
@@ -32,7 +30,7 @@ AGENT = "work"
 
 CAN_DO = ("このチャンネルでできること。\n"
           "• 「今日の予定は？」… Outlook の予定を、今日・明日・このあとで出す\n"
-          "• そのほかの質問… メール・SharePoint・Teams を読んで、要点とリンクで答える\n"
+          "• そのほかの質問… メール・Teams・SharePoint を読んで、要点とリンクで答える\n"
           "送信や予定の作成はできない（読むだけ）。")
 NO_EVENTS = "予定は入っていないよ。"
 WEEKDAYS = "月火水木金土日"
@@ -128,44 +126,8 @@ class WorkChannel:
         await self.mark_answered(req, failed=False)
 
     async def work_ask(self, req: Request) -> None:
-        """自由な質問を仕事エージェントに渡す。経過は1行に出す。"""
-        ui = self.thread_ui(req)
-        await ui.start()
-
-        async def on_progress(raw: str) -> None:
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                return
-            if event.get("activity"):
-                await ui.activity(event["activity"])
-
-        prompt = req.text or "今日の予定は？"
-        if req.message_ts != req.thread_ts:
-            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
-            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped)
-        reply = await self.ask_work_text(prompt, on_progress)
-        answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
-        if reply.ok:
-            self.store.set_last_provider(req.channel, req.thread_ts, AGENT,
-                                         settings.selected_provider(self.config, self.store, AGENT))
-        streamed = await ui.finish(answer)
-        if not streamed:
-            await self.post(req, answer, markdown=True)
-        await self.mark_answered(req, failed=not reply.ok)
-
-    async def ask_work_text(self, question: str, on_progress=None) -> agents.Reply:
-        """自由な質問を渡す（本文は相手が読んで、要点だけ返してくる）。"""
-        agent = self.agents.get(AGENT)
-        if agent is None:
-            await self.notify_trouble("仕事エージェントの住所が config.toml の [a2a.agents] にありません")
-            return agents.Reply.broken("仕事エージェントの住所がないよ")
-        provider = settings.selected_provider(self.config, self.store, AGENT)
-        reply = await agents.ask(agent, ASK, params={"provider": provider}, text=question, on_progress=on_progress)
-        if not reply.ok:
-            await self.notify_trouble(f"仕事エージェント（{agent.base_url}）の ask が返した理由: {reply.text[:300]}")
-        await self.note_limit(reply, AGENT, provider)
-        return reply
+        """自由な質問を仕事エージェントに渡す。会話の続け方・経過・上限・出力の確認は研究と同じ。"""
+        await self.converse_with_agent(req, AGENT)
 
     async def ask_work(self, skill: str, **params) -> agents.Reply:
         """仕事エージェントに頼む。つながらなければ、その理由を入れた返事にして知らせる。"""

@@ -5,7 +5,7 @@ description: Use when研究ホームの Notion にメモや結果を残すとき
 
 # 研究ホームの Notion を使う
 
-`research-notion` の MCP だけを使う。この道具は**研究ホームの下しか触れない**。
+`kei-notion`（ゲートウェイ）の MCP だけを使う。この道具は**研究ホームの下しか触れない**。
 外を指すと「届きません」で失敗する。
 
 **ほかの Notion 連携や Notion の鍵を探さない。** つながらないときは、

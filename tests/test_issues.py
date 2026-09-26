@@ -21,7 +21,7 @@ def model_returning(**fields):
     """runner.run_model の代わり。呼ばれた実行要求とプロンプトを残す。"""
     calls = []
 
-    async def run_model(config, request, prompt, on_activity=None, on_text=None):
+    async def run_model(config, request, prompt, on_activity=None):
         calls.append((request, prompt))
         return runner.RunResult(provider=request.recipe.provider, **fields)
 

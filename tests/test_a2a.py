@@ -168,48 +168,31 @@ async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, 
 
 
 async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
-    """本体は session_id などを添えた JSON で頼む。claude に渡すのは質問だけにする。"""
-    from kei_agent_a2a import claude
+    """本体は session_id などを添えた JSON で頼む。provider に渡すのは質問だけにする。"""
+    from kei_agent import runner
+    from kei_agent_a2a import run
 
     seen = {}
 
-    async def ask_connector(config, prompt, allowed, plugin_dir, deny=(), timeout_minutes=3, **_kwargs):
-        seen["prompt"] = prompt
-        return "過去問は Box にあるよ"
+    async def run_model(_config, request, prompt, **_kwargs):
+        seen.update(prompt=prompt, request=request)
+        return runner.RunResult(text="過去問は Box にあるよ", session_id="s-1")
 
-    monkeypatch.setattr(claude, "ask_connector", ask_connector)
-    payload = json.dumps({"prompt": "情報Bの過去問ある？", "session_id": None,
-                          "channel": "C123", "thread_ts": "1.2"}, ensure_ascii=False)
+    monkeypatch.setattr(run.runner, "run_model", run_model)
+    payload = json.dumps({"prompt": "情報Bの過去問ある？", "session_id": None, "use_case": "course_explain",
+                          "provider": "claude", "channel": "C123", "thread_ts": "1.2"}, ensure_ascii=False)
 
     result = await Agent(server, TOKEN).stream("ask", text=payload)
 
     assert result.ok and json.loads(result.answer)["text"] == "過去問は Box にあるよ"
-    assert seen["prompt"].endswith("情報Bの過去問ある？")
-    # スレッドの鍵やチャンネル ID を、質問として claude に渡さない
-    assert "C123" not in seen["prompt"] and "session_id" not in seen["prompt"]
+    assert seen["prompt"] == "情報Bの過去問ある？"
+    # スレッドの鍵やチャンネル ID は、質問ではなく実行要求として渡す
+    assert (seen["request"].channel, seen["request"].thread_ts) == ("C123", "1.2")
 
 
 async def test_unknown_skill_fails_with_a_reason(server):
     result = await Agent(server, TOKEN).ask("", text="よろしく")
     assert not result.ok and "どの仕事か分かりません" in json.loads(result.answer)["text"]
-
-
-def test_course_allows_every_notion_operation_but_no_box_write():
-    """授業ホームの中では Notion を自由に使える。Box は読むだけ。"""
-    from kei_agent_course import tools
-
-    assert "mcp__claude_ai_Notion__notion-create-database" in tools.ALLOWED
-    assert "mcp__claude_ai_Notion__notion-move-pages" in tools.ALLOWED
-    assert "mcp__claude_ai_Notion__notion-duplicate-page" in tools.ALLOWED
-    assert not any(name.endswith(("upload_file", "upload_file_version", "create_folder", "move_file",
-                                  "move_folder", "copy_file", "create_file_comment")) for name in tools.ALLOWED)
-
-
-def test_course_still_denies_box_writes_by_name():
-    from kei_agent_course import tools
-
-    assert "mcp__claude_ai_Box__upload_file" in tools.DENY
-    assert not set(tools.ALLOWED) & set(tools.DENY)
 
 
 async def test_list_classes_for_another_weekday_uses_that_days_date(server, monkeypatch):

@@ -126,11 +126,11 @@ async def test_without_the_connection_it_says_so(server, monkeypatch):
 
 def test_connector_reads_the_json_and_drops_the_body():
     """連携には JSON で答えさせる。会議の本文（参加リンクなど）は持ち込まない。"""
-    from kei_agent_a2a import claude
+    from kei_agent_a2a import run
 
     text = ('はい、調べました。\n[{"subject": "定例", "start": "2026-09-25T11:00", '
             '"end": "2026-09-25T13:00", "location": "Teams", "organizer": "c@example.com"}]')
-    found = claude.json_reply(text)
+    found = run.json_reply(text)
     assert found[0]["subject"] == "定例"
     from kei_agent_work import connector
 
@@ -148,7 +148,7 @@ async def test_calendar_snapshot_requires_matching_source_count(config, store, m
                            "items": [{"id": "event-1", "subject": "会議",
                                       "start": "2026-09-25T11:00", "end": "2026-09-25T12:00"}]})
 
-    monkeypatch.setattr(connector.claude, "ask_connector", reply)
+    monkeypatch.setattr(connector, "_read", reply)
     snapshot = await connector.calendar_snapshot(config, days=30, store=store)
 
     assert snapshot["complete"] is False
@@ -165,7 +165,7 @@ async def test_calendar_snapshot_derives_stable_id_when_outlook_id_missing(confi
                            "items": [{"subject": "会議", "start": "2026-09-25T11:00",
                                       "url": "https://outlook.example/event/1"}]})
 
-    monkeypatch.setattr(connector.claude, "ask_connector", reply)
+    monkeypatch.setattr(connector, "_read", reply)
     first = await connector.calendar_snapshot(config, days=30, store=store)
     second = await connector.calendar_snapshot(config, days=30, store=store)
     assert first["items"][0]["id"].startswith("fallback:")
@@ -173,12 +173,12 @@ async def test_calendar_snapshot_derives_stable_id_when_outlook_id_missing(confi
 
 
 def test_connector_says_when_the_reply_is_not_json():
-    from kei_agent_a2a import claude
+    from kei_agent_a2a import run
 
-    with pytest.raises(claude.ConnectorError, match="読めません"):
-        claude.json_reply("[これは JSON ではない]")
-    with pytest.raises(claude.ConnectorError, match="JSON の配列"):
-        claude.json_reply("予定はありません")
+    with pytest.raises(ValueError, match="読めません"):
+        run.json_reply("[これは JSON ではない]")
+    with pytest.raises(ValueError, match="JSON の配列"):
+        run.json_reply("予定はありません")
 
 
 def test_calendar_text_escapes_values_from_outlook():
@@ -199,9 +199,44 @@ def test_calendar_text_escapes_values_from_outlook():
 
 
 def test_work_connector_has_no_write_tools():
-    """仕事は読むだけ。送信・作成・更新の道具を許可の一覧に入れない。"""
-    from kei_agent_work import connector
+    """仕事は読むだけ。送信・作成・更新の道具を許可の一覧（制限の表）に入れない。"""
+    from kei_agent.agent_policy import policy_of
 
     forbidden = ("send", "create", "update", "delete", "move", "upload", "post")
-    assert not any(any(word in name.lower() for word in forbidden) for name in connector.ALLOWED_ASK)
-    assert not any(any(word in name.lower() for word in forbidden) for name in connector.ALLOWED)
+    names = [name for connector in policy_of("work").connectors for name in connector.claude_names()]
+    assert names and not any(any(word in name.lower() for word in forbidden) for name in names)
+
+
+async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(config, store, monkeypatch):
+    """予定の一覧も、共通の起動口で「読むだけ」の1回として動かす（会話は続けない）。"""
+    from kei_agent import runner
+    from kei_agent_work import connector
+
+    seen = {}
+
+    async def run_model(_config, request, prompt, **_kwargs):
+        seen.update(request=request, prompt=prompt)
+        return runner.RunResult(text='[{"subject": "定例", "start": "2026-09-25T11:00"}]')
+
+    monkeypatch.setattr(connector.runner, "run_model", run_model)
+    events = await connector.events(config, 7, store=store, provider="claude")
+
+    request = seen["request"]
+    assert [e["subject"] for e in events] == ["定例"]
+    assert request.read_only and request.session_id is None
+    assert (request.recipe.actor, request.recipe.provider) == ("work", "claude")
+    assert request.workspace.cwd == config.state_dir / "agents" / "work"
+    assert "mcp__" not in seen["prompt"]                              # どちらの provider にも通じる言い方
+
+
+async def test_calendar_failure_keeps_the_limit(config, store, monkeypatch):
+    from kei_agent import runner
+    from kei_agent_work import connector
+
+    async def run_model(*_args, **_kwargs):
+        return runner.RunResult(is_error=True, errors=["hit your session limit"], limit_reset_at=123.0)
+
+    monkeypatch.setattr(connector.runner, "run_model", run_model)
+    with pytest.raises(connector.WorkCalendarError) as caught:
+        await connector.events(config, 7, store=store, provider="claude")
+    assert caught.value.limit_reset_at == 123.0

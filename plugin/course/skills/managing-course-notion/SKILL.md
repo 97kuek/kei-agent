@@ -1,26 +1,28 @@
 ---
 name: managing-course-notion
-description: Use when授業ホームの Notion のページやデータベースを作る、整理する、移動する、複製する、消すとき。
+description: Use when授業ホームの Notion のページやデータベースを作る、整理する、移動する、消すとき。
 ---
 
 # 授業ホームの Notion を整える
 
-授業ホームの中では、**作成・更新・移動・複製・削除のどれもできる**。
+Notion は `kei-notion`（ゲートウェイ）の道具だけを使う。授業ホームの中では、**作成・更新・移動・削除のどれもできる**。
 
 | したいこと | 使う道具 |
 |---|---|
-| 探す・読む | `notion-search`、`notion-fetch`、`notion-query-data-sources` |
-| ページを作る | `notion-create-pages` |
-| 中身・プロパティを直す | `notion-update-page` |
-| 移す | `notion-move-pages` |
-| 複製する | `notion-duplicate-page` |
-| 消す（ゴミ箱へ） | `notion-update-page` の `in_trash` |
-| データベースを作る・直す | `notion-create-database`、`notion-update-data-source` |
+| 探す・読む | `search`、`read`、`query`（データベースの絞り込み） |
+| ページを作る（データベースの行も） | `create_page` |
+| プロパティ・アイコンを直す | `update_page` |
+| 中身を足す・書き換える | `append_blocks`、`replace_content`、`update_block`、`delete_block` |
+| 移す | `move` |
+| 消す（ゴミ箱へ） | `update_page` の `in_trash` |
+| データベースを作る・直す | `create_database`、`update_data_source` |
+
+複製の道具は無い。複製を頼まれたら、元を `read` で読んで `create_page` で作り直す。
 
 ## 気をつけること
 
-- 触れるのは**授業ホームの下だけ**。この Claude には授業ホームしか共有されていないので、
-  外のページは見つからない。見つからないものを別の経路で探さない
+- 触れるのは**授業ホームの下だけ**（ゲートウェイがそれ以外を断る）。外のページは見つからない。
+  見つからないものを別の経路で探さない。つながらなければ「つながらない」と返す
 - 消す・移す・まとめて直すのは、**戻せない**。何をどう変えるかを先に1行で言ってから実行する
 - 正本の DB は「授業」「課題」「📊 成績履歴」「🎓 単位要件」「📈 GPA推移」の5つ。
   列・relation・DB 名を消す／改名する操作は、Moodle と成績の取り込みを壊すので依頼者に確かめてからにする

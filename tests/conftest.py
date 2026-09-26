@@ -79,3 +79,15 @@ def fake_github(monkeypatch):
 
     monkeypatch.setattr(issues, "summarize", summarize)
     return github
+
+
+@pytest.fixture(autouse=True)
+def no_date_line(monkeypatch):
+    """担当への依頼の先頭に付く今日の日付を、ふだんのテストでは空にする（依頼の本文だけを確かめられるように）。
+
+    日付が付くことは test_assistant.py の専用のテストで確かめる。
+    """
+    from kei_agent import assistant
+
+    monkeypatch.setattr(assistant, "today_line", lambda now=None: "")
+

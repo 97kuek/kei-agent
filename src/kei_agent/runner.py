@@ -1,4 +1,4 @@
-"""claude -p の起動と、stream-json の読み取り。"""
+"""AI の起動口（Claude も Codex も、どの担当もここだけ）と、経過の読み取り。"""
 
 from __future__ import annotations
 
@@ -8,14 +8,15 @@ import os
 import re
 import signal
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from kei_agent import guard, run_hooks
+from kei_agent import codex_apps, guard
+from kei_agent.agent_policy import NOTION_MCP, AgentPolicy
 from kei_agent.config import Config, path_without_venv
 from kei_agent.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.model_policy import ResolvedModel, validate_resolved
@@ -39,75 +40,110 @@ UNKNOWN_LIMIT_RESET = -1.0
 EXIT_GRACE_SECONDS = 5
 # resume しようとした会話が provider 側に残っていないときの文
 SESSION_MISSING_MARKERS = ("No conversation found", "no rollout found for")
-# このファイルが動かすのは研究の claude だけ。skill も MCP も研究のものに限る
-AGENT = "research"
-# 研究ホームだけに届く Notion（src/kei_agent_notion_gateway）。合言葉は claude が環境変数から入れる
-NOTION_MCP = "research-notion"
+# Notion ゲートウェイの親の合言葉（子には渡さない）と、子に渡すヘッダーの値の置き場所
 GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
 GATEWAY_AUTH_ENV = "KEI_AGENT_NOTION_GATEWAY_AUTH"
-# ゲートウェイでの研究の利用者名。この名前の合言葉は研究ホームにしか届かない
-GATEWAY_CLIENT = "research"
+# 二の柵のフック1回の上限（plugin/<agent>/hooks/hooks.json と同じ）
+HOOK_TIMEOUT_SECONDS = 5
+# Claude の担当が持たない Codex の道具（サブエージェント、画像の生成、プラグインの導入の依頼）。どの担当でも切る
+CODEX_OFF_FEATURES = ("multi_agent", "image_generation", "tool_suggest")
+_CONFIG_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-def system_prompt_text(config: Config) -> str:
-    path = config.system_prompt_path
-    return path.read_text(encoding="utf-8") if path.exists() else ""
-
-
-def system_prompt_version(config: Config) -> str:
-    """研究 session の指示・skill の版。変更時は古い会話を再開しない。"""
-    from kei_agent.execution_contract import prompt_fingerprint
-
-    return prompt_fingerprint(system_prompt_text(config), config.agent_plugin_dir(AGENT) / "skills")
-
-
-def run_timeout_seconds(config: Config, ws: Workspace) -> float:
-    """claude 1回の上限時間（秒）。ワークスペースの指定があれば、そちらを使う。"""
-    return (ws.timeout_minutes or config.run_timeout_minutes) * 60
+def run_timeout_seconds(config: Config, ws: Workspace, policy: AgentPolicy | None = None) -> float:
+    """1回の上限時間（秒）。作業場の指定、担当の指定、config.toml の順に使う。"""
+    minutes = ws.timeout_minutes or (policy.timeout_minutes if policy else None) or config.run_timeout_minutes
+    return minutes * 60
 
 
 def notion_mcp_config(config: Config) -> dict:
-    """研究 Claude に渡す MCP の設定。生の Notion トークンではなく、入口の合言葉だけを載せる。"""
+    """Claude に渡すゲートウェイの MCP。生の Notion トークンではなく、担当の合言葉のヘッダーだけを載せる。"""
     return {"mcpServers": {NOTION_MCP: {
         "type": "http",
         "url": config.notion_gateway_url,
-        # build_env は親の合言葉（GATEWAY_TOKEN_ENV）を子に渡さず、研究用の合言葉のヘッダーだけを GATEWAY_AUTH_ENV に置く
+        # build_env が、その担当の合言葉のヘッダーの値を GATEWAY_AUTH_ENV に置く（親の合言葉は渡さない）
         "headers": {"Authorization": f"${{{GATEWAY_AUTH_ENV}}}"},
     }}}
 
 
-def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
-                        recipe: ResolvedModel, *, actor: str = AGENT,
-                        read_only: bool = False, contract: ExecutionContract | None = None) -> list[str]:
-    """Codex CLI の非対話 JSONL 実行。認証は codex CLI のログイン状態に任せる。"""
+def _checked_key(value: str) -> str:
+    if not _CONFIG_KEY.fullmatch(value):
+        raise CapabilityUnavailable("接続の設定名を安全に指定できません")
+    return value
+
+
+def codex_hooks_setting(hook: Path) -> str:
+    """plugin の二の柵（PreToolUse）を Codex にも掛ける設定。Claude では plugin として同じものが効く。"""
+    entry = {"hooks": [{"type": "command", "command": str(hook), "timeout": HOOK_TIMEOUT_SECONDS}]}
+    return "hooks.PreToolUse=" + _toml(entry, array=True)
+
+
+def _toml(value: object, array: bool = False) -> str:
+    """設定の上書きに使う TOML のインライン表記（文字列は JSON の書き方がそのまま TOML になる）。"""
+    if array:
+        return "[" + _toml(value) + "]"
+    if isinstance(value, dict):
+        # 鍵は引用符で囲む（App の道具の名前 `box.get_file_content` の `.` を、入れ子と読ませない）
+        return "{" + ",".join(f"{json.dumps(key)}={_toml(item)}" for key, item in value.items()) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_toml(item) for item in value) + "]"
+    return json.dumps(value)
+
+
+def build_codex_command(config: Config, ws: Workspace, session_id: str | None, recipe: ResolvedModel,
+                        contract: ExecutionContract, apps: Mapping[str, str] | None = None) -> list[str]:
+    """Codex CLI の非対話 JSONL 実行。制限は Claude と同じ表（contract.policy）から作る。"""
     assert ws.cwd is not None
-    # ルーターは状態DBの下（Gitリポジトリ外）で、接続先も作業用MCPも不要な分類だけをする。
-    is_router = actor == "router" or ws.system_prompt == config.repo_root / "prompts" / "router.md"
-    if contract is None:
-        contract = resolve_contract(config, ExecutionRequest(ws, recipe, session_id, "", "", read_only))
+    policy = contract.policy
+    apps = apps or {}
     profile = preflight(config, contract, "codex_cli")
     cmd = [
         config.codex_bin, "exec", "--json", "--strict-config", "--ignore-user-config",
-        "--cd", str(ws.cwd),
+        # 作業場は Git のリポジトリとは限らない（振り分け、大学・仕事の作業場、自己改善の一時ディレクトリ）
+        "--skip-git-repo-check", "--cd", str(ws.cwd),
     ]
     for setting in profile.config_overrides:
         cmd += ["--config", setting]
-    if is_router:
-        cmd.append("--skip-git-repo-check")
     cmd += ["--model", recipe.model]
     if recipe.reasoning_effort:
         cmd += ["--config", f"model_reasoning_effort={recipe.reasoning_effort}"]
-    if contract and contract.prompt_text:
-        cmd += codex_instruction_config(contract)
-    # 個人の App connector（Google Calendar等）は研究にもルーターにも渡さない。
+    if contract.prompt_text:
+        cmd += ["--config", codex_instructions_setting(contract.prompt_text)]
+    # Web の検索は、Claude の WebSearch と同じく表で許した担当だけ（Codex の既定は有効）
+    cmd += ["--config", f"web_search={json.dumps('live' if policy.web else 'disabled')}"]
+    for feature in CODEX_OFF_FEATURES:
+        cmd += ["--disable", feature]
+    if policy.files == "none":
+        # ファイルを読まない担当には、画像を開く道具も渡さない（Claude の Read と同じく作業場の外を見せない）
+        cmd += ["--disable", "view_image"]
+    # アカウントの連携は、表に書いた App の、表に書いた読む道具だけ（ほかの道具はモデルに見せない）。
+    # apps は表示名 → いまのログインでの ID
     cmd += ["--config", "apps._default.enabled=false"]
-    if actor == "research" and not read_only and not is_router:
-        # 研究ホームの外へ届く Notion を持ち込まず、検査済みgatewayだけを渡す。
+    for app in policy.codex_apps:
+        if app.name not in apps:
+            continue
+        key = _checked_key(apps[app.name])
+        cmd += ["--config", f"apps.{key}.enabled=true",
+                "--config", f"apps.{key}.destructive_enabled=false",
+                "--config", f"apps.{key}.default_tools_enabled=false",
+                "--config", f"apps.{key}.tools=" + _toml({tool: {"enabled": True} for tool in app.tools}),
+                # 渡すのは読む道具だけなので、呼ぶたびの承認は求めない（無人で動く）
+                "--config", f'apps.{key}.default_tools_approval_mode="approve"']
+    if policy.notion != "none":
         cmd += [
             "--config", f"mcp_servers.{NOTION_MCP}.url={json.dumps(config.notion_gateway_url)}",
             "--config", f'mcp_servers.{NOTION_MCP}.env_http_headers={{Authorization="{GATEWAY_AUTH_ENV}"}}',
-            "--config", f"mcp_servers.{NOTION_MCP}.enabled=true",
+            # つながらなければ別の経路に乗り換えず、始める前に止まる
+            "--config", f"mcp_servers.{NOTION_MCP}.required=true",
+            # 無人で動くので、呼ぶたびの承認は求めない（Claude の dontAsk と同じ）。届く範囲はゲートウェイが決める
+            "--config", f'mcp_servers.{NOTION_MCP}.default_tools_approval_mode="approve"',
         ]
+        if policy.notion_tools is not None:
+            cmd += ["--config", f"mcp_servers.{NOTION_MCP}.enabled_tools={json.dumps(list(policy.notion_tools))}"]
+    if contract.skill_dir is not None:
+        cmd += ["--config", codex_hooks_setting(contract.skill_dir.parent / "hooks" / "policy.py"),
+                # フックは Kei Agent 自身のもの（plugin/<agent>/hooks）なので、信頼の確認を省く
+                "--dangerously-bypass-hook-trust"]
     if session_id:
         cmd += ["resume", session_id]
     # prompt は stdin から渡す。`-` を明示しないと、Codex CLI は引数のpromptを待つ。
@@ -116,25 +152,28 @@ def build_codex_command(config: Config, ws: Workspace, session_id: str | None,
 
 
 def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
-                          recipe: ResolvedModel, contract: ExecutionContract, *, actor: str = AGENT,
-                          read_only: bool = False) -> list[str]:
+                          recipe: ResolvedModel, contract: ExecutionContract) -> list[str]:
+    policy = contract.policy
     cmd = [
         config.claude_bin,
         "-p",
         "--output-format", "stream-json",
         "--verbose",
-        # ユーザー設定（フックやプラグイン、広い許可ルール）を持ち込まない
-        "--setting-sources", "",
-        "--settings", json.dumps(guard.build_settings(config, ws, read_only=read_only), ensure_ascii=False),
+        # アカウントの連携（Box・Microsoft 365）は、その担当のプロファイルのユーザー設定から読む。
+        # ほかの担当はユーザー設定（フックやプラグイン、広い許可ルール）を持ち込まない
+        "--setting-sources", "user" if policy.connectors else "",
+        "--settings", json.dumps(guard.build_settings(config, ws, policy), ensure_ascii=False),
         "--permission-mode", "dontAsk",
     ]
     if contract.skill_dir:
         cmd += ["--plugin-dir", str(contract.skill_dir.parent)]
-    if actor == "research" and not read_only:
-        # 研究ホームの外へ届く Notion を持ち込ませない。ユーザーやプロジェクトの MCP も読まない
-        cmd += ["--mcp-config", json.dumps(notion_mcp_config(config), ensure_ascii=False), "--strict-mcp-config"]
+    mcp = notion_mcp_config(config) if policy.notion != "none" else {"mcpServers": {}}
+    cmd += ["--mcp-config", json.dumps(mcp, ensure_ascii=False)]
+    if not policy.connectors:
+        # ユーザーやプロジェクトの MCP も、アカウントの連携も読まない
+        cmd.append("--strict-mcp-config")
     if contract.prompt_text:
-        # --resume のときは効かない（会話を始めたときの版が残る）。版が変われば assistant が会話を始め直す
+        # --resume のときは効かない（会話を始めたときの版が残る）。版が変われば本体が会話を始め直す
         cmd += ["--append-system-prompt", contract.prompt_text]
     cmd += ["--model", recipe.model]
     if recipe.reasoning_effort:
@@ -145,16 +184,14 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
 
 
 def build_command(config: Config, request: ExecutionRequest,
-                  contract: ExecutionContract | None = None) -> list[str]:
-    """解決済み recipe だけで Claude/Codex の command を組み立てる。"""
+                  contract: ExecutionContract | None = None, apps: Mapping[str, str] | None = None) -> list[str]:
+    """解決済み recipe と制限の表だけで Claude/Codex の command を組み立てる。"""
     validate_resolved(request.recipe)
-    ws = request.workspace
     contract = contract or resolve_contract(config, request)
     if request.recipe.provider == "codex":
-        return build_codex_command(config, ws, request.session_id, request.recipe,
-                                   actor=request.recipe.actor, read_only=contract.read_only, contract=contract)
-    return _build_claude_command(config, ws, request.session_id, request.recipe, contract,
-                                 actor=request.recipe.actor, read_only=contract.read_only)
+        return build_codex_command(config, request.workspace, request.session_id, request.recipe,
+                                   contract, apps)
+    return _build_claude_command(config, request.workspace, request.session_id, request.recipe, contract)
 
 
 @dataclass(frozen=True)
@@ -193,10 +230,6 @@ async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionPro
 def codex_instructions_setting(text: str) -> str:
     """正本の指示を Codex の developer instruction にする設定（CLI と App Server で共通）。"""
     return "developer_instructions=" + json.dumps(text, ensure_ascii=False)
-
-
-def codex_instruction_config(contract: ExecutionContract) -> list[str]:
-    return ["--config", codex_instructions_setting(contract.prompt_text)]
 
 
 def install_agent_skills(contract: ExecutionContract, cwd: os.PathLike[str]) -> None:
@@ -261,15 +294,15 @@ def install_skill_directory(source_root: Path, cwd: Path) -> None:
 
 
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str,
-              *, include_gateway_auth: bool = True) -> dict[str, str]:
-    """子の環境。Notion の鍵は、研究ホームにしか届かない研究用の合言葉（ヘッダーの値）だけを渡す。"""
+              policy: AgentPolicy | None = None) -> dict[str, str]:
+    """子の環境。Notion の鍵は、その担当のホームにしか届かない合言葉（ヘッダーの値）だけを渡す。"""
     env = guard.strip_env(base)
     master = base.get(GATEWAY_TOKEN_ENV, "").strip()
     env["PATH"] = path_without_venv(base.get("PATH", ""), config.repo_root)
     env["KEI_AGENT_CHANNEL"] = channel
     env["KEI_AGENT_THREAD_TS"] = thread_ts
-    if include_gateway_auth and master:
-        env[GATEWAY_AUTH_ENV] = f"Bearer {gateway_client_token(master, GATEWAY_CLIENT)}"
+    if policy is not None and policy.notion != "none" and master:
+        env[GATEWAY_AUTH_ENV] = f"Bearer {gateway_client_token(master, policy.name)}"
     return env
 
 
@@ -374,6 +407,13 @@ def apply_codex_event(result: RunResult, event: dict) -> str | None:
         activity = describe_tool("Bash", {"command": command})
         result.activities.append(activity)
         return activity
+    if (etype == "item.started" and item_type == "mcp_tool_call") or (
+            etype == "item.completed" and item_type == "web_search"):
+        # Claude と同じ名前で経過に出す（MCP の道具は `mcp__<server>__<tool>`）
+        activity = (describe_tool("WebSearch", {"query": item.get("query") or ""}) if item_type == "web_search"
+                    else describe_tool(f"mcp__{item.get('server') or ''}__{item.get('tool') or ''}", {}))
+        result.activities.append(activity)
+        return activity
     if etype == "item.completed" and item_type == "agent_message":
         text = str(item.get("text") or "").strip()
         if text:
@@ -462,7 +502,6 @@ async def run_model(
     request: ExecutionRequest,
     prompt: str,
     on_activity: Callable[[str], Awaitable[None]] | None = None,
-    on_text: Callable[[str], Awaitable[None]] | None = None,
 ) -> RunResult:
     """用途別 recipe を解決済みの実行要求を一度だけ走らせる。
 
@@ -474,30 +513,21 @@ async def run_model(
     recipe = request.recipe
     validate_resolved(recipe)
     is_codex = recipe.provider == "codex"
-    context = run_hooks.RunContext(
-        agent=recipe.actor,
-        provider=recipe.provider,
-        workspace_kind=ws.kind.value,
-        model=recipe.model,
-    )
     contract = resolve_contract(config, request)
+    policy = contract.policy
+    apps: dict[str, str] = {}
     if is_codex:
-        # --ignore-user-config で起動するので、ユーザー設定の MCP は実行時に存在しない。
-        # この回に明示注入する gateway だけを「利用可能」と扱う。
-        configured_connectors = frozenset({NOTION_MCP})
-        connectors = config.agent_profiles.get(recipe.actor)
-        run_hooks.preflight(context, frozenset(getattr(connectors, "connectors", ())), configured_connectors)
         try:
+            # アカウントの連携は、いまのログインでの ID を表示名から引く（ID は保存しない）
+            apps = await codex_apps.app_ids(config.codex_bin, [app.name for app in policy.codex_apps])
             await verify_codex_profile(config.codex_bin, ws.cwd, preflight(config, contract, "codex_cli"))
-        except CapabilityUnavailable as exc:
+        except (CapabilityUnavailable, codex_apps.AppsUnavailable) as exc:
             return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
         install_agent_skills(contract, ws.cwd)
-    started_at = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
-        *build_command(config, request, contract),
+        *build_command(config, request, contract, apps),
         cwd=ws.cwd,
-        env=build_env(config, dict(os.environ), request.channel, request.thread_ts,
-                      include_gateway_auth=recipe.actor == AGENT and not contract.read_only),
+        env=build_env(config, dict(os.environ), request.channel, request.thread_ts, policy),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -517,7 +547,7 @@ async def run_model(
             except json.JSONDecodeError:
                 continue
             # 途中の assistant / agent_message は内部の思考や下書きを含み得る。
-            # Slack / A2A へ on_text では流さず、完了後の final だけを採用する。
+            # Slack / A2A へは流さず、完了後の final だけを採用する。
             activity = apply_codex_event(result, event) if is_codex else apply_event(result, event)
             if activity and on_activity:
                 await on_activity(activity)
@@ -528,7 +558,7 @@ async def run_model(
 
     stderr_task = asyncio.create_task(proc.stderr.read())
     try:
-        await asyncio.wait_for(read_stdout(), timeout=run_timeout_seconds(config, ws))
+        await asyncio.wait_for(read_stdout(), timeout=run_timeout_seconds(config, ws, policy))
     except TimeoutError:
         result.timed_out = True
         result.is_error = True
@@ -554,12 +584,6 @@ async def run_model(
         result.is_error = True
         result.errors.append(stderr[-2000:])
     finalize_run_result(result, returncode)
-    run_hooks.post_run(run_hooks.RunOutcome(
-        context=context,
-        duration_ms=round((time.monotonic() - started_at) * 1000),
-        is_error=result.is_error,
-        session_id=result.session_id,
-    ))
     return result
 
 

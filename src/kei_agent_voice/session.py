@@ -20,7 +20,6 @@ import asyncio
 import logging
 
 from kei_agent.config import Config, load_config
-from kei_agent.store import Store
 from kei_agent_voice import live
 from kei_agent_voice.face import Face
 from kei_agent_voice.tools import Tools
@@ -32,12 +31,11 @@ class VoiceSession:
     """マイクを開けているあいだ、Realtime API と繋がっている。"""
 
     def __init__(self, held: dict, config: Config | None = None,
-                 brain: live.Live | None = None, face: Face | None = None,
-                 store: Store | None = None):
+                 brain: live.Live | None = None, face: Face | None = None):
         self.held = held
         self.config = config or load_config()
         self.face = face or Face()
-        self.brain = brain or live.Live(Tools(held, self.config, store=store))
+        self.brain = brain or live.Live(Tools(held, self.config))
         self._talking: asyncio.Task | None = None
         self._notices: asyncio.Queue[str] = asyncio.Queue()
         self._notice_worker: asyncio.Task | None = None

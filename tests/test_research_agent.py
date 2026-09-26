@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import research, runner
+from kei_agent import agents, research, runner
 from kei_agent.a2a import Agent
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
@@ -51,15 +51,13 @@ class FakeClaude:
         self.result = result
         self.calls: list[dict] = []
 
-    async def __call__(self, config, request, prompt, on_activity=None, on_text=None):
+    async def __call__(self, config, request, prompt, on_activity=None):
         ws = request.workspace
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": request.session_id,
                            "channel": request.channel, "thread_ts": request.thread_ts,
                            "allowed_domains": ws.allowed_domains, "recipe": request.recipe})
         if on_activity:
             await on_activity("Bash: テスト")
-        if on_text:
-            await on_text("途中まで書けたよ")
         return self.result
 
 
@@ -96,20 +94,20 @@ async def test_card_says_it_runs_claude_and_holds_the_jobs(server):
     card = await Agent(base, TOKEN).card()
     assert card["name"] == "Kei Agent（研究）"
     assert [s["id"] for s in card["skills"]] == [
-        "run-claude", "submit-job", "list-jobs", "cancel-job", "forget-job"]
+        "ask", "submit-job", "list-jobs", "cancel-job", "forget-job"]
 
 
 async def test_the_orchestrator_gets_the_result_and_the_progress(server, config):
-    """結果は RunResult に戻り、途中の経過は on_activity / on_text に届く。"""
+    """結果は RunResult に戻り、途中の経過は on_activity に届く。"""
     from kei_agent import themes
 
     base, claude = server
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("example.com",))
-    activities, texts = [], []
+    activities = []
 
     result = await research.run(
         Agent(base, TOKEN, timeout=30), ws, "図を作って", "sess-1", "C1", "10.1",
-        on_activity=_collect(activities), on_text=_collect(texts))
+        on_activity=_collect(activities))
 
     assert result.text == "できたよ" and result.session_id == "sess-9" and not result.is_error
     assert result.cost_usd == 0.12
@@ -121,7 +119,7 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     assert call["channel"] == "C1" and call["thread_ts"] == "10.1"
     assert call["allowed_domains"] == ("example.com",)
     # tool activity だけを流す。モデルの途中 text はオーケストレーターへも渡さない
-    assert activities == ["Bash: テスト"] and texts == []
+    assert activities == ["Bash: テスト"]
 
 
 async def test_remote_research_honors_an_explicit_manual_recipe(server, config):
@@ -141,20 +139,20 @@ async def test_a_channel_without_a_directory_is_refused(server, config):
     """作業用ディレクトリのないチャンネル（Kei Agent の改善）は断る。"""
     base, claude = server
     agent = Agent(base, TOKEN, timeout=30)
-    task = await agent.ask("run-claude", json.dumps({"channel_name": "00_kei-agent", "prompt": "やって"}))
+    task = await agent.ask("ask", json.dumps({"channel_name": "00_kei-agent", "prompt": "やって"}))
     assert not task.ok and "作業用ディレクトリがありません" in json.loads(task.answer)["text"]
     assert claude.calls == []
 
 
 async def test_a_broken_request_is_refused(server):
     base, _ = server
-    task = await Agent(base, TOKEN, timeout=30).ask("run-claude", "これは JSON ではない")
+    task = await Agent(base, TOKEN, timeout=30).ask("ask", "これは JSON ではない")
     assert not task.ok and "prompt が要ります" in json.loads(task.answer)["text"]
 
 
 def test_to_result_keeps_only_what_it_knows():
     """知らない項目が増えても落ちない。組は JSON で配列になるので戻す。"""
-    result = research.to_result({"text": "できた", "requested_domains": [["example.com", "なぜ"]],
+    result = agents.to_result({"text": "できた", "requested_domains": [["example.com", "なぜ"]],
                                  "これは知らない": 1})
     assert result.text == "できた" and result.requested_domains == [("example.com", "なぜ")]
 

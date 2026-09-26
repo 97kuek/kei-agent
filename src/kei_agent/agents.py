@@ -15,13 +15,17 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from kei_agent import a2a
+from kei_agent import a2a, runner
 from kei_agent.config import Config
 
 log = logging.getLogger(__name__)
 
-# claude を動かす仕事は、返事までに claude の上限時間がかかる
-CLAUDE_SKILLS = ("run-claude", "ask")
+# provider を動かす仕事（どのエージェントでも同じ名前）。返事までに AI の上限時間がかかる
+ASK = "ask"
+MODEL_SKILLS = (ASK,)
+# `ask` の返事（封筒の data）のうち、受け取る RunResult の項目（知らない項目が増えても落ちないように、ここで絞る）
+FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
+          "timed_out", "requested_domains", "limit_reset_at", "provider")
 # 相手が入れ替わっている最中につながらなかったときに、待ってやり直す回数と秒数
 RETRIES, RETRY_WAIT = 1, 3.0
 
@@ -65,7 +69,7 @@ def build(config: Config) -> dict[str, a2a.Agent]:
     for name, url in config.a2a.agents.items():
         if not url:
             continue
-        # claude を動かす仕事があるので、待つ時間は claude の上限時間を足しておく
+        # AI を動かす仕事があるので、待つ時間は AI の上限時間を足しておく
         timeout = config.run_timeout_minutes * 60 + config.a2a.timeout_seconds
         agents[name] = a2a.Agent(url, config.a2a_token, timeout=timeout)
     return agents
@@ -76,9 +80,9 @@ async def ask(agent: a2a.Agent, skill: str, params: dict | None = None,
               text: str = "") -> Reply:
     """1つ頼んで、封筒を開いて返す。つながらなければ、その理由を入れた返事にする。
 
-    経過を見せたい仕事（claude を動かすもの）は、流しながら受け取る。
+    経過を見せたい仕事（AI を動かすもの）は、流しながら受け取る。
     """
-    stream = on_progress is not None or skill in CLAUDE_SKILLS
+    stream = on_progress is not None or skill in MODEL_SKILLS
     log.info("エージェントに頼みます: %s に %s%s", agent.base_url, skill,
              f"（{params}）" if params else "")
     for left in reversed(range(RETRIES + 1)):
@@ -98,3 +102,32 @@ async def ask(agent: a2a.Agent, skill: str, params: dict | None = None,
             log.warning("%s を頼めませんでした: %s", skill, e)
             return Reply.broken(f"{skill} を頼めなかった: {e}")
     raise AssertionError("ここには来ない")  # pragma: no cover
+
+
+def to_result(data: dict) -> runner.RunResult:
+    """封筒の `data` を RunResult に戻す。"""
+    result = runner.RunResult(**{k: v for k, v in data.items() if k in FIELDS})
+    # JSON では組が配列になるので、戻しておく（接続先の許可を聞くときに使う）
+    result.requested_domains = [(d[0], d[1]) for d in result.requested_domains if len(d) >= 2]
+    return result
+
+
+async def run_ask(agent: a2a.Agent, payload: dict,
+                  on_activity: Callable[[str], Awaitable[None]] | None = None) -> runner.RunResult:
+    """どのエージェントにも同じ形で `ask` を頼み、実行結果で受け取る（依頼の形は kei_agent_a2a.run）。"""
+
+    async def on_progress(raw: str) -> None:
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            return
+        if on_activity and isinstance(event, dict) and event.get("activity"):
+            await on_activity(event["activity"])
+
+    reply = await ask(agent, ASK, on_progress=on_progress, text=json.dumps(payload, ensure_ascii=False))
+    if not reply.data:
+        # 封筒が開けなかった（つながらない、途中で切れた、形が違う）か、動かす前に断られた（上限など）
+        return runner.RunResult(is_error=True, errors=[reply.text or "エージェントが返事をしませんでした"],
+                                limit_reset_at=reply.limit_reset_at,
+                                provider=str(payload.get("provider") or "") or None)
+    return to_result(reply.data)

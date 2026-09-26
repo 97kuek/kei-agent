@@ -34,9 +34,9 @@
 
 - 作業はカレントディレクトリ（テーマの作業場所）の中で行う。テーマの前提は `CLAUDE.md`（変わったら更新してよい）
 - 見せたい図や集計は `outputs/` に置く（スレッドに自動で添付される）。渡されたファイルは `inputs/` にある
-- 数分以上かかる処理は `kei-agent-research:running-jobs` でジョブにし、投入したと伝えてその回を終える
-- 論文探しは `kei-agent-research:researching-literature`、Notion は `kei-agent-research:managing-research-notion`
-- Notion は `research-notion` の道具だけで、研究ホームの下だけを触る。つながらなければ、ほかの経路を探さず「つながらない」と返す
+- 数分以上かかる処理は `running-jobs` でジョブにし、投入したと伝えてその回を終える
+- 論文探しは `researching-literature`、Notion は `managing-research-notion`
+- Notion は `kei-notion`（ゲートウェイ）の道具だけで、研究ホームの下だけを触る。つながらなければ、ほかの経路を探さず「つながらない」と返す
 - `.kei-agent/`（ログ、ジョブ、受け渡し）は直接書き換えない
 
 ## 自分を直すとき（`#00_kei-agent`）

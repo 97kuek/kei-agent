@@ -1,7 +1,7 @@
 import pytest
 
 from kei_agent import themes
-from kei_agent.agent_policy import policy_for
+from kei_agent.agent_policy import policy_of
 from kei_agent.themes import ChannelKind
 
 
@@ -111,20 +111,18 @@ def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path)
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"
     assert config.agent_profiles["research"].provider == "codex"
-    assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider", "connectors"}
+    assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider"}
     assert config.agent_profiles["course"].provider == ""
 
 
-def test_agent_profile_reads_unique_connector_declarations(tmp_path):
-    """connector 宣言を落として Codex の権限制査を迂回する変更を捕捉する。"""
-    from kei_agent.config import load_config
+def test_connectors_are_decided_by_the_policy_table_not_the_config(tmp_path):
+    """連携を config.toml でも宣言できると、制限の正本が2つになる。"""
+    from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
-    path.write_text('[agents.research]\nprovider = "codex"\nconnectors = ["wandb", "research-notion"]\n')
+    path.write_text('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n')
 
-    config = load_config(path, env={})
-
-    assert config.agent_profiles["research"].connectors == frozenset({"wandb", "research-notion"})
-    assert config.agent_profiles["course"].connectors == frozenset()
+    with pytest.raises(ConfigError, match="connectors"):
+        load_config(path, env={})
 
 
 def test_old_model_recipe_configuration_is_rejected(tmp_path):
@@ -149,10 +147,20 @@ def test_agent_profile_rejects_invalid_connector_declarations(tmp_path, connecto
         load_config(path, env={})
 
 
-def test_course_policy_allows_only_box_and_notion():
-    policy = policy_for("course")
-    assert policy.app_names == frozenset({"Box", "Notion"})
-    assert policy.read_only is False
+def test_course_policy_reads_box_and_uses_notion_only_through_the_gateway():
+    policy = policy_of("course")
+    assert [app.name for app in policy.codex_apps] == ["Box"]
+    assert policy.notion == "write"
+
+
+def test_agent_workspaces_are_stable_places_for_sessions(config):
+    course = themes.agent_workspace(config, "course")
+    work = themes.agent_workspace(config, "work")
+    assert (course.kind, course.cwd) == (ChannelKind.COURSE, config.course_root)
+    assert work.kind is ChannelKind.WORK and work.cwd == config.state_dir / "agents" / "work"
+    assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
+    with pytest.raises(ValueError):
+        themes.agent_workspace(config, "research")
 
 
 # チャンネル名の先頭の番号（並び順のためのもの）

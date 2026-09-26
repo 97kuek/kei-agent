@@ -167,16 +167,14 @@ class FakeClaude:
         self.calls = []
         self.behaviors = []
 
-    async def __call__(self, config, request, prompt, on_activity=None, on_text=None):
+    async def __call__(self, config, request, prompt, on_activity=None):
         ws = request.workspace
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": request.session_id,
                            "thread_ts": request.thread_ts})
         behavior = self.behaviors.pop(0) if self.behaviors else {}
-        # 途中の独り言と道具の呼び出し。実物の claude と同じく、独り言は道具の直前に来る
+        # 道具の呼び出し（途中の独り言は、実物と同じく本体へ流さない）
         for kind, value in behavior.get("steps", [("tool", "Bash: テスト")]):
-            if kind == "text" and on_text:
-                await on_text(value)
-            elif kind == "tool" and on_activity:
+            if kind == "tool" and on_activity:
                 await on_activity(value)
         if "side_effect" in behavior:
             behavior["side_effect"](ws.cwd)
@@ -193,8 +191,6 @@ class FakeClaude:
             "is_error": behavior.get("is_error", False),
             "errors": behavior.get("errors", []),
         })
-        if on_text and result.text:
-            await on_text(result.text)
         return result
 
 

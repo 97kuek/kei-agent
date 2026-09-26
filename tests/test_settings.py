@@ -85,11 +85,12 @@ def test_home_provider_changes_only_named_agent(config, store):
     assert settings.agent_profile(config, store, "work").provider == "claude"
 
 
-def test_profile_has_only_provider_and_connectors(config, store):
+def test_profile_has_only_the_provider(config, store):
+    """使える道具と連携は制限の表が決める。profile が持つのは provider だけ。"""
     settings.set_agent_provider(store, "course", "codex")
     profile = settings.agent_profile(config, store, "course")
     assert profile.provider == "codex"
-    assert set(profile.__dataclass_fields__) == {"provider", "connectors"}
+    assert set(profile.__dataclass_fields__) == {"provider"}
 
 
 def test_home_profile_override_is_detectable(config, store):

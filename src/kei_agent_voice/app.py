@@ -39,8 +39,7 @@ def _ears(executor: VoiceExecutor, config: Config | None = None, store: Store | 
         runtime_store = store or Store(runtime_config.db_path)
         try:
             initial_listening = settings.listening_enabled(runtime_store)
-            # 道具も同じ store を使う（sqlite はつないだスレッドでしか使えない）
-            session = VoiceSession(executor.held, config=runtime_config, store=runtime_store)
+            session = VoiceSession(executor.held, config=runtime_config)
             # マイクの開け閉めは、本体が Slack（App Home）から押してくる
             executor.session = session
             # 保存済みの設定を初期値として使う（既定では開けない）

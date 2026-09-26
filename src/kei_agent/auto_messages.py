@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from kei_agent.jobs import log_tail, missing_outputs
 from kei_agent.slack_text import DONE_PREFIX, FAILED_PREFIX, PROGRESS_PREFIX, clean_text, format_duration, message_text
 from kei_agent.store import Job
@@ -9,6 +11,13 @@ from kei_agent.store import Job
 HEADER = "[Kei Agent からの自動メッセージ]"
 
 _JOB_STATUS = {"succeeded": "成功", "failed": "失敗", "cancelled": "取り消し"}
+_WEEKDAYS = "月火水木金土日"
+
+
+def today_line(now: datetime | None = None) -> str:
+    """担当に頼むときに先頭に付ける、今日の日付と曜日の1行（どの担当にも同じ形）。"""
+    now = now or datetime.now()
+    return f"今日は {now:%Y-%m-%d}（{_WEEKDAYS[now.weekday()]}）。\n"
 
 
 def job_status_label(status: str) -> str:

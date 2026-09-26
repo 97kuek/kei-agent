@@ -3,22 +3,30 @@ from dataclasses import replace
 import pytest
 
 from kei_agent import router, runner, themes
-from kei_agent.execution_contract import resolve_contract
+from kei_agent.execution_contract import prompt_version, resolve_contract
 from kei_agent.model_policy import UseCase, resolve
 from kei_agent.themes import ChannelKind, Workspace
 
+ROUTER = {"filesystem.deny_read", "filesystem.read"}
+RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.domain_allowlist",
+            "mcp.allowlist"}
+COURSE = {"filesystem.deny_read", "mcp.allowlist", "app.allowlist"}
+WORK = {"filesystem.deny_read", "app.allowlist"}
 
-@pytest.mark.parametrize("actor,case,provider,model,effort,prompt_name,has_skills", [
-    ("router", UseCase.ROUTING, "codex", "gpt-6-luna", "low", "router.md", False),
-    ("router", UseCase.ROUTING, "claude", "claude-haiku-4-5", "", "router.md", False),
-    ("research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-sol", "high", "system.md", True),
-    ("research", UseCase.RESEARCH_EXECUTE, "claude", "claude-sonnet-5", "high", "system.md", True),
-    ("course", UseCase.COURSE_EXPLAIN, "codex", "gpt-6-luna", "medium", "course.md", True),
-    ("course", UseCase.COURSE_EXPLAIN, "claude", "claude-sonnet-5", "medium", "course.md", True),
-    ("work", UseCase.WORK_SINGLE_SOURCE, "codex", "gpt-6-luna", "medium", "work.md", True),
-    ("work", UseCase.WORK_SINGLE_SOURCE, "claude", "claude-sonnet-5", "medium", "work.md", True),
+
+@pytest.mark.parametrize("actor,case,provider,model,effort,prompt_name,has_skills,capabilities", [
+    ("router", UseCase.ROUTING, "codex", "gpt-6-luna", "low", "router.md", False, ROUTER),
+    ("router", UseCase.ROUTING, "claude", "claude-haiku-4-5", "", "router.md", False, ROUTER),
+    ("research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-sol", "high", "system.md", True, RESEARCH),
+    ("research", UseCase.RESEARCH_EXECUTE, "claude", "claude-sonnet-5", "high", "system.md", True, RESEARCH),
+    ("course", UseCase.COURSE_EXPLAIN, "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
+    ("course", UseCase.COURSE_EXPLAIN, "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
+    ("work", UseCase.WORK_SINGLE_SOURCE, "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
+    ("work", UseCase.WORK_SINGLE_SOURCE, "claude", "claude-sonnet-5", "medium", "work.md", True, WORK),
 ])
-def test_agent_provider_contract_matrix(config, actor, case, provider, model, effort, prompt_name, has_skills):
+def test_agent_provider_contract_matrix(config, actor, case, provider, model, effort, prompt_name, has_skills,
+                                        capabilities):
+    """Claude と Codex で、同じ担当は同じ指示書・skill・制限になる。"""
     workspace = (router.workspace(config) if actor == "router" else
                  themes.resolve(config, "vlm") if actor == "research" else
                  Workspace(actor, ChannelKind.COURSE if actor == "course" else ChannelKind.WORK,
@@ -30,7 +38,8 @@ def test_agent_provider_contract_matrix(config, actor, case, provider, model, ef
     assert contract.prompt_text == (config.repo_root / "prompts" / prompt_name).read_text(encoding="utf-8")
     assert len(contract.prompt_version) == 12
     assert (contract.skill_dir is not None) is has_skills
-    assert {"filesystem.read", "filesystem.deny_read", "network.domain_allowlist"} <= contract.capabilities
+    assert contract.capabilities == capabilities
+    assert contract.policy.name == actor
 
 
 def test_research_contract_uses_workspace_prompt_and_agent_skills(config):
@@ -61,7 +70,7 @@ def test_router_contract_does_not_inherit_research_skills_or_write(config):
     assert "filesystem.write_scope" not in contract.capabilities
 
 
-def test_read_only_research_contract_does_not_request_write_or_notion(config):
+def test_read_only_research_contract_does_not_request_write_and_reads_notion_only(config):
     request = runner.ExecutionRequest(
         themes.resolve(config, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXTRACT),
         None, "C1", "1.1", read_only=True,
@@ -71,7 +80,7 @@ def test_read_only_research_contract_does_not_request_write_or_notion(config):
 
     assert contract.read_only
     assert "filesystem.write_scope" not in contract.capabilities
-    assert "mcp.allowlist" not in contract.capabilities
+    assert contract.policy.notion == "read" and not contract.policy.shell
 
 
 def test_research_skill_change_invalidates_the_session_version(config, tmp_path):
@@ -83,11 +92,11 @@ def test_research_skill_change_invalidates_the_session_version(config, tmp_path)
     skill.parent.mkdir(parents=True)
     skill.write_text("元の手順")
     local = replace(config, repo_root=repo)
-    first = runner.system_prompt_version(local)
+    first = prompt_version(local, "research")
     request = runner.ExecutionRequest(
         themes.resolve(local, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXECUTE),
         None, "C1", "1.1")
     contract_version = resolve_contract(local, request).prompt_version
     skill.write_text("更新した手順")
-    assert runner.system_prompt_version(local) != first
+    assert prompt_version(local, "research") != first
     assert resolve_contract(local, request).prompt_version != contract_version

@@ -141,8 +141,10 @@ async def test_new_request_becomes_a_public_issue_and_plans_without_writing_code
     call, = claude.calls
     # 書けるのは一時ディレクトリだけ。読めるのは Kei Agent のリポジトリ
     assert call["cwd"] == cfg.state_dir / "improve" / "20.1" and call["cwd"].is_dir()
+    from kei_agent.agent_policy import policy_of
     from kei_agent.themes import ChannelKind, Workspace
-    settings_json = guard.build_settings(cfg, Workspace("research-agent", ChannelKind.IMPROVE, call["cwd"]))
+    settings_json = guard.build_settings(cfg, Workspace("research-agent", ChannelKind.IMPROVE, call["cwd"]),
+                                         policy_of("self_fix"))
     allow = settings_json["permissions"]["allow"]
     assert f"Read(/{cfg.repo_root}/**)" in allow and f"Edit(/{call['cwd']}/**)" in allow
     assert f"Edit(/{cfg.repo_root}/**)" not in allow
@@ -501,101 +503,3 @@ async def test_push_failure_undoes_the_local_merge_and_keeps_review(env, monkeyp
     assert not improve.pending_path(cfg).exists()
     assert not assistant.restart_requested.is_set()
     assert "push できなかった" in "\n".join(slack.texts())
-
-
-# backlog.md から issue へ（一度だけ）
-
-def write_backlog(config) -> Path:
-    """record_backlog が書いていた形の backlog.md。"""
-    path = config.overview_dir / "backlog.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join([
-        "# Kei Agent への要望", "", "`#kei-agent` で受け付けた要望。新しいものが下。", "",
-        "- [x] 2026-09-01 10:00 済んだもの （[Slack](https://example.slack.com/archives/C9/p1)）（Kei Agent が直して取り込み済み）",
-        "",
-        "- [ ] 2026-09-02 11:00 経過をもっと細かく",
-        "  二行目も見る （[Slack](https://example.slack.com/archives/C9/p2)）",
-        "",
-        "- [ ] 2026-09-03 12:00 朝の予定を短く ",
-        "",
-    ]), encoding="utf-8")
-    return path
-
-
-def numbered_summaries(monkeypatch) -> list[str]:
-    """要約の偽物。渡された要望を残し、何番目かを題にする。"""
-    seen: list[str] = []
-
-    async def summarize(config, store, text):
-        seen.append(text)
-        return issues.Summary(f"要望その{len(seen)}", "- 要約した本文")
-
-    monkeypatch.setattr(issues, "summarize", summarize)
-    return seen
-
-
-def test_backlog_migration_dry_run_only_proposes(config, fake_github, monkeypatch):
-    path = write_backlog(config)
-    seen = numbered_summaries(monkeypatch)
-
-    proposals = improve.migrate_backlog_to_issues(config)
-
-    assert seen == ["経過をもっと細かく\n二行目も見る", "朝の予定を短く"]    # 済んだものと、日時・Slack のリンクは渡さない
-    assert [(p["request"], p["title"], p["body"], p.get("number")) for p in proposals] == [
-        ("経過をもっと細かく\n二行目も見る", "要望その1", "- 要約した本文", None),
-        ("朝の予定を短く", "要望その2", "- 要約した本文", None)]
-    assert fake_github.calls == [] and path.exists()
-
-
-def test_backlog_migration_creates_the_reviewed_issues_once(config, fake_github, monkeypatch):
-    path = write_backlog(config)
-    seen = numbered_summaries(monkeypatch)
-    improve.migrate_backlog_to_issues(config)                         # 要約を見て確かめてから
-
-    created = improve.migrate_backlog_to_issues(config, dry_run=False)
-    again = improve.migrate_backlog_to_issues(config, dry_run=False)
-
-    assert len(seen) == 2                                             # 見た要約のまま作る（要約し直さない）
-    assert [p["number"] for p in created] == [1, 2] == [p["number"] for p in again]
-    assert [c["title"] for c in fake_github.created()] == ["要望その1", "要望その2"]   # 二度は作らない
-    assert path.exists()                                              # 消すのは人
-
-
-def test_backlog_migration_reports_what_it_could_not_file(config, fake_github, monkeypatch):
-    write_backlog(config)
-
-    async def summarize(config, store, text):
-        if text.startswith("朝"):
-            raise issues.IssueError("要約が公開の条件に合いません", "URL を含む")
-        return issues.Summary("経過を細かく見せる", "- 要約した本文")
-
-    monkeypatch.setattr(issues, "summarize", summarize)
-
-    drafts = improve.migrate_backlog_to_issues(config)
-    assert "要約が公開の条件に合いません" in drafts[1]["error"]
-
-    results = improve.migrate_backlog_to_issues(config, dry_run=False)
-
-    # 下書きで要約できなかったものは、本番の実行で要約し直して作らない（見て確かめていないので）
-    assert [r.get("number") for r in results] == [1, None]
-    assert "確かめた要約がありません" in results[1]["error"]
-    assert [c["title"] for c in fake_github.created()] == ["経過を細かく見せる"]
-
-
-def test_backlog_migration_files_nothing_without_reviewed_drafts(config, fake_github, monkeypatch):
-    write_backlog(config)
-
-    async def summarize(config, store, text):
-        raise AssertionError("本番の実行では要約しない")
-
-    monkeypatch.setattr(issues, "summarize", summarize)
-
-    results = improve.migrate_backlog_to_issues(config, dry_run=False)
-
-    assert all("確かめた要約がありません" in r["error"] for r in results)
-    assert fake_github.created() == []
-
-
-def test_backlog_migration_without_a_backlog(config, fake_github):
-    assert improve.migrate_backlog_to_issues(config, dry_run=False) == []
-    assert fake_github.calls == []

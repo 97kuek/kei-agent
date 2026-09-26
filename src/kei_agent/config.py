@@ -26,7 +26,7 @@ MODEL_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
 
 @dataclass(frozen=True)
 class AgentProfile:
-    """agent が使う provider と connector。
+    """agent が使う provider。どこまで触れるか（道具・連携）は制限の表（agent_policy.py）が決める。
 
     skill は手順、profile は実行器を決める。skill の中にモデル名を埋め込まないため、
     Claude と Codex を同じ agent から切り替えられる。
@@ -34,8 +34,6 @@ class AgentProfile:
 
     # provider は App Home で明示選択する。空文字は「まだ選んでいない」。
     provider: str = ""
-    # Codex に切り替えるとき、実際に使う MCP 名だけを明示する。空なら外部 connector は渡さない。
-    connectors: frozenset[str] = field(default_factory=frozenset)
 
 
 def _default_agent_profiles() -> dict[str, AgentProfile]:
@@ -115,8 +113,10 @@ class A2AConfig:
     呼び名と同じにする。書かなければ、そのエージェントは使わない（研究を書かなければ本体の中で動かす）。
     """
     agents: dict[str, str] = field(default_factory=dict)
-    # 相手を待つ時間（秒）。claude を動かす仕事には、claude の上限時間を足して待つ
+    # 相手を待つ時間（秒）。AI を動かす仕事には、AI の上限時間を足して待つ
     timeout_seconds: float = 300
+    # 本体の A2A の口（声のレイヤからの問い合わせを受ける）。担当を呼べるのは本体だけ
+    orchestrator: str = ""
 
     def url(self, name: str) -> str:
         return self.agents.get(name, "")
@@ -219,7 +219,7 @@ TOP_LEVEL_KEYS = {
     "schedule", "maintenance", "a2a", "notion",
 }
 AGENTS_KEYS = MODEL_ACTORS
-AGENT_PROFILE_KEYS = {"provider", "connectors"}
+AGENT_PROFILE_KEYS = {"provider"}
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 # [schedule] のうち、時刻（HH:MM）を書くキー
 SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
@@ -259,11 +259,15 @@ def _check_times(schedule: dict, maintenance: dict) -> None:
 
 def _a2a(data: dict) -> A2AConfig:
     """[a2a] と、その下の [a2a.agents]（名前 = 住所）を読む。"""
-    _check_keys(data, {"agents", "timeout_seconds"}, "[a2a]")
+    _check_keys(data, {"agents", "timeout_seconds", "orchestrator"}, "[a2a]")
     agents = data.get("agents", {})
     if not isinstance(agents, dict) or any(not isinstance(v, str) for v in agents.values()):
         raise ConfigError("config.toml の [a2a.agents] は「名前 = \"住所\"」の形で書いてください")
-    return A2AConfig(agents=dict(agents), timeout_seconds=float(data.get("timeout_seconds", 300)))
+    orchestrator = data.get("orchestrator", "")
+    if not isinstance(orchestrator, str):
+        raise ConfigError("config.toml の [a2a] orchestrator は住所の文字列で書いてください")
+    return A2AConfig(agents=dict(agents), timeout_seconds=float(data.get("timeout_seconds", 300)),
+                     orchestrator=orchestrator)
 
 
 def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
@@ -281,19 +285,7 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
         provider = str(raw.get("provider", ""))
         if provider not in {"", "claude", "codex"}:
             raise ConfigError(f"config.toml の [agents.{name}].provider は claude、codex、または空文字にしてください")
-        connectors = raw.get("connectors", [])
-        if (
-            not isinstance(connectors, list)
-            or any(not isinstance(connector, str) or not connector for connector in connectors)
-            or len(connectors) != len(set(connectors))
-        ):
-            raise ConfigError(
-                f"config.toml の [agents.{name}].connectors は重複のない空でない文字列の配列にしてください"
-            )
-        profiles[name] = AgentProfile(
-            provider=provider,
-            connectors=frozenset(connectors),
-        )
+        profiles[name] = AgentProfile(provider=provider)
     return profiles
 
 

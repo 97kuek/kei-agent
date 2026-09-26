@@ -7,7 +7,8 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>__REPO__/deploy/run-research.sh</string>
+    <string>__REPO__/deploy/run-agent.sh</string>
+    <string>research</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

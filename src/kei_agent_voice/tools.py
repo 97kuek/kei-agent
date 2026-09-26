@@ -27,7 +27,6 @@ from datetime import date, datetime, timedelta
 
 from kei_agent import ask as asks
 from kei_agent.config import Config
-from kei_agent.store import Store
 from kei_agent_voice.executor import current
 from kei_agent_voice.handoff import Handoff
 
@@ -116,20 +115,12 @@ class Draft:
 class Tools:
     """道具の中身。`held` は本体が押してきたもの（`executor.held`）。"""
 
-    def __init__(self, held: dict, config: Config, handoff: Handoff | None = None,
-                 store: Store | None = None):
+    def __init__(self, held: dict, config: Config, handoff: Handoff | None = None):
         self.held = held
         self.config = config
-        # sqlite はつないだスレッドでしか使えない。立ち上げ（app.py）が開いたものを、同じループで使う
-        self._handoff = handoff
-        self._store = store
+        # 担当への問い合わせは本体に頼む（担当を呼べるのは本体だけ）
+        self.handoff = handoff or Handoff(config)
         self.draft: Draft | None = None
-
-    @property
-    def handoff(self) -> Handoff:
-        if self._handoff is None:
-            self._handoff = Handoff(self.config, self._store or Store(self.config.db_path))
-        return self._handoff
 
     async def call(self, name: str, arguments: dict, now: datetime | None = None) -> str:
         """道具を呼ぶ。**返すのは、モデルが読み上げられる短い文**。

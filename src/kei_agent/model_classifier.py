@@ -48,18 +48,26 @@ async def classify_research(config: Config, store, prompt: str, *, provider: str
                            "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。", provider=provider)
 
 
-async def classify_course(config: Config, store, prompt: str) -> UseCase:
+async def classify_course(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
     return await _classify(config, store, "course", prompt, _COURSE_CASES, UseCase.COURSE_EXPLAIN,
                            "course_explain, course_requirements, course_compare, course_degree_plan",
                            "1資料の説明は explain、課題要件・評価基準の整理は requirements、複数資料や試験範囲の比較は compare、"
-                           "履修・卒業計画の選択肢提案は degree_plan。")
+                           "履修・卒業計画の選択肢提案は degree_plan。", provider=provider)
 
 
-async def classify_work(config: Config, store, prompt: str) -> UseCase:
+async def classify_work(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
     return await _classify(config, store, "work", prompt, _WORK_CASES, UseCase.WORK_SINGLE_SOURCE,
                            "work_single_source, work_cross_source, work_decide",
                            "1件のメール・資料の要点は single_source、複数メール・予定・資料の状況要約は cross_source、"
-                           "優先順位・会議準備・論点整理は decide。")
+                           "優先順位・会議準備・論点整理は decide。", provider=provider)
+
+
+CLASSIFIERS = {"research": classify_research, "course": classify_course, "work": classify_work}
+
+
+async def classify(config: Config, store, actor: str, prompt: str, *, provider: str | None = None) -> UseCase:
+    """担当の用途を分類する（研究・大学・仕事で同じ呼び方）。"""
+    return await CLASSIFIERS[actor](config, store, prompt, provider=provider)
 
 
 async def _classify(config: Config, store, actor: str, prompt: str, allowed: frozenset[UseCase],

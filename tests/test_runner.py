@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 
 from kei_agent import guard, router, runner, themes
+from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
 from kei_agent.execution_contract import resolve_contract
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
 from kei_agent.provider_permissions import preflight
@@ -20,7 +21,7 @@ def request(config, *, actor="research", provider="claude", use_case=UseCase.RES
 
 def test_settings_limit_theme_to_its_directory(config):
     ws = themes.resolve(config, "vlm")
-    settings = guard.build_settings(config, ws)
+    settings = guard.build_settings(config, ws, policy_of("research"))
     allow = settings["permissions"]["allow"]
     assert f"Read(/{ws.cwd}/**)" in allow
     assert f"Edit(/{ws.cwd}/**)" in allow
@@ -32,13 +33,13 @@ def test_settings_limit_theme_to_its_directory(config):
 def test_settings_add_domains_allowed_for_the_theme(config):
     """Slack で許可した接続先は、基本の接続先に足して使う。"""
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("zenodo.org",))
-    domains = guard.build_settings(config, ws)["sandbox"]["network"]["allowedDomains"]
+    domains = guard.build_settings(config, ws, policy_of("research"))["sandbox"]["network"]["allowedDomains"]
     assert domains == ["export.arxiv.org", "zenodo.org"]
 
 
 def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
     ws = themes.resolve(config, "research-overview")
-    allow = guard.build_settings(config, ws)["permissions"]["allow"]
+    allow = guard.build_settings(config, ws, policy_of("research"))["permissions"]["allow"]
     assert f"Read(/{config.research_root}/**)" in allow
     assert f"Edit(/{config.overview_dir}/**)" in allow
     assert f"Edit(/{config.research_root}/**)" not in allow
@@ -163,15 +164,18 @@ def test_router_execution_request_has_no_research_plugin_or_notion(config):
     assert str(config.agent_plugin_dir("research")) not in command
 
 
-def test_read_only_execution_removes_claude_write_tools_and_notion_gateway(config):
+def test_read_only_execution_removes_claude_write_tools_and_keeps_only_notion_reads(config):
     execution = request(config, read_only=True)
     command = runner.build_command(config, execution)
     settings = json.loads(command[command.index("--settings") + 1])
+    allow, deny = settings["permissions"]["allow"], settings["permissions"]["deny"]
 
-    assert "Bash" not in settings["permissions"]["allow"]
-    assert not any(item.startswith("Edit(") for item in settings["permissions"]["allow"])
-    assert "mcp__research-notion" not in settings["permissions"]["allow"]
-    assert "--mcp-config" not in command
+    assert "Bash" not in allow and "Bash" in deny
+    assert not any(item.startswith("Edit(") for item in allow) and {"Edit", "Write"} <= set(deny)
+    # ゲートウェイは読む道具だけ（書く道具も、サーバー全体の許可も渡さない）
+    assert "mcp__kei-notion" not in allow
+    assert [item for item in allow if item.startswith("mcp__kei-notion__")] == [
+        f"mcp__kei-notion__{tool}" for tool in NOTION_READ_TOOLS]
 
 
 def test_read_only_execution_has_no_codex_notion_gateway(config):
@@ -180,7 +184,8 @@ def test_read_only_execution_has_no_codex_notion_gateway(config):
                              if value.startswith("permissions.kei_agent_scoped.filesystem="))
     assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
     configs = [command[index + 1] for index, part in enumerate(command) if part == "--config"]
-    assert not any(item.startswith("mcp_servers.research-notion.") for item in configs)
+    enabled = next(item for item in configs if item.startswith("mcp_servers.kei-notion.enabled_tools="))
+    assert json.loads(enabled.split("=", 1)[1]) == list(NOTION_READ_TOOLS)
 
 
 def test_classifier_recipe_is_always_read_only_even_if_the_caller_omits_it(config, store):
@@ -190,7 +195,10 @@ def test_classifier_recipe_is_always_read_only_even_if_the_caller_omits_it(confi
     settings = json.loads(command[command.index("--settings") + 1])
 
     assert "Bash" not in settings["permissions"]["allow"]
-    assert "--mcp-config" not in command
+    # 分類は道具を持たない。MCP も何も読み込まない
+    assert json.loads(command[command.index("--mcp-config") + 1]) == {"mcpServers": {}}
+    assert "--strict-mcp-config" in command
+    assert "--plugin-dir" not in command
 
 
 def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
@@ -209,9 +217,13 @@ def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
 
 def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
     execution = request(config, provider="codex")
-    command = runner.build_codex_command(config, execution.workspace, None, execution.recipe)
+    command = runner.build_command(config, execution)
     configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
-    assert any("mcp_servers.research-notion.url" in item and config.notion_gateway_url in item for item in configs)
+    assert any("mcp_servers.kei-notion.url" in item and config.notion_gateway_url in item for item in configs)
+    assert "mcp_servers.kei-notion.required=true" in configs
+    # 無人で動くので、ゲートウェイの道具を呼ぶたびの承認は求めない（求めると Codex は断って止まる）
+    assert 'mcp_servers.kei-notion.default_tools_approval_mode="approve"' in configs
+    assert not any("enabled_tools" in item for item in configs)         # 書ける回は道具を絞らない
     assert any("env_http_headers" in item and "KEI_AGENT_NOTION_GATEWAY_AUTH" in item for item in configs)
     assert not any("NOTION_TOKEN" in item for item in configs)
 
@@ -219,7 +231,7 @@ def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
 def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(config):
     """振り分けは非gitの状態DBで動き、Google等のAppや研究Notionを触らない。"""
     execution = request(config, actor="router", provider="codex", use_case=UseCase.ROUTING)
-    command = runner.build_codex_command(config, execution.workspace, None, execution.recipe, actor="router")
+    command = runner.build_command(config, execution)
 
     assert "--skip-git-repo-check" in command
     filesystem_config = next(value.split("=", 1)[1] for value in command
@@ -227,7 +239,40 @@ def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(
     assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
     configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
     assert "apps._default.enabled=false" in configs
-    assert not any("research-notion" in item for item in configs)
+    assert 'web_search="disabled"' in configs
+    assert not any("kei-notion" in item for item in configs)
+    assert "--dangerously-bypass-hook-trust" not in command
+
+
+def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
+    """Codex App は、表に書いた App の読む道具だけ。アップロードや共有の道具はモデルに見せない。"""
+    from kei_agent.agent_policy import BOX
+
+    execution = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
+                                        resolve("course", "codex", UseCase.COURSE_EXPLAIN), None, "C1", "1.1")
+    command = runner.build_command(config, execution, apps={"Box": "asdk_app_1"})
+    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+
+    assert "apps._default.enabled=false" in configs
+    assert "apps.asdk_app_1.default_tools_enabled=false" in configs
+    assert 'apps.asdk_app_1.default_tools_approval_mode="approve"' in configs
+    tools = tomllib.loads("tools=" + next(item.split("=", 1)[1] for item in configs
+                                          if item.startswith("apps.asdk_app_1.tools=")))["tools"]
+    assert set(tools) == set(BOX.codex_apps[0].tools) and "box.upload_file" not in tools
+    assert all(value == {"enabled": True} for value in tools.values())
+
+
+def test_codex_turns_off_tools_that_claude_agents_do_not_have(config):
+    """サブエージェント・画像の生成・プラグインの導入は、どの担当にも渡さない。画像を開くのはファイルを読む担当だけ。"""
+    def disabled(command):
+        return {command[i + 1] for i, arg in enumerate(command) if arg == "--disable"}
+
+    research = runner.build_command(config, request(config, provider="codex"))
+    course = runner.build_command(config, runner.ExecutionRequest(
+        themes.agent_workspace(config, "course"), resolve("course", "codex", UseCase.COURSE_EXPLAIN), None, "", ""))
+
+    assert set(runner.CODEX_OFF_FEATURES) <= disabled(research) and "view_image" not in disabled(research)
+    assert set(runner.CODEX_OFF_FEATURES) | {"view_image"} <= disabled(course)
 
 
 def test_codex_install_links_only_research_skills_into_theme_workspace(config):
@@ -262,6 +307,18 @@ def test_apply_codex_events_maps_thread_message_and_command_activity():
     assert (result.session_id, result.text, result.is_error) == ("t1", "完了", False)
 
 
+def test_codex_tool_calls_show_as_the_same_activities_as_claude():
+    result = runner.RunResult()
+    mcp = runner.apply_codex_event(result, {"type": "item.started", "item": {
+        "type": "mcp_tool_call", "server": "kei-notion", "tool": "search", "arguments": {"query": "授業"}}})
+    search = runner.apply_codex_event(result, {"type": "item.completed", "item": {
+        "type": "web_search", "query": "VLM benchmark"}})
+
+    assert mcp == "mcp__kei-notion__search"
+    assert search == "Web で検索している: VLM benchmark"
+    assert result.activities == [mcp, search]
+
+
 def test_codex_only_uses_the_last_message_after_a_completed_turn():
     result = runner.RunResult()
     runner.apply_codex_event(result, {"type": "item.completed", "item": {
@@ -281,7 +338,7 @@ def test_nonzero_exit_discards_even_a_result_text():
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
     """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
-    text = runner.system_prompt_text(config)
+    text = config.system_prompt_path.read_text(encoding="utf-8")
     assert "自動で" in text and "続き" in text and "止まる" in text
 
 
@@ -341,17 +398,28 @@ def test_default_deny_read_follows_the_state_dir(tmp_path):
 def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
     from kei_agent.notion import gateway_client_token
 
-    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1")
+    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1",
+                           policy_of("research"))
     assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('gateway-secret', 'research')}"
     assert "gateway-secret" not in env.values()
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
 
 
-def test_read_only_env_exposes_no_gateway_credentials(config):
-    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"},
-                           "C1", "1", include_gateway_auth=False)
-    assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env
-    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
+def test_agents_without_notion_get_no_gateway_credentials(config):
+    for policy in (policy_of("work"), policy_of("router"), policy_of("self_fix"), None):
+        env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"},
+                               "C1", "1", policy)
+        assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env
+        assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
+
+
+def test_course_env_carries_the_course_token(config):
+    """大学の子が持つのは、授業ホームにしか届かない合言葉だけ。"""
+    from kei_agent.notion import gateway_client_token
+
+    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, "C1", "1",
+                           policy_of("course"))
+    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', 'course')}"
 
 
 def test_apply_event_keeps_domains_claude_asked_for():
@@ -402,9 +470,14 @@ def test_describe_tool_truncates():
 def test_settings_deny_reading_secret_locations(config):
     """sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞いでおく。"""
     ws = themes.resolve(config, "vlm")
-    filesystem = guard.build_settings(config, ws)["sandbox"]["filesystem"]
+    settings = guard.build_settings(config, ws, policy_of("research"))
+    filesystem = settings["sandbox"]["filesystem"]
     assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
     assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
+    # sandbox は Bash にしか効かない。Read・Grep・Glob からも、同じ場所を読ませない
+    deny = settings["permissions"]["deny"]
+    for path in config.deny_read:
+        assert f"Read(/{path}/**)" in deny and f"Read(/{path})" in deny
 
 
 def test_default_deny_read_covers_tokens_and_keys(tmp_path):
@@ -505,11 +578,7 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
     config = replace(config, codex_bin=str(fake))
     ws = themes.resolve(config, "vlm")
     themes.ensure_workspace(ws)
-    seen_text: list[str] = []
     seen_activity: list[str] = []
-
-    async def on_text(text: str) -> None:
-        seen_text.append(text)
 
     async def on_activity(activity: str) -> None:
         seen_activity.append(activity)
@@ -518,11 +587,10 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
         config, runner.ExecutionRequest(
             ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて",
         on_activity=on_activity,
-        on_text=on_text,
     )
 
     assert (result.session_id, result.text, result.is_error) == ("thread-1", "完了", False)
-    assert seen_text == []  # 未検証の text は callback にも流さない
+    # 途中の文（未検証の agent_message）は流さず、道具の経過だけを流す
     assert seen_activity == ["実行している: pwd"]
     assert (ws.cwd / ".agents" / "skills" / "managing-wandb").is_symlink()
 
@@ -653,7 +721,7 @@ def test_research_runner_uses_only_the_scoped_notion_mcp(config):
     cmd = runner.build_command(config, runner.ExecutionRequest(
         ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
 
-    mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["research-notion"]
+    mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["kei-notion"]
     assert mcp["url"] == config.notion_gateway_url
     assert mcp["headers"]["Authorization"] == "${KEI_AGENT_NOTION_GATEWAY_AUTH}"
     assert "--strict-mcp-config" in cmd
@@ -661,9 +729,11 @@ def test_research_runner_uses_only_the_scoped_notion_mcp(config):
 
 def test_research_settings_allow_the_gateway_tools(config):
     ws = themes.resolve(config, "vlm")
-    allow = guard.build_settings(config, ws)["permissions"]["allow"]
+    settings = guard.build_settings(config, ws, policy_of("research"))["permissions"]
 
-    assert "mcp__research-notion" in allow
+    assert "mcp__kei-notion" in settings["allow"]
+    # アカウントに付いた Notion 連携は、研究ホームの外まで届くので断る
+    assert "mcp__claude_ai_Notion" in settings["deny"]
 
 
 def test_research_env_carries_only_the_research_token_never_the_master(config):
@@ -676,7 +746,7 @@ def test_research_env_carries_only_the_research_token_never_the_master(config):
         "NOTION_COURSE_TOKEN": "ntn_course",
         "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master",
         "KEI_AGENT_NOTION_GATEWAY_AUTH": "Bearer stray",
-    }, "C1", "1.2")
+    }, "C1", "1.2", policy_of("research"))
 
     assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
@@ -689,7 +759,7 @@ def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config
     from kei_agent.notion import gateway_client_token
 
     header = runner.notion_mcp_config(config)["mcpServers"][runner.NOTION_MCP]["headers"]["Authorization"]
-    env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1")
+    env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1", policy_of("research"))
 
     name = header.removeprefix("${").removesuffix("}")
     assert env[name] == f"Bearer {gateway_client_token('s3cret', 'research')}"

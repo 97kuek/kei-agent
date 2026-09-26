@@ -22,14 +22,10 @@ from kei_agent.themes import Workspace
 log = logging.getLogger(__name__)
 
 AGENT = "research"
-RUN_CLAUDE = "run-claude"
 SUBMIT_JOB = "submit-job"
 LIST_JOBS = "list-jobs"
 CANCEL_JOB = "cancel-job"
 FORGET_JOB = "forget-job"
-# RunResult のうち、相手から受け取る項目（知らない項目が増えても落ちないように、ここで絞る）
-FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
-          "timed_out", "requested_domains", "limit_reset_at", "provider")
 _OVERRIDE = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 _LABELS = {
     "research-extract": UseCase.RESEARCH_EXTRACT,
@@ -73,8 +69,9 @@ def is_manual_use_case(use_case: UseCase) -> bool:
 
 def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str, thread_ts: str,
                 use_case: UseCase = UseCase.RESEARCH_EXECUTE, *, provider: str = "",
-                read_only: bool = False) -> str:
-    return json.dumps({
+                read_only: bool = False) -> dict:
+    """研究の `ask` の依頼。ほかの担当と同じ形に、テーマの作業場と許可済みの接続先を足したもの。"""
+    return {
         "channel_name": ws.channel_name,
         "prompt": prompt,
         "session_id": session_id,
@@ -84,42 +81,17 @@ def ask_payload(ws: Workspace, prompt: str, session_id: str | None, channel: str
         "use_case": use_case.value,
         "provider": provider,
         "read_only": read_only,
-    }, ensure_ascii=False)
-
-
-def to_result(data: dict) -> runner.RunResult:
-    """封筒の `data` を RunResult に戻す。"""
-    result = runner.RunResult(**{k: v for k, v in data.items() if k in FIELDS})
-    # JSON では組が配列になるので、戻しておく（接続先の許可を聞くときに使う）
-    result.requested_domains = [(d[0], d[1]) for d in result.requested_domains if len(d) >= 2]
-    return result
+    }
 
 
 async def run(agent: a2a.Agent, ws: Workspace, prompt: str, session_id: str | None,
               channel: str, thread_ts: str,
               use_case: UseCase = UseCase.RESEARCH_EXECUTE,
               on_activity: Callable[[str], Awaitable[None]] | None = None,
-              on_text: Callable[[str], Awaitable[None]] | None = None,
               *, provider: str = "", read_only: bool = False) -> runner.RunResult:
-    """研究エージェントに claude を1回動かしてもらう。"""
-
-    async def on_progress(payload: str) -> None:
-        try:
-            event = json.loads(payload)
-        except ValueError:
-            return
-        if on_activity and event.get("activity"):
-            await on_activity(event["activity"])
-        if on_text and event.get("text"):
-            await on_text(event["text"])
-
-    reply = await agents.ask(agent, RUN_CLAUDE, on_progress=on_progress,
-                             text=ask_payload(ws, prompt, session_id, channel, thread_ts, use_case,
-                                              provider=provider, read_only=read_only))
-    if not reply.data:
-        # 封筒が開けなかった（つながらない、途中で切れた、形が違う）
-        return runner.RunResult(is_error=True, errors=[reply.text or "研究エージェントが返事をしませんでした"])
-    return to_result(reply.data)
+    """研究エージェントに、テーマの作業場で provider を1回動かしてもらう。"""
+    return await agents.run_ask(agent, ask_payload(ws, prompt, session_id, channel, thread_ts, use_case,
+                                                   provider=provider, read_only=read_only), on_activity)
 
 
 # 長い処理（ジョブ）

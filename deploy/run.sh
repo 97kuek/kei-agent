@@ -39,4 +39,5 @@ if [[ -f "$PENDING" ]]; then
   fi
 fi
 
-exec uv run --frozen kei-agent
+# 声のレイヤからの問い合わせ口（A2A のサーバー）を開くので、エージェントと同じグループも入れる
+exec uv run --frozen --group agents kei-agent

@@ -2,8 +2,8 @@
 
 オーケストレーター（Kei Agent 本体）は、言われたことがどの仕事にあたるかだけを決めて A2A で頼み、
 返ってきた中身を Slack 向けの形にして出す。本体では claude を動かさない。
-定型（取り込む・締切・実績）に当てはまらない質問は `ask` に回し、**大学エージェント自身の claude** が
-Box と Notion を読んで答える（docs/architecture.md の「振り分けと A2A」）。
+定型（取り込む・締切・実績）に当てはまらない質問は `ask` に回し、大学エージェントが選択済み provider で
+Box と授業ホームを読んで答える。会話の続け方は研究と同じ（Assistant.converse_with_agent）。
 
 締切は封筒の `data.items` で返ってくるので、見せ方はここで決める（スレッドへの返事、朝の一覧、
 24時間前の知らせ）。
@@ -13,12 +13,10 @@ Assistant に混ぜて使う。self.agents、self.post などは Assistant の�
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent import agents, router, runner, settings
-from kei_agent.auto_messages import history_prompt
+from kei_agent import agents, router, settings
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape
@@ -174,53 +172,17 @@ class CourseChannel:
         return pick_skill(req.text) or ASK, {}
 
     async def course_ask(self, req: Request) -> None:
-        """自由な質問を大学エージェントに渡す。経過は1行に出し、返事は流して見せる。"""
-        ui = self.thread_ui(req)
-        await ui.start()
-        # 連携は毎回独立した process なので、Claude / Codex の session ID は再開に使わない。
-        # 既に公開した Slack の返答だけを、次の質問の文脈にする。
-        prompt = req.text or "授業について教えて"
-        if req.message_ts != req.thread_ts:
-            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
-            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped)
-        payload = json.dumps({
-            "prompt": prompt,
-            "session_id": None,
-            "channel": req.channel,
-            "thread_ts": req.thread_ts,
-        }, ensure_ascii=False)
+        """自由な質問を大学エージェントに渡す。会話の続け方・経過・上限・出力の確認は研究と同じ。"""
+        await self.converse_with_agent(req, AGENT)
 
-        async def on_progress(raw: str) -> None:
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                return
-            if event.get("activity"):
-                await ui.activity(event["activity"])
-            elif event.get("text"):
-                await ui.text(event["text"])
-
-        reply = await self.ask_course(ASK, text=payload, on_progress=on_progress)
-        answer, _ = self.render_reply(runner.RunResult(text=reply.text, is_error=not reply.ok))
-        new_session = str(reply.data.get("session_id") or "")
-        if new_session:
-            self.store.set_agent_session(req.channel, req.thread_ts, AGENT, new_session)
-        if reply.ok:
-            self.store.set_last_provider(req.channel, req.thread_ts, AGENT,
-                                         settings.selected_provider(self.config, self.store, AGENT))
-        streamed = await ui.finish(answer)
-        if not streamed:
-            await self.post(req, answer, markdown=True)
-        await self.mark_answered(req, failed=not reply.ok)
-
-    async def ask_course(self, skill: str, text: str = "", on_progress=None, **params) -> agents.Reply:
-        """大学エージェントに頼む。つながらなければ、その理由を入れた返事にして知らせる。"""
+    async def ask_course(self, skill: str, **params) -> agents.Reply:
+        """大学エージェントに定型の仕事を頼む。つながらなければ、その理由を入れた返事にして知らせる。"""
         agent = self.agents.get(AGENT)
         if agent is None:
             await self.notify_trouble("大学エージェントの住所が config.toml の [a2a.agents] にありません")
             return agents.Reply.broken("大学エージェントの住所がないよ")
         provider = settings.selected_provider(self.config, self.store, AGENT)
-        reply = await agents.ask(agent, skill, params={**params, "provider": provider}, text=text, on_progress=on_progress)
+        reply = await agents.ask(agent, skill, params={**params, "provider": provider})
         if not reply.ok:
             await self.notify_trouble(f"大学エージェント（{agent.base_url}）の {skill} が返した理由: {reply.text[:300]}")
         await self.note_limit(reply, AGENT, provider)

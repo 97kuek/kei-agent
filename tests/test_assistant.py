@@ -10,6 +10,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack, write_request
 from kei_agent import runner
 from kei_agent.assistant import Assistant
 from kei_agent.auto_messages import history_prompt
+from kei_agent.execution_contract import prompt_version
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.slack_text import split_text
@@ -51,7 +52,7 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
     assert any(name == "chat_stopStream" for name, _ in slack.calls)
     # 経過は入力欄の下の1行だけに出し、返事には手順を並べない（長い作業でもスクロールが要らない）
     assert slack.tasks() == []
-    assert slack.thinking() == ["考え中…", "作業している…", "まとめている…"]
+    assert slack.thinking() == ["考え中…", "作業している…"]
     assert "結果です" not in slack.texts()  # 流して見せたので、もう一度投稿しない
     assert store.get_thread("C1", "10.1")["session_id"] == "sess-1"
     log = (config.research_root / "vlm" / ".kei-agent" / "threads" / "10.1.md").read_text()
@@ -83,10 +84,9 @@ async def test_thread_status_never_uses_raw_model_text():
     slack = FakeSlack({"C1": "vlm"})
     ui = ThreadUI(slack, "C1", "10.1")
 
-    await ui.text("Bash で /private/secret を確認します")
     await ui.activity("Read: /private/secret")
 
-    assert slack.thinking() == ["まとめている…", "調べている…"]
+    assert slack.thinking() == ["調べている…"]
 
 
 async def test_time_card_starts_stops_and_keeps_one_active_timer(env, store):
@@ -396,7 +396,7 @@ async def test_missing_session_is_restored_from_thread_history(env, store):
     assistant, slack, claude, _ = env
     store.upsert_thread("C1", "10.1", "vlm", "lost-session")
     store.set_session("C1", "10.1", "research", "claude", "lost-session",
-                      runner.system_prompt_version(assistant.config))
+                      prompt_version(assistant.config, "research"))
     slack.replies = [
         {"ts": "10.1", "user": "UME", "text": "<@UBOT> 条件Aで回して"},
         {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "⏳ 作業中"},
@@ -417,7 +417,7 @@ async def test_missing_session_is_restored_from_thread_history(env, store):
     assert "作業中" not in second["prompt"] and second["prompt"].count("Bも") == 1
     assert store.get_thread("C1", "10.1")["session_id"] == "lost-session"
     assert store.session_for("C1", "10.1", "research", "claude",
-                             runner.system_prompt_version(assistant.config)) == "sess-new"
+                             prompt_version(assistant.config, "research")) == "sess-new"
     assert not any(t.startswith("⚠️") for t in slack.texts())
 
 
@@ -430,7 +430,7 @@ async def test_long_thread_history_is_paged_and_says_what_it_dropped(env, store,
     monkeypatch.setattr(mod, "HISTORY_MAX_MESSAGES", 4)
     store.upsert_thread("C1", "10.1", "vlm", "lost-session")
     store.set_session("C1", "10.1", "research", "claude", "lost-session",
-                      runner.system_prompt_version(assistant.config))
+                      prompt_version(assistant.config, "research"))
     pages = [
         ([{"ts": "10.1", "user": "UME", "text": "いちばん古い話"},
           {"ts": "10.2", "user": "UME", "text": "その次"}], "c1"),
@@ -517,7 +517,7 @@ async def test_narration_goes_to_the_status_not_the_answer(env):
 
     assert slack.streamed() == ["了解したよ。CLAUDE.md に書いておいた。"]
     # 独り言 → 道具 → まとめ。まとめは投稿すると Slack が消すので、残るのは返事の本文だけ
-    assert slack.thinking() == ["考え中…", "まとめている…", "作業している…", "まとめている…"]
+    assert slack.thinking() == ["考え中…", "作業している…"]
     assert slack.tasks() == []
 
 
@@ -573,8 +573,8 @@ async def test_thread_broadcast_reply_continues_thread(env, store):
     assistant, slack, claude, _ = env
     store.upsert_thread("C1", "10.1", "vlm", "s")
     store.set_session("C1", "10.1", "research", "claude", "s",
-                      runner.system_prompt_version(assistant.config))
-    store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
+                      prompt_version(assistant.config, "research"))
+    store.set_prompt_version("C1", "10.1", prompt_version(assistant.config, "research"))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",
                                 "subtype": "thread_broadcast", "text": "チャンネルにも送った返信"})
     await settle(assistant)
@@ -616,7 +616,7 @@ async def test_same_thread_requests_run_one_at_a_time(env, monkeypatch):
     gates = [asyncio.Event() for _ in range(3)]
     state = {"running": 0, "peak": 0, "calls": 0}
 
-    async def gated(config, request, prompt, on_activity=None, on_text=None):
+    async def gated(config, request, prompt, on_activity=None):
         i = state["calls"]
         state["calls"] += 1
         state["running"] += 1
@@ -731,8 +731,8 @@ async def test_same_thread_runs_one_at_a_time(env, monkeypatch):
     monkeypatch.setattr(runner, "run_model", slow)
     assistant.store.upsert_thread("C1", "10.1", "vlm", "s")
     assistant.store.set_session("C1", "10.1", "research", "claude", "s",
-                                runner.system_prompt_version(assistant.config))
-    assistant.store.set_prompt_version("C1", "10.1", runner.system_prompt_version(assistant.config))
+                                prompt_version(assistant.config, "research"))
+    assistant.store.set_prompt_version("C1", "10.1", prompt_version(assistant.config, "research"))
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "a"})
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "b"})
     await settle(assistant)
@@ -1017,14 +1017,13 @@ async def test_updated_rules_start_a_fresh_session_once(env, monkeypatch):
     """指示版が変わったら旧 session を再開せず、Slack 履歴で新規 session を作る。"""
     assistant, slack, claude, _ = env
     version = {"v": "v1"}
-    monkeypatch.setattr(runner, "system_prompt_version", lambda config: version["v"])
-    monkeypatch.setattr(runner, "system_prompt_text", lambda config: "新しい決まり")
+    from kei_agent import assistant as assistant_module
+    monkeypatch.setattr(assistant_module, "prompt_version", lambda config, actor, workspace=None: version["v"])
 
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 始めて"})
     await settle(assistant)
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "続き"})
     await settle(assistant)
-    assert "新しい決まり" not in claude.calls[0]["prompt"] and "新しい決まり" not in claude.calls[1]["prompt"]
 
     version["v"] = "v2"
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.3", "thread_ts": "10.1", "text": "もう一度"})
@@ -1376,9 +1375,9 @@ async def test_second_request_in_a_busy_thread_says_it_will_wait(env, monkeypatc
     assistant, slack, claude, _ = env
     gate = asyncio.Event()
 
-    async def slow(config, request, prompt, on_activity=None, on_text=None):
+    async def slow(config, request, prompt, on_activity=None):
         await gate.wait()
-        return await claude(config, request, prompt, on_activity, on_text)
+        return await claude(config, request, prompt, on_activity)
 
     monkeypatch.setattr(runner, "run_model", slow)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
@@ -1399,9 +1398,9 @@ async def test_status_inquiry_during_busy_thread_answers_immediately_without_que
     assistant, slack, claude, _ = env
     gate = asyncio.Event()
 
-    async def slow(config, request, prompt, on_activity=None, on_text=None):
+    async def slow(config, request, prompt, on_activity=None):
         await gate.wait()
-        return await claude(config, request, prompt, on_activity, on_text)
+        return await claude(config, request, prompt, on_activity)
 
     monkeypatch.setattr(runner, "run_model", slow)
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 集計して"})
@@ -1556,9 +1555,10 @@ async def test_course_channel_sends_free_questions_to_ask(env, store):
             asked.append((skill, _json.loads(text)))
             if on_progress:
                 await on_progress(_json.dumps({"activity": "box_search: 過去問"}))
+            answer = "<<kei-agent-final>>\n過去問は Box の Personal/過去問 にあるよ\n<<kei-agent-final-end>>"
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
-                    "ok": True, "text": "<<kei-agent-final>>\n過去問は Box の Personal/過去問 にあるよ\n<<kei-agent-final-end>>", "limit_reset_at": None,
-                "cost_usd": 0.01, "data": {"session_id": "course-1"}}))
+                "ok": True, "text": answer, "limit_reset_at": None, "cost_usd": 0.01,
+                "data": {"session_id": "course-1", "text": answer, "is_error": False, "provider": "claude"}}))
 
     assistant.agents["course"] = _Agent()
 
@@ -1572,11 +1572,14 @@ async def test_course_channel_sends_free_questions_to_ask(env, store):
     assert claude.calls == []                      # 本体では claude を動かさない
     assert "調べている…" in slack.thinking()  # 経過は固定の1行だけに出す
     assert slack.streamed() == ["過去問は Box の Personal/過去問 にあるよ"]
-    # 会話の続きは本体が覚える（次の質問は同じ claude の会話につながる）
-    assert store.agent_session("C7", "11.2", "course") == "course-1"
+    # 会話の続きは本体が覚える（次の質問は同じ provider の会話につながる。研究と同じ表）
+    from kei_agent import settings
+    provider = settings.selected_provider(assistant.config, store, "course")
+    assert store.session_for("C7", "11.2", "course", provider,
+                             prompt_version(assistant.config, "course")) == "course-1"
 
 
-async def test_course_connector_rebuilds_context_from_published_history(env, store):
+async def test_course_thread_rebuilds_context_from_history_when_the_provider_changes(env, store):
     import json as _json
 
     from kei_agent import a2a, settings
@@ -1590,9 +1593,10 @@ async def test_course_connector_rebuilds_context_from_published_history(env, sto
 
         async def stream(self, skill, text="", params=None, on_progress=None):
             asked.append(_json.loads(text))
+            answer = "<<kei-agent-final>>\n答えだよ\n<<kei-agent-final-end>>"
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
-                "ok": True, "text": "<<kei-agent-final>>\n答えだよ\n<<kei-agent-final-end>>",
-                "data": {}, "limit_reset_at": None, "cost_usd": None,
+                "ok": True, "text": answer, "data": {"text": answer, "is_error": False},
+                "limit_reset_at": None, "cost_usd": None,
             }))
 
     assistant.agents["course"] = _Agent()
@@ -1611,6 +1615,108 @@ async def test_course_connector_rebuilds_context_from_published_history(env, sto
     assert asked[1]["session_id"] is None
     assert "答えだよ" in asked[1]["prompt"]
     assert store.last_provider("C7", "11.2", "course") == "codex"
+
+
+class _AskAgent:
+    """`ask` を受けるエージェントの偽物。返事の data に実行結果（本文・会話の番号・上限）を入れる。"""
+
+    def __init__(self, base_url: str, replies: list[dict]):
+        self.base_url = base_url
+        self.replies = list(replies)
+        self.asked: list[dict] = []
+
+    async def stream(self, skill, text="", params=None, on_progress=None):
+        import json as _json
+
+        from kei_agent import a2a
+
+        assert skill == "ask"
+        self.asked.append(_json.loads(text))
+        data = self.replies.pop(0)
+        ok = not data.get("is_error")
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED" if ok else "TASK_STATE_FAILED", text="",
+                              status_text=_json.dumps({"ok": ok, "text": data.get("text", ""), "data": data,
+                                                       "limit_reset_at": data.get("limit_reset_at"),
+                                                       "cost_usd": None}))
+
+
+ANSWER = "<<kei-agent-final>>\n答えだよ\n<<kei-agent-final-end>>"
+
+
+@pytest.mark.parametrize(("channel", "name", "actor"), [("C7", "20_course", "course"), ("C8", "30_work", "work")])
+async def test_course_and_work_threads_resume_the_agents_session_like_research(env, channel, name, actor):
+    """大学・仕事の続きの質問は、Slack の履歴を貼り直さず、前回の会話をそのまま再開する。"""
+    assistant, slack, _, _ = env
+    slack.channels[channel] = name
+    agent = _AskAgent("http://127.0.0.1:8787", [{"text": ANSWER, "session_id": f"{actor}-1"},
+                                                 {"text": ANSWER, "session_id": f"{actor}-1"}])
+    assistant.agents[actor] = agent
+
+    await assistant.on_mention({"channel": channel, "user": "UME", "ts": "11.2", "text": "<@UBOT> どうなってる？"})
+    await settle(assistant)
+    await assistant.on_message({"channel": channel, "user": "UME", "ts": "11.3", "thread_ts": "11.2",
+                                "text": "その続きは？"})
+    await settle(assistant)
+
+    first, second = agent.asked
+    assert first["session_id"] is None and second["session_id"] == f"{actor}-1"
+    assert second["prompt"] == "その続きは？" and "Slack のスレッドの履歴" not in second["prompt"]
+    assert (second["channel"], second["thread_ts"], second["read_only"]) == (channel, "11.2", False)
+    assert slack.streamed() == ["答えだよ", "答えだよ"]
+
+
+async def test_course_limit_is_deferred_and_retried_like_research(env, store):
+    """大学・仕事でも、上限に当たったら明ける時刻をスレッドに書き、明けてから自動でやり直す。"""
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    agent = _AskAgent("http://127.0.0.1:8787", [
+        {"is_error": True, "limit_reset_at": time.time() + 3600, "provider": "claude"}])
+    assistant.agents["course"] = agent
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> どうなってる？"})
+    await settle(assistant)
+
+    assert [payload["thread_ts"] for _, payload in store.pending_deferred("request")] == ["11.2"]
+    assert any("利用上限" in text and "自動でやり直す" in text for text in slack.texts())
+
+
+async def test_every_agent_request_starts_with_todays_date(env, monkeypatch):
+    """「今日の授業は？」に答えられるよう、どの担当への依頼にも今日の日付と曜日を先頭に付ける。"""
+    from kei_agent import assistant as assistant_module
+    from kei_agent import auto_messages
+
+    monkeypatch.setattr(assistant_module, "today_line", auto_messages.today_line)
+    assistant, slack, claude, _ = env
+    slack.channels["C7"] = "20_course"
+    agent = _AskAgent("http://127.0.0.1:8787", [{"text": ANSWER, "session_id": "c-1"}])
+    assistant.agents["course"] = agent
+
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 今日の授業は？"})
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    today = auto_messages.today_line()
+    assert today.startswith("今日は ") and today.endswith("。\n")
+    assert agent.asked[0]["prompt"] == today + "今日の授業は？"
+    assert claude.calls[0]["prompt"] == today + "図を作って"
+
+
+async def test_self_fix_without_a_provider_says_to_choose_one(env, store):
+    """自己改善の AI が選ばれていないときは「接続に失敗」ではなく、選ぶよう伝える。"""
+    from dataclasses import replace
+
+    from kei_agent import settings, themes
+    from kei_agent.config import AgentProfile
+
+    assistant, slack, claude, _ = env
+    assistant.config = replace(assistant.config, agent_profiles={
+        **assistant.config.agent_profiles, "self_fix": AgentProfile(provider="")})
+    assert settings.selected_provider(assistant.config, store, "self_fix") == ""
+
+    result = await assistant.run_agent(themes.resolve(assistant.config, "00_kei-agent"), "直して")
+
+    assert result.is_error and assistant.render_reply(result)[0].startswith("⚠️ 使う AI")
+    assert claude.calls == []
 
 
 async def test_course_thread_takes_replies_without_a_mention(env, store):
@@ -1803,7 +1909,7 @@ async def test_claude_runs_through_the_research_agent_when_configured(env, store
 
     assert claude.calls == []
     skill, payload = asked[0]
-    assert skill == "run-claude"
+    assert skill == "ask"
     assert payload["channel_name"] == "vlm" and payload["prompt"] == "図を作って"
     assert payload["channel"] == "C1" and payload["thread_ts"] == "13.1"
     assert payload["provider"] == "claude"
@@ -1878,7 +1984,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
 # 仕事のチャンネル（#30_work）
 
 
-async def test_work_connector_rebuilds_context_from_published_history(env, store):
+async def test_work_thread_rebuilds_context_from_history_when_the_provider_changes(env, store):
     import json as _json
 
     from kei_agent import a2a, settings
@@ -1891,10 +1997,11 @@ async def test_work_connector_rebuilds_context_from_published_history(env, store
         base_url = "http://127.0.0.1:8789"
 
         async def stream(self, skill, text="", params=None, on_progress=None):
-            asked.append(text)
+            asked.append(_json.loads(text))
+            answer = "<<kei-agent-final>>\n朝会だよ\n<<kei-agent-final-end>>"
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
-                "ok": True, "text": "<<kei-agent-final>>\n朝会だよ\n<<kei-agent-final-end>>",
-                "data": {}, "limit_reset_at": None, "cost_usd": None,
+                "ok": True, "text": answer, "data": {"text": answer, "is_error": False},
+                "limit_reset_at": None, "cost_usd": None,
             }))
 
     assistant.agents["work"] = _Agent()
@@ -1910,7 +2017,9 @@ async def test_work_connector_rebuilds_context_from_published_history(env, store
                                 "thread_ts": "11.2", "text": "それの詳細は？"})
     await settle(assistant)
 
-    assert "朝会だよ" in asked[1]
+    # 仕事も研究と同じ JSON の依頼で頼み、provider が変わったら Slack の履歴から文脈を戻す
+    assert asked[1]["session_id"] is None and "朝会だよ" in asked[1]["prompt"]
+    assert asked[1]["provider"] == "codex"
     assert store.last_provider("C8", "11.2", "work") == "codex"
 
 
