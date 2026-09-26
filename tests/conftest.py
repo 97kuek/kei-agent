@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fakes import FakeGitHub
 
-from kei_agent import issues, model_classifier, research
+from kei_agent import improve, issues, model_classifier, research
 from kei_agent.config import MODEL_ACTORS, REPO_ROOT, AgentProfile, Config
 from kei_agent.store import Store
 
@@ -20,6 +20,18 @@ def no_real_secrets(monkeypatch):
     for name in list(os.environ):
         if name.startswith(_SECRET_PREFIXES):
             monkeypatch.delenv(name)
+
+
+@pytest.fixture(autouse=True)
+def no_real_restarts(monkeypatch):
+    """本物の launchd の担当を起動し直さない。
+
+    自己改善の取り込みや古い担当の入れ替えのテストは、本物の com.kei-agent.* に kickstart をかけてしまう
+    （2026-09-26、テストを回すたびに本番の担当が起動し直されていた）。確かめたいテストは、自分で差し替える。
+    """
+    restarted: list[str] = []
+    monkeypatch.setattr(improve, "restart_service", lambda name: restarted.append(name) or True)
+    return restarted
 
 
 @pytest.fixture(autouse=True)
