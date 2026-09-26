@@ -40,22 +40,25 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 - Notion の鍵（`NOTION_TOKEN`）を持つのはゲートウェイだけ。ほかの起動スクリプトは読んだあとで消し、親の合言葉から作った client ごとの合言葉でゲートウェイを通す。LLM の子プロセスには親の合言葉も渡さない
 - Toggl の ID は `focus.toggl.com/<組織>/workspaces/<ワークスペース>/` の URL から写す
 
-**エージェントごとのファイル**（そのエージェントの起動スクリプトだけが読む）
+**エージェントごとのファイル `kei-agent-<名前>.zsh`**（どれも任意。書き方は共通のファイルと同じ）
+
+研究・大学・仕事はどれも `deploy/run-agent.sh <名前>` で起動し、共通のファイルのあとに自分の名前のファイルだけを読む（無ければ共通のものだけで動く。同じ変数は上書きされる）。そのエージェントだけが要るものはここに置く。アカウント連携を使うエージェントは、連携を付けたアカウントのプロファイルを `CLAUDE_CONFIG_DIR` で選び、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外す（`claude setup-token` のトークンでは連携は使えない）。
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"` |
-| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"` |
-| `kei-agent-voice.zsh` | `OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
+| `kei-agent-research.zsh` | なし（置かなくてよい） |
+| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
+| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
+| `kei-agent-voice.zsh` | 声のレイヤ（`deploy/run-voice.sh`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
 
-アカウント連携はログイン（プロファイル）に付いてくるので、大学と仕事は専用のプロファイルを作ってログインしておく。`claude setup-token` のトークンでは連携は使えない。
+プロファイルは一度作ってログインしておく。
 
 ```zsh
-CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude   # /login → 個人アカウント。claude.ai で Box と Notion をつなぐ
-CLAUDE_CONFIG_DIR=$HOME/.claude-work claude       # /login → 会社アカウント（Microsoft 365）
+CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude   # /login → 個人アカウント。claude.ai で Box をつなぐ
+CLAUDE_CONFIG_DIR=$HOME/.claude-work claude       # /login → 会社アカウント。claude.ai で Microsoft 365 をつなぐ
 ```
 
-個人プロファイルの Notion 連携には授業ホームだけを共有する。Codex を選ぶ actor は、Codex CLI のログインと `codex mcp list --json` に必要な connector が出ていることを確かめる。
+Codex のアカウント連携は、Codex の ChatGPT ログイン（`~/.codex`。どのエージェントも同じ1つ）に付いてくる。Codex を選ぶ担当があるなら、Codex アプリで Box、Microsoft Outlook Email、Microsoft Outlook Calendar をつないでおく（Codex の仕事は Outlook だけを読む。Teams・SharePoint を読むのは Claude のとき）。
 
 ## 3. 手元で起動して確かめる
 
@@ -89,9 +92,10 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 | 設定 | `config.toml`（`KEI_AGENT_CONFIG` で別のファイルを指せる） |
 | 状態 | `~/.local/state/kei-agent/`（`kei-agent.db`、`notion.json`、`notion-course.json`） |
 | ログ | `~/Library/Logs/kei-agent/kei-agent.log`（5MB × 5世代）、起動の失敗は `launchd.log`、エージェントは `<名前>-launchd.log` |
+| 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
 | ジョブ | `pueue status --group kei-agent` |
 
-コードを入れ替えたら、エージェントも起動し直す（`launchctl kickstart -k gui/$(id -u)/com.kei-agent.<名前>`）。
+コードを入れ替えたら、エージェントも起動し直す（`launchctl kickstart -k gui/$(id -u)/com.kei-agent.<名前>`）。plist の雛形（`deploy/com.kei-agent.*.plist.template`）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。
 
 ## 5. Notion（最初の1回）
 
@@ -113,13 +117,6 @@ uv run kei-agent-notion-setup
 ```zsh
 uv run kei-agent-hub-setup
 uv run kei-agent-hub-setup --apply
-```
-
-旧 Daily／振り返り（研究の「ノート」）を「日別記録」へ移すのは、一度だけの作業。dry-run が作る manifest（Git に入れない）で件数・同日の重複・本文を確かめ、その件数を渡して反映する。旧ページは消さない。
-
-```zsh
-uv run kei-agent-hub-migrate
-uv run kei-agent-hub-migrate --apply --expected-count <確かめた件数>
 ```
 
 **授業ホーム**: 6つの DB をそろえる（`--seed <年度>` で `notion_setup.py` の履修科目を入れる）
@@ -158,9 +155,10 @@ gh auth status                                         # 要望を GitHub issue 
 | 起動しない | `launchctl print gui/$(id -u)/com.kei-agent.assistant \| grep -E 'state\|last exit'`、`launchd.log`。秘密情報のファイルがないと起動スクリプトが止まる |
 | 返事が来ない | App Home で provider が選ばれているか。`kei-agent.log` |
 | 大学・研究・仕事だけ失敗する | `curl -s http://127.0.0.1:8787/.well-known/agent-card.json`（ポートを替えて）と `<名前>-launchd.log`。`KEI_AGENT_A2A_TOKEN` が全プロセスで同じか |
+| `<名前>-launchd.log` に `can't open input file` | 登録してある plist が、いまはない起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
 | Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-gateway-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全プロセスで同じか |
 | Notion で `can't reach` と断られる | そのホームの外を触ろうとしている。ホームがコネクト「Kei Agent」に共有されているか、`config.toml` の `[notion]` が合っているか |
-| 大学・仕事の連携が見えない | エージェントのファイルの `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR`、そのプロファイルでのログイン |
+| 大学・仕事の連携が見えない | Claude なら、エージェントのファイルの `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR`、そのプロファイルでのログイン。Codex なら、ChatGPT のログインと Codex アプリの連携 |
 | 声が出ない・聞かない | `ffmpeg` があるか、マイクの許可、`OPENAI_API_KEY`、App Home のスイッチ、`voice-launchd.log` |
 | 上限に当たった | 何もしなくてよい。明ける時刻がスレッドに出て、明けてから自動でやり直す |
 | 自己改善のあと起動しない | 3回失敗すると `deploy/run.sh` が取り込んだ分を `git revert` して前の版で起動し、`update-rolled-back` を残して Slack で知らせる |

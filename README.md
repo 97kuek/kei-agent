@@ -17,17 +17,18 @@
 Slack（個人ワークスペース、Socket Mode）
   │
   ▼
-Kei Agent 本体（オーケストレーター, src/kei_agent/）
+Kei Agent 本体（オーケストレーター, src/kei_agent/）   :8786  声からの問い合わせ口
   Slack の受け口・振り分け・柵・Notion・定期実行・自己改善
-  │  A2A（127.0.0.1、共有トークン）
+  │  A2A（127.0.0.1、共有トークン）。エージェントを呼べるのは本体だけ
   ├─ 大学エージェント   :8787  Moodle / Box / 授業ホーム / Toggl
-  ├─ 研究エージェント   :8788  作業場での CLI 実行 / pueue ジョブ
+  ├─ 研究エージェント   :8788  テーマの作業場で AI を動かす / pueue ジョブ
   ├─ 仕事エージェント   :8789  Microsoft 365（読むだけ）
   └─ 声のレイヤ         :8790  Realtime API / マイク / スピーカー
   Notion ゲートウェイ   :8791  Notion に届く唯一の口（使う側ごとに届くホームを絞る）
 ```
 
-各エージェントは Claude Code CLI か Codex CLI のどちらかで動く（App Home で agent ごとに選ぶ）。
+各エージェントは Claude Code CLI か Codex CLI のどちらかで動く（App Home で agent ごとに選ぶ）。どちらでも、
+使える道具と届く範囲は同じ制限の表（`src/kei_agent/agent_policy.py`）で決まる。
 すべて同じ Mac の launchd で常駐する。
 
 ## ドキュメント
