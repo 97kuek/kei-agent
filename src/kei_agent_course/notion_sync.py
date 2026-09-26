@@ -9,7 +9,7 @@
 Notion はゲートウェイ経由（client は course）で、授業ホームの中だけに届く。
 
 使い方（手で動かすとき。Notion ゲートウェイが動いていること）:
-    source ~/.config/zsh/local/kei-agent.zsh
+    source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
     uv run --group course kei-agent-course-sync
 """
 

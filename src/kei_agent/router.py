@@ -91,7 +91,7 @@ def workspace(config: Config, actor: str = "router") -> Workspace:
     cwd.mkdir(parents=True, exist_ok=True)
     return Workspace("router", ChannelKind.COURSE, cwd, timeout_minutes=TIMEOUT_MINUTES,
                      # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
-                     system_prompt=config.repo_root / "prompts" / "router.md")
+                     system_prompt=config.prompt_file("router.md"))
 
 
 async def pick(config: Config, skills: list[dict], text: str, *, store=None) -> Choice:

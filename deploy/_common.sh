@@ -3,11 +3,22 @@
 # launchd は ~/.zshrc を読まないので、使うコマンド（uv・claude・codex・pueue など）の場所をここで決める
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# 秘密情報は、どのプロセスも読む共通のものと、そのプロセスだけのもの（kei-agent-<名前>.zsh、任意）に分けてある
-# （docs/architecture.md の「振り分けと A2A」）。こうすると、ほかのプロセスの鍵が載らない。
-# 読むのは各 run*.sh の一番外側で（関数の中で source すると、変数の扱いが変わることがある）
-SECRETS="$HOME/.config/zsh/local/kei-agent.zsh"
+# 秘密情報は、どのプロセスも読む共通のもの（kei-agent.zsh）と、そのプロセスだけのもの（kei-agent-<名前>.zsh、任意）に
+# 分けてある（docs/architecture.md の「振り分けと A2A」）。こうすると、ほかのプロセスの鍵が載らない。
+# 置き場所は config.toml の [paths] secrets（既定は ~/.config/kei-agent/secrets）。本体を起動する前に知りたいので、
+# 仮想環境の Python に設定を読ませる。まだ仮想環境が無いときは既定の場所
+secrets_dir() {
+  local found=""
+  if [[ -x "${REPO:-}/.venv/bin/python" ]]; then
+    found=$("$REPO/.venv/bin/python" -m kei_agent.paths secrets 2>/dev/null) || found=""
+  fi
+  print -r -- "${found:-${KEI_AGENT_HOME:-$HOME/.config/kei-agent}/secrets}"
+}
+# require_secrets が SECRETS_DIR と SECRETS（共通のファイル）を決める。source するのは各 run*.sh の一番外側で
+# （関数の中で source すると、変数の扱いが変わることがある）
 require_secrets() {
+  SECRETS_DIR=$(secrets_dir)
+  SECRETS="$SECRETS_DIR/kei-agent.zsh"
   if [[ ! -r "$SECRETS" ]]; then
     echo "秘密情報のファイルがありません: $SECRETS（deploy/README.md を参照）" >&2
     exit 1

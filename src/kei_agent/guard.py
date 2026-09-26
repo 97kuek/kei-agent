@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう。
 # 使うたびに更新するトークン（`<state_dir>/secrets`）は state_dir で変わるので、config.py で足す
 DEFAULT_DENY_READ = (
-    "~/.config/zsh/local",   # Kei Agent の秘密情報（deploy/README.md）
+    "~/.config/kei-agent/secrets",   # Kei Agent の秘密情報の既定の置き場所（config.toml の [paths] secrets）
+    "~/.config/zsh/local",   # 作者の環境の秘密情報の置き場所（[paths] secrets で指している）
     "~/.ssh",
     "~/.aws",
     "~/.claude",             # Claude Code の認証情報
@@ -54,7 +55,8 @@ SUBAGENT_TOOLS = ("Task", "Agent")
 ACCOUNT_NOTION = "mcp__claude_ai_Notion"
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
-PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.toml", "deploy/")
+# config.example.toml は、新しく使う人の既定の柵（読ませない場所・接続先）になる。本物の設定はリポジトリの外
+PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.example.toml", "deploy/")
 # 依存するライブラリが変わる差分。取り込む前の確認で、いちばん上に出す
 DEPENDENCY_PATHS = ("pyproject.toml", "uv.lock")
 # 差分に入っていてはいけない文字列（秘密情報）

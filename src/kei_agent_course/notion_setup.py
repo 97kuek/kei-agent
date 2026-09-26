@@ -4,7 +4,7 @@ Notion はゲートウェイ経由（client は course）で、授業ホーム�
 研究のデータベースには触れない（docs/architecture.md）。
 
 使い方（Notion ゲートウェイが動いていること）:
-    source ~/.config/zsh/local/kei-agent.zsh
+    source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
     uv run --group course kei-agent-course-setup [<授業ホームのページID>]
 """
 

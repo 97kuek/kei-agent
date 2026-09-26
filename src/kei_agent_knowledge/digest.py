@@ -270,7 +270,7 @@ def _workspace(config: Config) -> Workspace:
     ws = themes.agent_workspace(config, AGENT)
     assert ws.cwd is not None
     ws.cwd.mkdir(parents=True, exist_ok=True)
-    return replace(ws, system_prompt=config.repo_root / "prompts" / PROMPT_FILE)
+    return replace(ws, system_prompt=config.prompt_file(PROMPT_FILE))
 
 
 async def _run(config: Config, store, use_case: UseCase, prompt: str, provider: str, key: str) -> dict:

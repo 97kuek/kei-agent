@@ -60,9 +60,22 @@ def required_capabilities(policy: AgentPolicy) -> frozenset[str]:
     return frozenset(required)
 
 
+# 利用者のプロフィールを差し込まない指示書（JSON だけを返す、振り分け・分類と、選別・要約の係）
+NO_PROFILE = frozenset({"router.md", "knowledge-digest.md"})
+
+
 def prompt_path(config: Config, policy: AgentPolicy, workspace: Workspace) -> Path:
-    """指示書。作業場が持つもの（振り分け・分類の router.md）が優先。"""
-    return workspace.system_prompt or config.repo_root / "prompts" / policy.prompt
+    """指示書。作業場が持つもの（振り分け・分類の router.md）が優先。利用者が差し替えていれば、そちら。"""
+    return workspace.system_prompt or config.prompt_file(policy.prompt)
+
+
+def prompt_text(config: Config, path: Path) -> str:
+    """指示書の本文。会話する担当には、最後に利用者のプロフィール（話し方、所属、興味など）を差し込む。"""
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    profile = config.profile_text
+    if profile and path.name not in NO_PROFILE:
+        text = f"{text.rstrip()}\n\n## 依頼者のプロフィール\n\n{profile}\n"
+    return text
 
 
 def skill_dir(config: Config, policy: AgentPolicy) -> Path | None:
@@ -72,23 +85,21 @@ def skill_dir(config: Config, policy: AgentPolicy) -> Path | None:
 def prompt_version(config: Config, actor: str, workspace: Workspace | None = None) -> str:
     """その担当の会話の指示・skill の版。変わったら、古い会話を再開しない。"""
     policy = policy_of(actor)
-    path = config.repo_root / "prompts" / policy.prompt if workspace is None else prompt_path(config, policy, workspace)
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    return prompt_fingerprint(text, skill_dir(config, policy))
+    path = config.prompt_file(policy.prompt) if workspace is None else prompt_path(config, policy, workspace)
+    return prompt_fingerprint(prompt_text(config, path), skill_dir(config, policy))
 
 
 def resolve_contract(config: Config, request: ExecutionRequest) -> ExecutionContract:
     read_only = is_read_only(request)
     policy = policy_of(request.recipe.actor, request.recipe.use_case, read_only=read_only)
-    path = prompt_path(config, policy, request.workspace)
-    prompt_text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = prompt_text(config, prompt_path(config, policy, request.workspace))
     skills = skill_dir(config, policy)
     return ExecutionContract(
         workspace=request.workspace,
         recipe=request.recipe,
         policy=policy,
-        prompt_text=prompt_text,
-        prompt_version=prompt_fingerprint(prompt_text, skills),
+        prompt_text=text,
+        prompt_version=prompt_fingerprint(text, skills),
         skill_dir=skills,
         capabilities=required_capabilities(policy),
         read_only=read_only,

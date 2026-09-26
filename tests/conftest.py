@@ -22,6 +22,15 @@ def no_real_secrets(monkeypatch):
             monkeypatch.delenv(name)
 
 
+@pytest.fixture(autouse=True)
+def kei_agent_home(no_real_secrets, tmp_path_factory, monkeypatch):
+    """利用者のフォルダ（~/.config/kei-agent）は、テストごとに空の設定だけのものにする（開発機の本物を読まない）。"""
+    home = tmp_path_factory.mktemp("kei-agent-home")
+    (home / "config.toml").write_text("", encoding="utf-8")
+    monkeypatch.setenv("KEI_AGENT_HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
     return Config(

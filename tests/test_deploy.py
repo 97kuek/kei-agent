@@ -140,12 +140,14 @@ env
 """
 
 
-def _run_agent(home: Path, *args: str, common: str | None = "", own: dict[str, str] | None = None):
+def _run_agent(home: Path, *args: str, common: str | None = "", own: dict[str, str] | None = None,
+               secrets: Path | None = None):
     """偽の HOME と、リポジトリの写し（deploy/ と偽の .venv）で deploy/run-agent.sh を動かす。
 
-    common が None なら共通の秘密情報を置かない。本物の担当は起動しない。
+    common が None なら共通の秘密情報を置かない。secrets は設定（[paths] secrets）で選んだ置き場所で、
+    渡すと、仮想環境の Python がその場所を答える。本物の担当は起動しない。
     """
-    local = home / ".config" / "zsh" / "local"
+    local = secrets or home / ".config" / "kei-agent" / "secrets"
     local.mkdir(parents=True, exist_ok=True)
     if common is not None:
         (local / "kei-agent.zsh").write_text(common, encoding="utf-8")
@@ -164,6 +166,10 @@ def _run_agent(home: Path, *args: str, common: str | None = "", own: dict[str, s
         entry = venv_bin / f"kei-agent-{name}"
         entry.write_text(FAKE_ENTRY, encoding="utf-8")
         entry.chmod(0o755)
+    if secrets is not None:
+        python = venv_bin / "python"
+        python.write_text(f'#!/bin/sh\n[ "$*" = "-m kei_agent.paths secrets" ] && echo "{secrets}"\n', encoding="utf-8")
+        python.chmod(0o755)
     return subprocess.run([ZSH, str(repo / "deploy" / "run-agent.sh"), *args], capture_output=True, encoding="utf-8",
                           env={"PATH": "/usr/bin:/bin", "HOME": str(home)})
 
@@ -212,6 +218,16 @@ def test_run_agent_reads_its_own_secrets_after_the_common_ones(tmp_path):
     *_, env = _started(_run_agent(tmp_path, "research", common=common, own=own))
     assert env["CLAUDE_CONFIG_DIR"] == "common"
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "tok"
+
+
+@needs_zsh
+def test_run_agent_reads_secrets_from_the_configured_place(tmp_path):
+    """秘密情報の置き場所は設定（[paths] secrets）で変えられる。既定の場所にあっても、選んだ場所のほうを読む。"""
+    chosen = tmp_path / "dotfiles-local"
+    (tmp_path / ".config" / "kei-agent" / "secrets").mkdir(parents=True)
+    (tmp_path / ".config" / "kei-agent" / "secrets" / "kei-agent.zsh").write_text('export PICKED="default"\n')
+    *_, env = _started(_run_agent(tmp_path, "course", common='export PICKED="chosen"\n', secrets=chosen))
+    assert env["PICKED"] == "chosen"
 
 
 @needs_zsh

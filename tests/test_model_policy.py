@@ -82,6 +82,7 @@ def test_config_rejects_old_model_override_and_defaults_to_unselected_provider(t
     with pytest.raises(ConfigError, match="知らないキー"):
         load_config(old, env={})
 
+    (tmp_path / "empty.toml").write_text("")
     config = load_config(tmp_path / "empty.toml", env={})
     assert config.agent_profiles["research"].provider == ""
     assert config.agent_profiles["router"].provider == ""

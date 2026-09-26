@@ -30,7 +30,7 @@ def repo(tmp_path):
     git(path, "config", "user.name", "Kei Agent")
     (path / "src").mkdir()
     (path / "src" / "app.py").write_text("x = 1\n")
-    (path / "config.toml").write_text("research_root = \"~/research\"\n")
+    (path / "config.example.toml").write_text("research_root = \"~/research\"\n")
     git(path, "add", "-A")
     git(path, "commit", "-q", "-m", "はじめ")
     git(path, "remote", "add", "origin", str(origin))
@@ -81,7 +81,7 @@ async def second_yes(assistant, ts="20.5"):
 
 def test_check_change_rejects_protected_paths(repo):
     git(repo, "checkout", "-q", "-b", "work")
-    (repo / "config.toml").write_text("research_root = \"/tmp\"\n")
+    (repo / "config.example.toml").write_text("research_root = \"/tmp\"\n")
     git(repo, "commit", "-qam", "柵を触る")
     problems = guard.check_change(repo, "main", "HEAD")
     assert any("柵のファイル" in p for p in problems)
@@ -354,7 +354,7 @@ async def test_protected_change_is_not_offered_for_review(env):
     assistant, slack, claude, cfg = env
 
     def touches_guard(cwd: Path):
-        (cwd / "config.toml").write_text("research_root = \"/tmp\"\n")
+        (cwd / "config.example.toml").write_text("research_root = \"/tmp\"\n")
 
     await agreed(assistant, slack, claude, "柵を変えて")
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": touches_guard}]

@@ -1,6 +1,9 @@
 """設定の読み込み。
 
 秘密情報（Slackのトークンなど）は環境変数から、それ以外は config.toml から読む。
+config.toml は利用者のフォルダ（既定は ~/.config/kei-agent/。環境変数 KEI_AGENT_HOME で変えられる）に置き、
+リポジトリには例（config.example.toml）だけを置く。プロフィールと指示書の差し替えも、同じフォルダから読む
+（docs/extensibility.md）。
 """
 
 from __future__ import annotations
@@ -14,6 +17,11 @@ from pathlib import Path
 from kei_agent.guard import DEFAULT_DENY_READ
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# 利用者のもの（設定・プロフィール・指示書の差し替え・秘密情報）を置く場所
+DEFAULT_HOME = "~/.config/kei-agent"
+CONFIG_FILE = "config.toml"
+PROFILE_FILE = "profile.md"
+EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 
 # 決まった時刻の処理の時刻。空文字は「その処理を行わない」（settings.schedule_time と同じ形）
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -163,6 +171,28 @@ class Config:
     notion: NotionConfig = field(default_factory=lambda: NotionConfig())
     # エージェント同士の合言葉（環境変数 KEI_AGENT_A2A_TOKEN）
     a2a_token: str = ""
+    # 利用者のフォルダ（~/.config/kei-agent/）。None なら、プロフィールも指示書の差し替えも使わない（テスト）
+    user_dir: Path | None = None
+    # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
+    secrets_dir: Path | None = None
+
+    def prompt_file(self, name: str) -> Path:
+        """指示書。利用者のフォルダの prompts/ に同じ名前のファイルがあれば、そちらを使う（丸ごと差し替え）。"""
+        if self.user_dir is not None and (own := self.user_dir / "prompts" / name).is_file():
+            return own
+        return self.repo_root / "prompts" / name
+
+    @property
+    def profile_text(self) -> str:
+        """利用者のプロフィール（話し方、所属、興味など）。会話する担当の指示書に差し込む。無ければ空。
+
+        先頭の題（`# プロフィール`）と `<!-- -->` のコメント（書き方の説明）は外す。
+        """
+        path = self.user_dir / PROFILE_FILE if self.user_dir is not None else None
+        if path is None or not path.is_file():
+            return ""
+        text = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
+        return re.sub(r"\A\s*# [^\n]*\n", "", text).strip()
 
     @property
     def db_path(self) -> Path:
@@ -216,8 +246,9 @@ class ConfigError(ValueError):
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a", "notion",
+    "schedule", "maintenance", "a2a", "notion", "paths",
 }
+PATHS_KEYS = {"secrets"}
 AGENTS_KEYS = MODEL_ACTORS
 AGENT_PROFILE_KEYS = {"provider"}
 CHANNELS_KEYS = {"overview", "improve", "course", "work", "knowledge"}
@@ -289,13 +320,27 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
     return profiles
 
 
-def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
+def user_home(env: dict[str, str] | None = None) -> Path:
+    """利用者のフォルダ（環境変数 KEI_AGENT_HOME、なければ ~/.config/kei-agent）。"""
     env = dict(os.environ) if env is None else env
-    path = path or Path(env.get("KEI_AGENT_CONFIG", REPO_ROOT / "config.toml"))
-    data: dict = {}
-    if path.exists():
-        with path.open("rb") as f:
-            data = tomllib.load(f)
+    return _expand(env.get("KEI_AGENT_HOME") or DEFAULT_HOME)
+
+
+def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
+    """設定を読む。場所は path、環境変数 KEI_AGENT_CONFIG、利用者のフォルダの config.toml の順に探す。
+
+    利用者のフォルダは KEI_AGENT_HOME か、設定ファイルのあるフォルダ（path を渡したとき）か、~/.config/kei-agent。
+    """
+    env = dict(os.environ) if env is None else env
+    if path is None and env.get("KEI_AGENT_CONFIG"):
+        path = _expand(env["KEI_AGENT_CONFIG"])
+    home = user_home(env) if env.get("KEI_AGENT_HOME") or path is None else path.parent
+    path = path or home / CONFIG_FILE
+    if not path.is_file():
+        raise ConfigError(f"設定ファイルがありません: {path}。{EXAMPLE_CONFIG.name} を写して書き換えてください"
+                          f"（例: cp {EXAMPLE_CONFIG} {path}）")
+    with path.open("rb") as f:
+        data = tomllib.load(f)
 
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
@@ -303,10 +348,16 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(data, TOP_LEVEL_KEYS, "一番外側")
     _check_keys(channels, CHANNELS_KEYS, "[channels]")
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
+    paths = data.get("paths", {})
+    _check_keys(paths, PATHS_KEYS, "[paths]")
     _check_times(schedule, data.get("maintenance", {}))
     state_dir = _expand(data.get("state_dir", "~/.local/state/kei-agent"))
-    # 既定の読ませない場所には、使うたびに更新するトークン（Box など）の置き場も足す
-    deny_read = sandbox.get("deny_read", (*DEFAULT_DENY_READ, str(state_dir / "secrets")))
+    secrets_dir = _expand(paths.get("secrets", str(home / "secrets")))
+    # 既定の読ませない場所には、使うたびに更新するトークン（Box など）の置き場も足す。
+    # 秘密情報の置き場所は、deny_read を書き換えていても必ず足す
+    deny_read = [*sandbox.get("deny_read", (*DEFAULT_DENY_READ, str(state_dir / "secrets")))]
+    if str(secrets_dir) not in {str(_expand(p)) for p in deny_read}:
+        deny_read.append(str(secrets_dir))
     return Config(
         research_root=_expand(data.get("research_root", "~/research")),
         agent_root=_expand(data.get("agent_root", "~/kei-agent")),
@@ -336,4 +387,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         a2a=_a2a(data.get("a2a", {})),
         notion=_notion(data.get("notion", {})),
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
+        user_dir=home,
+        secrets_dir=secrets_dir,
     )

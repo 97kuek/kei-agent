@@ -1,0 +1,126 @@
+# Kei Agent の設定（例）
+# ~/.config/kei-agent/config.toml に写して書き換える（場所は環境変数 KEI_AGENT_HOME で変えられる）。
+# プロフィールは profile.example.md を ~/.config/kei-agent/profile.md に写す。docs/extensibility.md も参照
+
+# テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない
+research_root = "~/research"
+# 授業の作業場（大学エージェントの claude が動くところ）。資料は Box に置いたまま読むので、ここには置かない
+course_root = "~/course"
+# SQLite などBotの状態を置く場所
+state_dir = "~/.local/state/kei-agent"
+
+# claude -p を同時に動かす上限（違うスレッドどうし）
+max_concurrent_runs = 2
+# claude -p 1回の上限時間。長い作業はジョブにする
+run_timeout_minutes = 30
+# ジョブの状態を確認する間隔
+job_poll_seconds = 60
+# pueue の kei-agent グループで同時に走らせるジョブ数
+job_parallel = 1
+# 依頼者の依頼がこの回数たまったスレッドでは、[新しいスレッドで続ける] ボタンを出す。0 なら回数では出さない
+# （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
+handoff_after_turns = 8
+
+# agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
+# model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
+# 制限の表（src/kei_agent/agent_policy.py）で決まり、ここには書かない。
+# Claude / Codex の間、または上位 model への自動フォールバックはしない。
+[agents.research]
+provider = ""
+
+[agents.course]
+provider = ""
+
+[agents.work]
+provider = ""
+
+[agents.knowledge]
+provider = ""
+
+[agents.router]
+provider = ""
+
+[agents.self_fix]
+provider = ""
+
+[schedule]
+# 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
+enabled = true
+literature = "07:00"  # 先行研究の新着（テーマごと。知識の担当が選び、各テーマのチャンネルと先行研究 DB へ）
+reading = "07:00"     # 読みもの（興味のある技術記事。知識の担当が選び、#40_knowledge へ）
+daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#01_overview）。締切24時間前の知らせは1時間ごと
+review = "21:00"      # Retro & Planning（#01_overview）
+night = "00:00"       # 🌙 をつけた Task
+# Mac のスリープなどで逃した処理を、何時間後まで実行するか
+catch_up_hours = 3
+night_max_tasks = 5
+# この日数やり取りのないテーマを Daily で触れる
+stall_days = 3
+# 失敗したジョブや確認待ちを、この時間放置したら声をかける
+unanswered_hours = 24
+
+[maintenance]
+# 毎晩の保守。古いファイルを整理してから、~/research を非公開の Git リポジトリに push する
+enabled = true
+time = "22:00"
+backup = true
+session_retention_days = 90
+
+[a2a]
+# 相手を待つ時間（秒）。AI を動かす仕事には、これに AI の上限時間を足した時間まで待つ
+timeout_seconds = 300
+# 本体の A2A の口。声のレイヤは担当を直接呼ばず、ここに問い合わせる（担当を呼べるのは本体だけ）
+orchestrator = "http://127.0.0.1:8786"
+# 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
+
+[a2a.agents]
+# ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
+# 行を消すと、そのエージェントは使わない（research を消すと、claude は本体の中で動く）
+course = "http://127.0.0.1:8787"
+research = "http://127.0.0.1:8788"
+work = "http://127.0.0.1:8789"
+knowledge = "http://127.0.0.1:8792"
+voice = "http://127.0.0.1:8790"
+
+[notion]
+# Notion のホームのページ ID（URL の末尾32文字）。Notion を使わないなら空のまま。Notion を触るのはゲートウェイだけで、
+# 研究は research_home、大学は course_home、本体と手で動かす setup は3つすべての下だけを通す
+hub_home = ""       # 共通ホーム（自分の名前のページなど。Daily・振り返り・予定・時間の記録）
+research_home = ""  # 研究ホーム（notion.json の home_page_id）
+course_home = ""    # 授業ホーム（notion-course.json の home_page_id）
+
+[channels]
+# 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
+overview = ["overview", "research-overview"]
+# Kei Agent の改善: 要望は要約して公開の GitHub issue にする（原文は Slack に残る）
+# チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
+improve = ["research-agent", "kei-agent"]
+# 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない
+course = ["course"]
+# 仕事: 会社の予定など。依頼は仕事エージェント（A2A）に取り次ぐ
+work = ["work"]
+# 知識: 朝の読みもの（#40_knowledge）とその質問。依頼は知識エージェント（A2A）に取り次ぐ
+knowledge = ["knowledge"]
+# 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
+# 個人用のチャンネルには Kei Agent を招待しない
+
+[sandbox]
+# Bash（sandbox内）から接続してよいドメイン
+allowed_domains = [
+  "export.arxiv.org",
+  "arxiv.org",
+  "api.semanticscholar.org",
+  "pypi.org",
+  "files.pythonhosted.org",
+]
+# テーマごとに要る接続先は、ここには書かず Slack で許可する（App Home か、Kei Agent が聞いてくるボタン）
+# 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
+allow_write = ["~/.cache/uv"]
+# sandbox の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
+# 秘密情報や鍵の置き場所を塞ぐ。書かなければ src/kei_agent/config.py の DEFAULT_DENY_READ を使う
+# deny_read = ["~/.config/zsh/local", "~/.ssh", "~/.aws", "~/.claude", "~/.config/gh"]
+
+[paths]
+# 秘密情報の置き場所。共通の kei-agent.zsh と、担当ごとの kei-agent-<名前>.zsh を置く（deploy/README.md の「秘密情報」）。
+# 書かなければ ~/.config/kei-agent/secrets。ここは、いつも AI に読ませない場所に入る
+# secrets = "~/.config/kei-agent/secrets"

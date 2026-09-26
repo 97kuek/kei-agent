@@ -382,6 +382,7 @@ def test_env_strips_kei_agent_tokens_and_every_notion_key():
 def test_default_deny_read_covers_the_connector_profiles(tmp_path):
     """研究の Bash から、大学・仕事の連携を付けたプロファイルを読ませない。"""
     from kei_agent.config import load_config
+    (tmp_path / "none.toml").write_text("")
     paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
     assert any(p.endswith("/.claude-personal") for p in paths)
     assert any(p.endswith("/.claude-work") for p in paths)
@@ -482,6 +483,7 @@ def test_settings_deny_reading_secret_locations(config):
 
 def test_default_deny_read_covers_tokens_and_keys(tmp_path):
     from kei_agent.config import load_config
+    (tmp_path / "none.toml").write_text("")
     paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
     assert any(p.endswith("/.ssh") for p in paths)
     assert any(p.endswith("/.aws") for p in paths)

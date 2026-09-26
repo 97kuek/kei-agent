@@ -12,3 +12,7 @@ doctor-ai-concept.pdf
 # Slack のアイコン（似顔絵なので公開リポジトリには入れない。Slack の設定画面にだけ上げる）
 slack/icon.png
 /Kei Agent.png
+
+# 利用者の設定は ~/.config/kei-agent/ に置く（docs/extensibility.md）。リポジトリには例だけ
+/config.toml
+/profile.md

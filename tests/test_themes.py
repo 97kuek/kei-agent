@@ -98,10 +98,12 @@ def test_a_broken_schedule_time_is_reported(tmp_path):
     assert load_config(path, env={}).schedule.review == ""
 
 
-def test_config_toml_in_repo_loads(tmp_path):
-    """リポジトリの config.toml が、検査を通ること。"""
-    from kei_agent.config import REPO_ROOT, load_config
-    load_config(REPO_ROOT / "config.toml", env={})
+def test_example_config_in_repo_loads_without_personal_values(tmp_path):
+    """リポジトリには例の設定だけを置く。検査を通り、Notion のページ ID などの個人の値は空のまま。"""
+    from kei_agent.config import EXAMPLE_CONFIG, REPO_ROOT, load_config
+    assert not (REPO_ROOT / "config.toml").is_file() or (REPO_ROOT / ".gitignore").read_text().count("/config.toml")
+    config = load_config(EXAMPLE_CONFIG, env={})
+    assert (config.notion.hub_home, config.notion.research_home, config.notion.course_home) == ("", "", "")
 
 
 def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path):

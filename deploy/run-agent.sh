@@ -18,7 +18,7 @@ source "$REPO/deploy/_common.sh"
 
 require_secrets
 source "$SECRETS"
-AGENT_SECRETS="$HOME/.config/zsh/local/kei-agent-$AGENT.zsh"
+AGENT_SECRETS="$SECRETS_DIR/kei-agent-$AGENT.zsh"
 [[ -r "$AGENT_SECRETS" ]] && source "$AGENT_SECRETS"
 drop_notion_secrets
 

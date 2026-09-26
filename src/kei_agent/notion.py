@@ -1,7 +1,7 @@
 """Notion の「研究ホーム」を作る（docs/architecture.md の「Notion」）。Kei Agent が読み書きするときの接続も兼ねる。
 
 使い方（Notion ゲートウェイが動いていること）:
-    source ~/.config/zsh/local/kei-agent.zsh
+    source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
     uv run kei-agent-notion-setup [<研究ホームのページID>]            作るもの・足すものを見るだけ
     uv run kei-agent-notion-setup --apply [<研究ホームのページID>]    書き込む
 
