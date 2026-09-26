@@ -25,6 +25,7 @@ from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from kei_agent import version
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError
 from kei_agent_notion_gateway.clients import PROXY_CLIENTS, Tokens
@@ -181,7 +182,8 @@ def build_app(settings: GatewayConfig, gateway: Gateway) -> Starlette:
 
     @mcp.custom_route(HEALTH_PATH, methods=["GET"])
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"ok": True})
+        # version は起動したときの commit（deploy/update.sh が、新しい版で動いているかを見る）
+        return JSONResponse({"ok": True, "version": version.RUNNING})
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, json_response=True, host=settings.host)
     app.add_route(PROXY_PATH + "/{path:path}", proxy_endpoint(gateway), methods=["GET", "POST", "PATCH", "DELETE"])

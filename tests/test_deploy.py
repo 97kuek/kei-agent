@@ -236,3 +236,79 @@ def test_run_agent_stops_without_the_common_secrets(tmp_path):
 def test_readme_no_longer_asks_for_a_course_notion_token():
     readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
     assert "NOTION_COURSE_TOKEN" not in readme
+
+
+# deploy/update.sh（1コマンドのデプロイ）。本物の launchd と uv には触らない
+
+FAKE_TOOL = """#!/bin/sh
+echo "$(basename "$0") $*" >> "$HOME/calls.log"
+"""
+
+
+def _update_repo(home: Path, branch: str = "main") -> Path:
+    """deploy/ の写しを入れた git リポジトリ（本番の checkout の代わり）と、偽の uv・launchctl・python。"""
+    repo = home / "repo"
+    shutil.copytree(DEPLOY, repo / "deploy")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q", "-b", branch], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "first"], check=True)
+    for tool in (home / ".local" / "bin" / "uv", home / ".local" / "bin" / "launchctl", repo / ".venv" / "bin" / "python"):
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_text(FAKE_TOOL, encoding="utf-8")
+        tool.chmod(0o755)
+    (home / "Library" / "LaunchAgents").mkdir(parents=True)
+    return repo
+
+
+def _update(repo: Path, home: Path) -> subprocess.CompletedProcess:
+    return subprocess.run([ZSH, str(repo / "deploy" / "update.sh")], capture_output=True, encoding="utf-8",
+                          env={"PATH": "/usr/bin:/bin", "HOME": str(home)})
+
+
+def _printed(repo: Path, home: Path, *args: str) -> str:
+    return subprocess.run([ZSH, str(repo / "deploy" / "install.sh"), *args, "print"], capture_output=True,
+                          encoding="utf-8", check=True, env={"PATH": "/usr/bin:/bin", "HOME": str(home)}).stdout
+
+
+@needs_zsh
+def test_update_reinstalls_only_changed_plists_restarts_all_and_checks_the_version(tmp_path):
+    repo = _update_repo(tmp_path)
+    agents = tmp_path / "Library" / "LaunchAgents"
+    (agents / "com.kei-agent.assistant.plist").write_text(_printed(repo, tmp_path), encoding="utf-8")
+    # 前の雛形のまま（起動スクリプトが違う）の担当は、登録し直す
+    (agents / "com.kei-agent.course.plist").write_text(
+        _printed(repo, tmp_path, "course").replace("run-agent.sh", "run-course.sh"), encoding="utf-8")
+
+    result = _update(repo, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short=12", "HEAD"], capture_output=True,
+                            encoding="utf-8", check=True).stdout.strip()
+    calls = (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines()
+    assert calls[0] == "uv sync --frozen --inexact --all-groups --quiet"
+    assert "plist が変わったので登録し直します: course" in result.stdout
+    assert "plist が変わったので登録し直します: assistant" not in result.stdout
+    assert "登録されていません: research（使うなら deploy/install.sh research）" in result.stdout
+    assert (agents / "com.kei-agent.course.plist").read_text(encoding="utf-8").strip() == \
+        _printed(repo, tmp_path, "course").strip()
+    uid = subprocess.run(["id", "-u"], capture_output=True, encoding="utf-8", check=True).stdout.strip()
+    assert f"launchctl bootstrap gui/{uid} {agents / 'com.kei-agent.course.plist'}" in calls
+    # 全部を起動し直してから（本体は最後）、新しい版で動いているかを確かめる
+    kicks = [call for call in calls if call.startswith("launchctl kickstart")]
+    assert kicks[-1] == f"launchctl kickstart -k gui/{uid}/com.kei-agent.assistant"
+    assert calls[-1] == f"python -m kei_agent.deploy_check {commit}"
+
+
+@needs_zsh
+def test_update_refuses_other_branches_and_unfinished_changes(tmp_path):
+    repo = _update_repo(tmp_path / "a", branch="feature/x")
+    result = _update(repo, tmp_path / "a")
+    assert result.returncode == 1 and "main ではありません" in result.stderr
+    assert not (tmp_path / "a" / "calls.log").exists()           # 何も動かさない
+
+    repo = _update_repo(tmp_path / "b")
+    (repo / "deploy" / "run.sh").write_text("# 書きかけ\n", encoding="utf-8")
+    result = _update(repo, tmp_path / "b")
+    assert result.returncode == 1 and "書きかけの変更があります" in result.stderr
+    assert not (tmp_path / "b" / "calls.log").exists()
