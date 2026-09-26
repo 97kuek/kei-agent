@@ -52,8 +52,10 @@ def test_home_shows_agent_provider_controls(config, store):
     config = replace(config, agent_profiles={name: AgentProfile()
                                              for name in ("research", "course", "work", "router", "self_fix")})
     view = home.build_home(config, store, [], is_owner=True)
-    text = _texts(view)
-    assert "大学: 未選択" in text
+    course, = [b["accessory"] for b in view["blocks"]
+               if b.get("accessory", {}).get("action_id") == "kei_agent_home_provider:course"]
+    # 選んでいなければ、欄に「未選択」と出るだけ（説明文は置かない）
+    assert "initial_option" not in course and course["placeholder"]["text"] == "未選択"
     controls = [block.get("accessory", {}) for block in view["blocks"]]
     assert {element.get("action_id") for element in controls} >= {
         "kei_agent_home_provider:research", "kei_agent_home_provider:course", "kei_agent_home_provider:work",
@@ -89,6 +91,16 @@ async def test_remove_domain_from_home(env, store):
     assert "zenodo.org" not in _texts(_published(slack)["view"])
 
 
+async def test_remove_domain_with_the_select(env, store):
+    assistant, slack = env
+    settings.allow_domain(store, "vlm", "zenodo.org", "")
+    view = home.build_home(assistant.config, store, ["vlm"], is_owner=True)
+    remove, = [b["accessory"] for b in view["blocks"]
+               if b.get("accessory", {}).get("action_id") == home.REMOVE_DOMAIN_ACTION]
+    await assistant.on_home_action(_action(home.REMOVE_DOMAIN_ACTION, selected_option=remove["options"][0]))
+    assert settings.theme_domains(store, "vlm") == []
+
+
 async def test_someone_else_cannot_change_settings(env, store):
     assistant, slack = env
     settings.allow_domain(store, "vlm", "zenodo.org", "")
@@ -96,14 +108,36 @@ async def test_someone_else_cannot_change_settings(env, store):
     assert settings.theme_domains(store, "vlm") == ["zenodo.org"]
 
 
-async def test_change_time_and_toggle_from_home(env, config, store):
+def _checked(*values):
+    return [{"value": value} for value in values]
+
+
+async def test_change_time_and_turn_schedules_on_and_off_from_home(env, config, store):
     assistant, slack = env
+    others = [name for name in settings.SCHEDULE_NAMES if name != "daily"]
     await assistant.on_home_action(_action("kei_agent_home_time:daily", selected_time="07:30"))
     assert settings.schedule_time(config, store, "daily") == "07:30"
-    await assistant.on_home_action(_action("kei_agent_home_toggle:daily", "daily"))
+    await assistant.on_home_action(_action(home.SCHEDULES_ACTION, selected_options=_checked(*others)))
     assert settings.schedule_time(config, store, "daily") == ""
-    await assistant.on_home_action(_action("kei_agent_home_toggle:daily", "daily"))
+    assert all(settings.schedule_time(config, store, name) for name in others)
+    await assistant.on_home_action(_action(home.SCHEDULES_ACTION, selected_options=_checked(*settings.SCHEDULE_NAMES)))
     assert settings.schedule_time(config, store, "daily") == "07:30"
+    boxes, = [e for b in _published(slack)["view"]["blocks"] for e in b.get("elements", [])
+              if e.get("action_id") == home.SCHEDULES_ACTION]
+    assert {o["value"] for o in boxes["initial_options"]} == set(settings.SCHEDULE_NAMES)
+
+
+async def test_voice_checkboxes_open_and_close_the_microphone(env, store, monkeypatch):
+    assistant, slack = env
+    heard = []
+    monkeypatch.setattr(assistant, "notify_listening", heard.append)
+
+    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=_checked("voice", "listen")))
+    assert settings.voice_enabled(store) and settings.listening_enabled(store) and heard == [True]
+    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=_checked("voice")))
+    assert settings.voice_enabled(store) and not settings.listening_enabled(store) and heard == [True, False]
+    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=[]))
+    assert not settings.voice_enabled(store) and heard == [True, False]
 
 
 async def test_home_provider_action_changes_the_next_agent_run(env, store):
@@ -170,7 +204,7 @@ def test_home_shows_what_is_running(config, store):
 
     text = _texts(home.build_home(config, store, ["vlm"], is_owner=True))
 
-    assert "いま動いているもの" in text
+    assert "動いているもの" in text
     assert "#vlm" in text and "依頼" in text            # 動いている依頼
     assert "ジョブ 1「sweep」実行中" in text
     assert "#research-overview" in text and "返事待ち" in text
@@ -178,7 +212,17 @@ def test_home_shows_what_is_running(config, store):
 
 
 def test_home_says_when_nothing_is_running(config, store):
-    assert "いまは何も動いていません" in _texts(home.build_home(config, store, [], is_owner=True))
+    blocks = home.build_home(config, store, [], is_owner=True)["blocks"]
+    assert blocks[1]["text"]["text"] == "*動いているもの*" and blocks[2]["elements"][0]["text"] == "なし"
+
+
+def test_home_has_no_explanations(config, store):
+    """見出しと操作だけ。説明の文（context）は「なし」などの状態だけにする。"""
+    settings.allow_domain(store, "vlm", "zenodo.org", "")
+    blocks = home.build_home(config, store, ["vlm"], is_owner=True)["blocks"]
+    contexts = [e["text"] for b in blocks if b["type"] == "context" for e in b["elements"]]
+    assert contexts == ["なし"]
+    assert "config.toml" not in _texts({"blocks": blocks})
 
 
 async def test_refresh_button_rebuilds_the_home(env):

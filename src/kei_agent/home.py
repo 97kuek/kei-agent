@@ -1,7 +1,7 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
-置くのは、テーマごとに許可した接続先と、決まった時刻の処理の時刻だけ（docs/architecture.md）。
-基本の接続先など `config.toml` の柵は出さない。
+見出しと操作だけの1画面にする（説明文は置かない。2026-09-26）。置くのは、動いているもの、担当ごとの AI、
+定期実行の時刻とオン・オフ、声、テーマごとに許可した接続先だけ。基本の接続先など `config.toml` の柵は出さない。
 """
 
 from __future__ import annotations
@@ -15,6 +15,16 @@ from kei_agent.store import Store
 
 ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
 REFRESH_ACTION = "kei_agent_home_refresh"
+PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
+TIME_ACTION = "kei_agent_home_time"              # :<定期実行>
+SCHEDULES_ACTION = "kei_agent_home_schedules"
+VOICE_ACTION = "kei_agent_home_voice"
+REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
+ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
+AGENT_LABELS = {"research": "研究", "course": "大学", "work": "仕事", "router": "振り分け・Daily", "self_fix": "自己改善"}
+# 定期実行のチェックに出す短い名前（時刻の行は settings.SCHEDULE_LABELS）
+SCHEDULE_SHORT = {"literature": "先行研究", "daily": "Daily", "review": "レトプラ", "night": "夜間", "maintenance": "保守"}
+VOICE_OPTIONS = {"voice": "知らせる", "listen": "聞く（マイク）"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される
 TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",
                   "night": "夜間の Task", "handoff": "引き継ぎ", "literature": "先行研究の新着",
@@ -25,12 +35,30 @@ def _mrkdwn(text: str) -> dict:
     return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
 
+def _context(text: str) -> dict:
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
+
+
+def _option(text: str, value: str) -> dict:
+    return {"text": {"type": "plain_text", "text": text}, "value": value}
+
+
 def _button(text: str, action_id: str, value: str, style: str | None = None) -> dict:
     button = {"type": "button", "action_id": action_id, "value": value,
               "text": {"type": "plain_text", "text": text}}
     if style:
         button["style"] = style
     return button
+
+
+def _checkboxes(action_id: str, options: dict[str, str], chosen: set[str]) -> dict:
+    """値 → 表示名のチェック。Slack は空の initial_options を受け付けないので、選んだものが無ければ付けない。"""
+    element = {"type": "checkboxes", "action_id": action_id,
+               "options": [_option(text, value) for value, text in options.items()]}
+    initial = [_option(text, value) for value, text in options.items() if value in chosen]
+    if initial:
+        element["initial_options"] = initial
+    return element
 
 
 def _now_working(store: Store, now: float | None = None) -> list[str]:
@@ -51,112 +79,69 @@ def _now_working(store: Store, now: float | None = None) -> list[str]:
 
 def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool) -> dict:
     if not is_owner:
-        return {"type": "home", "blocks": [_mrkdwn("Kei Agent の設定は、依頼者だけが変えられます。")]}
+        return {"type": "home", "blocks": [_mrkdwn("設定を変えられるのは依頼者だけです")]}
 
-    blocks: list[dict] = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Kei Agent の設定"}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            "ここで変えた内容は、再起動なしで次の作業から効きます。書き込み先や読ませない場所などは `config.toml` で管理します"}]},
-        {"type": "divider"},
-        _mrkdwn("*いま動いているもの*"),
-    ]
     working = _now_working(store)
-    blocks.append(_mrkdwn("\n".join(working)) if working else
-                  {"type": "context", "elements": [{"type": "mrkdwn", "text": "いまは何も動いていません"}]})
-    blocks.append({"type": "actions", "elements": [_button("最新にする", REFRESH_ACTION, "refresh")]})
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Kei Agent"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*動いているもの*"},
+         "accessory": _button("更新", REFRESH_ACTION, "refresh")},
+        _mrkdwn("\n".join(working)) if working else _context("なし"),
+        {"type": "divider"},
+        _mrkdwn("*AI*"),
+    ]
+    for agent, label in AGENT_LABELS.items():
+        provider = settings.agent_profile(config, store, agent).provider
+        select = {"type": "static_select", "action_id": f"{PROVIDER_ACTION}:{agent}",
+                  "placeholder": {"type": "plain_text", "text": "未選択"},
+                  "options": [_option("Claude", "claude"), _option("Codex", "codex")]}
+        if provider:
+            select["initial_option"] = _option(provider.title(), provider)
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": label}, "accessory": select})
 
-    blocks += [{"type": "divider"}, _mrkdwn("*AI 実行器*")]
-    labels = {
-        "research": "研究", "course": "大学", "work": "仕事",
-        "router": "ルーティング・全体計画", "self_fix": "自己改善",
-    }
-    for agent, label in labels.items():
-        profile = settings.agent_profile(config, store, agent)
-        provider = profile.provider.title() if profile.provider else "未選択"
-        selector = {
-            "type": "static_select", "action_id": f"kei_agent_home_provider:{agent}",
-            "placeholder": {"type": "plain_text", "text": "provider を選ぶ"},
-            "options": [
-                {"text": {"type": "plain_text", "text": "Claude"}, "value": "claude"},
-                {"text": {"type": "plain_text", "text": "Codex"}, "value": "codex"},
-            ],
-        }
-        if profile.provider:
-            selector["initial_option"] = {"text": {"type": "plain_text", "text": provider},
-                                          "value": profile.provider}
-        description = (
-            "Box は読み取りのみ。Notion は大学ホーム内だけ" if agent == "course" else
-            "Outlook は読み取りのみ。SharePoint と Teams は使わない" if agent == "work" else
-            "研究ホームの Notion gateway と W&B を使う" if agent == "research" else
-            "分類と Daily/Retro を用途別の軽量・標準 recipe で処理する" if agent == "router" else
-            "設計・実装・レビューを用途別 recipe で処理する"
-        )
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*{label}: {provider}*\n{description}"},
-            "accessory": selector,
-        })
-
+    running = {name for name in settings.SCHEDULE_NAMES if settings.schedule_setting(config, store, name)[1]}
     blocks += [
         {"type": "divider"},
+        _mrkdwn("*定期実行*"),
+        {"type": "actions", "elements": [
+            _checkboxes(SCHEDULES_ACTION, {name: SCHEDULE_SHORT[name] for name in settings.SCHEDULE_NAMES}, running)]},
+    ]
+    for name in settings.SCHEDULE_NAMES:
+        hhmm, _enabled = settings.schedule_setting(config, store, name)
+        picker = {"type": "timepicker", "action_id": f"{TIME_ACTION}:{name}",
+                  "placeholder": {"type": "plain_text", "text": "時刻"}}
+        if hhmm:
+            picker["initial_time"] = hhmm
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": settings.SCHEDULE_LABELS[name]},
+                       "accessory": picker})
+
+    voice = {name for name, on in (("voice", settings.voice_enabled(store)),
+                                   ("listen", settings.listening_enabled(store))) if on}
+    blocks += [
+        {"type": "divider"},
+        _mrkdwn("*声*"),
+        {"type": "actions", "elements": [_checkboxes(VOICE_ACTION, VOICE_OPTIONS, voice)]},
+        {"type": "divider"},
         _mrkdwn("*接続先*"),
-        # Slack の mrkdwn は、閉じる * の直後に全角の文字が続くと太字にならないので、説明は別の行にする
-        {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            "テーマごとに許可した接続先です。チャンネルをアーカイブすると消えます"}]},
     ]
     domains = settings.all_theme_domains(store)
     for theme in theme_names:
         allowed = domains.get(theme, [])
         # テーマ名は先頭の番号を外したもの（themes.theme_name）。`#` を付けると
         # `#10_amr-query` というチャンネル名とずれて、別のものに見えてしまう
-        blocks.append(_mrkdwn(f"*{theme}*" + ("" if allowed else "\n許可した接続先はまだありません")))
-        for domain in allowed:
-            blocks.append({
-                "type": "section", "text": {"type": "mrkdwn", "text": f"`{domain}`"},
-                "accessory": _button("外す", "kei_agent_home_remove_domain", f"{theme}\t{domain}", "danger"),
-            })
-    if theme_names:
-        blocks.append({"type": "actions", "elements": [_button("接続先を足す", "kei_agent_home_add_domain", "add")]})
-    else:
-        blocks.append(_mrkdwn("研究テーマのチャンネルがまだありません"))
-
-    blocks += [
-        {"type": "divider"},
-        _mrkdwn("*声*"),
-        {"type": "context", "elements": [{"type": "mrkdwn", "text":
-            "*知らせる*: 作業が終わったときなどに、机の上で声に出します。"
-            "Stack-chan がいればそちら、いなければ Mac のスピーカーで鳴らします\n"
-            "*聞く*: マイクを開けて、話しかけると答えます。"
-            "**切っている間はマイクを閉じます**（講義中などに録られないように）"}]},
-        {"type": "actions", "elements": [
-            _button("知らせるのを止める" if settings.voice_enabled(store) else "知らせる",
-                    "kei_agent_home_toggle_voice", "voice"),
-            _button("聞くのを止める" if settings.listening_enabled(store) else "聞く",
-                    "kei_agent_home_toggle_listen", "listen",
-                    "danger" if settings.listening_enabled(store) else None),
-        ]},
-    ]
-
-    blocks += [{"type": "divider"}, _mrkdwn("*決まった時刻の処理*")]
-    for name in settings.SCHEDULE_NAMES:
-        hhmm, enabled = settings.schedule_setting(config, store, name)
-        timepicker = {"type": "timepicker", "action_id": f"kei_agent_home_time:{name}",
-                      "placeholder": {"type": "plain_text", "text": "時刻"}}
-        if hhmm:
-            timepicker["initial_time"] = hhmm
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"{settings.SCHEDULE_LABELS[name]}（{'動かす' if enabled else '止めている'}）"},
-            "accessory": timepicker,
-        })
-        blocks.append({"type": "actions", "elements": [
-            _button("止める" if enabled else "動かす", f"kei_agent_home_toggle:{name}", name),
-        ]})
+        block = _mrkdwn(f"*{theme}*  " + ("、".join(f"`{domain}`" for domain in allowed) if allowed else "なし"))
+        if allowed:
+            block["accessory"] = {"type": "static_select", "action_id": REMOVE_DOMAIN_ACTION,
+                                  "placeholder": {"type": "plain_text", "text": "外す"},
+                                  "options": [_option(domain, f"{theme}\t{domain}") for domain in allowed]}
+        blocks.append(block)
+    blocks.append({"type": "actions", "elements": [_button("足す", ADD_DOMAIN_ACTION, "add")]} if theme_names
+                  else _context("研究テーマのチャンネルはまだありません"))
     return {"type": "home", "blocks": blocks}
 
 
 def build_add_domain_modal(theme_names: list[str]) -> dict:
-    options = [{"text": {"type": "plain_text", "text": f"#{t}"}, "value": t} for t in theme_names]
+    options = [_option(theme, theme) for theme in theme_names]
     return {
         "type": "modal",
         "callback_id": ADD_DOMAIN_CALLBACK,
@@ -167,7 +152,7 @@ def build_add_domain_modal(theme_names: list[str]) -> dict:
             {"type": "input", "block_id": "theme", "label": {"type": "plain_text", "text": "テーマ"},
              "element": {"type": "static_select", "action_id": "value", "options": options}},
             {"type": "input", "block_id": "domain", "label": {"type": "plain_text", "text": "ドメイン"},
-             "hint": {"type": "plain_text", "text": "例: zenodo.org。*.example.com のように、まとめて許可することもできます"},
+             "hint": {"type": "plain_text", "text": "例: zenodo.org、*.example.com"},
              "element": {"type": "plain_text_input", "action_id": "value"}},
         ],
     }

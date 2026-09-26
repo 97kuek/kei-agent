@@ -115,29 +115,36 @@ class SettingsActions:
         kind, _, name = action.get("action_id", "").partition(":")
         if kind == home.REFRESH_ACTION:
             pass  # 表示を作り直すだけ
-        elif kind == "kei_agent_home_remove_domain":
-            theme, _, domain = action.get("value", "").partition("\t")
+        elif kind == home.REMOVE_DOMAIN_ACTION:
+            # 選ぶ形（いま）とボタン（前に出した画面）の両方を読む
+            value = (action.get("selected_option") or {}).get("value") or action.get("value", "")
+            theme, _, domain = value.partition("\t")
             settings.remove_domain(self.store, theme, domain)
-        elif kind == "kei_agent_home_add_domain":
+        elif kind == home.ADD_DOMAIN_ACTION:
             await self.slack.views_open(trigger_id=body.get("trigger_id"),
                                         view=home.build_add_domain_modal(self._theme_names()))
             return
-        elif kind == "kei_agent_home_time" and name in settings.SCHEDULE_NAMES:
+        elif kind == home.TIME_ACTION and name in settings.SCHEDULE_NAMES:
             # 時刻を消されたら変えずに、表示だけ元の時刻に戻す
             selected = action.get("selected_time") or ""
             if HHMM.match(selected):
                 _, enabled = settings.schedule_setting(self.config, self.store, name)
                 settings.set_schedule(self.store, name, selected, enabled)
-        elif kind == "kei_agent_home_toggle" and name in settings.SCHEDULE_NAMES:
-            hhmm, enabled = settings.schedule_setting(self.config, self.store, name)
-            settings.set_schedule(self.store, name, hhmm, not enabled)
-        elif kind == "kei_agent_home_toggle_voice":
-            settings.set_voice(self.store, not settings.voice_enabled(self.store))
-        elif kind == "kei_agent_home_toggle_listen":
-            on = not settings.listening_enabled(self.store)
-            settings.set_listening(self.store, on)
-            self.notify_listening(on)
-        elif kind == "kei_agent_home_provider" and name in {"research", "course", "work", "router", "self_fix"}:
+        elif kind == home.SCHEDULES_ACTION:
+            # チェックの付いたものだけを動かす（付け外ししたものだけ書き換える）
+            chosen = {option.get("value") for option in action.get("selected_options") or []}
+            for schedule in settings.SCHEDULE_NAMES:
+                hhmm, enabled = settings.schedule_setting(self.config, self.store, schedule)
+                if (schedule in chosen) != enabled:
+                    settings.set_schedule(self.store, schedule, hhmm, schedule in chosen)
+        elif kind == home.VOICE_ACTION:
+            chosen = {option.get("value") for option in action.get("selected_options") or []}
+            settings.set_voice(self.store, "voice" in chosen)
+            listen = "listen" in chosen
+            if listen != settings.listening_enabled(self.store):
+                settings.set_listening(self.store, listen)
+                self.notify_listening(listen)
+        elif kind == home.PROVIDER_ACTION and name in home.AGENT_LABELS:
             provider = ((action.get("selected_option") or {}).get("value") or "")
             if provider:
                 settings.set_agent_provider(self.store, name, provider)

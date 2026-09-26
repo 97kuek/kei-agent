@@ -23,7 +23,7 @@ SCHEDULE_LABELS = {
     "daily": "Daily",
     "review": "Retro & Planning",
     "night": "🌙 をつけた Task",
-    "maintenance": "毎晩の保守とバックアップ",
+    "maintenance": "保守とバックアップ",
 }
 
 _REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[）)])?\s*$")
