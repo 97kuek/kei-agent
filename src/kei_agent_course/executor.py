@@ -15,6 +15,7 @@ from datetime import date
 
 from a2a.server.tasks import TaskUpdater
 
+from kei_agent import dates
 from kei_agent.config import Config, load_config
 from kei_agent.notion import NotionError
 from kei_agent.store import Store
@@ -133,7 +134,7 @@ class CourseExecutor(SkillExecutor):
         曜日を指定されたら、今日から見て次のその曜日の日付で、学期と時刻を決める。
         """
         today = date.today()
-        weekday = str(metadata.get("weekday") or periods.weekday_of(today))
+        weekday = str(metadata.get("weekday") or dates.weekday(today))
         day = periods.next_weekday(weekday, today)
         try:
             found = await asyncio.to_thread(notion_sync.courses_on, weekday, day)

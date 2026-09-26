@@ -7,6 +7,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
+from kei_agent.dates import weekday
 from kei_agent_course import notion_sync
 from kei_agent_course.ics import Event
 
@@ -312,7 +313,7 @@ def test_waseda_periods_turn_into_times():
 
     from kei_agent_course import periods
 
-    assert periods.weekday_of(date(2026, 9, 21)) == "月"
+    assert weekday(date(2026, 9, 21)) == "月"
     start, end = periods.at(date(2026, 9, 21), 2)
     assert (start.hour, start.minute) == (10, 40) and (end.hour, end.minute) == (12, 20)
     assert periods.at(date(2026, 9, 21), None) is None      # 時限なし（集中講義）

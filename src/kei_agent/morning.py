@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from kei_agent import deadline
+from kei_agent.dates import day_label, parse_time
 from kei_agent.slack_text import escape
 
-WEEKDAYS = "月火水木金土日"
 CLASS, MEETING, DUE = "🎓", "💼", "⏰"
 NOTHING = "今日は、時間の決まった予定がないよ。"
 # 下に添える「このあと」の締切を、いくつまで出すか
@@ -49,26 +49,6 @@ class Entry:
         return f"{self.at:%H:%M}–{self.end:%H:%M}"
 
 
-def _at(value: str) -> datetime | None:
-    text = (value or "").strip()
-    if "." in text:
-        head, _, frac = text.partition(".")
-        text = f"{head}.{frac[:6]}"
-    try:
-        return datetime.fromisoformat(text).replace(tzinfo=None)
-    except ValueError:
-        return None
-
-
-def weekday(day: date) -> str:
-    return WEEKDAYS[day.weekday()]
-
-
-def day_label(day: date) -> str:
-    """9/25（金）の形。datetime も渡せる。"""
-    return f"{day.month}/{day.day}（{weekday(day)}）"
-
-
 def entries(classes: list[dict], events: list[dict], dues: list[dict], now: datetime) -> list[Entry]:
     """今日ぶんだけを、時刻の早い順に並べる（Slack の帯と1行の並びに使う）。"""
     return upcoming(classes, events, dues, now, days=1)
@@ -89,17 +69,17 @@ def upcoming(classes: list[dict], events: list[dict], dues: list[dict], now: dat
 
     found: list[Entry] = []
     for item in classes or []:
-        start, end = _at(item.get("start", "")), _at(item.get("end", ""))
+        start, end = parse_time(item.get("start", "")), parse_time(item.get("end", ""))
         if within(start):
             found.append(Entry(start, CLASS, escape(item.get("subject", "")), end))
     for item in events or []:
-        start, end = _at(item.get("start", "")), _at(item.get("end", ""))
+        start, end = parse_time(item.get("start", "")), parse_time(item.get("end", ""))
         if not within(start):
             continue
         where = f"（{escape(item['location'])}）" if item.get("location") else ""
         found.append(Entry(start, MEETING, f"{escape(item.get('subject', ''))}{where}", end))
     for item in dues or []:
-        at = _at(item.get("at", ""))
+        at = parse_time(item.get("at", ""))
         if at is not None and first <= deadline.day(at) <= last:
             course = f"{escape(item['course'])} " if item.get("course") else ""
             found.append(Entry(at, DUE, f"締切: {course}{escape(item.get('title', ''))}"))
@@ -111,7 +91,7 @@ def later(dues: list[dict], now: datetime, days: int = 7) -> str:
     limit = (now + timedelta(days=days)).date()
     found = []
     for item in dues or []:
-        at = _at(item.get("at", ""))
+        at = parse_time(item.get("at", ""))
         if at and now.date() < deadline.day(at) <= limit:
             found.append((at, item))
     if not found:
@@ -127,7 +107,7 @@ def soon_deadlines(dues: list[dict], now: datetime, days: int = 2) -> str:
     """いまから days 日後の終わりまでの締切（レトプラで明日の計画に使う）。無ければ空文字。"""
     limit = now.date() + timedelta(days=days)
     found = sorted(((at, item) for item in dues or []
-                    if (at := _at(item.get("at", ""))) and now <= at and deadline.day(at) <= limit),
+                    if (at := parse_time(item.get("at", ""))) and now <= at and deadline.day(at) <= limit),
                    key=lambda pair: pair[0])
     if not found:
         return ""

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from kei_agent import (
     course,
+    dates,
     digest,
     knowledge,
     maintenance,
@@ -87,7 +88,7 @@ def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
 
 
 def label(day: str) -> str:
-    return morning.day_label(date.fromisoformat(day))
+    return dates.day_label(date.fromisoformat(day))
 
 
 def search_keywords(claude_md: Path) -> list[str]:

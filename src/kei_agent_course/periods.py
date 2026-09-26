@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
+from kei_agent.dates import WEEKDAYS
+
 # 早稲田大学の標準の時間割（1時限 90 分）
 WASEDA = {
     1: (time(8, 50), time(10, 30)),
@@ -20,7 +22,6 @@ WASEDA = {
     6: (time(18, 55), time(20, 35)),
     7: (time(20, 45), time(22, 25)),
 }
-WEEKDAYS = "月火水木金土日"
 # 学期の呼び名（Notion の「授業」の選択肢と同じにする）
 SPRING, AUTUMN, ALL_YEAR = "春学期", "秋学期", "通年"
 # 春学期の月（4〜8月）。残りは秋学期として扱う
@@ -33,11 +34,6 @@ GRADE_TERMS = {"春期": SPRING, "秋期": AUTUMN}
 QUARTERS = {"春ク": SPRING, "夏ク": SPRING, "秋ク": AUTUMN, "冬ク": AUTUMN}
 # 成績 HTML で学期として読む名前（ほかは「その他」）
 GRADE_TERM_NAMES = frozenset({*GRADE_TERMS, *QUARTERS, ALL_YEAR})
-
-
-def weekday_of(day: date) -> str:
-    """その日の曜日（「月」など）。"""
-    return WEEKDAYS[day.weekday()]
 
 
 def term_of(day: date) -> str:

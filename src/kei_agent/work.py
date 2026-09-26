@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timedelta
 
 from kei_agent import agents, router, settings
+from kei_agent.dates import day_label, parse_time
 from kei_agent.request import Request
 from kei_agent.response_output import safe_failure
 from kei_agent.slack_text import escape
@@ -33,30 +34,13 @@ CAN_DO = ("このチャンネルでできること。\n"
           "• そのほかの質問… メール・Teams・SharePoint を読んで、要点とリンクで答える\n"
           "送信や予定の作成はできない（読むだけ）。")
 NO_EVENTS = "予定は入っていないよ。"
-WEEKDAYS = "月火水木金土日"
 # 何日先まで見るか（言われなかったとき）
 DEFAULT_DAYS = 7
 
 
-def _at(value: str) -> datetime | None:
-    """Graph が返す時刻（`2026-09-22T10:00:00.0000000`）を読む。"""
-    text = (value or "").strip()
-    if "." in text:
-        head, _, frac = text.partition(".")
-        text = f"{head}.{frac[:6]}"
-    try:
-        return datetime.fromisoformat(text).replace(tzinfo=None)
-    except ValueError:
-        return None
-
-
-def _day(at: datetime) -> str:
-    return f"{at.month}/{at.day}（{WEEKDAYS[at.weekday()]}）"
-
-
 def _line(event: dict, with_day: bool = True) -> str:
-    start, end = _at(event.get("start", "")), _at(event.get("end", ""))
-    head = f"{_day(start)} " if with_day else ""
+    start, end = parse_time(event.get("start", "")), parse_time(event.get("end", ""))
+    head = f"{day_label(start)} " if with_day else ""
     span = "終日" if event.get("all_day") else f"{start:%H:%M}" + (f"–{end:%H:%M}" if end else "")
     where = f"（{escape(event['location'])}）" if event.get("location") else ""
     # リンクの中に `|` が入ると、そこから先が表示名になってしまう
@@ -67,8 +51,8 @@ def _line(event: dict, with_day: bool = True) -> str:
 
 def events_of(data: dict) -> list[dict]:
     """封筒の中身から、予定を始まる順に取り出す。"""
-    items = [item for item in (data.get("items") or []) if _at(item.get("start", "")) is not None]
-    items.sort(key=lambda item: _at(item["start"]))
+    items = [item for item in (data.get("items") or []) if parse_time(item.get("start", "")) is not None]
+    items.sort(key=lambda item: parse_time(item["start"]))
     return items
 
 
@@ -86,7 +70,7 @@ def events_text(events: list[dict], now: datetime, period: str = "week") -> str:
     today, tomorrow = now.date(), (now + timedelta(days=1)).date()
     groups: dict[str, list[dict]] = {"今日": [], "明日": [], "このあと": []}
     for event in events:
-        day = _at(event["start"]).date()
+        day = parse_time(event["start"]).date()
         if (period == "today" and day != today) or (period == "tomorrow" and day != tomorrow):
             continue
         name = "今日" if day == today else "明日" if day == tomorrow else "このあと"

@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timedelta
 
 from kei_agent import agents, deadline, router, settings
+from kei_agent.dates import day_label, parse_time
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape
@@ -44,7 +45,6 @@ CAN_DO = ("このチャンネルでできること。\n"
           "• 「今週どれくらいやった？」… Toggl の記録を科目ごとに集計する\n"
           "• そのほかの質問… Box の学部要項と過去問、Notion の授業と課題を読んで答える")
 NO_DUE = "締切の近い課題はないよ。"
-WEEKDAYS = "月火水木金土日"
 # 朝の一覧で見る先の長さ（日）と、個別に知らせる締切までの時間
 DIGEST_DAYS = 7
 SOON_HOURS = 24
@@ -67,16 +67,9 @@ def pick_skill(text: str) -> str:
 
 def due_items(data: dict) -> tuple[list[dict], int]:
     """封筒の中身から、締切の一覧と「ほかに何件あるか」を取り出す。"""
-    items = [item for item in (data.get("items") or []) if _at(item) is not None]
-    items.sort(key=lambda item: _at(item))
+    items = [item for item in (data.get("items") or []) if parse_time(item.get("at")) is not None]
+    items.sort(key=lambda item: parse_time(item.get("at")))
     return items, int(data.get("more") or 0)
-
-
-def _at(item: dict) -> datetime | None:
-    try:
-        return datetime.fromisoformat(str(item.get("at"))).replace(tzinfo=None)
-    except ValueError:
-        return None
 
 
 def _left(at: datetime, now: datetime) -> str:
@@ -91,13 +84,9 @@ def _left(at: datetime, now: datetime) -> str:
     return f"あと {int(minutes / 60 / 24)} 日"
 
 
-def _day(at: datetime) -> str:
-    return f"{at.month}/{at.day}（{WEEKDAYS[at.weekday()]}）"
-
-
 def _line(item: dict, with_day: bool = True, now: datetime | None = None) -> str:
-    at = _at(item)
-    head = f"{_day(deadline.day(at))} " if with_day else ""
+    at = parse_time(item.get("at"))
+    head = f"{day_label(deadline.day(at))} " if with_day else ""
     course = f"{escape(item['course'])} / " if item.get("course") else ""
     left = f"（{_left(at, now)}）" if now is not None else ""
     return f"• {head}{deadline.clock(at)} {course}{escape(item.get('title', ''))}{left}"
@@ -116,16 +105,16 @@ def due_text(items: list[dict], more: int = 0, now: datetime | None = None) -> s
 def soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS) -> list[dict]:
     """あと hours 時間以内に締切のもの（過ぎたものは入れない）。"""
     limit = now + timedelta(hours=hours)
-    return [item for item in items if now <= _at(item) <= limit]
+    return [item for item in items if now <= parse_time(item.get("at")) <= limit]
 
 
 def soon_text(item: dict, now: datetime) -> str:
     """締切が近いものを1件ずつ知らせる文。"""
-    at = _at(item)
+    at = parse_time(item.get("at"))
     course = f"{escape(item['course'])} / " if item.get("course") else ""
     url = f"\n{str(item['url']).split('|')[0]}" if item.get("url") else ""
     return (f"⏰ {_left(at, now)}で締切: {course}{escape(item.get('title', ''))}\n"
-            f"{_day(deadline.day(at))} {deadline.clock(at)} まで{url}")
+            f"{day_label(deadline.day(at))} {deadline.clock(at)} まで{url}")
 
 
 def unstarted_items(items: list[dict], now: datetime, days: int = EARLY_DAYS) -> list[dict]:
@@ -147,7 +136,7 @@ def early_text(item: dict, now: datetime) -> str:
     at = datetime.fromisoformat(str(item["due"])).replace(tzinfo=None)
     url = f"\n{item['url']}" if item.get("url") else ""
     return (f"📚 {_left(at, now)}で締切、まだ未着手: {escape(item.get('title', ''))}\n"
-            f"{_day(deadline.day(at))} {deadline.clock(at)} まで{url}")
+            f"{day_label(deadline.day(at))} {deadline.clock(at)} まで{url}")
 
 
 def early_notice_key(item: dict) -> str:

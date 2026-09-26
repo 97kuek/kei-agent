@@ -9,9 +9,10 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, deadline, morning, themes, timelog, work
+from kei_agent import course, deadline, themes, timelog, work
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
+from kei_agent.dates import parse_time, weekday
 from kei_agent.notion import NotionError
 from kei_agent.slack_text import format_duration
 from kei_agent.store import Store
@@ -33,15 +34,8 @@ def _ts(value: float | None) -> str:
     return datetime.fromtimestamp(value).strftime("%m/%d %H:%M") if value else "-"
 
 
-def _at(value: str) -> datetime | None:
-    try:
-        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
-    except ValueError:
-        return None
-
-
 def _due_day(item: dict):
-    at = _at(item.get("at", ""))
+    at = parse_time(item.get("at", ""))
     return deadline.day(at) if at else None
 
 
@@ -49,7 +43,7 @@ def _dues(items: list[dict], with_day: bool = False) -> str:
     """締切を短い1行にまとめる（材料なので、素の文字のまま。Slack に出すのは Claude）。"""
     found = []
     for item in items[:MAX_DOMAIN_ITEMS]:
-        at = _at(item.get("at", ""))
+        at = parse_time(item.get("at", ""))
         head = f"{deadline.day(at).month}/{deadline.day(at).day} " if with_day and at else ""
         course = f"{item['course']} / " if item.get("course") else ""
         found.append(f"{head}{course}{item.get('title', '')}（{deadline.clock(at)}）" if at else str(item.get("title", "")))
@@ -74,10 +68,10 @@ def _events(items: list[dict], day) -> str:
     """その日の会議を短い1行に（材料なので、件名と時刻だけで足りる）。"""
     found = []
     for item in items:
-        at = _at(item.get("start", ""))
+        at = parse_time(item.get("start", ""))
         if not at or at.date() != day:
             continue
-        end = _at(item.get("end", ""))
+        end = parse_time(item.get("end", ""))
         span = f"{at:%H:%M}–{end:%H:%M}" if end else f"{at:%H:%M}"
         found.append(f"{span} {item.get('subject', '')}")
     rest = f"（ほか {len(found) - MAX_DOMAIN_ITEMS} 件）" if len(found) > MAX_DOMAIN_ITEMS else ""
@@ -128,9 +122,9 @@ class DigestBuilder:
         rest = [i for i in items if _due_day(i) and _due_day(i) > at.date()]
         lines.append(f"- 今日が期限だったもの: {_dues(today) or 'なし'}")
         lines.append(f"- 残っている締切: {_dues(rest, with_day=True) or 'なし'}")
-        classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=morning.weekday(tomorrow))
+        classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=weekday(tomorrow))
         names = [str(c.get("subject") or "") for c in (classes.data.get("items") or [])] if classes.ok else []
-        lines.append(f"- 明日（{morning.weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
+        lines.append(f"- 明日（{weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
         return [*lines, ""]
 
     async def _work(self, now: float) -> list[str]:
