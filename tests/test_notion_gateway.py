@@ -552,6 +552,22 @@ def test_research_setup_and_tasks_run_through_the_gateway(via, world, tmp_path):
     assert refused.value.status == 403
 
 
+def test_research_setup_can_be_previewed_without_writing(via, api, world, tmp_path):
+    """--apply を付けないときは読むだけで、作るもの・足すものを並べる。作ったあとは何も出ない。"""
+    from kei_agent.notion import Setup, safe_to_resend
+
+    kei = via("kei-agent")
+    state = tmp_path / "notion.json"
+    plan = Setup(kei, world.research.root, state).plan()
+    assert plan[0] == "ページを作る: 中長期の方針"
+    assert "データベースを作る: 先行研究（ビューも作る）" in plan
+    assert any(line.startswith("ホームに見出しとビューを足す: 自分の Task") for line in plan)
+    assert all(safe_to_resend(method, path) for method, path, _ in api.forwarded)     # 読んだだけ
+    Setup(kei, world.research.root, state).run()
+    assert [line for line in Setup(kei, world.research.root, state).plan()
+            if not line.startswith("ノートのテンプレート")] == []
+
+
 def test_papers_are_filed_once_and_every_theme_page_shows_its_own(via, api, world, tmp_path):
     """同じ論文は1行に、関係するテーマを並べる。テーマのページには、そのテーマの論文だけの表を1つ置く。"""
     from kei_agent.notion import THEME_PAPERS_VIEW, Setup

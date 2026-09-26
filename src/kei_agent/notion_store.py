@@ -208,7 +208,7 @@ def summarize(text: str, limit: int = RESULT_LIMIT) -> str:
 class NotionStore:
     def __init__(self, notion: Notion, state_path: Path):
         if not state_path.exists():
-            raise NotionError(f"{state_path} がありません。kei-agent-notion-setup を先に実行してください")
+            raise NotionError(f"{state_path} がありません。kei-agent-notion-setup --apply を先に実行してください")
         self.notion = notion
         try:
             self.state = json.loads(state_path.read_text(encoding="utf-8"))

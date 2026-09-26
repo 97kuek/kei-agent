@@ -2,7 +2,8 @@
 
 使い方（Notion ゲートウェイが動いていること）:
     source ~/.config/zsh/local/kei-agent.zsh
-    uv run kei-agent-notion-setup [<研究ホームのページID>]
+    uv run kei-agent-notion-setup [<研究ホームのページID>]            作るもの・足すものを見るだけ
+    uv run kei-agent-notion-setup --apply [<研究ホームのページID>]    書き込む
 
 Notion を直接呼べるのはゲートウェイ（`kei-agent-notion-gateway`）だけ。ここからは
 `gateway_notion()` でゲートウェイの `/notion/v1` を呼び、どのホームを触れるかはゲートウェイが決める。
@@ -331,6 +332,8 @@ NOTE_TEMPLATES = [
 _BLANK_TEMPLATE_NAMES = {"", "New page", "新規ページ", "Untitled", "無題"}
 
 
+# マイルストーンを置く子ページ
+STRATEGY_TITLE = "中長期の方針"
 # 状態のファイル（notion.json）のキーと、上の定義の対応。設定のずれを見つけるのに使う
 SPECS = {"themes": THEMES, "tasks": TASKS, "notes": NOTES, "milestones": MILESTONES, "papers": PAPERS}
 
@@ -348,7 +351,7 @@ def schema_problems(notion: Notion, state: dict) -> list[str]:
     for key, spec in SPECS.items():
         db = (state.get("databases") or {}).get(key)
         if db is None:
-            problems.append(f"{key}: notion.json にありません（kei-agent-notion-setup を実行してください）")
+            problems.append(f"{key}: notion.json にありません（kei-agent-notion-setup --apply を実行してください）")
             continue
         try:
             live = notion.request("GET", f"/data_sources/{db['data_source_id']}")["properties"]
@@ -431,13 +434,17 @@ class Setup:
         self.log.append(f"ページを作成: {title}")
         return page["id"]
 
-    def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
-        """(database_id, data_source_id, property_ids) を返す。同名のデータベースがあれば使う。"""
+    def find_database(self, parent: str, title: str) -> str | None:
+        """親ページの直下の、その名前のデータベース。無ければ None、2つ以上あれば止める。"""
         matches = [block["id"] for block in self.notion.children(parent)
                    if block["type"] == "child_database" and block["child_database"]["title"] == title]
         if len(matches) > 1:
             raise NotionError(f"{title} という同名のデータベースが重複しています。正本を確認してから整理してください")
-        db_id = matches[0] if matches else None
+        return matches[0] if matches else None
+
+    def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
+        """(database_id, data_source_id, property_ids) を返す。同名のデータベースがあれば使う。"""
+        db_id = self.find_database(parent, title)
         properties = dict(spec["properties"])
         if db_id is None:
             for name, (target, synced) in spec.get("relations", {}).items():
@@ -502,6 +509,12 @@ class Setup:
 
     def theme_paper_views(self, themes: dict, papers: dict) -> None:
         """どのテーマのページにも、そのテーマの論文だけの表を置く。もう置いてあるページは飛ばす。"""
+        for page_id in self.pages_without_paper_table(themes, papers):
+            self.notion.request("POST", "/views", theme_papers_view(papers, page_id))
+            self.log.append("テーマのページに先行研究の表を作成")
+
+    def pages_without_paper_table(self, themes: dict, papers: dict) -> list[str]:
+        """先行研究の表がまだ無いテーマのページ。"""
         placed = set()
         response = self.notion.request("GET", f"/views?data_source_id={papers['data_source_id']}")
         for view in response.get("results", []):
@@ -512,19 +525,17 @@ class Setup:
             parent = self.notion.request("GET", f"/databases/{parent_db}")
             placed.add(notion_id((parent.get("parent") or {}).get("page_id")))
         rows = self.notion.paginate("POST", f"/data_sources/{themes['data_source_id']}/query", {"page_size": 100})
-        for row in rows:
-            if notion_id(row["id"]) not in placed:
-                self.notion.request("POST", "/views", theme_papers_view(papers, row["id"]))
-                self.log.append("テーマのページに先行研究の表を作成")
+        return [row["id"] for row in rows if notion_id(row["id"]) not in placed]
 
     # ホーム
 
+    def home_headings(self) -> set[str]:
+        return {"".join(t["plain_text"] for t in b["heading_2"]["rich_text"])
+                for b in self.notion.children(self.home) if b["type"] == "heading_2"}
+
     def home_sections(self, sections: list[tuple[str, dict, dict]]) -> None:
         """見出しと、その下のリンクドビューを並べる。同じ見出しがあれば飛ばす。"""
-        headings = {
-            "".join(t["plain_text"] for t in b["heading_2"]["rich_text"])
-            for b in self.notion.children(self.home) if b["type"] == "heading_2"
-        }
+        headings = self.home_headings()
         for title, db, view in sections:
             if title in headings:
                 continue
@@ -542,13 +553,14 @@ class Setup:
             })
             self.log.append(f"ホームに追加: {title}")
 
+    def templates(self, notes: dict) -> list[dict]:
+        return self.notion.request("GET", f"/data_sources/{notes['data_source_id']}/templates").get("templates", [])
+
     def note_templates(self) -> None:
         """ノートのテンプレートに名前・種類・本文を書く。空のテンプレートが足りなければ知らせる。"""
         from kei_agent.notion_store import markdown_to_blocks
 
-        notes = self.state["databases"]["notes"]
-        resp = self.notion.request("GET", f"/data_sources/{notes['data_source_id']}/templates")
-        templates = resp.get("templates", [])
+        templates = self.templates(self.state["databases"]["notes"])
         names = {t["name"] for t in templates}
         blanks = [t for t in templates if t["name"] in _BLANK_TEMPLATE_NAMES]
         for kind, body in NOTE_TEMPLATES:
@@ -566,72 +578,130 @@ class Setup:
             self.notion.request("PATCH", f"/blocks/{template['id']}/children", {"children": markdown_to_blocks(body)})
             self.log.append(f"テンプレートを作成: {kind}")
 
-    def run(self) -> None:
-        self.notion.request("PATCH", f"/pages/{self.home}", {"icon": {"type": "emoji", "emoji": "🔬"}})
-        themes = self.database("themes", self.home, "テーマ", THEMES)
-        tasks = self.database("tasks", self.home, "Task", TASKS)
-        notes = self.database("notes", self.home, "ノート", NOTES)
-        strategy = self.child_page(self.home, "中長期の方針", "🧭")
-        self.state["strategy_page_id"] = strategy
-        milestones = self.database("milestones", strategy, "マイルストーン", MILESTONES)
-        papers = self.database("papers", self.home, "先行研究", PAPERS)
-        self.save()
+    # 作るものの定義（run と plan で共通）
 
-        p = lambda db, name: db["properties"][name]  # noqa: E731
-        self.views(themes, [
-            {"name": "進行中", "type": "list", "filter": _eq_select("状態", "進行中")},
-        ])
-        self.views(tasks, [
-            {"name": "ボード", "type": "board", "configuration": {"type": "board", "group_by": {
-                "type": "status", "property_id": p(tasks, "状態"), "group_by": "option", "sort": {"type": "manual"}}}},
-            {"name": "今夜", "type": "table",
-             "filter": {"and": [_eq_select("担当", "Kei Agent"), _eq_status("状態", "今夜やる")]}},
-            {"name": "確認待ち", "type": "table", "filter": _eq_status("状態", "確認待ち")},
-            {"name": "今週の自分", "type": "table",
-             "filter": {"and": [_eq_select("担当", "自分"), {"property": "期日", "date": {"this_week": {}}}]}},
-        ])
-        self.views(notes, [
-            {"name": "最近", "type": "table", "sorts": [{"property": "日付", "direction": "descending"}]},
-            {"name": "種類ごと", "type": "board", "configuration": {"type": "board", "group_by": {
-                "type": "select", "property_id": p(notes, "種類"), "sort": {"type": "manual"}}}},
-            {"name": "Daily と振り返り", "type": "calendar",
-             "filter": {"or": [_eq_select("種類", "Daily"), _eq_select("種類", "振り返り")]},
-             "configuration": {"type": "calendar", "date_property_id": p(notes, "日付")}},
-        ])
-        self.views(milestones, [
-            {"name": "タイムライン", "type": "timeline",
-             "configuration": {"type": "timeline", "date_property_id": p(milestones, "期日")}},
-        ])
-        self.views(papers, [
-            {"name": "未読", "type": "table", "filter": _eq_select("状態", "未読"),
-             "sorts": [{"property": "見つけた日", "direction": "descending"}]},
-        ])
-        self.theme_paper_views(themes, papers)
+    def databases(self, strategy: str | None) -> list[tuple[str, str | None, str, dict]]:
+        """（state の鍵、親ページ、名前、定義）を作る順に。親が無い（これから作る）ときは None。"""
+        return [("themes", self.home, "テーマ", THEMES), ("tasks", self.home, "Task", TASKS),
+                ("notes", self.home, "ノート", NOTES), ("milestones", strategy, "マイルストーン", MILESTONES),
+                ("papers", self.home, "先行研究", PAPERS)]
 
-        self.home_sections([
-            ("自分の Task", tasks, {
+    @staticmethod
+    def view_specs(dbs: dict[str, dict]) -> dict[str, list[dict]]:
+        """データベースごとのビュー。まだ無いデータベースの列は空（名前を並べるだけのとき）。"""
+        def p(key: str, name: str) -> str:
+            return (dbs.get(key) or {}).get("properties", {}).get(name, "")
+
+        return {
+            "themes": [{"name": "進行中", "type": "list", "filter": _eq_select("状態", "進行中")}],
+            "tasks": [
+                {"name": "ボード", "type": "board", "configuration": {"type": "board", "group_by": {
+                    "type": "status", "property_id": p("tasks", "状態"), "group_by": "option",
+                    "sort": {"type": "manual"}}}},
+                {"name": "今夜", "type": "table",
+                 "filter": {"and": [_eq_select("担当", "Kei Agent"), _eq_status("状態", "今夜やる")]}},
+                {"name": "確認待ち", "type": "table", "filter": _eq_status("状態", "確認待ち")},
+                {"name": "今週の自分", "type": "table",
+                 "filter": {"and": [_eq_select("担当", "自分"), {"property": "期日", "date": {"this_week": {}}}]}},
+            ],
+            "notes": [
+                {"name": "最近", "type": "table", "sorts": [{"property": "日付", "direction": "descending"}]},
+                {"name": "種類ごと", "type": "board", "configuration": {"type": "board", "group_by": {
+                    "type": "select", "property_id": p("notes", "種類"), "sort": {"type": "manual"}}}},
+                {"name": "Daily と振り返り", "type": "calendar",
+                 "filter": {"or": [_eq_select("種類", "Daily"), _eq_select("種類", "振り返り")]},
+                 "configuration": {"type": "calendar", "date_property_id": p("notes", "日付")}},
+            ],
+            "milestones": [{"name": "タイムライン", "type": "timeline",
+                            "configuration": {"type": "timeline", "date_property_id": p("milestones", "期日")}}],
+            "papers": [{"name": "未読", "type": "table", "filter": _eq_select("状態", "未読"),
+                        "sorts": [{"property": "見つけた日", "direction": "descending"}]}],
+        }
+
+    @staticmethod
+    def section_specs() -> list[tuple[str, str, dict]]:
+        """ホームの見出しと、その下に置くビュー（データベースは state の鍵で指す）。"""
+        return [
+            ("自分の Task", "tasks", {
                 "name": "自分の Task", "type": "table",
                 "filter": {"and": [_eq_select("担当", "自分"),
                                    {"property": "状態", "status": {"does_not_equal": "完了"}}]},
                 "sorts": [{"property": "期日", "direction": "ascending"}],
             }),
-            ("進行中のテーマ", themes, {
+            ("進行中のテーマ", "themes", {
                 "name": "進行中のテーマ", "type": "list", "filter": _eq_select("状態", "進行中"),
             }),
-            ("近いマイルストーン", milestones, {
+            ("近いマイルストーン", "milestones", {
                 "name": "近いマイルストーン", "type": "list",
                 "filter": {"property": "期日", "date": {"on_or_after": "today"}},
                 "sorts": [{"property": "期日", "direction": "ascending"}],
             }),
-        ])
+        ]
+
+    def run(self) -> None:
+        self.notion.request("PATCH", f"/pages/{self.home}", {"icon": {"type": "emoji", "emoji": "🔬"}})
+        dbs: dict[str, dict] = {}
+        strategy = None
+        for key, parent, title, spec in self.databases(None):
+            if key == "milestones":
+                strategy = self.child_page(self.home, STRATEGY_TITLE, "🧭")
+                self.state["strategy_page_id"] = strategy
+                parent = strategy
+            assert parent is not None
+            dbs[key] = self.database(key, parent, title, spec)
+        self.save()
+        for key, specs in self.view_specs(dbs).items():
+            self.views(dbs[key], specs)
+        self.theme_paper_views(dbs["themes"], dbs["papers"])
+        self.home_sections([(title, dbs[key], view) for title, key, view in self.section_specs()])
         self.note_templates()
         self.save()
+
+    def plan(self) -> list[str]:
+        """--apply を付けないときの確認。読むだけで、作るもの・足すものを run と同じ順に並べる。"""
+        lines: list[str] = []
+        strategy = next((b["id"] for b in self.notion.children(self.home)
+                         if b["type"] == "child_page" and b["child_page"]["title"] == STRATEGY_TITLE), None)
+        if strategy is None:
+            lines.append(f"ページを作る: {STRATEGY_TITLE}")
+        dbs: dict[str, dict] = {}
+        titles: dict[str, str] = {}
+        for key, parent, title, spec in self.databases(strategy):
+            titles[key] = title
+            db_id = self.find_database(parent, title) if parent else None
+            if db_id is None:
+                lines.append(f"データベースを作る: {title}（ビューも作る）")
+                continue
+            ds_id = self.notion.request("GET", f"/databases/{db_id}")["data_sources"][0]["id"]
+            ds = self.notion.request("GET", f"/data_sources/{ds_id}")
+            missing = [name for name in [*spec["properties"], *spec.get("relations", {})] if name not in ds["properties"]]
+            if missing:
+                lines.append(f"列を足す: {title}（{'、'.join(missing)}）")
+            dbs[key] = {"database_id": db_id, "data_source_id": ds_id,
+                        "properties": {n: prop["id"] for n, prop in ds["properties"].items()}}
+        for key, specs in self.view_specs(dbs).items():
+            if key in dbs and (missing := [s["name"] for s in specs if s["name"] not in self.view_names(dbs[key])]):
+                lines.append(f"ビューを足す: {titles[key]}（{'、'.join(missing)}）")
+        if "themes" in dbs and "papers" in dbs and (pages := self.pages_without_paper_table(dbs["themes"], dbs["papers"])):
+            lines.append(f"テーマのページに先行研究の表を置く: {len(pages)} ページ")
+        headings = self.home_headings()
+        if missing := [title for title, _, _ in self.section_specs() if title not in headings]:
+            lines.append(f"ホームに見出しとビューを足す: {'、'.join(missing)}")
+        if "notes" in dbs:
+            templates = self.templates(dbs["notes"])
+            names = {t["name"] for t in templates}
+            blanks = sum(t["name"] in _BLANK_TEMPLATE_NAMES for t in templates)
+            if missing := [kind for kind, _ in NOTE_TEMPLATES if kind not in names]:
+                lines.append(f"ノートのテンプレートを書く: {'、'.join(missing)}"
+                             + ("" if blanks >= len(missing) else "（空の枠が足りない。Notion で「新規テンプレート」を作る）"))
+        return lines
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-notion-setup")
     parser.add_argument("home_page_id", nargs="?", default="",
                         help="研究ホームのページID（省くと config.toml の [notion] research_home）")
+    parser.add_argument("--apply", action="store_true", help="書き込む（付けなければ、作るもの・足すものを見るだけ）")
     args = parser.parse_args()
     config = load_config()
     try:
@@ -642,6 +712,10 @@ def main() -> None:
     if not home:
         sys.exit("研究ホームのページ ID がありません（config.toml の [notion] research_home）")
     setup = Setup(notion, home, config.state_dir / "notion.json")
+    if not args.apply:
+        print("\n".join(setup.plan()) or "変更なし（そろっています）")
+        print("読み取りだけの確認です。書き込むには --apply を付けてください")
+        return
     try:
         setup.run()
     finally:
