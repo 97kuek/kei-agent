@@ -22,7 +22,7 @@ from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent_a2a import envelope
 from kei_agent_voice import events
-from kei_agent_voice.card import NOTIFY
+from kei_agent_voice.skills import NOTIFY
 
 log = logging.getLogger(__name__)
 

@@ -5,14 +5,7 @@ from __future__ import annotations
 from a2a.types import AgentCard, AgentSkill
 
 from kei_agent_a2a.card import agent_card
-from kei_agent_a2a.executor import ASK
-
-# 仕事の名前。オーケストレーターはこの id を指定して頼む
-# 長い処理（ジョブ）。pueue を持つのはこちら側で、行き先の管理（どのスレッドのジョブか）は本体
-SUBMIT_JOB = "submit-job"
-LIST_JOBS = "list-jobs"
-CANCEL_JOB = "cancel-job"
-FORGET_JOB = "forget-job"
+from kei_agent_research.skills import ASK, CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
 
 
 def build_card(base_url: str) -> AgentCard:

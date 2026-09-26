@@ -5,8 +5,7 @@ from __future__ import annotations
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
 from kei_agent import version
-
-NOTIFY = "notify"
+from kei_agent_voice.skills import NOTIFY
 
 RPC_PATH = "/a2a"
 

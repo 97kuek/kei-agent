@@ -15,13 +15,12 @@ import logging
 from kei_agent import agents, settings
 from kei_agent.request import Request
 from kei_agent.slack_text import escape
+from kei_agent_knowledge.skills import ASK as ASK
+from kei_agent_knowledge.skills import PAPER_DIGEST as PAPER_DIGEST
+from kei_agent_knowledge.skills import READING_DIGEST as READING_DIGEST
 
 log = logging.getLogger(__name__)
 
-# 知識エージェントの仕事の名前（src/kei_agent_knowledge/card.py と同じもの）
-READING_DIGEST = "reading-digest"
-PAPER_DIGEST = "paper-digest"
-ASK = "ask"
 # config.toml の [a2a.agents] で書いたエージェントの名前
 AGENT = "knowledge"
 # 朝に出す本数（読みものは全体で、論文はテーマごと）

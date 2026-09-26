@@ -18,7 +18,7 @@ from kei_agent.config import Config, load_config
 from kei_agent.store import Store
 from kei_agent_a2a.executor import SkillExecutor, asked_days
 from kei_agent_work import connector
-from kei_agent_work.card import ASK, LIST_EVENTS
+from kei_agent_work.skills import ASK, LIST_EVENTS
 
 log = logging.getLogger(__name__)
 

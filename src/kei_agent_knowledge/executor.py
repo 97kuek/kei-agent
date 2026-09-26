@@ -16,7 +16,7 @@ from kei_agent.store import Store
 from kei_agent_a2a import run
 from kei_agent_a2a.executor import SkillExecutor
 from kei_agent_knowledge import digest
-from kei_agent_knowledge.card import ASK, PAPER_DIGEST, READING_DIGEST
+from kei_agent_knowledge.skills import ASK, PAPER_DIGEST, READING_DIGEST
 
 log = logging.getLogger(__name__)
 

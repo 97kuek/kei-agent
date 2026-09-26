@@ -20,12 +20,11 @@ from kei_agent.dates import day_label, parse_time
 from kei_agent.request import Request
 from kei_agent.response_output import safe_failure
 from kei_agent.slack_text import escape
+from kei_agent_work.skills import ASK as ASK
+from kei_agent_work.skills import LIST_EVENTS as LIST_EVENTS
 
 log = logging.getLogger(__name__)
 
-# 仕事エージェントの仕事の名前（src/kei_agent_work/card.py と同じもの）
-LIST_EVENTS = "list-events"
-ASK = "ask"
 # config.toml の [a2a.agents] で書いたエージェントの名前
 AGENT = "work"
 

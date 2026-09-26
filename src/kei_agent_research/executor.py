@@ -34,7 +34,7 @@ from kei_agent.jobs import Pueue
 from kei_agent.store import Store
 from kei_agent.themes import Workspace
 from kei_agent_a2a.executor import ASK, SkillExecutor
-from kei_agent_research.card import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
+from kei_agent_research.skills import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
 
 log = logging.getLogger(__name__)
 

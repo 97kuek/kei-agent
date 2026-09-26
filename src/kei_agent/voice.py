@@ -15,12 +15,12 @@ import json
 import logging
 
 from kei_agent import agents, settings
+from kei_agent_voice.skills import NOTIFY
 
 log = logging.getLogger(__name__)
 
 # config.toml の [a2a.agents] で書くエージェントの名前
 AGENT = "voice"
-NOTIFY = "notify"
 
 
 class VoiceNotices:

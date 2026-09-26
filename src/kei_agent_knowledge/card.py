@@ -5,10 +5,7 @@ from __future__ import annotations
 from a2a.types import AgentCard, AgentSkill
 
 from kei_agent_a2a.card import agent_card
-
-READING_DIGEST = "reading-digest"
-PAPER_DIGEST = "paper-digest"
-ASK = "ask"
+from kei_agent_knowledge.skills import ASK, PAPER_DIGEST, READING_DIGEST
 
 
 def build_card(base_url: str) -> AgentCard:

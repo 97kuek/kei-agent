@@ -18,14 +18,11 @@ from kei_agent import a2a, agents, jobs, runner
 from kei_agent.config import Config
 from kei_agent.model_policy import UseCase
 from kei_agent.themes import Workspace
+from kei_agent_research.skills import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
 
 log = logging.getLogger(__name__)
 
 AGENT = "research"
-SUBMIT_JOB = "submit-job"
-LIST_JOBS = "list-jobs"
-CANCEL_JOB = "cancel-job"
-FORGET_JOB = "forget-job"
 _OVERRIDE = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 _LABELS = {
     "research-extract": UseCase.RESEARCH_EXTRACT,

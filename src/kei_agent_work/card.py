@@ -5,9 +5,7 @@ from __future__ import annotations
 from a2a.types import AgentCard, AgentSkill
 
 from kei_agent_a2a.card import agent_card
-
-LIST_EVENTS = "list-events"
-ASK = "ask"
+from kei_agent_work.skills import ASK, LIST_EVENTS
 
 
 def build_card(base_url: str) -> AgentCard:
