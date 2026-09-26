@@ -765,8 +765,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
                 and self.is_allowed(event.get("user")) and event.get("item_user") == event.get("user"))
 
     async def on_reaction_added(self, event: dict) -> None:
-        """自分のメッセージに 🌙 をつけると、夜間の Task になる。"""
-        if not self._own_night_reaction(event):
+        """自分のメッセージに 🌙 をつけると、夜間の Task になる。朝の読みものへの 👍 は knowledge.py で扱う。"""
+        if await self.reading_reaction(event, added=True) or not self._own_night_reaction(event):
             return
         channel, ts = event["item"]["channel"], event["item"]["ts"]
         name = await self.channel_name(channel)
@@ -795,7 +795,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         await self.post(req, f"🌙 今夜の Task にしたよ: <{task.url}|{task.title}>")
 
     async def on_reaction_removed(self, event: dict) -> None:
-        if not self._own_night_reaction(event) or self.notion is None:
+        if (await self.reading_reaction(event, added=False) or not self._own_night_reaction(event)
+                or self.notion is None):
             return
         link = await self.permalink(event["item"]["channel"], event["item"]["ts"])
         try:

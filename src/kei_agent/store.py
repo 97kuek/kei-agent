@@ -185,6 +185,18 @@ CREATE TABLE IF NOT EXISTS active_timers (
     entry_id TEXT NOT NULL UNIQUE,
     FOREIGN KEY(entry_id) REFERENCES time_entries(id)
 );
+-- 朝の読みもの（1記事 = 1投稿）。👍 で共通ホームの「読みもの」に入れ、次からの選び方の参考にする
+CREATE TABLE IF NOT EXISTS reading_posts (
+    channel TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    day TEXT NOT NULL,
+    -- 記事（JSON: title, url, source, interests, summary, why）
+    item TEXT NOT NULL,
+    posted_at REAL NOT NULL,
+    liked_at REAL,
+    notion_page_id TEXT,
+    PRIMARY KEY (channel, ts)
+);
 """
 
 
@@ -703,6 +715,29 @@ class Store:
         with self.conn:
             self.conn.execute("INSERT OR REPLACE INTO notices (key, at) VALUES (?, ?)", (key, time.time()))
 
+    # 朝の読みもの
+
+    def add_reading_post(self, channel: str, ts: str, day: str, item: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO reading_posts (channel, ts, day, item, posted_at) VALUES (?, ?, ?, ?, ?)",
+                (channel, ts, day, json.dumps(item, ensure_ascii=False), time.time()))
+
+    def reading_post(self, channel: str, ts: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM reading_posts WHERE channel = ? AND ts = ?", (channel, ts)).fetchone()
+
+    def set_reading_like(self, channel: str, ts: str, liked_at: float | None, notion_page_id: str | None) -> None:
+        """👍 を付けた（liked_at）か外した（None）。Notion の行も一緒に覚える（外すときに消すため）。"""
+        with self.conn:
+            self.conn.execute("UPDATE reading_posts SET liked_at = ?, notion_page_id = ? WHERE channel = ? AND ts = ?",
+                              (liked_at, notion_page_id, channel, ts))
+
+    def liked_readings(self, since: float, limit: int) -> list[dict]:
+        """since より後に 👍 した記事を、新しい順に（次の読みものを選ぶときの参考）。"""
+        rows = self.conn.execute(
+            "SELECT item FROM reading_posts WHERE liked_at >= ? ORDER BY liked_at DESC LIMIT ?", (since, limit))
+        return [json.loads(row["item"]) for row in rows]
+
     def drop_old_agent_sessions(self, before: float) -> int:
         """古いスレッドのエージェントの会話と、済んだ記録を忘れる（毎晩の保守から呼ぶ）。消した行数を返す。
 
@@ -714,6 +749,8 @@ class Store:
             removed = 0
             for sql, args in (
                 ("DELETE FROM agent_sessions WHERE updated_at < ?", (before,)),
+                # 👍 した記事は、次からの選び方の参考と、外したときに Notion から消すために残す
+                ("DELETE FROM reading_posts WHERE posted_at < ? AND liked_at IS NULL", (before,)),
                 ("DELETE FROM provider_sessions WHERE updated_at < ?", (before,)),
                 ("DELETE FROM provider_thread_state WHERE updated_at < ?", (before,)),
                 ("DELETE FROM deferred_runs WHERE done = 1 AND created_at < ?", (before,)),

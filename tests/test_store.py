@@ -60,8 +60,17 @@ def test_nightly_pruning_drops_old_records_but_keeps_what_aggregation_needs(stor
         store.conn.execute("UPDATE runs SET started_at = ?, ended_at = ? WHERE id = ?",
                            (now - (RUNS_MIN_DAYS - 7) * 86400, week_ago, recent_run))
 
+    # 朝の読みものは、👍 したものだけ残す（次からの参考と、外したときに Notion から消すため）
+    store.add_reading_post("C40", "1.1", "2026-06-01", {"title": "見ただけ"})
+    store.add_reading_post("C40", "2.2", "2026-06-01", {"title": "👍 した"})
+    store.set_reading_like("C40", "2.2", old, "page-1")
+    with store.conn:
+        store.conn.execute("UPDATE reading_posts SET posted_at = ?", (old,))
+
     # 保持を短く（7日）しても、runs は 8 週ぶん残す
     assert store.drop_old_agent_sessions(week_ago) > 0
+
+    assert store.reading_post("C40", "1.1") is None and store.reading_post("C40", "2.2")["notion_page_id"] == "page-1"
 
     assert store.session_for("C1", "1.1", "research", "claude", "v1") is None
     assert store.session_for("C1", "2.2", "research", "claude", "v1") == "sess-new"

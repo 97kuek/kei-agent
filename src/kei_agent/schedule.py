@@ -341,7 +341,8 @@ class Scheduler:
         return {"status": "error" if failed else "done", "themes": results}
 
     async def run_reading(self, day: str) -> dict:
-        """朝の読みもの。共通ホームの「収集」ページの興味と情報源を知識の担当に渡し、選ばれた記事を1通で出す。"""
+        """朝の読みもの。共通ホームの「収集」ページの興味と情報源と、最近 👍 した記事を知識の担当に渡し、
+        選ばれた記事を1記事 = 1投稿で出す（👍 とスレッドが記事ごとになる）。"""
         name = self.config.knowledge_channels[0] if self.config.knowledge_channels else ""
         channel = (await self.assistant.channel_ids()).get(name) if name else None
         if channel is None:
@@ -356,18 +357,25 @@ class Scheduler:
             return {"status": "error", "error": f"「収集」ページを読めません: {e}"}
         if not interests or not sources:
             return {"status": "no_settings"}
+        liked = self.store.liked_readings(time.time() - knowledge.LIKED_DAYS * 86400, knowledge.LIKED_EXAMPLES)
         reply = await self.assistant.ask_knowledge(knowledge.READING_DIGEST, {
-            "interests": interests, "sources": sources, "count": knowledge.READING_COUNT})
+            "interests": interests, "sources": sources, "count": knowledge.READING_COUNT,
+            "liked": [{key: item.get(key) for key in ("title", "source", "interests")} for item in liked]})
         if not reply.ok:
             return {"status": "error"}
         items = reply.data.get("items") or []
         failed = [str(source) for source in reply.data.get("failed_sources") or []]
         if not items:
             return {"status": "no_new", "failed_sources": failed}
-        posted = await self.assistant.slack.chat_postMessage(
-            channel=channel, text=knowledge.reading_text(items, label(day)), unfurl_links=False, unfurl_media=False)
-        if posted.get("ts"):
-            self.store.upsert_thread(channel, str(posted["ts"]), name, None)
+        for number, item in enumerate(items, 1):
+            posted = await self.assistant.slack.chat_postMessage(
+                channel=channel, text=knowledge.reading_post_text(item, number, len(items), hint=number == len(items)),
+                unfurl_links=False, unfurl_media=False)
+            ts = str(posted.get("ts") or "")
+            if ts:
+                # スレッドの質問は知識の担当へ（元の投稿も渡る）。👍 はこの控えで記事を知る
+                self.store.upsert_thread(channel, ts, name, None)
+                self.store.add_reading_post(channel, ts, day, item)
         return {"status": "posted", "count": len(items), "channel": channel, "failed_sources": failed}
 
     # Daily と振り返り

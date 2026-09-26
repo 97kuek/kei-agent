@@ -7,7 +7,7 @@ from datetime import time as dtime
 import pytest
 from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import agents, morning, runner, themes
+from kei_agent import agents, knowledge, morning, runner, themes
 from kei_agent import schedule as schedule_module
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import SyncReport
@@ -38,8 +38,11 @@ DAILY_REPLY = """**今日のタスク**
 
 class FakeHub:
     has_time_db = True
+    has_reading_db = True
 
     def __init__(self):
+        self.readings: dict[str, dict] = {}
+        self.trashed: list[str] = []
         self.notes = []
         self.appended = []
         self.reviews: dict[str, str] = {}
@@ -74,6 +77,14 @@ class FakeHub:
 
     def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
         self.recorded.append((entry_id, domain, label, minutes, source))
+
+    def add_reading(self, item, day):
+        page_id = f"reading-{len(self.readings) + 1}"
+        self.readings[page_id] = {"item": item, "day": day}
+        return page_id
+
+    def trash_page(self, page_id):
+        self.trashed.append(page_id)
 
     collect = ([], [])
 
@@ -460,28 +471,79 @@ async def test_literature_goes_through_the_knowledge_agent(env, config, store):
     assert not any("先行研究" in note for note in scheduler.morning_notes(datetime(2026, 9, 20, 8, 0)))
 
 
-async def test_reading_posts_the_digest_to_the_knowledge_channel(env, config, store):
+READING = [{"title": "LLM の話", "url": "https://zenn.dev/x", "source": "Zenn", "interests": ["AI"],
+            "summary": "要約", "why": "AI に近い"},
+           {"title": "RAG の話", "url": "https://zenn.dev/y", "source": "Zenn", "interests": ["AI"],
+            "summary": "要約2", "why": "AI に近い"}]
+
+
+async def test_reading_posts_one_message_per_article(env, config, store):
+    """1記事 = 1投稿（👍 とスレッドが記事ごとになる）。記事は控えておき、案内は最後の1件にだけ付ける。"""
     scheduler, assistant, slack, _ = env
     slack.channels["C40"] = "40_knowledge"
     assistant.hub.collect = ([{"name": "AI", "keywords": ["LLM"]}], ["zenn: llm"])
-    agent = FakeKnowledgeAgent({"items": [{"title": "LLM の話", "url": "https://zenn.dev/x", "source": "Zenn",
-                                           "summary": "要約", "why": "AI に近い"}], "failed_sources": []})
+    agent = FakeKnowledgeAgent({"items": READING, "failed_sources": []})
     assistant.agents["knowledge"] = agent
 
     detail = await scheduler.run_reading("2026-09-26")
 
     skill, payload = agent.asked[0]
     assert skill == "reading-digest" and payload["sources"] == ["zenn: llm"] and payload["count"] == 5
-    post, = slack.posted()
-    assert post["channel"] == "C40" and post["text"].startswith("📰 今日の読みもの 9/26（土）")
-    assert "1. *LLM の話*" in post["text"] and post["unfurl_links"] is False
+    assert payload["liked"] == []
+    first, second = slack.posted()
+    assert first["channel"] == second["channel"] == "C40" and first["unfurl_links"] is False
+    assert first["text"].startswith("📰 1/2 *LLM の話*") and second["text"].startswith("📰 2/2 *RAG の話*")
     # URL は <> で囲む（囲まないと、すぐ後の「（Zenn）」まで Slack が URL にしてしまう）
-    assert "<https://zenn.dev/x>（Zenn）" in post["text"]
-    assert detail == {"status": "posted", "count": 1, "channel": "C40", "failed_sources": []}
+    assert "<https://zenn.dev/x>（Zenn）" in first["text"]
+    assert knowledge.LIKE_HINT not in first["text"] and knowledge.LIKE_HINT in second["text"]
+    rows = store.conn.execute("SELECT ts, day, item FROM reading_posts ORDER BY ts").fetchall()
+    assert [json.loads(row["item"])["title"] for row in rows] == ["LLM の話", "RAG の話"]
+    assert all(store.get_thread("C40", row["ts"]) for row in rows)      # スレッドの質問は知識の担当へ
+    assert detail == {"status": "posted", "count": 2, "channel": "C40", "failed_sources": []}
     store.record_schedule("reading", "2026-09-26", detail)
-    assert "読みもの: 1件（<#C40>）" in scheduler.morning_notes(datetime(2026, 9, 26, 8, 0))
+    assert "読みもの: 2件（<#C40>）" in scheduler.morning_notes(datetime(2026, 9, 26, 8, 0))
     # 今朝の分がまだ無ければ、昨日の分は載せない
     assert not any("読みもの" in note for note in scheduler.morning_notes(datetime(2026, 9, 27, 8, 0)))
+
+
+async def test_a_thumbs_up_saves_the_article_and_guides_the_next_picks(env, config, store):
+    """依頼者の 👍 で「読みもの」に入れて 📝 を付ける。外すとゴミ箱へ。次の読みものには好みの参考として渡す。"""
+    scheduler, assistant, slack, _ = env
+    slack.channels["C40"] = "40_knowledge"
+    store.add_reading_post("C40", "40.1", "2026-09-26", READING[0])
+    event = {"reaction": "+1::skin-tone-2", "user": "UME", "item": {"type": "message", "channel": "C40", "ts": "40.1"}}
+
+    await assistant.on_reaction_added(event)
+    await assistant.on_reaction_added({**event, "reaction": "thumbsup"})        # もう入っているので何もしない
+    await assistant.on_reaction_added({**event, "user": "USOMEONE"})            # 依頼者の 👍 だけを見る
+    await assistant.on_reaction_added({**event, "item": {"type": "message", "channel": "C40", "ts": "99.9"}})
+
+    assert assistant.hub.readings == {"reading-1": {"item": READING[0], "day": "2026-09-26"}}
+    assert ("reactions_add", {"channel": "C40", "timestamp": "40.1", "name": "memo"}) in slack.calls
+    assistant.hub.collect = ([{"name": "AI", "keywords": ["LLM"]}], ["zenn: llm"])
+    agent = FakeKnowledgeAgent({"items": [], "failed_sources": []})
+    assistant.agents["knowledge"] = agent
+    await scheduler.run_reading("2026-09-27")
+    assert agent.asked[0][1]["liked"] == [{"title": "LLM の話", "source": "Zenn", "interests": ["AI"]}]
+
+    await assistant.on_reaction_removed(event)
+
+    assert assistant.hub.trashed == ["reading-1"] and store.liked_readings(0, 20) == []
+    assert ("reactions_remove", {"channel": "C40", "timestamp": "40.1", "name": "memo"}) in slack.calls
+
+
+async def test_a_thumbs_up_without_the_reading_db_is_still_remembered(env, store):
+    """「読みもの」がまだ無くても、次からの参考には使う。無いことは1回だけ知らせる。"""
+    scheduler, assistant, slack, _ = env
+    assistant.hub.has_reading_db = False
+    store.add_reading_post("C40", "40.1", "2026-09-26", READING[0])
+    store.add_reading_post("C40", "40.2", "2026-09-26", READING[1])
+    for ts in ("40.1", "40.2"):
+        await assistant.on_reaction_added({"reaction": "+1", "user": "UME",
+                                           "item": {"type": "message", "channel": "C40", "ts": ts}})
+    assert assistant.hub.readings == {} and len(store.liked_readings(0, 20)) == 2
+    assert sum("読みもの" in text for text in slack.texts()) == 1
+    assert not any(name == "reactions_add" and kw["name"] == "memo" for name, kw in slack.calls)
 
 
 async def test_reading_stays_quiet_without_new_articles(env):

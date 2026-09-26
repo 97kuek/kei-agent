@@ -158,6 +158,20 @@ def test_candidates_drop_seen_old_duplicate_and_off_topic_feeds(tmp_path):
     assert [(e.title, hits) for e, hits in found] == [("LLM の話", ["AI"]), ("Company news", [])]
 
 
+def test_likes_nudge_candidates_toward_liked_sources_and_interests(tmp_path):
+    """👍 した記事と出どころ・興味が同じ候補は、少しだけ前に出る（当たる興味の数を上回らない程度）。"""
+    seen = digest.Seen(tmp_path / "seen.json", now=NOW.timestamp())
+    plain = feeds.Entry("LLM の話", "https://blog.example/1", "", "Blog", NOW - timedelta(hours=1))
+    zenn = feeds.Entry("LLM の別の話", "https://zenn.dev/2", "", "Zenn", NOW - timedelta(hours=5))
+    liked = digest.liked_of({"liked": [{"title": "前に 👍 した記事", "source": "Zenn", "interests": ["AI"]}]})
+    assert [e.url for e, _ in digest.candidates([plain, zenn], INTERESTS, seen, NOW)] == [plain.url, zenn.url]
+    assert [e.url for e, _ in digest.candidates([plain, zenn], INTERESTS, seen, NOW, liked=liked)] == [zenn.url, plain.url]
+    # 興味に2つ当たる記事は、👍 の分だけでは抜かれない
+    both = feeds.Entry("LLM で M5Stack", "https://blog.example/3", "", "Blog", NOW - timedelta(hours=9))
+    assert digest.candidates([zenn, both], INTERESTS, seen, NOW, liked=liked)[0][0].url == both.url
+    assert liked.lines() == "- [Zenn] 前に 👍 した記事" and digest.NO_LIKES.lines() == "（まだない）"
+
+
 def test_balanced_pick_takes_each_interest_in_turn():
     found = [(_entry("a", "1"), ["AI"]), (_entry("b", "2"), ["AI"]), (_entry("c", "3"), ["電子工作"])]
     assert digest.balanced(found, INTERESTS, 2) == [0, 2]
@@ -205,10 +219,13 @@ async def test_reading_picks_then_summarizes_without_the_web(config, store, monk
     model = FakeModel({UseCase.KNOWLEDGE_PICK: {"picks": [1, 1, 9]},
                        UseCase.KNOWLEDGE_SUMMARY: {"items": [{"n": 1, "summary": "RAG の作り方。", "why": "AI に近い"}]}})
     monkeypatch.setattr(runner, "run_model", model)
-    payload = {"interests": [{"name": "AI", "keywords": ["LLM", "RAG"]}], "sources": ["zenn: llm"], "count": 5}
+    payload = {"interests": [{"name": "AI", "keywords": ["LLM", "RAG"]}], "sources": ["zenn: llm"], "count": 5,
+               "liked": [{"title": "前に 👍 した記事", "source": "Qiita", "interests": ["AI"]}]}
 
     data = await digest.reading(config, store, payload, provider="claude")
 
+    # 最近の 👍 は、選ぶ回に好みの参考として渡る
+    assert "- [Qiita] 前に 👍 した記事" in model.calls[0]["prompt"]
     item, = data["items"]
     assert (item["title"], item["summary"], item["why"]) == ("LLM で RAG を作る", "RAG の作り方。", "AI に近い")
     assert [c["use_case"] for c in model.calls] == [UseCase.KNOWLEDGE_PICK, UseCase.KNOWLEDGE_SUMMARY]

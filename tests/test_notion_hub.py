@@ -130,7 +130,7 @@ class FakeHubNotion:
         self.writes.append((method, path, body))
         if method == "POST" and path == "/databases":
             title = body["title"][0]["text"]["content"]
-            prefix = {"日別記録": "daily", "時間記録": "time"}[title]
+            prefix = {"日別記録": "daily", "時間記録": "time", "読みもの": "reading"}[title]
             db_id, ds_id = f"{prefix}-db", f"{prefix}-ds"
             self.blocks["home"].append(self.child_db(db_id, title))
             self.databases[db_id] = {"id": db_id, "parent": {"type": "page_id", "page_id": "home"},
@@ -439,6 +439,43 @@ def test_run_creates_time_db_with_weekly_chart(fake_notion, tmp_path):
     assert config["y_axis"] == {"aggregator": "sum", "property_id": "分"}
     assert config["stack_by"]["property_id"] == "領域"
     assert json.loads((tmp_path / "hub.json").read_text())["time_ds_id"] == "time-ds"
+
+
+def test_run_creates_the_reading_db_once_and_likes_are_written_to_it(fake_notion, tmp_path):
+    """👍 した記事の入れ先。setup は1回だけ作り、記事は「気になる」で入る。選択肢にカンマは使えない。"""
+    hub_setup = setup(fake_notion, tmp_path)
+    state = hub_setup.run()
+    hub_setup.run()
+    assert [b["child_database"]["title"] for b in fake_notion.blocks["home"]
+            if b["type"] == "child_database"].count("読みもの") == 1
+    assert (state.reading_db_id, state.reading_ds_id) == ("reading-db", "reading-ds")
+    assert {name: prop["type"] for name, prop in fake_notion.sources["reading-ds"]["properties"].items()} == {
+        "名前": "title", "URL": "url", "出どころ": "select", "興味": "multi_select", "要約": "rich_text",
+        "日付": "date", "状態": "select"}
+
+    class Pages:
+        def __init__(self):
+            self.sent = []
+
+        def request(self, method, path, body=None):
+            self.sent.append((method, path, body))
+            return {"id": "page-1"}
+
+    pages = Pages()
+    hub = HubStore(pages, HubState("home", "calendar-ds", "daily-ds", reading_ds_id="reading-ds"))
+    assert hub.has_reading_db and not HubStore(pages, HubState("home", "c", "d")).has_reading_db
+    page_id = hub.add_reading({"title": "LLM の話", "url": "https://zenn.dev/x", "source": "Zenn, Inc.",
+                               "interests": ["AI", "AI"], "summary": "要約"}, "2026-09-26")
+    method, path, body = pages.sent[0]
+    props = body["properties"]
+    assert (page_id, method, path, body["parent"]) == (
+        "page-1", "POST", "/pages", {"type": "data_source_id", "data_source_id": "reading-ds"})
+    assert plain_text(props["名前"]["title"]) == "LLM の話" and props["URL"] == {"url": "https://zenn.dev/x"}
+    assert props["出どころ"] == {"select": {"name": "Zenn、 Inc."}}
+    assert props["興味"] == {"multi_select": [{"name": "AI"}]}
+    assert props["日付"] == {"date": {"start": "2026-09-26"}} and props["状態"] == {"select": {"name": "気になる"}}
+    hub.trash_page("page-1")
+    assert pages.sent[-1] == ("PATCH", "/pages/page-1", {"in_trash": True})
 
 
 def test_chart_failure_does_not_stop_setup(fake_notion, tmp_path):
