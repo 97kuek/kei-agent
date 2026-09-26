@@ -681,6 +681,18 @@ async def test_member_joined_registers_theme_in_notion(env, config):
     assert (config.research_root / "vlm" / "CLAUDE.md").exists()
 
 
+async def test_joining_the_knowledge_channel_is_not_a_theme(env, config):
+    """#40_knowledge は研究テーマではない。テーマとして登録せず、作業用のディレクトリも作らない。"""
+    scheduler, assistant, slack, claude = env
+    slack.channels["C40"] = "40_knowledge"
+    await assistant.on_member_joined({"user": "UBOT", "channel": "C40"})
+    assert assistant.notion.themes == {}
+    assert not (config.research_root / "knowledge").exists()
+    text, = slack.texts()
+    assert text.startswith("Kei Agent です。このチャンネルの用事は知識エージェントに取り次ぎます。")
+    assert "読みものを5件" in text and "CLAUDE.md" not in text
+
+
 # 返事待ちへの声かけ
 
 async def test_awaiting_marker_nudges_once_and_clears_on_reply(env, config, store, monkeypatch):

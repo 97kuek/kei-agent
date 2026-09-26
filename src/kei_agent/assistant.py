@@ -632,6 +632,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
             text = "Kei Agent です。このチャンネルの用事は大学エージェントに取り次ぎます。\n" + course.CAN_DO
         elif ws.kind is ChannelKind.WORK:
             text = "Kei Agent です。このチャンネルの用事は仕事エージェントに取り次ぎます。\n" + work.CAN_DO
+        elif ws.kind is ChannelKind.KNOWLEDGE:
+            text = "Kei Agent です。このチャンネルの用事は知識エージェントに取り次ぎます。\n" + knowledge.CAN_DO
         else:
             state = "作りました" if created else "使います"
             text = (
