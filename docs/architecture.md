@@ -33,6 +33,11 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ├── overview/             #01_overview などの作業場。Daily・レトプラ・時間はここに置かず、Notion の共通ホームに残す
 └── state/                毎晩の保守が書き出す SQLite の中身と Notion の ID
 ~/.local/state/kei-agent/ 状態（kei-agent.db、notion.json、asks/、worktrees/ など）
+~/.config/kei-agent/      利用者のもの（KEI_AGENT_HOME で変えられる。docs/extensibility.md）
+├── config.toml           設定の本体（リポジトリには config.example.toml だけ）
+├── profile.md            話し方・所属・興味。会話する担当の指示書の最後に差し込む（例は profile.example.md）
+├── prompts/              指示書の差し替え（prompts/ と同じ名前なら、そちらを使う）
+└── secrets/              秘密情報（[paths] secrets で変えられる。AI には読ませない）
 ```
 
 ## 3. Slack の受け口（本体）
@@ -167,7 +172,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 | 接続先 | 基本は `[sandbox] allowed_domains`。テーマごとの追加は Slack で1つずつ許可し、本体の SQLite に置く（作業場に置くとモデルが自分で足せてしまうため） |
 | 環境変数 | 子プロセスに Slack・Notion などの鍵を渡さない。Notion ゲートウェイの親の合言葉も、どの子にも渡さない（`guard.strip_env`） |
 | Notion | 鍵を持つのはゲートウェイだけ。ほかはすべて client ごとの合言葉でゲートウェイを通し、届くホームはゲートウェイが決める（下） |
-| 柵そのもの | `src/kei_agent/guard.py`、`config.toml`、`deploy/` は Kei Agent 自身に直させない（`PROTECTED_PATHS`） |
+| 柵そのもの | `src/kei_agent/guard.py`、`config.example.toml`、`deploy/` は Kei Agent 自身に直させない（`PROTECTED_PATHS`）。本物の設定はリポジトリの外（`~/.config/kei-agent/`）にあり、自己改善の作業場からは届かない |
 | Slack から変えられないもの | 同時に動かす数、上限時間、書き込み先、読ませない場所、基本の接続先 |
 
 **Notion ゲートウェイ**（`127.0.0.1:8791`、`src/kei_agent_notion_gateway/`）

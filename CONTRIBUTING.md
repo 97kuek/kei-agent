@@ -28,17 +28,18 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の秘�
 - ドキュメントには「いまどうなっているか」だけを書く。経緯は Git の履歴に残す
 - Notion の DB やプロパティの名前を変えたら、`src/kei_agent/notion.py`・`notion_store.py`・`notion_hub.py`（大学は `src/kei_agent_course/notion_setup.py`）も合わせる
 - モデル名は `src/kei_agent/model_policy.py` にだけ書く。skill や prompt に埋め込まない
-- Slack の権限、sandbox、柵（`guard.py`、`config.toml`、`deploy/`）の大きな変更は、先に Issue で相談する
+- Slack の権限、sandbox、柵（`guard.py`、`config.example.toml`、`deploy/`）の大きな変更は、先に Issue で相談する
 
 ## エージェントを増やすとき
 
-名前（`<agent>`）をすべての場所でそろえる。
+名前（`<agent>`）をすべての場所でそろえる。この手順は、モジュールの枠ができたら（`docs/extensibility.md` の段階2）、
+モジュールのフォルダ1つと設定1行に変わる。
 
-1. `src/kei_agent_<agent>/` に `card.py`（名刺。スキルの ID は kebab-case の動詞-目的語、自由な質問は `ask`）、`executor.py`、`app.py`（`kei_agent_a2a.server.serve` を呼ぶだけ）
+1. `src/kei_agent_<agent>/` に `skills.py`（スキルの ID だけ。kebab-case の動詞-目的語、自由な質問は `ask`）、`card.py`（名刺）、`executor.py`、`app.py`（`kei_agent_a2a.server.serve` を呼ぶだけ）
 2. `pyproject.toml` に `kei-agent-<agent>` のコマンドと `[dependency-groups] <agent> = [{ include-group = "agents" }]`
-3. `config.toml` の `[a2a.agents]` に `127.0.0.1` の次のポート、`[agents.<agent>]`、`[channels]`
-4. `deploy/run-agent.sh` と `deploy/install.sh` の `case` に名前を足し、`deploy/com.kei-agent.<agent>.plist.template`（`run-agent.sh <agent>` を呼ぶ）を作る
-5. そのエージェントだけの秘密情報は `~/.config/zsh/local/kei-agent-<agent>.zsh`（600。無くてもよい）に分ける
+3. `config.example.toml`（と自分の `~/.config/kei-agent/config.toml`）の `[a2a.agents]` に `127.0.0.1` の次のポート、`[agents.<agent>]`、`[channels]`
+4. `deploy/run-agent.sh` と `deploy/install.sh` の `case`、`deploy/update.sh` の名前の一覧に足す（plist は共通の雛形 `deploy/com.kei-agent.plist.template` から作る）
+5. そのエージェントだけの秘密情報は、秘密情報の置き場所（既定は `~/.config/kei-agent/secrets/`）の `kei-agent-<agent>.zsh`（600。無くてもよい）に分ける
 6. 本体の取り次ぎ（`src/kei_agent/<agent>.py`）と、`model_policy.py` の用途と recipe
 7. skill を持たせるなら `plugin/<agent>/`（`kei-agent-<agent>` という名前の plugin、`skills/<skill>/SKILL.md`、`hooks/`）を作り、`AGENT_PLUGINS` に足す。スクリプトは標準ライブラリだけで書く
 8. テストは本物の A2A サーバーを立てて往復を見る（`tests/test_a2a.py` の型）。外部サービスとモデルは偽物にする
@@ -46,7 +47,7 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の秘�
 ## 書き方
 
 - コメント、ログ、Slack への投稿、ドキュメントは日本語
-- 設定は `config.toml`、秘密情報は環境変数。秘密情報をコード、コミット、ログ、Issue に含めない
+- 設定は `~/.config/kei-agent/config.toml`（リポジトリには `config.example.toml` だけ）、秘密情報は環境変数。秘密情報をコード、コミット、ログ、Issue に含めない
 
 ## コミットとプルリクエスト
 

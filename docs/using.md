@@ -122,7 +122,7 @@ Slack で Kei Agent に頼むときの案内。入れ方は [`deploy/README.md`]
 4. 見て「いいよ」と言うと `📦 取り込み`。テストして main に取り込み、push して新しい版で起動し直す。起動できたら issue を閉じる
 
 issue にできなかったとき（自己改善の AI が未選択、`gh` の失敗、要約が条件に合わない）は、そう知らせて案だけ続ける。
-`src/kei_agent/guard.py`、`config.toml`、`deploy/` に触れる変更は取り込まない（人が直す）。
+`src/kei_agent/guard.py`、`config.example.toml`、`deploy/` に触れる変更は取り込まない（人が直す）。本物の設定（`~/.config/kei-agent/`）はリポジトリの外にあるので、自己改善では変わらない。
 
 ## App Home（設定）
 

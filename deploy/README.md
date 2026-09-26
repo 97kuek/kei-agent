@@ -15,9 +15,19 @@
 
 マニフェストを変えたときは **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。`/toggl` コマンド（`commands` の scope と slash command）を足したマニフェストに更新したら、一度入れ直すまで `/toggl` は使えない。
 
-## 2. 秘密情報
+## 2. 設定と秘密情報
 
-`~/.config/zsh/local/` に置き、`chmod 600` にする（Git に入れない）。値はここに書かない。
+自分の設定は、リポジトリの外の `~/.config/kei-agent/` に置く（場所は環境変数 `KEI_AGENT_HOME` で変えられる。docs/extensibility.md）。
+
+```zsh
+mkdir -p ~/.config/kei-agent/secrets && chmod 700 ~/.config/kei-agent/secrets
+cp config.example.toml ~/.config/kei-agent/config.toml     # チャンネル、Notion のページ ID などを書き換える
+cp profile.example.md ~/.config/kei-agent/profile.md       # 話し方、所属、興味。会話する担当の指示書に差し込まれる
+```
+
+指示書を丸ごと変えたいときは、`~/.config/kei-agent/prompts/` に `prompts/` と同じ名前のファイルを置く（そちらが使われる）。
+
+秘密情報は `~/.config/kei-agent/secrets/` に置き、`chmod 600` にする（Git に入れない）。値はここに書かない。置き場所は `config.toml` の `[paths] secrets` で変えられる（どこにしても、AI には読ませない）。
 
 **`kei-agent.zsh`（共通。全プロセスが読む）**
 
@@ -66,7 +76,7 @@ Codex のアカウント連携は、Codex の ChatGPT ログイン（`~/.codex`�
 ```zsh
 brew install pueue ffmpeg && brew services start pueue
 uv sync --all-groups
-source ~/.config/zsh/local/kei-agent.zsh
+source ~/.config/kei-agent/secrets/kei-agent.zsh
 uv run kei-agent
 ```
 
@@ -91,7 +101,7 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 
 | もの | 場所 |
 |---|---|
-| 設定 | `config.toml`（`KEI_AGENT_CONFIG` で別のファイルを指せる） |
+| 設定 | `~/.config/kei-agent/config.toml`（フォルダは `KEI_AGENT_HOME`、ファイルは `KEI_AGENT_CONFIG` で変えられる）。プロフィールは `profile.md`、指示書の差し替えは `prompts/` |
 | 状態 | `~/.local/state/kei-agent/`（`kei-agent.db`、`notion.json`、`notion-course.json`） |
 | ログ | `~/Library/Logs/kei-agent/kei-agent.log`（5MB × 5世代）、起動の失敗は `launchd.log`、エージェントは `<名前>-launchd.log` |
 | 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
@@ -127,8 +137,8 @@ uv run kei-agent-hub-setup --apply
 **授業ホーム**: 6つの DB をそろえる（`--seed <年度>` で `notion_setup.py` の履修科目を入れる）
 
 ```zsh
-source ~/.config/zsh/local/kei-agent.zsh          # ゲートウェイの親の合言葉
-source ~/.config/zsh/local/kei-agent-course.zsh   # MOODLE_ICS_URL
+source ~/.config/kei-agent/secrets/kei-agent.zsh          # ゲートウェイの親の合言葉
+source ~/.config/kei-agent/secrets/kei-agent-course.zsh   # MOODLE_ICS_URL
 uv run --group course kei-agent-course-setup --seed 2026
 uv run --group course kei-agent-course-sync            # 手で締切を取り込む（--all で履修外も）
 uv run --group course kei-agent-course-inspect         # Moodle と「授業」を読むだけで照合する
