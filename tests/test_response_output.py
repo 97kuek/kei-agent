@@ -5,6 +5,7 @@ from kei_agent.response_output import (
     finalize_conversation,
     trouble_notice,
     validate_daily,
+    validate_review,
     validate_structured_response,
 )
 
@@ -68,6 +69,52 @@ def test_daily_requires_four_bold_sections_in_order():
     assert validate_daily(valid) == valid
     with pytest.raises(OutputError):
         validate_daily("*今日のタスク*\nなし")
+
+
+def test_daily_tolerates_heading_styles_and_blank_lines_but_keeps_the_order():
+    loose = """### 今日のタスク
+
+- 論文を読む
+
+- 実験を回す
+
+**夜間処理の結果:**
+なし
+
+**確認待ち・期日・止まっているテーマ・返事待ち**
+いずれもなし
+
+**今日考えるとよい問い**
+1. 何から進める？"""
+
+    assert validate_daily(loose) == """**今日のタスク**
+- 論文を読む
+
+- 実験を回す
+
+**夜間処理の結果**
+なし
+
+**確認待ち・期日・止まっているテーマ・返事待ち**
+いずれもなし
+
+**今日考えるとよい問い**
+1. 何から進める？"""
+    swapped = loose.replace("**夜間処理の結果:**", "**今日考えるとよい問い**", 1)
+    for broken in ("前置き\n\n" + loose,                              # 見出しの前に文がある
+                   loose.replace("**夜間処理の結果:**\nなし\n\n", ""),  # 見出しが欠けている
+                   swapped,                                            # 順番が違う・重なっている
+                   loose.replace("いずれもなし", "")):                  # 中身が空
+        with pytest.raises(OutputError):
+            validate_daily(broken)
+
+
+def test_review_adds_the_fixed_night_question_when_it_is_missing():
+    body = "**今日の成果**\n- 実験を回した\n\n\n**未完了タスク**\nなし"
+
+    expected = "**今日の成果**\n- 実験を回した\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？"
+    assert validate_review(body) == expected
+    assert validate_review(body + "\n\n夜間に実行したいタスクはありますか？") == expected
 
 
 def test_trouble_notice_says_what_happened_without_local_paths():

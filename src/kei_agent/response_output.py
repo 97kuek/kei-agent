@@ -99,33 +99,46 @@ def validate_structured_response(text: str) -> str:
     return normalized
 
 
+def _heading_name(line: str) -> str:
+    """見出しらしい行から、飾り（`#`、太字の `*`、末尾のコロン）を外した名前。"""
+    return line.strip().lstrip("#").strip().strip("*").strip().rstrip(":：").strip()
+
+
 def _validate_sections(text: str, headings: tuple[str, ...], message: str) -> str:
+    """決まった見出しがこの順で1回ずつあり、どれも中身がある返答だけを受け入れる。
+
+    見出しの書き方（`###` や末尾のコロン）と、見出しや項目のあいだの空行の違いでは捨てず、
+    見出しは決まった書き方にそろえる。最初の見出しより前に文があるもの、手元のパスや
+    作業の実況を含むものは捨てる。
+    """
     normalized = text.strip().replace("\r\n", "\n")
-    parts = normalized.split("\n\n")
-    if len(parts) != len(headings):
+    names = [heading.strip("*") for heading in headings]
+    lines = normalized.split("\n")
+    marks = [(index, _heading_name(line)) for index, line in enumerate(lines) if _heading_name(line) in names]
+    if [name for _, name in marks] != names or marks[0][0] != 0 or _forbidden(normalized):
         raise OutputError(message)
-    for part, heading in zip(parts, headings, strict=True):
-        prefix = heading + "\n"
-        if not part.startswith(prefix) or not part[len(prefix):].strip():
+    parts = []
+    ends = [index for index, _ in marks[1:]] + [len(lines)]
+    for (start, name), end in zip(marks, ends, strict=True):
+        body = "\n".join(lines[start + 1:end]).strip()
+        if not body:
             raise OutputError(message)
-    if any(line.startswith("#") for line in normalized.splitlines()) or _forbidden(normalized):
-        raise OutputError(message)
-    return normalized
+        parts.append(f"**{name}**\n{body}")
+    return "\n\n".join(parts)
 
 
 def validate_daily(text: str) -> str:
-    """Daily の四つの太字 section だけを受け入れる。"""
+    """Daily の四つの section だけを受け入れる。"""
     return _validate_sections(text, DAILY_HEADINGS, "Daily の返答が指定形式ではありません")
 
 
 def validate_review(text: str) -> str:
-    """Retro の二つの section と夜間質問だけを受け入れる。"""
+    """Retro の二つの section と夜間質問だけを受け入れる。夜間質問は決まった文なので、無ければ足す。"""
     normalized = text.strip().replace("\r\n", "\n")
-    parts = normalized.split("\n\n")
-    if len(parts) != 3 or parts[-1] != NIGHT_QUESTION:
-        raise OutputError("Retro の返答が指定形式ではありません")
+    if normalized.endswith(NIGHT_QUESTION):
+        normalized = normalized[:-len(NIGHT_QUESTION)].rstrip()
     return _validate_sections(
-        "\n\n".join(parts[:2]), REVIEW_HEADINGS, "Retro の返答が指定形式ではありません"
+        normalized, REVIEW_HEADINGS, "Retro の返答が指定形式ではありません"
     ) + "\n\n" + NIGHT_QUESTION
 
 
