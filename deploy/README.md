@@ -97,7 +97,9 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 | 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
 | ジョブ | `pueue status --group kei-agent` |
 
-コードを入れ替えたら、`deploy/restart-all.sh` で全部を起動し直す（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.plist.template`。どのプロセスも同じ雛形から作る）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。登録する中身は `deploy/install.sh <名前> print` で先に確かめられる。
+main に取り込んだら、`deploy/update.sh` で反映する（先に origin から取り込むときは `--pull`）。main で書きかけが無いときだけ動き、依存をそろえ、plist が変わったものだけ登録し直し、全部を起動し直して、7つのプロセスが新しい版で動いているか（担当と本体は名刺、ゲートウェイは `/health` の version）を確かめる。push はしない。
+
+手で起動し直すだけなら `deploy/restart-all.sh`（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.plist.template`。どのプロセスも同じ雛形から作る）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。登録する中身は `deploy/install.sh <名前> print` で先に確かめられる。
 
 ## 5. Notion（最初の1回）
 
@@ -108,10 +110,11 @@ Notion に届くのはゲートウェイだけなので、下の setup もゲー
 3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home` / `research_home` / `course_home`）に書く。ゲートウェイはこの下だけを通す
 4. ゲートウェイを動かす（`deploy/install.sh notion-gateway`。手元なら別の端末で `uv run kei-agent-notion-gateway`）
 
-**研究ホーム**: 実行する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
+**研究ホーム**: 作るもの・足すものを確かめてから反映する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
 
 ```zsh
 uv run kei-agent-notion-setup
+uv run kei-agent-notion-setup --apply
 ```
 
 **共通ホーム**（`Keitaro Ueki`）: dry-run を確認してから反映する。

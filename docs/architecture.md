@@ -4,7 +4,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 1. プロセス
 
-すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。plist はどれも `deploy/com.kei-agent.plist.template` から作り、起動スクリプト（本体 `run.sh`、担当 `run-agent.sh <名前>`、ゲートウェイ `run-notion-gateway.sh`）は、`uv sync` で依存をそろえてから仮想環境の Python を直に起動する（`uv run` のように uv を親として常駐させない）。
+すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。plist はどれも `deploy/com.kei-agent.plist.template` から作り、起動スクリプト（本体 `run.sh`、担当 `run-agent.sh <名前>`、ゲートウェイ `run-notion-gateway.sh`）は、`uv sync` で依存をそろえてから仮想環境の Python を直に起動する（`uv run` のように uv を親として常駐させない）。取り込んだ main の反映は `deploy/update.sh`（`deploy/README.md`）。
 
 | プロセス | コマンド | ポート | パッケージ | 役目 |
 |---|---|---|---|---|
@@ -247,7 +247,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 ### 研究ホーム
 
-`kei-agent-notion-setup` が作る（作った DB の ID は `notion.json`）。ホームには「自分の Task」「進行中のテーマ」「近いマイルストーン」のビューを置く。
+`kei-agent-notion-setup --apply` が作る（付けなければ、作るもの・足すものを並べるだけ。作った DB の ID は `notion.json`）。ホームには「自分の Task」「進行中のテーマ」「近いマイルストーン」のビューを置く。
 
 | DB | 主なプロパティ |
 |---|---|
