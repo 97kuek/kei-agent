@@ -12,6 +12,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 大学エージェント | `kei-agent-course` | 8787 | `src/kei_agent_course/` | Moodle・Box・授業ホーム・Toggl |
 | 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
 | 仕事エージェント | `kei-agent-work` | 8789 | `src/kei_agent_work/` | Microsoft 365 を読む |
+| 知識エージェント | `kei-agent-knowledge` | 8792 | `src/kei_agent_knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない） |
 | 声のレイヤ | `kei-agent-voice` | 8790 | `src/kei_agent_voice/` | Realtime API、マイク、スピーカー |
 | Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章） |
 
@@ -25,7 +26,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ~/research/<テーマ>/      研究テーマの作業場（1テーマ = 1チャンネル = 1ディレクトリ = Notion の「テーマ」1行）
 ├── CLAUDE.md             前提、分野、検索キーワード、ジョブにする基準
 ├── inputs/ outputs/      添付されたファイル／見せたい図や集計（新しいものをスレッドに添付）
-├── logs/ papers/         ジョブのログ／文献調査の結果
+├── logs/                 ジョブのログ（論文は研究ホームの先行研究 DB に残し、ここには置かない）
 └── .kei-agent/           スレッドのログ、ジョブの状態（Kei Agent が書く）
 ~/course/                 大学エージェントの作業場（資料は Box に置いたまま）
 ~/kei-agent/              Kei Agent 自身のもの（agent_root）
@@ -37,10 +38,10 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ## 3. Slack の受け口（本体）
 
 - Socket Mode。指示できるのは `KEI_AGENT_ALLOWED_USER_ID` の1人だけ
-- チャンネル名は先頭の番号（`00_` など）を外して `config.toml` の `[channels]` と照合する。`overview` / `improve` / `course` / `work` に当たらないものは研究テーマ
+- チャンネル名は先頭の番号（`00_` など）を外して `config.toml` の `[channels]` と照合する。`overview` / `improve` / `course` / `work` / `knowledge` に当たらないものは研究テーマ
 - 返事は `chat.startStream` で流し、経過は `assistant.threads.setStatus` の1行、スレッドの状態は `agents.sessions.setStatus` で出す
 - 違うスレッドは最大2件まで並行（`max_concurrent_runs`）、同じスレッドの中は順番
-- 1スレッド = 1会話。研究・大学・仕事・自己改善のどれも同じ扱いで、provider と指示書・skill の版が一致する session ID だけで再開し、合わないか失われたら Slack の履歴から新しい会話を始める（`Assistant._converse`）
+- 1スレッド = 1会話。研究・大学・仕事・知識・自己改善のどれも同じ扱いで、provider と指示書・skill の版が一致する session ID だけで再開し、合わないか失われたら Slack の履歴から新しい会話を始める（`Assistant._converse`）。Kei Agent の投稿（朝の読みもの、論文の新着、朝の一覧など）から始まったスレッドへの最初の返信にも、元の投稿を渡す（「2番を詳しく」に答えるため）
 - どの担当に頼むときも、依頼の先頭に今日の日付と曜日を付ける
 - 処理中の依頼は控えを残し、再起動で止まったものは起動時にやり直す（大学・仕事の質問も同じ）
 - provider の利用上限に当たったら、明ける時刻をスレッドに書き、明けてから自動でやり直す（時刻が分からないときは30分後）
@@ -53,6 +54,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 研究テーマ | 研究エージェントの `ask`（テーマの作業場で provider を1回動かす） |
 | 大学 | 大学エージェント。定型に当たれば決まったスキル、当たらなければ `ask` |
 | 仕事 | 仕事エージェント。同上 |
+| 知識（`#40_knowledge`） | 知識エージェントの `ask`。研究テーマのチャンネルでも、朝の論文の新着のスレッドは知識エージェント |
 | overview | 軽いモデル（routing recipe）が名刺のスキル一覧から相手と仕事を選ぶ。選べなければそのドメインの `ask` |
 | improve | 本体の自己改善（9章） |
 
@@ -78,10 +80,11 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 大学 | `sync-assignments` / `list-due` / `list-calendar-assignments` / `list-classes` / `list-current-courses` / `time-report` / `ask` |
 | 研究 | `ask` / `submit-job` / `list-jobs` / `cancel-job` / `forget-job` |
 | 仕事 | `list-events` / `ask` |
+| 知識 | `reading-digest` / `paper-digest` / `ask` |
 | 声 | `notify` |
 | 本体（声から） | `ask`（`actor`・`question`・研究なら `theme`） |
 
-`ask` は3つのエージェントで同じ形。依頼は JSON（`prompt`、`session_id`、`channel`、`thread_ts`、`read_only`、`use_case`、`provider`。研究はさらに `channel_name`、`allowed_domains`）、返事の `data` は実行結果（`session_id`、`text`、`limit_reset_at` など）。用途が書いていなければ、その担当の軽い分類器で決める（`src/kei_agent_a2a/run.py`）。
+`ask` はどのエージェントでも同じ形。依頼は JSON（`prompt`、`session_id`、`channel`、`thread_ts`、`read_only`、`use_case`、`provider`。研究はさらに `channel_name`、`allowed_domains`）、返事の `data` は実行結果（`session_id`、`text`、`limit_reset_at` など）。用途が書いていなければ、その担当の軽い分類器で決める（`src/kei_agent_a2a/run.py`）。
 
 エージェントが持たないもの: Slack への投稿、依頼者への約束（上限で待つ・やり直す・知らせる）、スレッドと session の対応、ジョブがどのスレッドのものか、ほかのドメインの秘密情報、Kei Agent 自身を直す作業。
 
@@ -89,11 +92,12 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 - **研究** … テーマの作業場で provider を1回動かして最終結果を返す。長い処理は pueue（グループ `kei-agent`）に入れ、本体が毎分状態を見て、終わったらその会話を再開する。ジョブは作業場の中のスクリプトだけで、`--expect` で宣言したファイルができたかを確かめる。Notion はゲートウェイ経由、W&B は `managing-wandb` skill
 - **大学** … Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
+- **知識** … 朝の読みもの（`reading-digest`）と、テーマごとの論文の新着（`paper-digest`）を作る。材料（「収集」ページの興味と情報源、テーマの `CLAUDE.md` の検索キーワードと前提、先行研究 DB にある ID）は本体が本文の JSON で渡し、結果は本体が Slack と Notion に出す。RSS・arXiv・記事の本文はプログラムが読み（`feeds.py`。arXiv は混んでいると 406 などでしばらく断るので、5・15・45秒あけてやり直す）、一度候補にしたものは作業場の `seen.json` に90日覚える。選ぶ・要約するのは Web を使えない回（`OFFLINE_USE_CASES`）、質問に答える `ask` だけが Web を読む
 - **仕事** … 会社アカウントに付いた Microsoft 365 の連携（Outlook の予定・メール・人・空き時間、Teams、SharePoint）を、読む道具だけで使う。送信・投稿・予定の作成・変更・削除はしない。Codex では Outlook（メールと予定の App）だけを読む（Teams・SharePoint の App は、道具の名前を確かめてから表に足す）。予定の一覧（`list-events`）も共通の起動口で、読むだけの1回として動かす
 
 ## 5. provider とモデル
 
-- 各 actor（`research` / `course` / `work` / `router` / `self_fix`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
+- 各 actor（`research` / `course` / `work` / `knowledge` / `router` / `self_fix`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
 - model と effort は `src/kei_agent/model_policy.py` が actor・用途（use case）・provider から決める。ここが唯一の正
 - 許可する model は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` だけ
 - 別 provider や上位 model への自動の切り替えはしない。provider 未選択、連携が使えない、上限到達のときは理由を出して止まる
@@ -107,6 +111,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 研究: 設計 | sol / xhigh | opus-5 / high |
 | 大学: 説明 / 要件 / 比較 / 履修計画 | luna medium / luna high / sol medium / sol xhigh | sonnet-5 medium / high / high / opus-5 high |
 | 仕事: 1つの出典 / 横断 / 判断 | luna medium / sol medium / sol high | sonnet-5 medium / high / opus-5 high |
+| 知識: 選ぶ / 要約 / 質問 | luna low / luna medium / luna medium | haiku-4-5 / sonnet-5 medium / sonnet-5 medium |
 | Daily / Retro & Planning | luna medium / sol high | sonnet-5 medium / opus-5 high |
 | 自己改善: 案 / 実装 / 確認 | sol xhigh / high / medium | opus-5 high / sonnet-5 high / high |
 | 明示指定だけ | `[[manual-astra]]` → astra / xhigh | `[[manual-fable]]` → fable-5 / high |
@@ -117,17 +122,19 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ### 実行のしかた
 
-AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研究・大学・仕事・振り分け・Daily/レトプラ・自己改善、Claude も Codex も）。1回の実行条件は `ExecutionRequest` と `ExecutionContract`（`execution_contract.py`）にまとめ、どこまで触れるかは制限の表（`agent_policy.py`）が決める。Claude の設定も Codex の設定も、この表から作る。
+AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研究・大学・仕事・知識・振り分け・Daily/レトプラ・自己改善、Claude も Codex も）。1回の実行条件は `ExecutionRequest` と `ExecutionContract`（`execution_contract.py`）にまとめ、どこまで触れるかは制限の表（`agent_policy.py`）が決める。Claude の設定も Codex の設定も、この表から作る。
 
 | 担当 | ファイル | コマンド | Web | Notion（ゲートウェイ） | アカウントの連携 |
 |---|---|---|---|---|---|
 | 研究 | 作業場を読み書き | ○ | ○ | 研究ホームを読み書き | なし |
 | 大学 | 作業場を読むだけ | × | × | 授業ホームを読み書き | Box（読む道具だけ） |
 | 仕事 | 作業場を読むだけ | × | × | なし | Microsoft 365（Outlook・Teams・SharePoint を読む道具だけ。Codex は Outlook だけ） |
+| 知識 | 作業場を読むだけ | × | 質問に答えるときだけ | なし | なし |
 | 振り分け・分類・Daily/レトプラ | 読むだけ | × | × | なし | なし |
 | 自己改善 | 作業場を読み書き | ○ | ○ | なし | なし |
 
 - 読むだけの実行（声からの問い合わせ、分類など）は、書く・動かす手段を外す。ゲートウェイは読む道具（`read` `search` `query`）だけ
+- 外の文（記事・論文）を材料にする用途（`OFFLINE_USE_CASES`: 知識の選ぶ・要約）は、Web も外す。外の文・個人の情報・外への出口の3つを1つの回に揃えない（記事に仕込まれた指示で、手元の情報を外へ送られないように）。知識の担当は Notion もテーマのファイルも持たず、テーマの前提は Web を使えない回にだけ渡す
 - Claude は `claude -p`（stream-json）。表から `--settings` の許可と拒否を作り、`dontAsk` で表にないものは使わせない。アカウントの連携はその担当のプロファイル（`CLAUDE_CONFIG_DIR`）のユーザー設定から読み、ほかの担当はユーザー設定を持ち込まない（`--setting-sources ""`、`--strict-mcp-config`）
 - Codex は `codex exec --json`（一時的な権限 profile `kei_agent_scoped`、`--ignore-user-config`）。アカウントの連携は、表の App の、表に書いた読む道具だけをモデルに見せる（ID は実行のたびに名前から引く）。Web 検索は表で許した担当だけ。Claude の担当が持たない道具（サブエージェント、画像の生成、プラグインの導入）は切り、ファイルを読まない担当からは画像を開く道具も外す。無人で動くので、渡した道具（ゲートウェイと App の読む道具）は呼ぶたびの承認を求めない
 - Codex はファイルや skill をコマンドで読むので、コマンドを持たない担当（大学・仕事）でもシェルだけは残す。書き込み・通信・ホームの下（作業場と skill の置き場のほか）は、権限 profile が止める
@@ -188,7 +195,8 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 | 名前 | 既定 | 中身 |
 |---|---|---|
-| `literature` | 07:00 | テーマの `CLAUDE.md` の検索キーワードで arXiv の新着を探し、`papers/` にない論文だけをテーマのチャンネルに出す |
+| `literature` | 07:00 | テーマの `CLAUDE.md` の検索キーワードと前提を知識エージェントに渡し、arXiv の新着から関係のあるものを最大5本、研究ホームの先行研究 DB（「未読」）とテーマのチャンネルに出す。そのスレッドの続きは知識エージェントが答える |
+| `reading` | 07:00 | 共通ホームの「収集」ページの興味と情報源を知識エージェントに渡し、興味ごとに偏らない5件を要約つきで `#40_knowledge` に1通で出す。新着がなければ出さない |
 | `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily |
 | `review` | 21:00 | Retro & Planning。Slack には成果と未完了だけ。直前に Moodle の課題を取り込み、スレッドに明日・明後日の締切を並べる |
 | `maintenance` | 22:00 | 古いファイルの整理、Toggl だけで測った時間の取り込み（11章）、バックアップ（`[maintenance]`） |
@@ -203,7 +211,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 - 締切の「0:00」ちょうどは、前の日の「24:00」として表示し、日付もその日に振り分ける（`deadline.py`。締切の時刻そのものは変えない）
 - 朝の予定には、前回の Daily から失敗した定期処理（Notion に残せなかった Daily・Retro を含む）と、前の日に予定カレンダーへ課題を写せなかったことを1行で添える
 - スリープで逃した処理は3時間以内（`night` は12時間以内）なら起きたときに動かす。上限中は始めず、明けてから動かす
-- `kei-agent-schedule <night|literature|daily|review|maintenance>` で1回だけ動かせる（`--record` を付けなければ今日の記録に残らない）
+- `kei-agent-schedule <night|literature|reading|daily|review|maintenance>` で1回だけ動かせる（`--record` を付けなければ今日の記録に残らない）
 
 ## 9. 自己改善（`#00_kei-agent`）
 
@@ -234,6 +242,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 - **予定カレンダー** … 既存の「今月の予定」に `出典`（Outlook / 課題 / 手入力）、`出典 ID`、`元 URL`、`最終確認`、`同期状態` を足したもの。手入力の行と、同期に失敗したときの既存の行は消さない。見えなくなった行は `同期状態` を「要確認」にし、次に見えれば「確認済み」に戻す
 - **時間記録** … 研究・大学・仕事の時間（11章）
 - 研究 Task と授業の課題のリンクドビュー（「今週のタスク」）。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に出す（`task_view_spec`）
+- **収集** … 知識エージェントが毎朝読む設定のページ。「興味」は `名前: キーワード、キーワード`、「情報源」は `zenn: トピック、…`・`qiita: タグ、…`・RSS の URL を1行ずつ。setup が無いときだけ作り、中身は利用者が直す（`parse_collect`）
 
 ### 研究ホーム
 
@@ -245,10 +254,11 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | Task | タイトル、テーマ、状態（未着手 / 今夜やる / 実行中 / 確認待ち / 完了）、担当（自分 / Kei Agent）、優先度（P0〜P2）、期日、Slack、結果 |
 | ノート | タイトル、種類（計画 / 考察 / 議論メモ。旧 Daily・振り返りの原本も残る）、テーマ、日付、書いた人、Slack、ファイル |
 | マイルストーン | 名前、期日、テーマ、状態（予定 / 準備中 / 済み）、メモ。「中長期の方針」ページの下 |
+| 先行研究 | 名前、テーマ（複数）、URL、ID（`arXiv:…` など。同じ論文は1行）、著者、年、会場、要点、この研究との関係、見つけた日、出どころ（毎朝の新着 / 依頼）、状態（未読 / 読んだ / 使う）。各テーマのページに、そのテーマの論文だけの表「先行研究」を置く |
 
 - 🌙 は Task を作る入口。外すと「未着手」に戻す。夜間は「今夜やる」を読み、「状態」と「結果」を書く
 - 実験の要約（W&B run の URL・主な指標）は、研究の LLM がゲートウェイ経由でその Task の「結果」かノート（種類「考察」）に書く。スレッドやジョブなど運用の状態は本体の SQLite が正で、Notion には置かない
-- テーマの前提と検索キーワードの正は `CLAUDE.md`、論文は `papers/`。Notion には目的とリンクだけ
+- テーマの前提と検索キーワードの正は `CLAUDE.md`、論文は先行研究 DB（手元の `papers/` は使わない）。毎朝の新着は本体が書き、頼まれて調べた論文は研究の LLM が `researching-literature` の手順で書く
 
 ### 授業ホーム
 
@@ -302,7 +312,9 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `response_output.py` | 出力契約 |
 | `guard.py` | 柵（Kei Agent 自身に直させない） |
 | `store.py` | SQLite（スレッド、session、ジョブ、定期処理、実行時間、接続先、時間記録） |
-| `schedule.py` / `morning.py` / `digest.py` | 定期実行、朝の予定、材料集め |
+| `schedule.py` / `morning.py` / `digest.py` / `deadline.py` | 定期実行、朝の予定、材料集め、締切の読み方 |
+| `course.py` / `work.py` / `knowledge.py` | 大学・仕事・知識のチャンネルと、そのエージェントに頼む口（知識は朝の読みもの・論文の新着の見せ方も） |
+| `version.py` | 動いている版（担当の版ずれを見つける） |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
 | `home.py` / `settings.py` / `settings_actions.py` | App Home と設定 |
 | `improve.py` / `self_fix.py` / `issues.py` | 自己改善、要望の GitHub issue |

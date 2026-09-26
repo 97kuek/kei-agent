@@ -4,7 +4,7 @@
 
 ## 1. Slack
 
-1. 個人用のワークスペースを作り、チャンネルを作る（`#00_kei-agent`、`#01_overview`、`#02_research-strategy`、`#10_<テーマ>`、`#20_course`、`#30_work`）。番号を外した名前を `config.toml` の `[channels]` と合わせる
+1. 個人用のワークスペースを作り、チャンネルを作る（`#00_kei-agent`、`#01_overview`、`#10_<テーマ>`、`#20_course`、`#30_work`、`#40_knowledge`）。番号を外した名前を `config.toml` の `[channels]` と合わせる
 2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** で `slack/manifest.yaml` を貼る
 3. **Install App** で入れ、**Bot User OAuth Token**（`xoxb-`）を控える
 4. **Basic Information** → **App-Level Tokens** で scope `connections:write` のトークン（`xapp-`）を作る
@@ -42,13 +42,14 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 
 **エージェントごとのファイル `kei-agent-<名前>.zsh`**（どれも任意。書き方は共通のファイルと同じ）
 
-研究・大学・仕事はどれも `deploy/run-agent.sh <名前>` で起動し、共通のファイルのあとに自分の名前のファイルだけを読む（無ければ共通のものだけで動く。同じ変数は上書きされる）。そのエージェントだけが要るものはここに置く。アカウント連携を使うエージェントは、連携を付けたアカウントのプロファイルを `CLAUDE_CONFIG_DIR` で選び、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外す（`claude setup-token` のトークンでは連携は使えない）。
+研究・大学・仕事・知識はどれも `deploy/run-agent.sh <名前>` で起動し、共通のファイルのあとに自分の名前のファイルだけを読む（無ければ共通のものだけで動く。同じ変数は上書きされる）。そのエージェントだけが要るものはここに置く。アカウント連携を使うエージェントは、連携を付けたアカウントのプロファイルを `CLAUDE_CONFIG_DIR` で選び、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外す（`claude setup-token` のトークンでは連携は使えない）。
 
 | ファイル | 中身 |
 |---|---|
 | `kei-agent-research.zsh` | なし（置かなくてよい） |
 | `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
+| `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |
 | `kei-agent-voice.zsh` | 声のレイヤ（`deploy/run-voice.sh`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
 
 プロファイルは一度作ってログインしておく。
@@ -82,6 +83,7 @@ deploy/install.sh                  # 本体
 deploy/install.sh course           # 127.0.0.1:8787
 deploy/install.sh research         # 127.0.0.1:8788
 deploy/install.sh work             # 127.0.0.1:8789
+deploy/install.sh knowledge        # 127.0.0.1:8792
 deploy/install.sh voice            # 127.0.0.1:8790
 deploy/install.sh notion-gateway   # 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
 deploy/install.sh remove           # 本体の登録を外す（エージェントは deploy/install.sh course remove など）
