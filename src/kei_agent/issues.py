@@ -163,7 +163,7 @@ async def summarize(config: Config, store, text: str) -> Summary:
     if result.limit_reset_at is not None:
         raise IssueError("要約の AI が利用上限に達しています")
     if result.is_error:
-        raise IssueError("要約の AI が失敗しました", "; ".join(result.errors)[:500])
+        raise IssueError("要約の AI が失敗しました", result.failure_reason(500))
     summary = parse(result.text)
     if summary is None:
         raise IssueError("要約が JSON になっていません")

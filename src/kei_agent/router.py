@@ -132,7 +132,7 @@ async def _choose(config: Config, skills: str, allowed: set[str], text: str, fal
         config, runner.ExecutionRequest(workspace(config), recipe, None, "", "", read_only=True), prompt,
     )
     if result.is_error:
-        log.warning("振り分けに失敗しました: %s", "; ".join(result.errors)[:200])
+        log.warning("振り分けに失敗しました: %s", result.failure_reason())
         return Choice()
     choice = parse(result.text, allowed)
     # 相手も選ぶとき（研究全体のチャンネル）だけ、誰に渡したかを出す。

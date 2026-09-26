@@ -283,8 +283,7 @@ async def _run(config: Config, store, use_case: UseCase, prompt: str, provider: 
     result = await runner.run_model(
         config, runner.ExecutionRequest(_workspace(config), recipe, None, "", "", read_only=True), prompt)
     if result.is_error:
-        reason = "; ".join(result.errors)[:200] or result.failure_kind or "AI が答えませんでした"
-        raise DigestError(reason, result.limit_reset_at)
+        raise DigestError(result.failure_reason(), result.limit_reset_at)
     try:
         return json_object(result.text, key)
     except ValueError:

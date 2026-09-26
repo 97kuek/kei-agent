@@ -136,7 +136,7 @@ class SelfFix:
             )
         await ui.finish(result.text, awaiting=True)
         if result.is_error:
-            errors = "; ".join(result.errors)[:500]
+            errors = result.failure_reason(500)
             await self._fix_failed(req, errors, f"直している途中で止まったよ: {errors}")
             return
         commit = await asyncio.to_thread(improve.commit_all, worktree, improve.commit_message(req.text, result.text))

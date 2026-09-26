@@ -56,8 +56,7 @@ async def _read(config: Config, store: Store, prompt: str, provider: str = "") -
     result = await runner.run_model(config, runner.ExecutionRequest(
         themes.agent_workspace(config, AGENT), recipe, None, "", "", read_only=True), prompt)
     if result.is_error:
-        reason = "; ".join(result.errors)[:200] or result.failure_kind or "理由不明"
-        raise WorkCalendarError(f"Outlook の予定を読めませんでした: {reason}", result.limit_reset_at)
+        raise WorkCalendarError(f"Outlook の予定を読めませんでした: {result.failure_reason()}", result.limit_reset_at)
     return result.text
 
 

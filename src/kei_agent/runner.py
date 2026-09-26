@@ -335,6 +335,11 @@ def describe_tool(name: str, tool_input: dict) -> str:
     return name
 
 
+# 失敗の種類の言い方（RunResult.failure_reason）
+FAILURE_LABELS = {"quota": "利用上限", "timeout": "時間切れ", "session_missing": "会話が見つからない",
+                  "capability": "選んだ provider では使えない", "runtime": "実行の失敗"}
+
+
 @dataclass
 class RunResult:
     provider: str | None = None
@@ -360,6 +365,14 @@ class RunResult:
     def session_missing(self) -> bool:
         # Claude は "No conversation found"、Codex は "no rollout found for thread id" で断る
         return any(marker in e for e in self.errors for marker in SESSION_MISSING_MARKERS)
+
+    def failure_reason(self, limit: int = 200) -> str:
+        """失敗の理由を短く（ログや知らせ用）。エラーの文が無いとき（時間切れ、空の返事）も、何が起きたかを残す。"""
+        kind = FAILURE_LABELS.get(self.failure_kind or "", self.failure_kind or "")
+        detail = "; ".join(self.errors)
+        if not detail and self.failure_kind == "runtime":
+            detail = "返事が空か、終了コードだけを残して止まった"
+        return "：".join(part for part in (kind, detail) if part)[:limit] or "理由不明"
 
 
 def apply_event(result: RunResult, event: dict) -> str | None:

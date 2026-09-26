@@ -764,3 +764,14 @@ def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config
     name = header.removeprefix("${").removesuffix("}")
     assert env[name] == f"Bearer {gateway_client_token('s3cret', 'research')}"
     assert runner.GATEWAY_TOKEN_ENV not in env
+
+
+def test_failure_reason_says_what_happened_even_without_an_error_text():
+    """時間切れや空の返事でも、ログと知らせに理由が残る（振り分けの失敗が空欄になっていた）。"""
+    assert runner.RunResult(is_error=True, failure_kind="timeout").failure_reason() == "時間切れ"
+    assert runner.RunResult(is_error=True, failure_kind="runtime").failure_reason() == (
+        "実行の失敗：返事が空か、終了コードだけを残して止まった")
+    assert runner.RunResult(is_error=True, failure_kind="quota", errors=["usage limit"]).failure_reason() == (
+        "利用上限：usage limit")
+    assert runner.RunResult(is_error=True, errors=["x" * 300]).failure_reason(10) == "x" * 10
+    assert runner.RunResult(is_error=True).failure_reason() == "理由不明"
