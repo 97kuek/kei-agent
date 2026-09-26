@@ -7,7 +7,7 @@ import pytest
 from fakes import FakeGitHub
 
 from kei_agent import issues, model_classifier, research
-from kei_agent.config import REPO_ROOT, AgentProfile, Config
+from kei_agent.config import MODEL_ACTORS, REPO_ROOT, AgentProfile, Config
 from kei_agent.store import Store
 
 # 開発機のシェルには本物の秘密情報が入っている。テストから Toggl・Notion・Slack などに届かないよう、
@@ -35,8 +35,7 @@ def config(tmp_path: Path) -> Config:
         allow_write=(tmp_path / "cache",),
         deny_read=(tmp_path / "secrets",),
         # 個別の unit test は既存経路の振る舞いを検証する。製品の config.toml は未選択で始まる。
-        agent_profiles={name: AgentProfile(provider="claude")
-                        for name in ("research", "course", "work", "router", "self_fix")},
+        agent_profiles={name: AgentProfile(provider="claude") for name in MODEL_ACTORS},
     )
 
 

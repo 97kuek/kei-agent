@@ -159,3 +159,17 @@ def test_json_object_is_read_from_the_first_brace_block():
     assert json_object("よく分かりません") is None
     assert json_object("{broken}") is None
     assert json_object("[1, 2]") is None
+
+
+def test_every_actor_use_case_has_a_recipe_on_both_providers():
+    """Claude でも Codex でも同じ担当が動く（知識の担当を足したときに、片方だけ忘れないように）。"""
+    from kei_agent.config import MODEL_ACTORS
+    from kei_agent.model_policy import allowed_use_cases
+    from kei_agent.research import is_manual_use_case
+
+    for actor in MODEL_ACTORS:
+        for use_case in allowed_use_cases(actor):
+            if is_manual_use_case(use_case):
+                continue
+            for provider in ("claude", "codex"):
+                assert resolve(actor, provider, use_case).provider == provider

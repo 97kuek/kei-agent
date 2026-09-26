@@ -2378,3 +2378,64 @@ async def test_toggl_command_opens_a_course_picker_in_the_course_channel(env, mo
 
     assert opened and opened[0]["trigger_id"] == "trig" and "科目" in reply
     assert updated and updated[0]["view_id"] == "V1" and "信号処理" in str(updated[0]["view"])
+
+
+async def test_knowledge_channel_and_paper_threads_go_to_the_knowledge_agent(env, store):
+    """#40_knowledge は知識の担当へ。テーマのチャンネルでも、朝の論文の新着のスレッドだけは知識の担当が答える。"""
+    assistant, slack, claude, _ = env
+    slack.channels["C40"] = "40_knowledge"
+    agent = _AskAgent("http://127.0.0.1:8792", [{"text": ANSWER, "session_id": "k-1"},
+                                                 {"text": ANSWER, "session_id": "k-2"},
+                                                 {"text": ANSWER, "session_id": "k-3"}])
+    assistant.agents["knowledge"] = agent
+    store.upsert_thread("C1", "20.1", "vlm", None)
+    store.set_agent_session("C1", "20.1", "knowledge", "")
+
+    await assistant.on_mention({"channel": "C40", "user": "UME", "ts": "40.1",
+                                "text": "<@UBOT> これ要約して https://zenn.dev/x"})
+    await settle(assistant)
+    slack.replies = [{"ts": "20.1", "user": "UBOT", "text": "📚 先行研究の新着\n\n1. *A*\n\n2. *Counting with VLMs*"},
+                     {"ts": "20.2", "user": "UME", "text": "2番を詳しく"}]
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "20.2", "thread_ts": "20.1",
+                                "text": "2番を詳しく"})
+    await settle(assistant)
+    # 人が始めたスレッドには、今までどおり履歴を足さない
+    slack.replies = [{"ts": "40.5", "user": "UME", "text": "自分のメモ"}, {"ts": "40.6", "user": "UME", "text": "x"}]
+    await assistant.on_mention({"channel": "C40", "user": "UME", "ts": "40.6", "thread_ts": "40.5",
+                                "text": "<@UBOT> これどう思う？"})
+    await settle(assistant)
+    slack.replies = []
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "21.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+
+    first, second, third = agent.asked
+    assert first["channel"] == "C40" and first["prompt"].endswith("これ要約して https://zenn.dev/x")
+    assert (second["channel"], second["thread_ts"]) == ("C1", "20.1") and second["prompt"].endswith("2番を詳しく")
+    # 朝の投稿への最初の返信には、元の投稿（番号つきの一覧）を渡す
+    assert "Kei Agent: 📚 先行研究の新着" in second["prompt"] and "Counting with VLMs" in second["prompt"]
+    assert "自分のメモ" not in third["prompt"] and third["prompt"].endswith("これどう思う？")
+    # ほかのスレッドは、今までどおり研究の担当
+    assert [call["prompt"] for call in claude.calls][-1].endswith("図を作って")
+
+
+async def test_a_deferred_question_in_a_paper_thread_follows_the_knowledge_provider(env, store):
+    """論文の新着のスレッドの質問は知識の担当のもの。研究の担当のモデルを変えても、やり直しは止めない。"""
+    from kei_agent import settings
+
+    assistant, slack, _, _ = env
+    reset = time.time() + 3600
+    agent = _AskAgent("http://127.0.0.1:8792", [{"is_error": True, "limit_reset_at": reset, "provider": "claude"},
+                                                 {"text": ANSWER, "session_id": "k-1"}])
+    assistant.agents["knowledge"] = agent
+    store.upsert_thread("C1", "20.1", "vlm", None)
+    store.set_agent_session("C1", "20.1", "knowledge", "")
+    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "20.2", "thread_ts": "20.1",
+                                "text": "2番を詳しく"})
+    await settle(assistant)
+    settings.set_agent_provider(store, "research", "codex")
+
+    await assistant.retry_deferred(now=reset + 120)
+    await settle(assistant)
+
+    assert len(agent.asked) == 2 and agent.asked[1]["prompt"].endswith("2番を詳しく")
+    assert not any("自動で再実行しなかった" in text for text in slack.texts())

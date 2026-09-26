@@ -7,14 +7,15 @@
 #         deploy/install.sh research      研究エージェント（A2A サーバー）を登録
 #         deploy/install.sh research remove 研究エージェントの登録を外す
 #         deploy/install.sh work          仕事エージェント（A2A サーバー）を登録
+#         deploy/install.sh knowledge     知識エージェント（A2A サーバー）を登録
 #         deploy/install.sh voice         声のレイヤ（A2A サーバー＋マイク）を登録
 #         deploy/install.sh notion-gateway Notion ゲートウェイ（Notion に届く唯一の口）を登録
 set -eu
 
 # 引数に course / research などを付けると、そのプロセスのほうを登録する。
-# research / course / work の plist は、どれも deploy/run-agent.sh <名前> を呼ぶ（エージェントを足すときは、あちらの case にも足す）
+# research / course / work / knowledge の plist は、どれも deploy/run-agent.sh <名前> を呼ぶ（エージェントを足すときは、あちらの case にも足す）
 case "${1:-}" in
-  course|research|work|voice|notion-gateway)
+  course|research|work|knowledge|voice|notion-gateway)
     LABEL="com.kei-agent.${1}"
     shift
     ;;

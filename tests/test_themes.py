@@ -186,3 +186,14 @@ def test_course_channel_points_at_the_course_workspace(config):
     assert ws.kind is themes.ChannelKind.COURSE and ws.cwd == config.course_root
     assert themes.ensure_workspace(ws) is True
     assert "授業と課題の資料は Box" in (ws.cwd / "CLAUDE.md").read_text()
+
+
+def test_knowledge_channel_is_its_own_kind_and_actor(config):
+    ws = themes.resolve(config, "40_knowledge")
+    assert ws.kind is ChannelKind.KNOWLEDGE and ws.cwd is None
+    assert [themes.actor_of(kind) for kind in (ChannelKind.KNOWLEDGE, ChannelKind.COURSE, ChannelKind.WORK,
+                                               ChannelKind.IMPROVE, ChannelKind.THEME, ChannelKind.OVERVIEW)] == [
+        "knowledge", "course", "work", "self_fix", "research", "research"]
+    assert themes.agent_workspace(config, "knowledge").cwd == config.state_dir / "agents" / "knowledge"
+    # 研究テーマのディレクトリには、もう papers/ を作らない（論文は研究ホームの先行研究 DB）
+    assert "papers" not in themes.THEME_SUBDIRS

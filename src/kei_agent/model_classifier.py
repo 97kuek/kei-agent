@@ -62,7 +62,13 @@ async def classify_work(config: Config, store, prompt: str, *, provider: str | N
                            "優先順位・会議準備・論点整理は decide。", provider=provider)
 
 
-CLASSIFIERS = {"research": classify_research, "course": classify_course, "work": classify_work}
+async def classify_knowledge(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
+    """知識の担当への自由な質問は、用途が1つだけ（分類器を動かさない）。"""
+    return UseCase.KNOWLEDGE_ANSWER
+
+
+CLASSIFIERS = {"research": classify_research, "course": classify_course, "work": classify_work,
+               "knowledge": classify_knowledge}
 
 
 async def classify(config: Config, store, actor: str, prompt: str, *, provider: str | None = None) -> UseCase:

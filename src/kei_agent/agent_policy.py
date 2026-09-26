@@ -128,10 +128,19 @@ POLICIES: dict[str, AgentPolicy] = {
     # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),
+    # 知識（読みもの・論文の新着・その質問）。外の記事を読むので、Notion・コマンド・手元のファイルは持たない。
+    # Web を使うのは質問に答えるときだけ（朝の選別と要約は OFFLINE_USE_CASES で Web を切る）
+    "knowledge": AgentPolicy("knowledge", "knowledge.md", plugin=False, files="none", shell=False, web=True,
+                             notion="none", timeout_minutes=10),
     # 自己改善。書けるのは一時ディレクトリか worktree の中だけ（作業場で決まる）
     "self_fix": AgentPolicy("self_fix", "system.md", plugin=False, files="write", shell=True, web=True,
                             notion="none"),
 }
+
+
+# 材料をプロンプトで渡す用途。外の文（記事・論文の要旨）を読むが、外には出られない回にする
+# （外の文・個人の情報・外への出口の3つを1つの回に揃えない。docs/architecture.md の「知識」）
+OFFLINE_USE_CASES = frozenset({UseCase.KNOWLEDGE_PICK, UseCase.KNOWLEDGE_SUMMARY})
 
 
 def policy_of(actor: str, use_case: UseCase | None = None, *, read_only: bool = False) -> AgentPolicy:
@@ -141,4 +150,5 @@ def policy_of(actor: str, use_case: UseCase | None = None, *, read_only: bool = 
         policy = POLICIES[name]
     except KeyError:
         raise ValueError(f"未知のagentです: {actor}") from None
-    return policy.narrowed(read_only or name == "router")
+    policy = policy.narrowed(read_only or name == "router")
+    return replace(policy, web=False) if use_case in OFFLINE_USE_CASES else policy

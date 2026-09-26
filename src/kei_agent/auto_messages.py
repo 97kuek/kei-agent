@@ -66,10 +66,11 @@ def thread_history(messages: list[dict], bot_user_id: str, exclude_ts: str | Non
 
 
 def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None,
-                   stalled: str | None = None, dropped: int = 0) -> str:
+                   stalled: str | None = None, dropped: int = 0, *, reply_to_post: bool = False) -> str:
     """セッションが失われたときや、直前の依頼がエラーで止まったときに、スレッドの履歴から文脈を復元するためのプロンプト。
 
     dropped は、長すぎて載せられなかった古い投稿の数。黙って切ると、Claude は全部を見たつもりで答えてしまう。
+    reply_to_post は、Kei Agent の投稿（朝の読みもの、論文の新着など）への最初の返信のとき。
     """
     history = thread_history(messages, bot_user_id, exclude_ts)
     if dropped:
@@ -81,9 +82,11 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     else:
         why = "以前の会話セッションが見つからないため"
         note = ""
+    lead = ("このスレッドは Kei Agent の投稿から始まっていて、これはその投稿への最初の依頼です。"
+            "Slack のスレッドの履歴を渡します。" if reply_to_post else
+            f"このスレッドの{why}、Slack のスレッドの履歴から文脈を復元します。")
     return (
-        f"{HEADER} このスレッドの{why}、"
-        "Slack のスレッドの履歴から文脈を復元します。\n\n"
+        f"{HEADER} {lead}\n\n"
         f"<thread_history>\n{history}\n</thread_history>\n\n{note}"
         f"続きの依頼:\n{new_text}"
     )

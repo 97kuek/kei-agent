@@ -47,10 +47,9 @@ def test_home_lists_theme_domains_and_schedule(config, store):
 
 
 def test_home_shows_agent_provider_controls(config, store):
-    from kei_agent.config import AgentProfile
+    from kei_agent.config import MODEL_ACTORS, AgentProfile
 
-    config = replace(config, agent_profiles={name: AgentProfile()
-                                             for name in ("research", "course", "work", "router", "self_fix")})
+    config = replace(config, agent_profiles={name: AgentProfile() for name in MODEL_ACTORS})
     view = home.build_home(config, store, [], is_owner=True)
     course, = [b["accessory"] for b in view["blocks"]
                if b.get("accessory", {}).get("action_id") == "kei_agent_home_provider:course"]
@@ -60,6 +59,7 @@ def test_home_shows_agent_provider_controls(config, store):
     assert {element.get("action_id") for element in controls} >= {
         "kei_agent_home_provider:research", "kei_agent_home_provider:course", "kei_agent_home_provider:work",
         "kei_agent_home_provider:router", "kei_agent_home_provider:self_fix",
+        "kei_agent_home_provider:knowledge",
     }
 
 

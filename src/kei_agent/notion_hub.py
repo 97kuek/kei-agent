@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -48,6 +49,58 @@ CALENDAR_ADDITIONS = {
 MANAGED_END = "— Kei Agent の本文ここまで —"
 # 研究・大学・仕事の時間を1つにまとめる DB。記録 ID で1回だけ作る
 TIME_TITLE = "時間記録"
+# 知識の担当が毎朝読む設定のページ（共通ホームの子ページ）。書き方は COLLECT_NOTE
+COLLECT_TITLE = "収集"
+COLLECT_INTERESTS = "興味"
+COLLECT_SOURCES = "情報源"
+COLLECT_NOTE = ("知識の担当が毎朝7時に読む設定。興味は「名前: キーワード、キーワード」、"
+                "情報源は「zenn: トピック、…」「qiita: タグ、…」か RSS の URL を1行ずつ。")
+COLLECT_DEFAULT = f"""{COLLECT_NOTE}
+
+## {COLLECT_INTERESTS}
+- AI・LLM・エージェント: LLM、生成AI、AI エージェント、Claude、OpenAI、Gemini、MCP、RAG
+- 電子工作・ロボット: M5Stack、スタックチャン、ESP32、Arduino、Raspberry Pi、電子工作、ロボット、スマートホーム
+- Web・アプリ開発: TypeScript、React、Next.js、Python、フロントエンド、個人開発、Cloudflare、Vercel
+
+## {COLLECT_SOURCES}
+- zenn: llm, ai, claude, mcp, openai, m5stack, esp32, 電子工作, raspberrypi, arduino, react, nextjs, typescript
+- qiita: llm, claude, m5stack, esp32, 電子工作, react, typescript
+- https://openai.com/news/rss.xml
+- https://huggingface.co/blog/feed.xml
+- https://research.google/blog/rss/
+- https://blog.google/technology/ai/rss/
+- https://deepmind.google/blog/rss.xml
+- https://github.blog/feed/
+- https://www.microsoft.com/en-us/research/feed/
+- https://blog.cloudflare.com/rss/
+- https://vercel.com/atom
+"""
+
+
+def parse_collect(blocks: list[dict]) -> tuple[list[dict], list[str]]:
+    """「収集」ページの箇条書きを、興味（名前とキーワード）と情報源の行にする。読めない行は飛ばす。"""
+    section = ""
+    interests: list[dict] = []
+    sources: list[str] = []
+    for block in blocks:
+        kind = block.get("type", "")
+        body = block.get(kind) or {}
+        if kind in ("heading_1", "heading_2", "heading_3"):
+            section = plain_text(body.get("rich_text") or []).strip()
+        elif kind in ("bulleted_list_item", "numbered_list_item"):
+            items = body.get("rich_text") or []
+            text = plain_text(items).strip()
+            links = [str(item.get("href") or "") for item in items]
+            if section == COLLECT_INTERESTS:
+                name, _, rest = text.replace("：", ":").partition(":")
+                keywords = [k.strip() for k in re.split(r"[,、，]", rest) if k.strip()]
+                if name.strip() and keywords:
+                    interests.append({"name": name.strip(), "keywords": keywords})
+            elif section == COLLECT_SOURCES and text:
+                # リンクに題名を付けて貼られたときは、リンク先を使う
+                url = next((link for link in links if link.startswith(("http://", "https://"))), "")
+                sources.append(text if text.startswith(("http://", "https://")) or not url else url)
+    return interests, sources
 TIME_DOMAINS = {"research": "研究", "course": "大学", "work": "仕事"}
 TIME_SOURCES = ("Slack", "Toggl")
 TIME_PROPERTIES = {
@@ -352,6 +405,15 @@ class HubSetup:
                      for key, value in spec.items()):
                 # 前の絞り込み（締切が今週だけ）で作った表を、いまの絞り込みにそろえる
                 self.notion.request("PATCH", f"/views/{views[name]['id']}", spec)
+        if not any(block.get("type") == "child_page" and block["child_page"].get("title") == COLLECT_TITLE
+                   for block in self.notion.children(self.home_id)):
+            # 中身は利用者が直していくので、作るのは無いときだけ
+            self.notion.request("POST", "/pages", {
+                "parent": {"type": "page_id", "page_id": self.home_id},
+                "icon": {"type": "emoji", "emoji": "🧺"},
+                "properties": {"title": {"title": [{"text": {"content": COLLECT_TITLE}}]}},
+                "children": markdown_to_blocks(COLLECT_DEFAULT),
+            })
         time_source = self._time_source()
         if time_source is None:
             created = self.notion.request("POST", "/databases", {
@@ -548,6 +610,14 @@ class HubStore:
     # 時間記録
 
     @property
+    def collect_settings(self) -> tuple[list[dict], list[str]]:
+        """「収集」ページの興味と情報源（知識の担当に渡す）。"""
+        page = next((block for block in self.notion.children(self.state.home_id)
+                     if block.get("type") == "child_page" and block["child_page"].get("title") == COLLECT_TITLE), None)
+        if page is None:
+            raise NotionError("共通ホームに「収集」ページがありません（kei-agent-hub-setup --apply で作れます）")
+        return parse_collect(self.notion.children(page["id"]))
+
     def has_time_db(self) -> bool:
         """時間記録が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
         return bool(self.state.time_ds_id)

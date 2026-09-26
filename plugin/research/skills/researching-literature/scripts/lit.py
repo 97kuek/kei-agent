@@ -13,7 +13,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 USER_AGENT = "kei-agent-literature/0.1"
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -29,7 +28,8 @@ def _get(url: str, headers: dict[str, str] | None = None, retries: int = 4) -> b
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503) and attempt < retries - 1:
+            # arXiv は混んでいるときや立て続けに読んだときに、406 でしばらく断る
+            if e.code in (406, 429, 500, 502, 503, 504) and attempt < retries - 1:
                 time.sleep(delay)
                 delay *= 2
                 continue
@@ -101,17 +101,6 @@ def search_s2(query: str, limit: int, year: str | None) -> list[dict]:
     return papers
 
 
-def known_ids(papers_dir: Path) -> dict[str, str]:
-    """papers/*.md の先頭にある `id:` を集める。"""
-    ids = {}
-    for md in sorted(papers_dir.glob("*.md")):
-        head = md.read_text(encoding="utf-8", errors="replace").split("\n---", 1)[0]
-        m = re.search(r"^id:\s*(.+)$", head, re.MULTILINE)
-        if m:
-            ids[m.group(1).strip().strip("\"'")] = md.name
-    return ids
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lit")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -123,13 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--sort", choices=["relevance", "date"], default="relevance", help="arxiv のみ")
     p.add_argument("--year", help="s2 のみ。例: 2023- / 2020-2024")
 
-    p = sub.add_parser("known", help="papers/ に保存済みの論文IDを表示する")
-    p.add_argument("--dir", default="papers")
-
     args = parser.parse_args(argv)
-    if args.command == "known":
-        print(json.dumps(known_ids(Path(args.dir)), ensure_ascii=False, indent=2))
-        return 0
 
     limit = max(1, min(args.limit, 50))
     try:
@@ -138,9 +121,6 @@ def main(argv: list[str] | None = None) -> int:
         hint = "混雑しています。少し待つか、別のソースを使ってください" if getattr(e, "code", None) == 429 else "取得に失敗しました"
         print(json.dumps({"error": f"{args.source}: {hint} ({e})"}, ensure_ascii=False), file=sys.stderr)
         return 1
-    saved = known_ids(Path("papers")) if Path("papers").is_dir() else {}
-    for paper in papers:
-        paper["saved_as"] = saved.get(paper["id"])
     print(json.dumps(papers, ensure_ascii=False, indent=2))
     return 0
 

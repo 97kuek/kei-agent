@@ -21,9 +21,11 @@ SCHEDULES_ACTION = "kei_agent_home_schedules"
 VOICE_ACTION = "kei_agent_home_voice"
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
-AGENT_LABELS = {"research": "研究", "course": "大学", "work": "仕事", "router": "振り分け・Daily", "self_fix": "自己改善"}
+AGENT_LABELS = {"research": "研究", "course": "大学", "work": "仕事", "knowledge": "知識",
+                "router": "振り分け・Daily", "self_fix": "自己改善"}
 # 定期実行のチェックに出す短い名前（時刻の行は settings.SCHEDULE_LABELS）
-SCHEDULE_SHORT = {"literature": "先行研究", "daily": "Daily", "review": "レトプラ", "night": "夜間", "maintenance": "保守"}
+SCHEDULE_SHORT = {"literature": "先行研究", "reading": "読みもの", "daily": "Daily", "review": "レトプラ",
+                  "night": "夜間", "maintenance": "保守"}
 VOICE_OPTIONS = {"voice": "知らせる", "listen": "聞く（マイク）"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される
 TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",

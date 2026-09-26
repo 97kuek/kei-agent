@@ -75,6 +75,11 @@ class FakeHub:
     def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
         self.recorded.append((entry_id, domain, label, minutes, source))
 
+    collect = ([], [])
+
+    def collect_settings(self):
+        return self.collect
+
     def schema_problems(self):
         return []
 
@@ -266,8 +271,8 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     monkeypatch.setattr(scheduler, "run_task", fake_run)
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
-    # 01:30 の夜間、07:00 の先行研究、08:00 の Daily が1回ずつ。21:00 はまだ
-    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"),
+    # 01:30 の夜間、07:00 の先行研究と読みもの、08:00 の Daily が1回ずつ。21:00 はまだ
+    assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("reading", "2026-09-18"),
                    ("daily", "2026-09-18"), ("hub_calendar", "2026-09-18")]
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
@@ -401,27 +406,90 @@ async def test_night_skips_when_notion_is_down(env, config):
 
 # 先行研究
 
-async def test_literature_posts_only_when_new(env, config, store):
+class FakeKnowledgeAgent:
+    """知識エージェントの代わり。頼まれた材料を覚えて、決めておいた結果を返す。"""
+    base_url = "http://127.0.0.1:8792"
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.asked: list[tuple[str, dict]] = []
+
+    async def stream(self, skill, text="", params=None, on_progress=None):
+        from kei_agent import a2a
+        self.asked.append((skill, json.loads(text)))
+        data = self.replies.pop(0) if self.replies else {"items": []}
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(
+            {"ok": True, "text": "済", "data": data, "limit_reset_at": None, "cost_usd": None}, ensure_ascii=False))
+
+
+PAPER = {"id": "arXiv:2609.00001", "title": "Counting with VLMs", "url": "https://arxiv.org/abs/2609.00001",
+         "authors": ["A. Author"], "year": "2026", "venue": "", "summary": "数えるときの失敗を分けた。",
+         "relation": "条件Bの説明に使える。"}
+
+
+async def test_literature_goes_through_the_knowledge_agent(env, config, store):
+    """キーワードと前提を知識の担当に渡し、選ばれた論文を先行研究 DB とテーマのチャンネルに出す。"""
     scheduler, assistant, slack, claude = env
     make_theme(config, "vlm")
     slack.channels["C2"] = "notes"
     make_theme(config, "notes", keywords=None)
     make_theme(config, "archived")  # Kei Agent のいない（アーカイブした）テーマは見張らない
-    claude.behaviors = [{"text": "papers/ に変更はありません。\n\nNO_NEW_PAPERS"}]
+    agent = FakeKnowledgeAgent({"items": []}, {"items": [PAPER]})
+    assistant.agents["knowledge"] = agent
+    assistant.notion.papers["arXiv:old"] = {"id": "arXiv:old", "themes": ["vlm"]}
 
     detail = await scheduler.run_literature("2026-09-18")
 
     assert detail["themes"] == {"vlm": {"status": "no_new"}, "notes": {"status": "no_keywords"}}
-    assert slack.posted() == []
-    assert "vision language model counting" in claude.calls[0]["prompt"]
+    assert slack.posted() == [] and claude.calls == []     # 研究の担当は動かさない
+    skill, payload = agent.asked[0]
+    assert skill == "paper-digest" and payload["keywords"] == ["vision language model counting"]
+    assert "# テーマ: vlm" in payload["premises"] and payload["known_ids"] == ["arXiv:old"]
 
-    claude.behaviors = [{"text": "新着が2本あります", "session_id": "lit-sess"}]
     detail = await scheduler.run_literature("2026-09-19")
-    header, body = slack.posted()
-    assert header == {"channel": "C1", "text": "📚 先行研究の新着 9/19（土）"}
-    assert body["thread_ts"] == "1001.000" and body["markdown_text"] == "新着が2本あります"
-    # スレッドで続きを話せる
-    assert store.get_thread("C1", "1001.000")["session_id"] == "lit-sess"
+
+    post, = slack.posted()
+    assert post["channel"] == "C1" and post["text"].startswith("📚 先行研究の新着 9/19（土）")
+    assert "Counting with VLMs" in post["text"] and "条件Bの説明に使える" in post["text"]
+    assert post["unfurl_links"] is False
+    assert assistant.notion.papers["arXiv:2609.00001"]["themes"] == ["vlm"]
+    # このスレッドの続きは知識の担当が答える
+    assert store.thread_agent("C1", detail["themes"]["vlm"]["thread_ts"]) == "knowledge"
+    store.record_schedule("literature", "2026-09-19", detail)
+    assert "先行研究の新着: #vlm" in scheduler.morning_notes(datetime(2026, 9, 19, 8, 0))
+    assert not any("先行研究" in note for note in scheduler.morning_notes(datetime(2026, 9, 20, 8, 0)))
+
+
+async def test_reading_posts_the_digest_to_the_knowledge_channel(env, config, store):
+    scheduler, assistant, slack, _ = env
+    slack.channels["C40"] = "40_knowledge"
+    assistant.hub.collect = ([{"name": "AI", "keywords": ["LLM"]}], ["zenn: llm"])
+    agent = FakeKnowledgeAgent({"items": [{"title": "LLM の話", "url": "https://zenn.dev/x", "source": "Zenn",
+                                           "summary": "要約", "why": "AI に近い"}], "failed_sources": []})
+    assistant.agents["knowledge"] = agent
+
+    detail = await scheduler.run_reading("2026-09-26")
+
+    skill, payload = agent.asked[0]
+    assert skill == "reading-digest" and payload["sources"] == ["zenn: llm"] and payload["count"] == 5
+    post, = slack.posted()
+    assert post["channel"] == "C40" and post["text"].startswith("📰 今日の読みもの 9/26（土）")
+    assert "1. *LLM の話*" in post["text"] and post["unfurl_links"] is False
+    assert detail == {"status": "posted", "count": 1, "channel": "C40", "failed_sources": []}
+    store.record_schedule("reading", "2026-09-26", detail)
+    assert "読みもの: 1件（<#C40>）" in scheduler.morning_notes(datetime(2026, 9, 26, 8, 0))
+    # 今朝の分がまだ無ければ、昨日の分は載せない
+    assert not any("読みもの" in note for note in scheduler.morning_notes(datetime(2026, 9, 27, 8, 0)))
+
+
+async def test_reading_stays_quiet_without_new_articles(env):
+    scheduler, assistant, slack, _ = env
+    slack.channels["C40"] = "40_knowledge"
+    assistant.hub.collect = ([{"name": "AI", "keywords": ["LLM"]}], ["zenn: llm"])
+    assistant.agents["knowledge"] = FakeKnowledgeAgent({"items": [], "failed_sources": ["Zenn llm"]})
+
+    assert (await scheduler.run_reading("2026-09-26"))["status"] == "no_new"
+    assert slack.posted() == []
 
 
 # Daily と振り返り
@@ -809,7 +877,7 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
     monkeypatch.setattr(scheduler, "run_task", works)
     scheduler.store.set_limit_until("claude", 0)
     await scheduler.catch_up_deferred(reset + 120)
-    assert done == [("night", "2026-09-18"), ("literature", "2026-09-18"),
+    assert done == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("reading", "2026-09-18"),
                     ("daily", "2026-09-18")]
     assert scheduler.store.due_deferred("schedule", reset + 200) == []
 

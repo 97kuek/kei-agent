@@ -16,7 +16,15 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.config import Config
-from kei_agent.notion import BLOCKS_PER_REQUEST, Notion, NotionError, append_blocks, gateway_notion, schema_problems
+from kei_agent.notion import (
+    BLOCKS_PER_REQUEST,
+    Notion,
+    NotionError,
+    append_blocks,
+    gateway_notion,
+    schema_problems,
+    theme_papers_view,
+)
 
 log = logging.getLogger(__name__)
 
@@ -245,16 +253,65 @@ class NotionStore:
         return self._theme_names[page_id]
 
     def ensure_theme(self, name: str, slack_url: str, directory: str) -> bool:
-        """テーマの行がなければ作る。作ったら True。"""
+        """テーマの行がなければ作る。作ったら True。そのページには、テーマの論文だけの表も置く。"""
         if self.theme_page_id(name):
             return False
-        self._create_page("themes", {
+        page = self._create_page("themes", {
             "名前": {"title": rich_text(name)},
             "状態": {"select": {"name": "進行中"}},
             "Slack": {"url": slack_url},
             "ディレクトリ": {"rich_text": rich_text(directory)},
         })
+        if "papers" in self.state.get("databases", {}):
+            try:
+                self.notion.request("POST", "/views", theme_papers_view(self._db("papers"), page["id"]))
+            except NotionError as e:
+                log.warning("テーマのページに先行研究の表を置けません: %s", e)
         return True
+
+    # 先行研究
+
+    def paper_ids(self) -> list[str]:
+        """先行研究 DB にある論文の ID（同じ論文を二度入れないため）。"""
+        return [pid for row in self._query("papers", {})
+                if (pid := plain_text(_prop(row["properties"], "ID").get("rich_text") or []))]
+
+    def add_papers(self, theme: str, items: list[dict], source: str) -> int:
+        """論文を先行研究 DB に「未読」で入れる。同じ ID の行があれば、テーマを足すだけ。書いた行の数を返す。"""
+        theme_id = self.theme_page_id(theme)
+        if theme_id is None:
+            raise NotionError(f"研究ホームの「テーマ」に {theme} の行がありません")
+        written = 0
+        for item in items:
+            paper_id = str(item.get("id") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if not paper_id or not title:
+                continue
+            rows = self._query("papers", {"filter": {"property": "ID", "rich_text": {"equals": paper_id}}})
+            if rows:
+                related = [r["id"] for r in _prop(rows[0]["properties"], "テーマ").get("relation") or []]
+                if theme_id not in related:
+                    self.notion.request("PATCH", f"/pages/{rows[0]['id']}", {"properties": {
+                        "テーマ": {"relation": [{"id": i} for i in [*related, theme_id]]}}})
+                    written += 1
+                continue
+            year = str(item.get("year") or "")
+            self._create_page("papers", {
+                "名前": {"title": rich_text(title[:200])},
+                "URL": {"url": str(item.get("url") or "") or None},
+                "ID": {"rich_text": rich_text(paper_id)},
+                "著者": {"rich_text": rich_text(", ".join(str(a) for a in item.get("authors") or [])[:500])},
+                "年": {"number": int(year) if year.isdigit() else None},
+                "会場": {"rich_text": rich_text(str(item.get("venue") or ""))},
+                "要点": {"rich_text": rich_text(str(item.get("summary") or ""))},
+                "この研究との関係": {"rich_text": rich_text(str(item.get("relation") or ""))},
+                "見つけた日": {"date": {"start": str(item.get("found") or date.today().isoformat())}},
+                "出どころ": {"select": {"name": source}},
+                "状態": {"select": {"name": "未読"}},
+                "テーマ": {"relation": [{"id": theme_id}]},
+            })
+            written += 1
+        return written
 
     # Task
 

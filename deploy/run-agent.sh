@@ -1,11 +1,11 @@
 #!/bin/zsh
 # launchd から研究・大学・仕事のエージェント（A2A サーバー）を起動する。127.0.0.1 でだけ待ち受ける。
-# 使い方: deploy/run-agent.sh <research|course|work>。3つとも同じ形で、違うのは名前だけ。
+# 使い方: deploy/run-agent.sh <research|course|work|knowledge>。どれも同じ形で、違うのは名前だけ。
 set -eu
 
 AGENT="${1:-}"
 case "$AGENT" in
-  research|course|work) ;;
+  research|course|work|knowledge) ;;
   *)
     echo "知らないエージェントです: ${AGENT:-（名前なし）}（research / course / work のどれか）" >&2
     exit 1

@@ -155,6 +155,13 @@ class FakeHubNotion:
         if (method, path) == ("PATCH", "/views/daily-default-view"):
             self.daily_view.update(body)
             return self.daily_view
+        if method == "POST" and path == "/pages" and body.get("parent", {}).get("page_id") == "home":
+            page_id = f"child-page-{len(self.blocks)}"
+            title = body["properties"]["title"]["title"][0]["text"]["content"]
+            self.blocks.setdefault("home", []).append(
+                {"id": page_id, "type": "child_page", "child_page": {"title": title}})
+            self.blocks[page_id] = list(body.get("children") or [])
+            return {"id": page_id}
         if method == "PATCH" and path.startswith("/views/view-"):
             view = next(view for view in self.views if view["id"] == path.removeprefix("/views/"))
             view.update(body)
@@ -564,3 +571,34 @@ def test_day_row_has_no_local_file_columns(day_hub):
     props = day_hub.notion.rows[0]["properties"]
     assert not any("ファイル" in name for name in (*DAILY_PROPERTIES, *props))
     assert props["Daily Slack"] == {"url": "https://slack.example/1"}
+
+
+def test_collect_page_is_made_once_and_read_back(fake_notion, tmp_path):
+    from kei_agent.notion_hub import COLLECT_TITLE, parse_collect
+
+    hub_setup = setup(fake_notion, tmp_path)
+    hub_setup.run()
+    hub_setup.run()
+    pages = [b for b in fake_notion.blocks["home"]
+             if b["type"] == "child_page" and b["child_page"]["title"] == COLLECT_TITLE]
+    assert len(pages) == 1
+    interests, sources = parse_collect(fake_notion.blocks[pages[0]["id"]])
+    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
+    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
+
+
+def test_collect_lines_accept_full_width_colons_and_titled_links():
+    from kei_agent.notion_hub import parse_collect
+
+    def bullet(text, href=None):
+        return {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [
+            {"type": "text", "plain_text": text, "href": href, "text": {"content": text}}]}}
+
+    def heading(text):
+        return {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "plain_text": text}]}}
+
+    blocks = [heading("興味"), bullet("AI：LLM、RAG"), bullet("名前だけ"),
+              heading("情報源"), bullet("OpenAI のブログ", "https://openai.com/news/rss.xml"), bullet("qiita: llm")]
+    interests, sources = parse_collect(blocks)
+    assert interests == [{"name": "AI", "keywords": ["LLM", "RAG"]}]
+    assert sources == ["https://openai.com/news/rss.xml", "qiita: llm"]

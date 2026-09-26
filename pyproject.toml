@@ -31,13 +31,14 @@ kei-agent-course-inspect = "kei_agent_course.catalog:main"
 kei-agent-course-academic-import = "kei_agent_course.academic_sync:main"
 kei-agent-research = "kei_agent_research.app:main"
 kei-agent-work = "kei_agent_work.app:main"
+kei-agent-knowledge = "kei_agent_knowledge.app:main"
 
 [tool.uv.build-backend]
 # 机の上の音声対話（src/kei_agent_voice）と、A2A のエージェント（src/kei_agent_a2a、
 # src/kei_agent_course、src/kei_agent_research）は、Kei Agent 本体とは別のパッケージにしてある
 # （依存をそれぞれに閉じる）
 module-name = ["kei_agent", "kei_agent_voice", "kei_agent_a2a", "kei_agent_course", "kei_agent_research",
-               "kei_agent_work", "kei_agent_notion_gateway"]
+               "kei_agent_work", "kei_agent_knowledge", "kei_agent_notion_gateway"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
@@ -52,6 +53,7 @@ agents = [
 course = [{ include-group = "agents" }]
 research = [{ include-group = "agents" }]
 work = [{ include-group = "agents" }]
+knowledge = [{ include-group = "agents" }]
 voice = [
     { include-group = "agents" },
     # 声のレイヤは Realtime API の WebSocket を直に叩く（いまは a2a-sdk 経由で入っているだけ）

@@ -203,12 +203,26 @@ class FakeNotion:
         self.results: dict[str, str] = {}
         self.notes: list[Note] = []
         self.themes: dict[str, str] = {}
+        # 先行研究 DB（ID → 行）
+        self.papers: dict[str, dict] = {}
         self.fail = False
         self._n = 0
 
     def _check(self):
         if self.fail:
             raise NotionError("503 Service Unavailable")
+
+    def paper_ids(self):
+        self._check()
+        return list(self.papers)
+
+    def add_papers(self, theme, items, source):
+        self._check()
+        for item in items:
+            row = self.papers.setdefault(item["id"], {**item, "themes": [], "source": source, "state": "未読"})
+            if theme not in row["themes"]:
+                row["themes"].append(theme)
+        return len(items)
 
     def add_task(self, title, theme=None, status="今夜やる", slack_url=None, body="", assignee="Kei Agent"):
         self._n += 1

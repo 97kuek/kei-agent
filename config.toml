@@ -32,6 +32,9 @@ provider = ""
 [agents.work]
 provider = ""
 
+[agents.knowledge]
+provider = ""
+
 [agents.router]
 provider = ""
 
@@ -41,7 +44,8 @@ provider = ""
 [schedule]
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
 enabled = true
-literature = "07:00"  # 先行研究の新着（テーマごと）
+literature = "07:00"  # 先行研究の新着（テーマごと。知識の担当が選び、各テーマのチャンネルと先行研究 DB へ）
+reading = "07:00"     # 読みもの（興味のある技術記事。知識の担当が選び、#40_knowledge へ）
 daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#01_overview）。締切24時間前の知らせは1時間ごと
 review = "21:00"      # Retro & Planning（#01_overview）
 night = "00:00"       # 🌙 をつけた Task
@@ -73,6 +77,7 @@ orchestrator = "http://127.0.0.1:8786"
 course = "http://127.0.0.1:8787"
 research = "http://127.0.0.1:8788"
 work = "http://127.0.0.1:8789"
+knowledge = "http://127.0.0.1:8792"
 voice = "http://127.0.0.1:8790"
 
 [notion]
@@ -84,7 +89,7 @@ course_home = "3e14fb5d2d07805ab7b2c01aab6b39a7"    # 授業ホーム（notion-c
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
-overview = ["overview", "research-overview", "research-strategy"]
+overview = ["overview", "research-overview"]
 # Kei Agent の改善: 要望は要約して公開の GitHub issue にする（原文は Slack に残る）
 # チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
 improve = ["research-agent", "kei-agent"]
@@ -92,6 +97,8 @@ improve = ["research-agent", "kei-agent"]
 course = ["course"]
 # 仕事: 会社の予定など。依頼は仕事エージェント（A2A）に取り次ぐ
 work = ["work"]
+# 知識: 朝の読みもの（#40_knowledge）とその質問。依頼は知識エージェント（A2A）に取り次ぐ
+knowledge = ["knowledge"]
 # 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
 # 個人用のチャンネルには Kei Agent を招待しない
 

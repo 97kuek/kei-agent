@@ -1,4 +1,4 @@
-"""決まった時刻の処理: 先行研究の新着、Daily、Retro & Planning、🌙 の夜間 Task、放置されたスレッドへの声かけ。"""
+"""決まった時刻の処理: 先行研究の新着と読みもの（知識の担当）、Daily、Retro & Planning、🌙 の夜間 Task、放置されたスレッドへの声かけ。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,19 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from kei_agent import course, digest, maintenance, morning, research, settings, themes, timelog, version, work
+from kei_agent import (
+    course,
+    digest,
+    knowledge,
+    maintenance,
+    morning,
+    research,
+    settings,
+    themes,
+    timelog,
+    version,
+    work,
+)
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import (
     JST,
@@ -35,10 +47,9 @@ from kei_agent.store import Store
 log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
-TASK_NAMES = ("night", "literature", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
+TASK_NAMES = ("night", "literature", "reading", "daily", "review", "maintenance")  # 実行する順。settings.SCHEDULE_NAMES と同じもの
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
-NO_NEW_PAPERS = "NO_NEW_PAPERS"
 # 締切が近いものを知らせるために、カレンダーを見に行く間隔（秒）
 DUE_CHECK_SECONDS = 3600
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
@@ -161,7 +172,8 @@ class Scheduler:
         """定期処理が使う明示 provider。保守はモデルを使わない。"""
         if name == "maintenance":
             return None
-        actor = "router" if name in {"daily", "review"} else "research"
+        actor = {"daily": "router", "review": "router", "literature": knowledge.AGENT,
+                 "reading": knowledge.AGENT}.get(name, "research")
         return settings.selected_provider(self.config, self.store, actor)
 
     def can_run(self, name: str, now: float, provider: str | None = None) -> bool:
@@ -277,39 +289,85 @@ class Scheduler:
     # 先行研究の新着
 
     async def run_literature(self, day: str) -> dict:
+        """先行研究の新着。テーマの検索キーワードと前提（CLAUDE.md）を知識の担当に渡し、選ばれた論文を
+        研究ホームの先行研究 DB と、各テーマのチャンネルに出す。そのスレッドの質問は知識の担当が答える。"""
         ids = await self.assistant.channel_ids()
-        last = self.store.last_schedule("literature", before_day=day)
-        since = date.fromisoformat(day) - timedelta(days=1)
-        if last:
-            since = min(since, date.fromisoformat(last["day"]))
-        results = {}
+        notion = self.assistant.notion
+        if notion is None:
+            return {"status": "no_notion"}
+        try:
+            known = set(await asyncio.to_thread(notion.paper_ids))
+        except (NotionError, KeyError) as e:
+            log.warning("先行研究 DB を読めません: %s", e)
+            return {"status": "error", "error": f"先行研究 DB を読めません: {e}"}
+        results: dict[str, dict] = {}
         for cwd in themes.theme_dirs(self.config):
             name = cwd.name
             if name not in ids:
                 continue  # アーカイブしたテーマや、Kei Agent のいないテーマは見張らない
-            keywords = search_keywords(cwd / "CLAUDE.md")
+            claude_md = cwd / "CLAUDE.md"
+            keywords = search_keywords(claude_md)
             if not keywords:
                 results[name] = {"status": "no_keywords"}
                 continue
-            ws = themes.resolve(self.config, name)
-            prompt = (
-                f"[Kei Agent の定期処理: 先行研究の新着 {day}]\n"
-                f"検索キーワード: {' / '.join(keywords)}\n\n"
-                f"kei-agent-research:researching-literature skill で、キーワードごとに arXiv を `--sort date` で検索し、{since.isoformat()} 以降に"
-                "投稿された論文のうち、papers/ にまだ保存していないものを探してください。"
-                "テーマの CLAUDE.md の前提に照らして関係のある論文だけを papers/ に保存し、1本ずつ要点と関係を報告してください。\n"
-                f"関係のある新着が1本もなければ、返答は `{NO_NEW_PAPERS}` の1行だけにしてください。"
-                "ジョブは投入しないでください。"
-            )
-            result = await self.assistant.run_detached(
-                ws, name, prompt, "literature", use_case=UseCase.RESEARCH_COMPARE)
-            # 「新着なし」の目印の前後に説明をつけることがあるので、目印が含まれていれば新着なしとみなす
-            if not result.is_error and NO_NEW_PAPERS in result.text:
+            premises = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
+            reply = await self.assistant.ask_knowledge(knowledge.PAPER_DIGEST, {
+                "theme": name, "keywords": keywords, "premises": premises, "known_ids": sorted(known),
+                "count": knowledge.PAPERS_PER_THEME})
+            if not reply.ok:
+                results[name] = {"status": "error"}
+                continue
+            items = reply.data.get("items") or []
+            if not items:
                 results[name] = {"status": "no_new"}
                 continue
-            thread_ts = await self.assistant.publish(ids[name], name, ws, f"📚 先行研究の新着 {label(day)}", result)
-            results[name] = {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts}
-        return {"status": "done", "themes": results}
+            try:
+                await asyncio.to_thread(notion.add_papers, name, items, "毎朝の新着")
+            except (NotionError, KeyError) as e:
+                log.warning("先行研究 DB に書けません（%s）: %s", name, e)
+                results[name] = {"status": "error", "error": f"先行研究 DB に書けません: {e}"}
+                continue
+            known |= {str(item.get("id")) for item in items}
+            posted = await self.assistant.slack.chat_postMessage(
+                channel=ids[name], text=knowledge.papers_text(items, label(day)), unfurl_links=False, unfurl_media=False)
+            thread_ts = str(posted.get("ts") or "")
+            if thread_ts:
+                # このスレッドの続きは、知識の担当が答える（ほかのスレッドは研究の担当）
+                self.store.upsert_thread(ids[name], thread_ts, name, None)
+                self.store.set_agent_session(ids[name], thread_ts, knowledge.AGENT, "")
+            results[name] = {"status": "posted", "count": len(items), "thread_ts": thread_ts}
+        failed = any(result.get("status") == "error" for result in results.values())
+        return {"status": "error" if failed else "done", "themes": results}
+
+    async def run_reading(self, day: str) -> dict:
+        """朝の読みもの。共通ホームの「収集」ページの興味と情報源を知識の担当に渡し、選ばれた記事を1通で出す。"""
+        name = self.config.knowledge_channels[0] if self.config.knowledge_channels else ""
+        channel = (await self.assistant.channel_ids()).get(name) if name else None
+        if channel is None:
+            return {"status": "no_channel"}
+        hub = self.assistant.hub
+        if hub is None:
+            return {"status": "no_hub"}
+        try:
+            interests, sources = await asyncio.to_thread(hub.collect_settings)
+        except NotionError as e:
+            log.warning("「収集」ページを読めません: %s", e)
+            return {"status": "error", "error": f"「収集」ページを読めません: {e}"}
+        if not interests or not sources:
+            return {"status": "no_settings"}
+        reply = await self.assistant.ask_knowledge(knowledge.READING_DIGEST, {
+            "interests": interests, "sources": sources, "count": knowledge.READING_COUNT})
+        if not reply.ok:
+            return {"status": "error"}
+        items = reply.data.get("items") or []
+        failed = [str(source) for source in reply.data.get("failed_sources") or []]
+        if not items:
+            return {"status": "no_new", "failed_sources": failed}
+        posted = await self.assistant.slack.chat_postMessage(
+            channel=channel, text=knowledge.reading_text(items, label(day)), unfurl_links=False, unfurl_media=False)
+        if posted.get("ts"):
+            self.store.upsert_thread(channel, str(posted["ts"]), name, None)
+        return {"status": "posted", "count": len(items), "channel": channel, "failed_sources": failed}
 
     # Daily と振り返り
 
@@ -638,18 +696,28 @@ class Scheduler:
         return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
 
     def morning_notes(self, now: datetime | None = None, failed_now: list[str] | None = None) -> list[str]:
-        """時刻の無いもの（先行研究の新着、うまくいかなかったこと）を、1行ずつ。"""
+        """時刻の無いもの（今朝の先行研究の新着と読みもの、うまくいかなかったこと）を、1行ずつ。"""
+        now = now or datetime.now()
+        today = now.date().isoformat()
         notes = []
-        last = self.store.last_schedule("literature")
-        if last:
-            themes_ = (json.loads(last["detail"] or "{}") or {}).get("themes") or {}
-            posted = [name for name, got in themes_.items() if got.get("status") == "posted"]
-            if posted:
-                notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
-        failure = self.failure_note(now or datetime.now(), failed_now)
+        themes_ = self.today_detail("literature", today).get("themes") or {}
+        posted = [name for name, got in themes_.items() if got.get("status") == "posted"]
+        if posted:
+            notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
+        reading = self.today_detail("reading", today)
+        if reading.get("status") == "posted" and reading.get("channel"):
+            notes.append(f"読みもの: {reading.get('count')}件（<#{reading['channel']}>）")
+        failure = self.failure_note(now, failed_now)
         if failure:
             notes.append(failure)
         return notes
+
+    def today_detail(self, name: str, today: str) -> dict:
+        """その定期処理の今日の記録（まだなら空）。昨日の分を、今朝のもののように載せないため。"""
+        last = self.store.last_schedule(name)
+        if last is None or last["day"] != today:
+            return {}
+        return json.loads(last["detail"] or "{}") or {}
 
     async def notify_due_soon(self, now: datetime) -> None:
         """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる。"""

@@ -111,3 +111,14 @@ def test_resetting_a_profile_returns_to_the_config_provider(config, store):
 
     profile = settings.agent_profile(config, store, "research")
     assert profile.provider == "claude"
+
+
+def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
+    from kei_agent.config import load_config
+
+    path = tmp_path / "config.toml"
+    path.write_text('[channels]\nknowledge = ["knowledge", "reading"]\n\n[schedule]\nreading = "06:30"\n')
+    config = load_config(path, env={})
+    assert config.knowledge_channels == ("knowledge", "reading")
+    assert config.schedule.reading == "06:30"
+    assert "research-strategy" not in config.overview_channels

@@ -20,8 +20,8 @@ HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
 AGENT_PLUGINS = frozenset({"research", "course", "work"})
-# provider を選ぶ実行役。router は Daily/Retro の横断的な計画も担う。
-MODEL_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
+# provider を選ぶ実行役。router は Daily/Retro の横断的な計画も担う。knowledge は読みものと論文の新着の担当
+MODEL_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix", "knowledge"})
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,8 @@ class ScheduleConfig:
     enabled: bool = True
     # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
     literature: str = "07:00"
+    # 読みもの（興味のある技術記事。知識の担当）
+    reading: str = "07:00"
     daily: str = "08:00"
     review: str = "21:00"
     night: str = "00:00"
@@ -133,13 +135,15 @@ class Config:
     state_dir: Path
     repo_root: Path
     allowed_user_id: str
-    overview_channels: tuple[str, ...] = ("overview", "research-overview", "research-strategy")
+    overview_channels: tuple[str, ...] = ("overview", "research-overview")
     # `#00_kei-agent`。先頭の番号は外して照合する（themes.theme_name）
     improve_channels: tuple[str, ...] = ("kei-agent",)
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
     course_channels: tuple[str, ...] = ("course",)
     # 仕事エージェントに取り次ぐチャンネル
     work_channels: tuple[str, ...] = ("work",)
+    # 知識（読みもの・論文の新着・その質問）。依頼は知識エージェント（A2A）に取り次ぐ
+    knowledge_channels: tuple[str, ...] = ("knowledge",)
     max_concurrent_runs: int = 2
     run_timeout_minutes: int = 30
     job_poll_seconds: int = 60
@@ -220,9 +224,9 @@ TOP_LEVEL_KEYS = {
 }
 AGENTS_KEYS = MODEL_ACTORS
 AGENT_PROFILE_KEYS = {"provider"}
-CHANNELS_KEYS = {"overview", "improve", "course", "work"}
+CHANNELS_KEYS = {"overview", "improve", "course", "work", "knowledge"}
 # [schedule] のうち、時刻（HH:MM）を書くキー
-SCHEDULE_TIME_KEYS = ("literature", "daily", "review", "night")
+SCHEDULE_TIME_KEYS = ("literature", "reading", "daily", "review", "night")
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
 
 
@@ -318,6 +322,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
         course_channels=tuple(channels.get("course", Config.course_channels)),
         work_channels=tuple(channels.get("work", Config.work_channels)),
+        knowledge_channels=tuple(channels.get("knowledge", Config.knowledge_channels)),
         max_concurrent_runs=int(data.get("max_concurrent_runs", 2)),
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),

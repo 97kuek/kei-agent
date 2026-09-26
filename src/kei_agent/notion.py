@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from kei_agent.config import Config, load_config
+from kei_agent.config import Config, load_config, notion_id
 
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"
@@ -284,6 +284,40 @@ MILESTONES = {
 }
 
 
+PAPERS = {
+    "icon": "📚",
+    "description": "先行研究。毎朝の新着（知識の担当が選ぶ）と、頼まれて調べた論文。ID で重ならないようにし、"
+                   "同じ論文が複数のテーマに関係するときは、1行にテーマを並べる。",
+    "properties": {
+        "名前": {"title": {}},
+        "URL": {"url": {}},
+        "ID": {"rich_text": {}},
+        "著者": {"rich_text": {}},
+        "年": {"number": {"format": "number"}},
+        "会場": {"rich_text": {}},
+        "要点": {"rich_text": {}},
+        "この研究との関係": {"rich_text": {}},
+        "見つけた日": {"date": {}},
+        "出どころ": {"select": {"options": _options(("毎朝の新着", "blue"), ("依頼", "green"))}},
+        "状態": {"select": {"options": _options(("未読", "gray"), ("読んだ", "blue"), ("使う", "green"))}},
+    },
+    "relations": {"テーマ": ("themes", "先行研究")},
+}
+# テーマのページに置く、そのテーマの論文だけの表の名前
+THEME_PAPERS_VIEW = "先行研究"
+
+
+def theme_papers_view(papers: dict, theme_page_id: str) -> dict:
+    """テーマのページに置く表（そのテーマの論文だけ、見つけた日の新しい順）。"""
+    return {
+        "database_id": papers["database_id"], "data_source_id": papers["data_source_id"],
+        "create_database": {"parent": {"type": "page_id", "page_id": theme_page_id}},
+        "name": THEME_PAPERS_VIEW, "type": "table",
+        "filter": {"property": "テーマ", "relation": {"contains": theme_page_id}},
+        "sorts": [{"property": "見つけた日", "direction": "descending"}],
+    }
+
+
 # ノートのテンプレート。API ではテンプレートを作れないので、Notion の画面で空のテンプレートを作っておき、中身をここで書く
 NOTE_TEMPLATES = [
     ("計画", "## 目的\n\n## 仮説\n\n## 条件（何を変えて何を測るか）\n\n## 判断の基準（どうなったら仮説を支持するか）\n\n"
@@ -295,7 +329,7 @@ _BLANK_TEMPLATE_NAMES = {"", "New page", "新規ページ", "Untitled", "無題"
 
 
 # 状態のファイル（notion.json）のキーと、上の定義の対応。設定のずれを見つけるのに使う
-SPECS = {"themes": THEMES, "tasks": TASKS, "notes": NOTES, "milestones": MILESTONES}
+SPECS = {"themes": THEMES, "tasks": TASKS, "notes": NOTES, "milestones": MILESTONES, "papers": PAPERS}
 
 
 def _option_names(config: dict) -> set[str]:
@@ -463,6 +497,23 @@ class Setup:
             })
             self.log.append(f"ビューを作成: {spec['name']}")
 
+    def theme_paper_views(self, themes: dict, papers: dict) -> None:
+        """どのテーマのページにも、そのテーマの論文だけの表を置く。もう置いてあるページは飛ばす。"""
+        placed = set()
+        response = self.notion.request("GET", f"/views?data_source_id={papers['data_source_id']}")
+        for view in response.get("results", []):
+            full = self.notion.request("GET", f"/views/{view['id']}")
+            parent_db = (full.get("parent") or {}).get("database_id")
+            if full.get("name") != THEME_PAPERS_VIEW or not parent_db or parent_db == papers["database_id"]:
+                continue
+            parent = self.notion.request("GET", f"/databases/{parent_db}")
+            placed.add(notion_id((parent.get("parent") or {}).get("page_id")))
+        rows = self.notion.paginate("POST", f"/data_sources/{themes['data_source_id']}/query", {"page_size": 100})
+        for row in rows:
+            if notion_id(row["id"]) not in placed:
+                self.notion.request("POST", "/views", theme_papers_view(papers, row["id"]))
+                self.log.append("テーマのページに先行研究の表を作成")
+
     # ホーム
 
     def home_sections(self, sections: list[tuple[str, dict, dict]]) -> None:
@@ -520,6 +571,7 @@ class Setup:
         strategy = self.child_page(self.home, "中長期の方針", "🧭")
         self.state["strategy_page_id"] = strategy
         milestones = self.database("milestones", strategy, "マイルストーン", MILESTONES)
+        papers = self.database("papers", self.home, "先行研究", PAPERS)
         self.save()
 
         p = lambda db, name: db["properties"][name]  # noqa: E731
@@ -547,6 +599,11 @@ class Setup:
             {"name": "タイムライン", "type": "timeline",
              "configuration": {"type": "timeline", "date_property_id": p(milestones, "期日")}},
         ])
+        self.views(papers, [
+            {"name": "未読", "type": "table", "filter": _eq_select("状態", "未読"),
+             "sorts": [{"property": "見つけた日", "direction": "descending"}]},
+        ])
+        self.theme_paper_views(themes, papers)
 
         self.home_sections([
             ("自分の Task", tasks, {

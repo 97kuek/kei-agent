@@ -181,7 +181,9 @@ class _FakeNotionApi:
 
 
 def _tasks_state():
-    return {"databases": {k: {"data_source_id": f"ds-{k}"} for k in ("themes", "tasks", "notes", "milestones")}}
+    from kei_agent.notion import SPECS
+
+    return {"databases": {k: {"data_source_id": f"ds-{k}"} for k in SPECS}}
 
 
 def _live_from_spec(spec):

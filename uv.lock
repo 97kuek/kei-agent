@@ -695,6 +695,10 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
+knowledge = [
+    { name = "a2a-sdk", extra = ["http-server"] },
+    { name = "uvicorn" },
+]
 research = [
     { name = "a2a-sdk", extra = ["http-server"] },
     { name = "uvicorn" },
@@ -728,6 +732,10 @@ course = [
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+]
+knowledge = [
+    { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
+    { name = "uvicorn", specifier = ">=0.53.0" },
 ]
 research = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },

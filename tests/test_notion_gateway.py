@@ -550,3 +550,27 @@ def test_research_setup_and_tasks_run_through_the_gateway(via, world, tmp_path):
     with pytest.raises(NotionError) as refused:
         via("research").request("GET", f"/pages/{world.research.page}")
     assert refused.value.status == 403
+
+
+def test_papers_are_filed_once_and_every_theme_page_shows_its_own(via, api, world, tmp_path):
+    """同じ論文は1行に、関係するテーマを並べる。テーマのページには、そのテーマの論文だけの表を1つ置く。"""
+    from kei_agent.notion import THEME_PAPERS_VIEW, Setup
+    from kei_agent.notion_store import NotionStore
+
+    kei = via("kei-agent")
+    state = tmp_path / "notion.json"
+    Setup(kei, world.research.root, state).run()
+    store = NotionStore(kei, state)
+    store.ensure_theme("vlm", "https://slack.example/c1", "~/research/vlm")
+    store.ensure_theme("amr", "https://slack.example/c2", "~/research/amr")
+    paper = {"id": "arXiv:2609.00001", "title": "Counting with VLMs", "url": "https://arxiv.org/abs/2609.00001",
+             "authors": ["A. Author"], "year": "2026", "venue": "", "summary": "要点", "relation": "関係"}
+
+    assert store.add_papers("vlm", [paper], "毎朝の新着") == 1
+    assert store.add_papers("amr", [paper], "依頼") == 1          # 同じ行にテーマを足す
+    assert store.add_papers("amr", [paper], "依頼") == 0
+    assert store.paper_ids() == ["arXiv:2609.00001"]
+
+    Setup(kei, world.research.root, state).run()                   # 作り直しても表は増えない
+    shown = [item for item in api.items.values() if item["object"] == "view" and item["name"] == THEME_PAPERS_VIEW]
+    assert len(shown) == 2

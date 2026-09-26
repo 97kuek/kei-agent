@@ -27,6 +27,7 @@ from kei_agent import (
     course,
     guard,
     improve,
+    knowledge,
     research,
     router,
     runner,
@@ -48,6 +49,7 @@ from kei_agent.course import CourseChannel
 from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
+from kei_agent.knowledge import KnowledgeChannel
 from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
@@ -153,7 +155,8 @@ class ThemeRuns:
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
 # 大学・仕事で、メンションだけで本文が無いときの質問
-AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて", "work": "今日の予定は？"}
+AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて", "work": "今日の予定は？",
+                           "knowledge": "今日の読みものについて教えて"}
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える）
 VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT, "course": UseCase.COURSE_EXPLAIN,
                    "work": UseCase.WORK_SINGLE_SOURCE}
@@ -168,7 +171,8 @@ def time_label(entry: TimeEntry) -> str:
     return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, voice.VoiceNotices):
+class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, KnowledgeChannel,
+                voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -986,8 +990,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
-        if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK):
-            await self._dispatch(req, course.AGENT if ws.kind is ChannelKind.COURSE else work.AGENT, "")
+        if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK, ChannelKind.KNOWLEDGE):
+            await self._dispatch(req, themes.actor_of(ws.kind), "")
+            return None
+        if (ws.kind is ChannelKind.THEME and self.actor_for(req, ws.kind) == knowledge.AGENT
+                and await self._dispatch(req, knowledge.AGENT, "")):
             return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
@@ -1032,9 +1039,15 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         choice = await router.pick_across(self.config, catalog, req.text, store=self.store)
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
+    def actor_for(self, req: Request, kind: ChannelKind) -> str:
+        """その依頼に答える担当。テーマのチャンネルでも、朝の論文の新着のスレッドは知識の担当が答える。"""
+        if kind is ChannelKind.THEME and self.store.thread_agent(req.channel, req.thread_ts) == knowledge.AGENT:
+            return knowledge.AGENT
+        return themes.actor_of(kind)
+
     async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
         """エージェントに渡す。同じスレッドで2つ同時に動かさず、全体の同時実行の上限も守る。"""
-        handler = {course.AGENT: self.course, work.AGENT: self.work}.get(agent)
+        handler = {course.AGENT: self.course, work.AGENT: self.work, knowledge.AGENT: self.knowledge}.get(agent)
         if handler is None:
             return False
         # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
@@ -1177,7 +1190,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        actor = actor or ("self_fix" if ws is not None and ws.kind is ChannelKind.IMPROVE else research.AGENT)
+        actor = actor or (themes.actor_of(ws.kind) if ws is not None else research.AGENT)
         provider = settings.selected_provider(self.config, self.store, actor)
         version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
@@ -1199,13 +1212,21 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts,
                                     stalled if stalled and stalled != req.text else None, dropped=dropped)
             session_id = None
+        elif session_id is None and req.message_ts and req.message_ts != req.thread_ts:
+            # Kei Agent の投稿（朝の読みもの、論文の新着、朝の一覧など）への最初の返信。
+            # 「2番を詳しく」に答えられるよう、元の投稿を渡す（人が始めたスレッドは今までどおり）
+            messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
+            parent = next((m for m in messages if m.get("ts") == req.thread_ts), None)
+            if parent is not None and (parent.get("user") == self.bot_user_id or parent.get("bot_id")):
+                prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped,
+                                        reply_to_post=True)
 
         on_activity = ui.activity if ui is not None else None
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
             # 今日の日付と曜日は、どの担当にも同じ形で先頭に付ける（「今日の授業は？」に答えられるように）
             prompt = today_line() + prompt
-            if actor in (course.AGENT, work.AGENT):
+            if actor in (course.AGENT, work.AGENT, knowledge.AGENT):
                 return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
                                             on_activity, provider=provider)
             assert ws is not None
@@ -1496,10 +1517,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             req = Request.from_payload(payload)
             original_provider = payload.get("provider")
             if original_provider:
-                kind = themes.resolve(self.config, req.channel_name).kind
-                actor = (course.AGENT if kind is ChannelKind.COURSE else
-                         work.AGENT if kind is ChannelKind.WORK else
-                         "self_fix" if kind is ChannelKind.IMPROVE else research.AGENT)
+                actor = self.actor_for(req, themes.resolve(self.config, req.channel_name).kind)
                 if settings.selected_provider(self.config, self.store, actor) != original_provider:
                     await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
                     continue
