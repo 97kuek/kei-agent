@@ -95,7 +95,7 @@ deploy/install.sh remove           # 本体の登録を外す（エージェン�
 | 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
 | ジョブ | `pueue status --group kei-agent` |
 
-コードを入れ替えたら、エージェントも起動し直す（`launchctl kickstart -k gui/$(id -u)/com.kei-agent.<名前>`）。plist の雛形（`deploy/com.kei-agent.*.plist.template`）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。
+コードを入れ替えたら、`deploy/restart-all.sh` で全部を起動し直す（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.*.plist.template`）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。
 
 ## 5. Notion（最初の1回）
 
