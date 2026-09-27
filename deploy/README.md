@@ -160,6 +160,7 @@ gh auth status                                         # 要望を GitHub issue 
 
 ## 7. 日々の運用
 
+- 困ったら、まず点検: `uv run kei-agent doctor`（読むだけ。設定・秘密情報の有無・担当ごとの AI・常駐と版・Notion のホーム・道具・最近のログを見て、直し方を並べる。鍵の中身は出さない。`--all` でうまくいっているものも並べる。問題があれば終了コード 1）
 - 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance|toggl_import>`（`--record` を付けなければ今日の本番に影響しない）
 - 声を通さず依頼を渡す: `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ）
 - Toggl のアプリで直接測った記録は、22:00 の「Toggl の取り込み」（時間記録のモジュール）が「時間記録」に入れる
