@@ -56,7 +56,7 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-research.zsh` | なし（置かなくてよい） |
+| `kei-agent-research.zsh` | 研究のモジュールの担当（`deploy/run-agent.sh research`）。なし（置かなくてよい） |
 | `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
 | `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |

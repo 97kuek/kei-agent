@@ -10,7 +10,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 |---|---|---|---|---|
 | 本体（オーケストレーター） | `kei-agent` | 8786 | `src/kei_agent/` | Slack の受け口、振り分け、柵、Notion、定期実行、自己改善。8786 は声からの問い合わせ口（12章） |
 | 大学エージェント | `kei-agent-module course` | 8787 | `modules/course/` | Moodle・Box・授業ホーム・Toggl。モジュールの担当プロセス（`agent.py`） |
-| 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
+| 研究エージェント | `kei-agent-module research` | 8788 | `modules/research/` | 作業場での CLI 実行と pueue ジョブ。研究のモジュールの担当プロセス（`agent.py`）で、研究テーマ（ほかのどれにも当たらないチャンネル）を受け持つ |
 | 仕事エージェント | `kei-agent-module work` | 8789 | `modules/work/` | Microsoft 365 を読む。モジュールの担当プロセス（`agent.py`） |
 | 知識エージェント | `kei-agent-module knowledge` | 8792 | `modules/knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない）。モジュールの担当プロセス（`agent.py`） |
 | 声 | `kei-agent-module voice` | 8790 | `modules/voice/` | Realtime API、マイク、スピーカー。モジュールの担当プロセス（`agent.py`）で、マイクの会話も同じプロセス（`background`） |
@@ -152,7 +152,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 6. Slack に出す文（出力契約）
 
-モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`prompts/system.md`、`modules/course/course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
+モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`modules/research/research.md`、`prompts/system.md`（自己改善）、`modules/course/course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
 
 | 種類 | 扱い |
 |---|---|
