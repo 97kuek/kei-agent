@@ -75,7 +75,8 @@ def test_secrets_come_from_the_core_and_the_modules_that_are_on():
     assert names[4:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
                          ("time", "TOGGL_WORKSPACE_ID")]
     openai = modules.builtin()["voice"].secrets[0]
-    assert openai.required and openai.own_file and not openai.generate
+    # 声の鍵はマイクでの会話にだけ使う（喋って知らせるだけなら要らない）ので任意
+    assert not openai.required and openai.own_file and not openai.generate
     gateway = next(s for s in modules.builtin()["notion"].secrets if s.name == "KEI_AGENT_NOTION_GATEWAY_TOKEN")
     assert gateway.generate and {s.group for s in modules.builtin()["time"].secrets} == {"Toggl"}
 

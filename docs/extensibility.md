@@ -113,7 +113,7 @@ default = "07:00"               # 空文字なら、既定では動かさない
 
 # [secrets]                     # 要る秘密情報（環境変数の名前 = 説明と扱い。値は書かない）。kei-agent setup が聞いて秘密情報の
 #                               # ファイルに書き、kei-agent doctor が有無を確かめる（本体のものは modules.CORE_SECRETS）
-# OPENAI_API_KEY = { description = "OpenAI の API キー", required = true, own_file = true }
+# WEATHER_API_KEY = { description = "天気の API のキー", required = true, own_file = true }
 #                               # required: 無いと動かない（書かなければ任意）。own_file: そのプロセスだけのファイル
 #                               # kei-agent-<名前>.zsh に置く（[process] を持つモジュールだけ）。generate = true なら setup が
 #                               # 値を作る（プロセスどうしの合言葉）。group = "Toggl" の任意の鍵は、そろって初めて使う

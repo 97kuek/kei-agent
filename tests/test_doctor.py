@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import cli, doctor
+from kei_agent import cli, doctor, modules
 from kei_agent.config import AgentProfile
 from kei_agent.doctor import ERROR, OK, WARN
 
@@ -46,11 +46,6 @@ def test_a_broken_config_is_the_only_finding(tmp_path):
 
 def test_secrets_are_checked_by_name_only(config, tmp_path):
     ok = _secrets(config, tmp_path, FULL)
-    # 声の鍵（module.toml の [secrets] で own_file）は、そのプロセスだけのファイルにある
-    assert "OPENAI_API_KEY（kei-agent-voice.zsh）" in levels(doctor.check_secrets(ok))[0][1]
-    voice = tmp_path / "secrets" / "kei-agent-voice.zsh"
-    voice.write_text('export OPENAI_API_KEY="sk-1"\n', encoding="utf-8")
-    voice.chmod(0o600)
     assert levels(doctor.check_secrets(ok)) == [(OK, "要る鍵がそろっている")]
 
     # 例の書き方のまま・空・無いものは、足りない鍵として名前だけ出す（値は出さない）
@@ -60,6 +55,23 @@ def test_secrets_are_checked_by_name_only(config, tmp_path):
     text = doctor.report(findings, verbose=True)
     assert "SLACK_APP_TOKEN、KEI_AGENT_A2A_TOKEN、NOTION_TOKEN" in text
     assert "ほかの人も読める" in text and SECRET not in text
+
+
+def test_a_process_key_can_be_in_its_own_file(config, tmp_path):
+    """module.toml の [secrets] で own_file の鍵は、そのプロセスだけのファイル（kei-agent-<名前>.zsh）で見る。"""
+    folder = tmp_path / "user-modules" / "weather"
+    folder.mkdir(parents=True)
+    (folder / "module.toml").write_text(
+        'api = 1\nname = "weather"\n[process]\nport = 8899\n[secrets]\n'
+        'WEATHER_API_KEY = { description = "天気の API のキー", required = true, own_file = true }\n', encoding="utf-8")
+    (folder / "agent.py").write_text("SKILLS = []\n", encoding="utf-8")
+    modules.register_user_modules(folder.parent)
+    config = _secrets(replace(config, modules=(*config.modules, "weather")), tmp_path, FULL)
+    assert levels(doctor.check_secrets(config))[0] == (ERROR, "要る鍵が無い: WEATHER_API_KEY（kei-agent-weather.zsh）")
+    own = tmp_path / "secrets" / "kei-agent-weather.zsh"
+    own.write_text('export WEATHER_API_KEY="w-1"\n', encoding="utf-8")
+    own.chmod(0o600)
+    assert levels(doctor.check_secrets(config)) == [(OK, "要る鍵がそろっている")]
 
 
 def test_a_missing_secrets_file_and_partial_toggl(config, tmp_path):

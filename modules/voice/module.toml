@@ -11,4 +11,4 @@ port = 8790
 
 # 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
 [secrets]
-OPENAI_API_KEY = { description = "OpenAI の API キー（声の会話に使う）", required = true, own_file = true }
+OPENAI_API_KEY = { description = "OpenAI の API キー（マイクでの会話。App Home の「聞く」に使う。喋って知らせるだけなら要らない）", own_file = true }
