@@ -181,13 +181,16 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 - Notion に届くのはこのプロセスだけで、`NOTION_TOKEN` を持つのもここだけ（ほかの起動スクリプトは読んだあとで消す）
 - 合言葉は client ごと。親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN` で client 名を HMAC-SHA256 したもの（`kei_agent.notion.gateway_client_token`）だけを定数時間で比べて受け付け、親そのものは通さない。`/health` 以外はどれかの合言葉が要る
-- 届くホームは `config.toml` の `[notion]` で決まる
+- 届くホームは `config.toml` の `[notion]` で決まる。client は本体と、ホームを書いたモジュール（と研究）で、名前はモジュールの名前（`kei_agent_notion_gateway/clients.py`）。ほかのモジュールのホームは `[notion.homes]` に「名前 = ページ ID」で足す
 
 | client | 使うところ | 届くホーム | 口 |
 |---|---|---|---|
-| `kei-agent` | 本体、手で動かす setup・移行の CLI | 共通・研究・授業 | `/mcp`、`/notion/v1` |
+| `kei-agent` | 本体、手で動かす setup・移行の CLI | 共通と、書いてあるすべてのホーム | `/mcp`、`/notion/v1` |
 | `course` | 大学エージェントの決まった処理（締切・成績・setup）と LLM | 授業 | `/mcp`、`/notion/v1` |
 | `research` | 研究の LLM | 研究 | `/mcp` だけ（Bash を持つので、何でも送れる口は渡さない） |
+| そのほかのモジュール | そのモジュールの決まった処理と LLM | `[notion.homes]` のそのホーム | `/mcp`。シェルを使える AI の実行役がいなければ `/notion/v1` も |
+
+- ホームの無い担当（`[notion]` に書いていない）には、ゲートウェイの MCP も合言葉も渡さない（`execution_contract.resolve_contract`）
 
 - 要求ごとに、触れる ID をすべて確かめてから送る。パスの ID、クエリの `database_id` / `data_source_id`、本文の親・移動先・テンプレート・リレーション・メンション・ページへのリンク・同期ブロック・位置の指定・ビューの置き場所・Markdown のページ参照。どれも親をたどってホームの子孫なら通す。外・見つからない・ワークスペース直下・循環・深すぎは 403（`restricted_resource`、`Kei Agent gateway: <client> can't reach <ID>`）。親子関係は60秒だけ覚え、ゲートウェイで移したものはすぐ忘れる
 - `/notion/v1/…` は Notion の API をそのまま中継し、状態・本文・`Retry-After` をそのまま返す。扱うのはページ（Markdown・移動を含む）・ブロック・データベース・データソース・ビューと検索だけで、`/users` `/comments` `/file_uploads` など分からない形は断る。検索はホームの外の結果を落とす
@@ -237,7 +240,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（コネクト「Kei Agent」。3つのホームを共有）で、持つのはゲートウェイだけ。使う側（client）ごとに届くホームを絞る（7章）。
 
-本体・大学エージェントの決まった処理と LLM・setup の CLI・研究の LLM は、どれも client ごとの合言葉でゲートウェイを通す。アカウントに付いた Notion 連携（claude.ai・Codex App）は、どの担当にも使わせない。ホームのページ ID は `config.toml` の `[notion]`。
+本体・大学エージェントの決まった処理と LLM・setup の CLI・研究の LLM・ホームを持つモジュールは、どれも client ごとの合言葉でゲートウェイを通す。アカウントに付いた Notion 連携（claude.ai・Codex App）は、どの担当にも使わせない。ホームのページ ID は `config.toml` の `[notion]`（モジュールのホームは `[notion.homes]`）。
 
 データベースとプロパティは名前で読むので、Notion の画面で名前や選択肢を変えない（変えるなら `src/kei_agent/notion.py`、`notion_store.py`、`notion_hub.py`、`modules/course/notion_setup.py` も直す）。Kei Agent は自分が作ったページと決めたプロパティだけを書き、人が書いた本文は書き換えない。
 

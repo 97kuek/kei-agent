@@ -85,10 +85,14 @@ research = "http://127.0.0.1:8788"
 
 [notion]
 # Notion のホームのページ ID（URL の末尾32文字）。Notion を使わないなら空のまま。Notion を触るのはゲートウェイだけで、
-# 研究は research_home、大学は course_home、本体と手で動かす setup は3つすべての下だけを通す
+# 研究は research_home、大学は course_home、ほかのモジュールは [notion.homes] のホームの下だけを通す。
+# 本体と手で動かす setup は、書いてあるすべてのホームに届く。ホームの無い担当には、Notion の道具を渡さない
 hub_home = ""       # 共通ホーム（自分の名前のページなど。Daily・振り返り・予定・時間の記録）
 research_home = ""  # 研究ホーム（notion.json の home_page_id）
 course_home = ""    # 授業ホーム（notion-course.json の home_page_id）
+# ほかのモジュールのホーム（モジュールの名前 = ページ ID）。そのモジュールの AI と Python は、このホームの下だけに届く
+# [notion.homes]
+# weather = ""
 
 [course]
 # 大学のモジュールの設定（書けるものは modules/course/module.toml の [settings]）
