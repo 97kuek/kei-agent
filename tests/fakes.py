@@ -146,6 +146,10 @@ class FakeSlack:
         self.calls.append(("views_open", kw))
         return {}
 
+    async def views_update(self, **kw):
+        self.calls.append(("views_update", kw))
+        return {}
+
     async def files_upload_v2(self, **kw):
         self.calls.append(("files_upload_v2", kw))
 

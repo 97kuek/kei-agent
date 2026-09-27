@@ -102,6 +102,7 @@ class DigestBuilder:
         lines += self._stalled(now, active_channels)
         lines += self._waiting(active_channels)
         lines += await self._time(now)
+        lines += await self.assistant.module_material(now)
         if domains:
             lines += await self._agenda(now)
         # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる

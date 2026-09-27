@@ -13,7 +13,7 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import home, jobs, theme_invite
+from kei_agent import api, home, jobs, modules, theme_invite
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config
 from kei_agent.jobs import JobManager
@@ -27,6 +27,18 @@ log = logging.getLogger("kei_agent")
 REQUIRED_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "KEI_AGENT_ALLOWED_USER_ID")
 # Slack につながるのを待つ上限。超えたら落ちて、launchd に起動し直してもらう
 CONNECT_TIMEOUT_SECONDS = 120
+
+
+def _slash(assistant: Assistant, command: str):
+    """モジュールのスラッシュコマンドの受け口。Slack には3秒以内に、打った人にだけ見える文で返す。"""
+    async def handler(ack, body):
+        try:
+            text = await assistant.module_slash(command, body)
+        except Exception:
+            log.exception("/%s を処理できませんでした", command)
+            text = f"⚠️ /{command} を処理できなかったよ。もう一度試してね。"
+        await ack(text)
+    return handler
 
 
 async def serve() -> None:
@@ -92,6 +104,25 @@ async def serve() -> None:
     app.action(re.compile(r"^kei_agent_home_"))(acked(assistant.on_home_action))
     app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
     app.action(re.compile(r"^kei_agent_theme_place_(default|existing)$"))(acked(assistant.on_theme_place_action))
+    # モジュールの投稿のボタンと入力の画面（kei_agent.api の MODULE_PREFIX）
+    app.action(re.compile("^" + re.escape(api.MODULE_PREFIX)))(acked(assistant.module_action))
+
+    @app.view(re.compile("^" + re.escape(api.MODULE_PREFIX)))
+    async def module_view(ack, body):
+        try:
+            errors = await assistant.module_view(body)
+        except Exception:
+            log.exception("モジュールの入力の画面を受け取れませんでした")
+            errors = None
+        if errors:
+            await ack(response_action="errors", errors=errors)
+        else:
+            await ack()
+
+    # モジュールのスラッシュコマンド（module.toml の [slash_commands]。Slack の App にも同じ名前で足す）
+    for spec in modules.enabled(config.modules):
+        for command in spec.slash_commands:
+            app.command(f"/{command}")(_slash(assistant, command))
     app.action(re.compile(r"^kei_agent_time_(start|stop)$"))(acked(assistant.on_time_action))
     app.action(re.compile(r"^kei_agent_time_(memo|retry)$"))(acked(assistant.on_time_action))
 

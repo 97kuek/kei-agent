@@ -892,6 +892,58 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
             await self.notify_trouble(f"モジュール「{module}」が App Home の操作を扱えませんでした")
         return True
 
+    def _module_target(self, value: str) -> tuple[object, str] | None:
+        """モジュールの action_id / callback_id（api.MODULE_PREFIX）から、そのモジュールと名前。"""
+        if not value.startswith(api.MODULE_PREFIX):
+            return None
+        module, _, name = value.removeprefix(api.MODULE_PREFIX).partition(":")
+        found = self.modules.get(module)
+        return (found, name) if found is not None and name else None
+
+    async def module_action(self, body: dict) -> None:
+        """モジュールの投稿のボタンなどが押された（class Module の on_action）。押せるのは依頼者だけ。"""
+        if not self.is_allowed(body.get("user", {}).get("id")):
+            return
+        action = (body.get("actions") or [{}])[0]
+        target = self._module_target(str(action.get("action_id") or ""))
+        on_action = getattr(target[0], "on_action", None) if target else None
+        if callable(on_action):
+            await on_action(target[1], body)
+
+    async def module_view(self, body: dict) -> dict | None:
+        """モジュールの入力の画面が送られた（class Module の on_view）。欄の下に出す理由を返すと、画面は閉じない。"""
+        view = body.get("view") or {}
+        target = self._module_target(str(view.get("callback_id") or ""))
+        on_view = getattr(target[0], "on_view", None) if target else None
+        if not callable(on_view):
+            return None
+        if not self.is_allowed(body.get("user", {}).get("id")):
+            first = next(iter(view.get("blocks") or [{}]), {}).get("block_id", "")
+            return {first: "依頼者だけが使えます"} if first else None
+        return await on_view(target[1], body)
+
+    async def module_slash(self, name: str, body: dict) -> str:
+        """モジュールのスラッシュコマンド（class Module の on_slash_command）。打った人にだけ見せる文を返す。"""
+        if not self.is_allowed(str(body.get("user_id") or "")):
+            return "この操作は利用できません"
+        for module_name, spec in ((n, modules.known()[n]) for n in self.modules):
+            if name in spec.slash_commands:
+                return str(await self.modules[module_name].on_slash_command(name, body) or "")
+        return "このコマンドを受け持つモジュールがありません"
+
+    async def module_material(self, now: float) -> list[str]:
+        """Daily と振り返りの材料に、モジュールが足す行（class Module の material）。作れなかったモジュールは飛ばす。"""
+        lines: list[str] = []
+        for name, module in self.modules.items():
+            material = getattr(module, "material", None)
+            if not callable(material):
+                continue
+            try:
+                lines += [str(line) for line in await material(now) or []]
+            except Exception:
+                log.exception("モジュール「%s」の材料を作れませんでした", name)
+        return lines
+
     async def on_reaction_added(self, event: dict) -> None:
         """自分のメッセージに 🌙 をつけると、夜間の Task になる。モジュールの投稿へのリアクションは、そのモジュールが扱う。"""
         if await self.module_reaction(event, added=True) or not self._own_night_reaction(event):

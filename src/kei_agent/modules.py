@@ -41,7 +41,7 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "schedules", "settings"}
+             "schedules", "settings", "slash_commands"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
@@ -57,6 +57,8 @@ _PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
 PROCESS_KINDS = ("a2a", "service")
 _SCHEDULE_KEYS = {"label", "short", "default"}
+# Slack のスラッシュコマンドの名前（/ は付けない）
+_SLASH = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 # 設定（[settings]）の既定の値に使える形。利用者の設定（config.toml の [<名前>]）は、既定と同じ形にする
 SETTING_TYPES = (str, int, float, bool, list, dict)
 
@@ -140,6 +142,8 @@ class ModuleSpec:
     schedules: tuple[ScheduleSpec, ...] = ()
     # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）
     settings: dict[str, object] = field(default_factory=dict)
+    # Slack のスラッシュコマンド（/ を付けない名前 → 説明）。Slack の App にも同じ名前で足す
+    slash_commands: dict[str, str] = field(default_factory=dict)
 
     @property
     def catch_all(self) -> bool:
@@ -318,15 +322,21 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
             raise ModuleError(f"{where} の [channels] {kind}: \"{ALL_CHANNELS}\"（ほかのどれにも当たらないチャンネル）は、"
                               "それだけを書いてください")
     schedules = _schedules(_table(data, "schedules", where), where)
-    if (channels or schedules) and not (directory / CODE_FILE).is_file():
-        raise ModuleError(f"{where}: [channels] と [schedules] を動かす {CODE_FILE}（class Module）が、同じフォルダにありません")
+    slash = _table(data, "slash_commands", where)
+    for command, text in slash.items():
+        if not _SLASH.match(command) or not isinstance(text, str):
+            raise ModuleError(f"{where} の [slash_commands] {command}: 名前は英小文字・数字・_・-（/ は付けない）で、"
+                              "値は説明の文字にしてください")
+    if (channels or schedules or slash) and not (directory / CODE_FILE).is_file():
+        raise ModuleError(f"{where}: [channels]・[schedules]・[slash_commands] を動かす {CODE_FILE}（class Module）が、"
+                          "同じフォルダにありません")
     return ModuleSpec(
         name=name, label=str(data.get("label") or name), description=str(data.get("description") or ""),
         path=directory, builtin=builtin,
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
-        settings=_settings(_table(data, "settings", where), where))
+        settings=_settings(_table(data, "settings", where), where), slash_commands=dict(slash))
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:
@@ -373,6 +383,7 @@ def _check_collisions(specs: dict[str, ModuleSpec]) -> None:
         keys = [f"用途「{u.name}」" for u in (spec.actor.use_cases if spec.actor else ())]
         keys += [f"定期処理「{s.name}」" for s in spec.schedules]
         keys += [f"チャンネルの種類「{kind}」" for kind in spec.channels]
+        keys += [f"スラッシュコマンド「/{name}」" for name in spec.slash_commands]
         keys += [f"番地「{spec.port}」"] if spec.port else []
         for key in keys:
             if key in seen and seen[key] != spec.name:
@@ -441,9 +452,15 @@ def load_code(spec: ModuleSpec) -> type | None:
             inspect.signature(agenda).bind(None, 7, None)
         except TypeError:
             raise ModuleError(f"{where}: agenda は agenda(self, days, kinds=None) の形にしてください") from None
+    if spec.slash_commands and not callable(getattr(cls, "on_slash_command", None)):
+        raise ModuleError(f"{where}: [slash_commands] があるので、class Module に on_slash_command(name, body) を書いてください")
     for hook, args, shape in (("on_event", (None, "", {}), "on_event(self, kind, data)"),
                               ("home", (None,), "home(self)"),
-                              ("on_home_action", (None, "", {}), "on_home_action(self, name, action)")):
+                              ("on_home_action", (None, "", {}), "on_home_action(self, name, action)"),
+                              ("on_slash_command", (None, "", {}), "on_slash_command(self, name, body)"),
+                              ("on_action", (None, "", {}), "on_action(self, name, body)"),
+                              ("on_view", (None, "", {}), "on_view(self, name, body)"),
+                              ("material", (None, 0.0), "material(self, now)")):
         found = getattr(cls, hook, None)
         if found is None:
             continue

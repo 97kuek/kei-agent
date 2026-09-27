@@ -31,8 +31,16 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
   押せるものの action_id は core.home_action_id(名前) で作る（チェックなら core.home_checkboxes）
 - `async on_home_action(name, action)` … App Home の、このモジュールの項目が押されたとき（name は
   home_action_id に渡した名前、action は Slack の action）。依頼者のときだけ呼ばれ、終わると App Home を作り直す
+- `async on_slash_command(name, body) -> str` … module.toml の [slash_commands] のコマンドが打たれたとき（body は Slack の
+  command の中身）。返した文を、打った人にだけ見せる。Slack は3秒以内の返事を求めるので、時間のかかることは core.spawn に回す
+- `async on_action(name, body)` … このモジュールの投稿のボタンなど（action_id は core.action_id(名前) で作る）が押されたとき
+- `async on_view(name, body) -> dict | None` … このモジュールの入力の画面（callback_id は core.view_id(名前)）が送られたとき。
+  欄の下に出す理由を {block_id: 文} で返すと、画面を閉じない
+- `async material(now) -> list[str]` … Daily と振り返りの材料に足す行（今週の時間など）
 - `welcome() -> str` … モジュールのチャンネルに招かれたときの案内（できること）
 - `default_question` … 本文の無いメンションのときに、担当に聞くこと
+
+依頼者だけが押せる・打てる（ボタン・画面・コマンドは、本体が依頼者か確かめてから渡す）。
 """
 
 from __future__ import annotations
@@ -54,14 +62,18 @@ from kei_agent.records import Records
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape, split_text
+from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 
 if TYPE_CHECKING:
     from kei_agent.assistant import Assistant
 
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "checked_text",
-           "day_label", "due_clock", "due_day", "escape", "failure_text", "parse_time", "selected_values", "weekday"]
+__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "Toggl",
+           "TogglAmbiguousWrite", "TogglError", "checked_text", "day_label", "due_clock", "due_day", "escape",
+           "failure_text", "load_toggl", "parse_time", "selected_values", "weekday"]
+# モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
+MODULE_PREFIX = "kei_agent_module:"
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
 
@@ -170,12 +182,50 @@ class Core:
         """module.toml の [channels] の種類に当たるチャンネルの名前（設定の [channels] で変えたものも）。"""
         return self._assistant.config.module_channels.get(kind, ())
 
-    async def post(self, channel: str, text: str, *, thread_ts: str | None = None) -> str:
-        """投稿する（リンクのプレビューは付けない）。投稿の ts を返す。"""
+    async def post(self, channel: str, text: str, *, thread_ts: str | None = None,
+                   blocks: list[dict] | None = None) -> str:
+        """投稿する（リンクのプレビューは付けない）。blocks を渡すとボタンなども置ける。投稿の ts を返す。"""
         where = {"thread_ts": thread_ts} if thread_ts else {}
+        if blocks is not None:
+            where["blocks"] = blocks
         posted = await self._assistant.slack.chat_postMessage(channel=channel, text=text, unfurl_links=False,
                                                               unfurl_media=False, **where)
         return str(posted.get("ts") or "")
+
+    async def update(self, channel: str, ts: str, text: str, *, blocks: list[dict] | None = None) -> None:
+        """自分の投稿を書き換える（消されていたら Slack の例外がそのまま上がる）。"""
+        await self._assistant.slack.chat_update(channel=channel, ts=ts, text=text,
+                                                **({"blocks": blocks} if blocks is not None else {}))
+
+    async def open_view(self, trigger_id: str, view: dict) -> dict:
+        """入力の画面を開く（trigger_id は押されてから3秒で切れる）。開いた画面（id など）を返す。"""
+        opened = await self._assistant.slack.views_open(trigger_id=trigger_id, view=view)
+        return dict(opened.get("view") or {})
+
+    async def update_view(self, view_id: str, view: dict) -> None:
+        """開いている画面を差し替える（読み込み中の画面を、あとから中身に替えるときなど）。"""
+        await self._assistant.slack.views_update(view_id=view_id, view=view)
+
+    async def permalink(self, channel: str, ts: str) -> str:
+        """投稿へのリンク。"""
+        return await self._assistant.permalink(channel, ts)
+
+    async def channel_name(self, channel: str) -> str:
+        """チャンネルの Slack での名前（番号つき。`20_course` など）。"""
+        info = await self._assistant.slack.conversations_info(channel=channel)
+        return str(info["channel"]["name"])
+
+    def action_id(self, name: str) -> str:
+        """このモジュールの投稿に置くボタンなどの action_id（押されると on_action(name, body)）。"""
+        return f"{MODULE_PREFIX}{self.name}:{name}"
+
+    def view_id(self, name: str) -> str:
+        """このモジュールの入力の画面の callback_id（送られると on_view(name, body)）。"""
+        return f"{MODULE_PREFIX}{self.name}:{name}"
+
+    def spawn(self, coro) -> None:
+        """裏で動かす（Slack に3秒以内に返したあとに、Toggl や Notion に送るときなど）。落ちたらログに残る。"""
+        self._assistant.spawn(coro)
 
     async def react(self, channel: str, ts: str, emoji: str, *, remove: bool = False) -> None:
         """リアクションを付ける（remove なら外す）。付け外しに失敗しても止めない。"""
@@ -265,6 +315,15 @@ class Core:
         if not reply.ok:
             log.info("%sの担当に %s を渡せませんでした: %s", self.spec.label, skill, reply.text[:200])
         return reply.ok
+
+    async def ask_module(self, name: str, skill: str, payload: dict) -> Reply:
+        """ほかのモジュールの担当プロセスに仕事を頼む（module.toml の [depends] に書いた相手だけ）。"""
+        if name not in (*self.spec.requires, *self.spec.optional):
+            raise ValueError(f"モジュール「{self.name}」の [depends] に {name} がありません")
+        core = self._assistant.cores.get(name)
+        if core is None:
+            return Reply.broken(f"モジュール「{name}」はオンになっていません")
+        return await core.ask_agent(skill, payload)
 
     async def skills(self) -> list[dict]:
         """この担当の名刺に載っている仕事（読めなければ空）。"""
