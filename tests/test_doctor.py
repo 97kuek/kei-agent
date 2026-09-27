@@ -38,6 +38,10 @@ def test_a_broken_config_is_the_only_finding(tmp_path):
     (home / "config.toml").write_text("modules = [\"nothing\"]\n", encoding="utf-8")
     config, findings = doctor.check_config(env={"KEI_AGENT_HOME": str(home)})
     assert config is None and findings[0].level == ERROR and "nothing" in findings[0].text
+    # TOML の書き方の誤りも、止まらずに設定の誤りとして出す
+    (home / "config.toml").write_text("modules = [\"course\"\n", encoding="utf-8")
+    config, findings = doctor.check_config(env={"KEI_AGENT_HOME": str(home)})
+    assert config is None and findings[0].level == ERROR and "TOML として読めません" in findings[0].text
 
 
 def test_secrets_are_checked_by_name_only(config, tmp_path):

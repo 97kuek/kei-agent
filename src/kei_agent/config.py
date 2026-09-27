@@ -510,6 +510,12 @@ def user_home(env: dict[str, str] | None = None) -> Path:
     return _expand(env.get("KEI_AGENT_HOME") or DEFAULT_HOME)
 
 
+def config_path(env: dict[str, str] | None = None) -> Path:
+    """設定ファイルの場所（環境変数 KEI_AGENT_CONFIG、なければ利用者のフォルダの config.toml）。"""
+    env = dict(os.environ) if env is None else env
+    return _expand(env["KEI_AGENT_CONFIG"]) if env.get("KEI_AGENT_CONFIG") else user_home(env) / CONFIG_FILE
+
+
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
     """設定を読む。場所は path、環境変数 KEI_AGENT_CONFIG、利用者のフォルダの config.toml の順に探す。
 
@@ -523,8 +529,12 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     if not path.is_file():
         raise ConfigError(f"設定ファイルがありません: {path}。{EXAMPLE_CONFIG.name} を写して書き換えてください"
                           f"（例: cp {EXAMPLE_CONFIG} {path}）")
-    with path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        # 書き方の誤りも設定の誤りとして知らせる（起動・kei-agent doctor・kei-agent module が同じように扱える）
+        raise ConfigError(f"{path.name} の書き方が TOML として読めません: {e}") from None
 
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
