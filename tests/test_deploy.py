@@ -14,8 +14,11 @@ import pytest
 from kei_agent.config import REPO_ROOT
 
 DEPLOY = REPO_ROOT / "deploy"
-# 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する
-AGENTS = ("research", "course", "work", "knowledge", "voice")
+# 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する。本体に組み込みの担当は kei-agent-<名前>、
+# 担当プロセスを持つモジュールは共通の kei-agent-module <名前> で動く
+CORE_AGENTS = ("research", "course", "work", "voice")
+MODULE_AGENTS = ("knowledge",)
+AGENTS = (*CORE_AGENTS, *MODULE_AGENTS)
 # install.sh で登録できるもの（名前なしは本体）
 INSTALLABLE = ("", *AGENTS, "notion-gateway")
 ZSH = shutil.which("zsh")
@@ -78,9 +81,15 @@ def test_every_agent_starts_from_one_script():
         assert plist["ProgramArguments"] == ["/bin/zsh", f"{REPO_ROOT}/deploy/run-agent.sh", name]
         assert plist["StandardOutPath"] == plist["StandardErrorPath"] == str(logs / f"{name}-launchd.log")
         assert plist["KeepAlive"] is True and plist["ThrottleInterval"] == 30
-        # run-agent.sh は、グループ <名前> をそろえてから kei-agent-<名前> を動かす
-        assert f"kei-agent-{name}" in project["project"]["scripts"]
-        assert name in project["dependency-groups"]
+        if name in CORE_AGENTS:
+            # run-agent.sh は、グループ <名前> をそろえてから kei-agent-<名前> を動かす
+            assert f"kei-agent-{name}" in project["project"]["scripts"]
+            assert name in project["dependency-groups"]
+        else:
+            # モジュールの担当は、pyproject.toml に自分の名前を持たない（共通の起動コマンドと、担当に共通のグループ）
+            assert f"kei-agent-{name}" not in project["project"]["scripts"]
+            assert name not in project["dependency-groups"]
+    assert "kei-agent-module" in project["project"]["scripts"] and "agents" in project["dependency-groups"]
 
 
 @needs_zsh
@@ -164,7 +173,7 @@ def _run_agent(home: Path, *args: str, common: str | None = "", own: dict[str, s
     shutil.copytree(REPO_ROOT / "modules", repo / "modules", dirs_exist_ok=True)
     venv_bin = repo / ".venv" / "bin"
     venv_bin.mkdir(parents=True, exist_ok=True)
-    for name in AGENTS:
+    for name in (*CORE_AGENTS, "module"):
         entry = venv_bin / f"kei-agent-{name}"
         entry.write_text(FAKE_ENTRY, encoding="utf-8")
         entry.chmod(0o755)
@@ -201,9 +210,14 @@ def test_run_agent_starts_each_agent_from_the_common_secrets_alone(tmp_path, nam
     """
     uv, cwd, argv, env = _started(_run_agent(tmp_path, name))
     repo = (tmp_path / "repo").resolve()
-    assert uv == f"uv sync --frozen --inexact --quiet --group {name}"
+    if name in CORE_AGENTS:
+        assert uv == f"uv sync --frozen --inexact --quiet --group {name}"
+        assert argv == f"{tmp_path}/repo/.venv/bin/kei-agent-{name} "
+    else:
+        # モジュールの担当は、担当に共通のグループをそろえて、共通の起動コマンドに名前を渡す
+        assert uv == "uv sync --frozen --inexact --quiet --group agents"
+        assert argv == f"{tmp_path}/repo/.venv/bin/kei-agent-module {name}"
     assert cwd == str(repo)
-    assert argv == f"{tmp_path}/repo/.venv/bin/kei-agent-{name} "
     assert env["VIRTUAL_ENV"] == f"{tmp_path}/repo/.venv"
     assert env["PATH"].startswith(f"{tmp_path}/repo/.venv/bin:")
 

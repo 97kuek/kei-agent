@@ -111,8 +111,9 @@ def test_modules_in_the_config_must_exist_and_bring_what_they_require(tmp_path):
 
 def test_a_module_can_only_pick_models_from_the_core_list(tmp_path):
     home_dir = _config(tmp_path, 'modules = ["cheap"]\n')
-    _module(home_dir / "modules", "cheap", 'api = 1\nname = "cheap"\n[actor]\nprompt = "cheap.md"\n'
-                                           '[use_cases.cheap_answer]\nclaude = { model = "claude-2" }\n')
+    folder = _module(home_dir / "modules", "cheap", 'api = 1\nname = "cheap"\n[actor]\nprompt = "cheap.md"\n'
+                                                    '[use_cases.cheap_answer]\nclaude = { model = "claude-2" }\n')
+    (folder / "cheap.md").write_text("# 安い担当\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="claude のモデル claude-2 は使えません"):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
@@ -156,13 +157,85 @@ def test_code_can_read_files_next_to_it_and_is_reloaded_from_a_new_place(tmp_pat
     assert modules.load_code(modules.load_spec(second)).label == "雨"
 
 
-def test_builtin_module_code_only_imports_the_api():
-    """組み込みのモジュールも、利用者のモジュールと同じく、窓口（kei_agent.api）だけでコアに触れる。"""
+def test_builtin_module_code_only_imports_the_windows():
+    """組み込みのモジュールも、利用者のモジュールと同じく、窓口だけでコアに触れる。
+
+    本体側の module.py は kei_agent.api、担当プロセス側（agent.py と、そこから読むファイル）は kei_agent_a2a.api。
+    """
     import ast
 
-    for path in modules.BUILTIN_DIR.glob(f"*/{modules.CODE_FILE}"):
+    for path in modules.BUILTIN_DIR.glob("*/*.py"):
+        window = "kei_agent.api" if path.name == modules.CODE_FILE else "kei_agent_a2a.api"
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
         imported += [node.module for node in ast.walk(tree)
                      if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module]
-        assert [name for name in imported if name.startswith("kei_agent") and name != "kei_agent.api"] == [], path
+        assert [name for name in imported if name.startswith("kei_agent") and name != window] == [], path
+
+
+# 担当プロセス（agent.py）
+
+AGENT_CODE = '''from kei_agent_a2a.api import AgentSkill, SkillExecutor
+
+SKILLS = [AgentSkill(id="forecast", name="天気", description="明日の天気", tags=["weather"])]
+
+
+class Executor(SkillExecutor):
+    async def handle(self, updater, metadata, text):
+        await self.done(updater, "晴れ")
+'''
+
+
+def _agent_module(root, code=AGENT_CODE):
+    folder = _module(root, "weather", 'api = 1\nname = "weather"\nlabel = "天気"\ndescription = "天気を調べる"\n'
+                                      '[process]\nport = 8800\n')
+    if code is not None:
+        (folder / "agent.py").write_text(code, encoding="utf-8")
+    return folder
+
+
+def test_a_process_needs_its_agent_code_and_an_actor_needs_its_prompt(tmp_path):
+    with pytest.raises(modules.ModuleError, match="agent.py"):
+        modules.load_spec(_agent_module(tmp_path / "a", code=None))
+    folder = _module(tmp_path / "b", "helper", 'api = 1\nname = "helper"\n[actor]\nprompt = "helper.md"\n'
+                                              '[use_cases.helper_answer]\nclaude = { model = "claude-sonnet-5" }\n')
+    with pytest.raises(modules.ModuleError, match="helper.md"):
+        modules.load_spec(folder)
+    (folder / "helper.md").write_text("# 手伝い\n", encoding="utf-8")
+    assert modules.load_spec(folder).actor.prompt == "helper.md"
+
+
+def test_agent_code_without_skills_or_an_executor_is_refused(tmp_path):
+    spec = modules.load_spec(_agent_module(tmp_path, code="VALUE = 1\n"))
+    with pytest.raises(modules.ModuleError, match="SKILLS"):
+        modules.load_agent(spec)
+
+
+def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
+    """共通の起動コマンドは、module.toml の番地と agent.py から担当を作る（src/ と pyproject.toml は触らない）。"""
+    pytest.importorskip("a2a", reason="担当プロセスは a2a-sdk で動く")
+    from kei_agent_a2a import launch, server
+
+    home_dir = _config(tmp_path, 'modules = ["knowledge", "weather"]\n')
+    _agent_module(home_dir / "modules")
+    monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
+    started = []
+    monkeypatch.setattr(server, "serve", lambda name, build_card, build_executor, rpc_path, port, prefix:
+                        started.append((name, build_card("http://127.0.0.1:8800"), port, prefix)))
+
+    launch.main(["weather"])
+
+    (name, card, port, prefix), = started
+    assert (name, port, prefix) == ("天気エージェント", 8800, "KEI_AGENT_WEATHER")
+    # 名刺の説明は、agent.py に DESCRIPTION が無ければ module.toml の description
+    assert (card.name, card.description, [s.id for s in card.skills]) == ("Kei Agent（天気）", "天気を調べる", ["forecast"])
+    _, build_executor = launch.parts(modules.known()["weather"])
+    assert build_executor().agent == "weather"            # 制限の表とモデルの一覧を引く名前はモジュールの名前
+    # 知らないもの、担当プロセスを持たないもの、設定の modules に無い（オフの）ものは起動しない
+    _module(home_dir / "modules", "quiet", 'api = 1\nname = "quiet"\n')
+    radar = _module(home_dir / "modules", "radar", 'api = 1\nname = "radar"\n[process]\nport = 8801\n')
+    (radar / "agent.py").write_text(AGENT_CODE, encoding="utf-8")
+    for name in ("nothing", "quiet", "radar"):
+        with pytest.raises(SystemExit):
+            launch.main([name])
+    assert len(started) == 1

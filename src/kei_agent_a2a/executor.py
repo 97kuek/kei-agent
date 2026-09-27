@@ -1,4 +1,4 @@
-"""頼まれた仕事をこなすところの土台（大学・研究・仕事のエージェントで共通）。
+"""頼まれた仕事をこなすところの土台（大学・研究・仕事・モジュールのエージェントで共通）。
 
 A2A では、相手からのメッセージは `RequestContext` に入って届き、結果は `EventQueue` に流す。
 ここは「仕事を受け付けたと知らせ、本文と metadata を取り出して `handle` に渡す」までと、
@@ -15,8 +15,10 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent import themes
+from kei_agent.config import Config, load_config
 from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import ModelPolicyError
+from kei_agent.store import Store
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope, run
 
@@ -47,10 +49,15 @@ def asked_days(metadata: dict | None, default: int, maximum: int = MAX_DAYS) -> 
 class SkillExecutor(AgentExecutor):
     """仕事を受け付けて `handle` に渡す。返事は全エージェント共通の封筒（`envelope.py`）。
 
-    使う側は `agent`（制限の表の名前）と、`config`・`store` を持つ。
+    使う側は `agent`（制限の表の名前）を持つ。設定（`config`）と保存（`store`）は、渡さなければここで用意する。
+    終わったら `done`、断るなら `fail`、自由な依頼は `answer` に渡す。
     """
 
     agent = ""
+
+    def __init__(self, config: Config | None = None, store: Store | None = None):
+        self.config = config or load_config()
+        self.store = store or Store(self.config.db_path)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})
@@ -77,19 +84,19 @@ class SkillExecutor(AgentExecutor):
             ws = self.workspace(ask)
             recipe = await run.recipe_for(self.config, self.store, self.agent, ask)
         except UsageLimited as e:
-            await self._fail(updater, str(e), e.reset_at)
+            await self.fail(updater, str(e), e.reset_at)
             return
         except (ValueError, ModelPolicyError) as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
         await run.finish(updater, await run.execute(self.config, ws, ask, updater, recipe))
 
-    async def _fail(self, updater: TaskUpdater, reason: str, limit_reset_at: float | None = None) -> None:
+    async def fail(self, updater: TaskUpdater, reason: str, limit_reset_at: float | None = None) -> None:
         log.warning("断りました: %s", reason)
         await updater.failed(updater.new_agent_message([
             Part(text=envelope.reply(reason, ok=False, limit_reset_at=limit_reset_at))]))
 
-    async def _done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
+    async def done(self, updater: TaskUpdater, text: str, data: dict | None = None) -> None:
         await run.finish(updater, envelope.reply(text, data))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:

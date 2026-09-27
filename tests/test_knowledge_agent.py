@@ -16,7 +16,7 @@ from kei_agent.agent_policy import policy_of
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 pytest.importorskip("uvicorn")
 
-from kei_agent_knowledge import digest, feeds
+from kei_agent_modules.knowledge import digest, feeds
 
 TOKEN = "test-token"
 NOW = datetime(2026, 9, 26, 7, 0, tzinfo=UTC)
@@ -297,12 +297,13 @@ def _free_port() -> int:
 async def server(config, store):
     import uvicorn
 
-    from kei_agent_knowledge.app import build_app
-    from kei_agent_knowledge.executor import KnowledgeExecutor
+    from kei_agent import modules
+    from kei_agent_a2a import launch
+    from kei_agent_modules.knowledge.agent import Executor
 
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    app = build_app(base, TOKEN, executor=KnowledgeExecutor(config, store))
+    app = launch.build_app(modules.builtin()["knowledge"], base, TOKEN, executor=Executor(config, store))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     for _ in range(100):

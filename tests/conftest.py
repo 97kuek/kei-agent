@@ -11,6 +11,10 @@ from kei_agent import improve, issues, model_classifier, modules, research
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, model_actors
 from kei_agent.store import Store
 
+# 組み込みのモジュールのフォルダを、パッケージとして読めるようにしておく（from kei_agent_modules.knowledge import digest）
+for _spec in modules.builtin().values():
+    modules.package(_spec)
+
 # 開発機のシェルには本物の秘密情報が入っている。テストから Toggl・Notion・Slack などに届かないよう、
 # 各テストの前に消す（使うテストは monkeypatch.setenv で入れ直す）
 _SECRET_PREFIXES = ("TOGGL_", "NOTION_", "SLACK_", "KEI_AGENT_", "BOX_", "WANDB_", "OPENAI_")

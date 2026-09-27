@@ -48,18 +48,18 @@ class QuestionExecutor(SkillExecutor):
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         if metadata.get("skill", ASK) != ASK:
-            await self._fail(updater, f"できるのは {ASK} だけです")
+            await self.fail(updater, f"できるのは {ASK} だけです")
             return
         try:
             asked = json.loads(text)
         except ValueError:
             asked = None
         if not isinstance(asked, dict):
-            await self._fail(updater, NO_QUESTION)
+            await self.fail(updater, NO_QUESTION)
             return
         answer = await self.assistant.answer_question(
             str(asked.get("actor") or ""), str(asked.get("question") or ""), str(asked.get("theme") or ""))
-        await self._done(updater, answer)
+        await self.done(updater, answer)
 
 
 async def serve(assistant, url: str) -> None:

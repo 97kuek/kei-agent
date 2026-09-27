@@ -87,6 +87,8 @@ class Workspace:
     timeout_minutes: int | None = None
     # MODULE のときの、モジュールの名前
     module: str = ""
+    # 指示書の最後に、依頼者のプロフィールを差し込むか（JSON だけを返す振り分け・分類・選別の係は差し込まない）
+    profile: bool = True
 
 
 # Slack のチャンネル名は日本語も使えるので、パスとして危ない形だけを弾く

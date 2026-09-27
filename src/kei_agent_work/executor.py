@@ -37,7 +37,7 @@ class WorkExecutor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", LIST_EVENTS)
         if skill not in SKILLS:
-            await self._fail(updater, f"できるのは {' / '.join(SKILLS)} だけです")
+            await self.fail(updater, f"できるのは {' / '.join(SKILLS)} だけです")
             return
         if skill == ASK:
             await self.answer(updater, text)
@@ -48,7 +48,7 @@ class WorkExecutor(SkillExecutor):
             events = await connector.events(self.config, days, store=self.store,
                                             **({"provider": provider} if provider else {}))
         except connector.WorkCalendarError as e:
-            await self._fail(updater, str(e), e.limit_reset_at)
+            await self.fail(updater, str(e), e.limit_reset_at)
             return
         log.info("予定を %d 件返します（%d 日ぶん）", len(events), days)
-        await self._done(updater, f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events})
+        await self.done(updater, f"これから {days} 日の予定は {len(events)} 件", {"days": days, "items": events})

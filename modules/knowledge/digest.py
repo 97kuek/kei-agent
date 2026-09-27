@@ -1,7 +1,7 @@
 """朝の読みものと、テーマごとの論文の新着（docs/architecture.md の「知識」）。
 
 集める・絞るのはプログラム（feeds.py）。選ぶ・要約するのは AI で、どちらも Web を使えない回
-（modules/knowledge/module.toml の offline = true）。外の文は材料としてプロンプトに入れるだけにする。
+（module.toml の offline = true）。外の文は材料としてプロンプトに入れるだけにする。
 一度候補にした記事・論文は、担当の作業場に SEEN_DAYS 日だけ覚えておき、もう出さない。
 """
 
@@ -15,16 +15,13 @@ import time
 import urllib.parse
 from collections.abc import Awaitable, Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from kei_agent import runner, themes
-from kei_agent.config import Config
-from kei_agent.model_json import json_object
-from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
-from kei_agent.themes import Workspace
-from kei_agent_knowledge import feeds
+from kei_agent_a2a.api import AIError, Config, json_object, run_ai, workspace
+
+from . import feeds
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ MAX_CANDIDATES = 60
 LIKE_BOOST = 0.5
 MAX_PAPER_CANDIDATES = 30
 FETCH_WORKERS = 8
-# 朝の選別・要約の指示書（作業場に差し替える。質問に答えるときは prompts/knowledge.md）
+# 朝の選別・要約の指示書（同じフォルダ。質問に答えるときは module.toml の prompt の knowledge.md）
 PROMPT_FILE = "knowledge-digest.md"
 # 用途の名前（modules/knowledge/module.toml の [use_cases]）。選ぶ回と要約する回は、どちらも Web を使わない
 PICK = "knowledge_pick"
@@ -195,7 +192,7 @@ class Seen:
 
 
 def seen_path(config: Config) -> Path:
-    return themes.agent_workspace(config, AGENT).cwd / SEEN_FILE
+    return workspace(config, AGENT) / SEEN_FILE
 
 
 def normalized_url(url: str) -> str:
@@ -269,26 +266,15 @@ def balanced(found: list[tuple[feeds.Entry, list[str]]], interests: list[Interes
     return (picks + rest)[:count]
 
 
-def _workspace(config: Config) -> Workspace:
-    ws = themes.agent_workspace(config, AGENT)
-    assert ws.cwd is not None
-    ws.cwd.mkdir(parents=True, exist_ok=True)
-    return replace(ws, system_prompt=config.prompt_file(PROMPT_FILE))
-
-
 async def _run(config: Config, store, use_case: str, prompt: str, provider: str, key: str) -> dict:
-    """Web を使えない回で AI を1回動かし、key を持つ JSON を返す。"""
+    """Web を使えない回で AI を1回動かし、key を持つ JSON を返す（指示書は選別・要約の係のもの。プロフィールは渡さない）。"""
     try:
-        recipe = (resolve(AGENT, provider, use_case) if provider
-                  else resolve_selected(config, store, AGENT, use_case))
-    except ModelPolicyError as e:
-        raise DigestError(str(e)) from None
-    result = await runner.run_model(
-        config, runner.ExecutionRequest(_workspace(config), recipe, None, "", "", read_only=True), prompt)
-    if result.is_error:
-        raise DigestError(result.failure_reason(), result.limit_reset_at)
+        text = await run_ai(config, store, AGENT, use_case, prompt, provider=provider, prompt_file=PROMPT_FILE,
+                            profile=False)
+    except AIError as e:
+        raise DigestError(str(e), e.limit_reset_at) from None
     try:
-        return json_object(result.text, key)
+        return json_object(text, key)
     except ValueError:
         raise DigestError("AI の答えを読めませんでした（JSON ではありません）") from None
 

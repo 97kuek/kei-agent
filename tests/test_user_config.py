@@ -59,8 +59,13 @@ def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_
     course = prompt_text(config, config.prompt_file("course.md"))
     assert course.rstrip().endswith("## 依頼者のプロフィール\n\n## 話し方\n\n- 一人称は「僕」")
     assert "# プロフィール" not in course and "書き方の説明" not in course     # 題とコメントは差し込まない
-    assert "依頼者のプロフィール" not in prompt_text(config, config.prompt_file("router.md"))
-    assert "依頼者のプロフィール" not in prompt_text(config, config.prompt_file("knowledge-digest.md"))
+    # JSON だけを返す係は、作業場で差し込まないと決める（振り分け・分類の作業場と、知識の選別・要約の回）
+    from kei_agent import router
+    ws = router.workspace(config)
+    assert ws.profile is False and "依頼者のプロフィール" not in prompt_text(config, ws.system_prompt, ws.profile)
+    digest = config.prompt_file("knowledge-digest.md", module="knowledge")
+    assert digest == config.repo_root / "modules" / "knowledge" / "knowledge-digest.md" and digest.is_file()
+    assert "依頼者のプロフィール" not in prompt_text(config, digest, profile=False)
     # プロフィールを変えたら、指示の版も変わる（古い会話を、前の話し方のまま続けない）
     before = prompt_version(config, "course")
     (home / "profile.md").write_text("## 話し方\n\n- 一人称は「私」\n", encoding="utf-8")
@@ -73,6 +78,10 @@ def test_a_prompt_can_be_replaced_as_a_whole(tmp_path):
     assert config.prompt_file("course.md") == home.resolve() / "prompts" / "course.md"
     assert config.prompt_file("work.md") == config.repo_root / "prompts" / "work.md"
     assert prompt_text(config, config.prompt_file("course.md")) == "# 自分の大学エージェント\n"
+    # モジュールの指示書はモジュールのフォルダにある。同じ名前を利用者のフォルダに置けば、それも差し替えられる
+    assert config.prompt_file("knowledge.md", module="knowledge") == config.repo_root / "modules" / "knowledge" / "knowledge.md"
+    (home / "prompts" / "knowledge.md").write_text("# 自分の知識の担当\n", encoding="utf-8")
+    assert config.prompt_file("knowledge.md", module="knowledge") == home.resolve() / "prompts" / "knowledge.md"
 
 
 def test_the_example_profile_adds_only_its_content(tmp_path):

@@ -58,8 +58,10 @@ agent_names() {
 
 # 仮想環境の Python で直に起動する。`uv run` だと uv が親として残り、プロセスごとに 20MB ほど余分に使う。
 # 起動の前に lock のとおりに依存をそろえる（--inexact: ほかのグループのものは消さない。uv run と同じ）
+# 使い方: launch <依存のグループ（空なら本体だけ）> <起動口> [起動口に渡す引数...]
 launch() {
   local group="$1" entry="$2"
+  shift 2
   local -a groups=()
   if [[ -n "$group" ]]; then
     groups=(--group "$group")
@@ -68,5 +70,5 @@ launch() {
   uv sync --frozen --inexact --quiet "${groups[@]}"
   export VIRTUAL_ENV="$REPO/.venv"
   export PATH="$VIRTUAL_ENV/bin:$PATH"
-  exec "$VIRTUAL_ENV/bin/$entry"
+  exec "$VIRTUAL_ENV/bin/$entry" "$@"
 }

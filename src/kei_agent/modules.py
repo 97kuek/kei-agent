@@ -1,11 +1,11 @@
 """モジュール（機能のまとまり）の定義 `module.toml` を読む（docs/extensibility.md）。
 
 組み込みのモジュールはリポジトリ直下の `modules/<名前>/`、利用者のモジュールは `~/.config/kei-agent/modules/<名前>/`。
-どちらも同じ形で読む。変わらない事実（module.toml）は設定を読むときに確かめ、動き（module.py）は
-本体が起動するときに load_code で読み込む。
+どちらも同じ形で読む。変わらない事実（module.toml）は設定を読むときに確かめ、動きは使うときに読み込む
+（本体側の module.py は本体の起動のときに load_code で、担当プロセスの agent.py は共通の起動コマンドが load_agent で）。
 
 コアのほかの部品（設定・モデル・制限の表）がここを読むので、ここからは kei_agent のどこも読み込まない
-（module.py が読み込むのは、窓口の kei_agent.api だけ）。
+（module.py が読み込むのは窓口の kei_agent.api、agent.py は kei_agent_a2a.api だけ）。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from pathlib import Path
 API_VERSION = 1
 SPEC_FILE = "module.toml"
 CODE_FILE = "module.py"
+AGENT_FILE = "agent.py"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
 PACKAGE = "kei_agent_modules"
 BUILTIN_DIR = Path(__file__).resolve().parents[2] / "modules"
@@ -153,6 +154,8 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
     prompt = str(data.get("prompt") or "")
     if not prompt.endswith(".md"):
         raise ModuleError(f"{at} の prompt は指示書のファイル名（例: knowledge.md）にしてください")
+    if not (Path(where).parent / prompt).is_file():
+        raise ModuleError(f"{at} の prompt（{prompt}）が、module.toml と同じフォルダにありません")
     return ActorSpec(prompt=prompt, plugin=bool(data.get("plugin", False)), files=data.get("files", "none"),
                      shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
                      notion=data.get("notion", "none"), timeout_minutes=timeout, default_use_case=default,
@@ -200,6 +203,8 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     port = process.get("port")
     if process and (not isinstance(port, int) or not 1024 <= port <= 65535):
         raise ModuleError(f"{where} の [process] port は 1024〜65535 の整数にしてください")
+    if process and not (directory / AGENT_FILE).is_file():
+        raise ModuleError(f"{where}: [process] で動かす {AGENT_FILE}（SKILLS と class Executor）が、同じフォルダにありません")
     channels = {kind: _names(names, f"{where} の [channels] {kind}")
                 for kind, names in _table(data, "channels", where).items()}
     schedules = _schedules(_table(data, "schedules", where), where)
@@ -322,3 +327,14 @@ def load_code(spec: ModuleSpec) -> type | None:
     if spec.channels and not callable(getattr(cls, "on_message", None)):
         raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req) を書いてください")
     return cls
+
+
+def load_agent(spec: ModuleSpec):
+    """担当プロセスの動き（agent.py の SKILLS と class Executor）を読み込む。共通の起動コマンドが使う。"""
+    where = spec.path / AGENT_FILE
+    importlib.invalidate_caches()
+    code = importlib.import_module(f"{package(spec)}.agent")
+    if not isinstance(getattr(code, "SKILLS", None), (list, tuple)) or not isinstance(getattr(code, "Executor", None),
+                                                                                       type):
+        raise ModuleError(f"{where} に SKILLS（名刺に載せる仕事の一覧）と class Executor を書いてください")
+    return code

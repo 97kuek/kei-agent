@@ -52,12 +52,17 @@ class FakeKnowledgeAgent:
             {"ok": True, "text": "済", "data": data, "limit_reset_at": None, "cost_usd": None}, ensure_ascii=False))
 
 
-def test_the_skill_names_match_the_knowledge_agent():
-    """本体側（module.py）は kei_agent.api しか読み込まないので、担当の仕事の名前を自分でも持っている。"""
-    from kei_agent_knowledge import skills
+def test_the_host_and_the_agent_share_the_skill_names():
+    """本体側（module.py）が頼む仕事は、担当側（agent.py）の名刺に載っている。名前は同じ skills.py から読む。"""
+    pytest.importorskip("a2a", reason="名刺は a2a-sdk で作る")
+    from kei_agent_a2a import launch
 
-    code = sys.modules[modules.load_code(modules.builtin()["knowledge"]).__module__]
-    assert (code.READING_DIGEST, code.PAPER_DIGEST) == (skills.READING_DIGEST, skills.PAPER_DIGEST)
+    spec = modules.builtin()["knowledge"]
+    code = sys.modules[modules.load_code(spec).__module__]
+    build_card, _ = launch.parts(spec)
+    card = build_card("http://127.0.0.1:8792")
+    assert card.name == "Kei Agent（知識）" and card.description.startswith("興味のある技術記事")
+    assert {code.READING_DIGEST, code.PAPER_DIGEST} < {skill.id for skill in card.skills}
 
 
 # 先行研究

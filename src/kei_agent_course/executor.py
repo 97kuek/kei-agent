@@ -73,7 +73,7 @@ class CourseExecutor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = asked_skill(text, metadata)
         if not skill:
-            await self._fail(updater, f"どの仕事か分かりませんでした。{' / '.join(SKILLS)} のどれかを "
+            await self.fail(updater, f"どの仕事か分かりませんでした。{' / '.join(SKILLS)} のどれかを "
                                       "metadata の skill か、本文の1行目に書いてください")
             return
         log.info("頼まれた仕事: %s", skill)
@@ -87,12 +87,12 @@ class CourseExecutor(SkillExecutor):
         """Moodle のカレンダーから締切を読む。読めなければ理由を返して None。"""
         url = moodle.ics_url()
         if not url:
-            await self._fail(updater, NO_ICS)
+            await self.fail(updater, NO_ICS)
             return None
         try:
             return await asyncio.to_thread(lambda: moodle.due(url, days=days))
         except moodle.MoodleError as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return None
 
     async def _sync_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
@@ -103,9 +103,9 @@ class CourseExecutor(SkillExecutor):
         try:
             result = await asyncio.to_thread(notion_sync.sync, events)
         except (notion_sync.SyncError, NotionError) as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
-        await self._done(updater, result.summary(), {
+        await self.done(updater, result.summary(), {
             "added": result.added, "updated": result.updated, "unchanged": result.unchanged,
             "other_courses": result.other_courses})
 
@@ -116,7 +116,7 @@ class CourseExecutor(SkillExecutor):
         if events is None:
             return
         data = due_data(events, days)
-        await self._done(updater, f"これから {days} 日で締切の課題は {len(data['items'])} 件", data)
+        await self.done(updater, f"これから {days} 日で締切の課題は {len(data['items'])} 件", data)
 
     async def _list_calendar_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """Notion 課題 DB の完全な read-only snapshot を返す。"""
@@ -124,9 +124,9 @@ class CourseExecutor(SkillExecutor):
         try:
             data = await asyncio.to_thread(notion_sync.list_calendar_assignments, days, date.today())
         except (notion_sync.SyncError, NotionError) as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
-        await self._done(updater, f"{days} 日間の課題締切は {len(data['items'])} 件", data)
+        await self.done(updater, f"{days} 日間の課題締切は {len(data['items'])} 件", data)
 
     async def _list_classes(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """その曜日の授業を、時刻つきで返す（朝のまとめで時系列に並べるために使う）。
@@ -139,7 +139,7 @@ class CourseExecutor(SkillExecutor):
         try:
             found = await asyncio.to_thread(notion_sync.courses_on, weekday, day)
         except (notion_sync.SyncError, NotionError) as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
         items = []
         for course in found:
@@ -147,16 +147,16 @@ class CourseExecutor(SkillExecutor):
             items.append({**course,
                           "start": span[0].isoformat(timespec="minutes") if span else "",
                           "end": span[1].isoformat(timespec="minutes") if span else ""})
-        await self._done(updater, f"{weekday}曜の授業は {len(items)} コマ",
+        await self.done(updater, f"{weekday}曜の授業は {len(items)} コマ",
                          {"weekday": weekday, "items": items})
 
     async def _list_current_courses(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         try:
             items = await asyncio.to_thread(notion_sync.current_courses)
         except (notion_sync.SyncError, NotionError) as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
-        await self._done(updater, f"今学期の履修科目は {len(items)} 件", {"items": items})
+        await self.done(updater, f"今学期の履修科目は {len(items)} 件", {"items": items})
 
     async def _time_report(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """Toggl の記録を、科目ごと・課題ごとに集計して返す。"""
@@ -171,9 +171,9 @@ class CourseExecutor(SkillExecutor):
             text = await asyncio.to_thread(
                 toggl_report.report, asked_days(metadata, toggl_report.DEFAULT_DAYS), courses)
         except TogglError as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
-        await self._done(updater, text + note)
+        await self.done(updater, text + note)
 
     async def _ask(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         """定型に当てはまらない質問。Box と、ゲートウェイ経由の授業ホームを読んで答える（どの担当とも同じ ask）。"""

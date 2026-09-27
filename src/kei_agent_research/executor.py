@@ -65,7 +65,7 @@ class ResearchExecutor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", ASK)
         if skill not in SKILLS:
-            await self._fail(updater, f"できるのは {' / '.join(SKILLS)} です")
+            await self.fail(updater, f"できるのは {' / '.join(SKILLS)} です")
             return
         if skill == ASK:
             await self.answer(updater, text)
@@ -73,7 +73,7 @@ class ResearchExecutor(SkillExecutor):
         try:
             ask = _json(text)
         except ValueError as e:
-            await self._fail(updater, str(e))
+            await self.fail(updater, str(e))
             return
         await self._job(updater, skill, ask)
 
@@ -97,21 +97,21 @@ class ResearchExecutor(SkillExecutor):
                     self._group_ready = True
                 task_id = await self.pueue.add(cwd, str(ask.get("command") or ""),
                                                label=str(ask.get("label") or ""))
-                await self._done(updater, f"ジョブを入れました（pueue {task_id}）", {"task_id": task_id})
+                await self.done(updater, f"ジョブを入れました（pueue {task_id}）", {"task_id": task_id})
             elif skill == LIST_JOBS:
                 tasks = await self.pueue.tasks()
-                await self._done(updater, f"動いているジョブ: {len(tasks)} 件",
+                await self.done(updater, f"動いているジョブ: {len(tasks)} 件",
                                  {"tasks": {str(k): v for k, v in tasks.items()}})
             elif skill == CANCEL_JOB:
                 await self.pueue.kill(int(ask["task_id"]))
-                await self._done(updater, f"ジョブを止めました（pueue {ask['task_id']}）")
+                await self.done(updater, f"ジョブを止めました（pueue {ask['task_id']}）")
             else:
                 await self.pueue.remove(int(ask["task_id"]))
-                await self._done(updater, f"ジョブを片づけました（pueue {ask['task_id']}）")
+                await self.done(updater, f"ジョブを片づけました（pueue {ask['task_id']}）")
         except (KeyError, TypeError, ValueError) as e:
-            await self._fail(updater, f"ジョブの依頼が読めません: {e}")
+            await self.fail(updater, f"ジョブの依頼が読めません: {e}")
         except RuntimeError as e:
-            await self._fail(updater, f"pueue が失敗しました: {e}")
+            await self.fail(updater, f"pueue が失敗しました: {e}")
 
     def _theme_dir(self, cwd: str) -> Path:
         """ジョブを動かしてよい場所だけを受け付ける（渡された場所で何でも動かさない）。

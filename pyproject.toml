@@ -31,21 +31,22 @@ kei-agent-course-inspect = "kei_agent_course.catalog:main"
 kei-agent-course-academic-import = "kei_agent_course.academic_sync:main"
 kei-agent-research = "kei_agent_research.app:main"
 kei-agent-work = "kei_agent_work.app:main"
-kei-agent-knowledge = "kei_agent_knowledge.app:main"
+# モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module knowledge
+kei-agent-module = "kei_agent_a2a.launch:main"
 
 [tool.uv.build-backend]
 # 机の上の音声対話（src/kei_agent_voice）と、A2A のエージェント（src/kei_agent_a2a、
 # src/kei_agent_course、src/kei_agent_research）は、Kei Agent 本体とは別のパッケージにしてある
 # （依存をそれぞれに閉じる）
 module-name = ["kei_agent", "kei_agent_voice", "kei_agent_a2a", "kei_agent_course", "kei_agent_research",
-               "kei_agent_work", "kei_agent_knowledge", "kei_agent_notion_gateway"]
+               "kei_agent_work", "kei_agent_notion_gateway"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-# A2A のサーバー側（大学・研究のエージェント）に必要なもの
+# A2A のサーバー側（大学・研究・仕事の担当と、モジュールの担当プロセス）に必要なもの
 agents = [
     "a2a-sdk[http-server]>=1.1.4",
     "uvicorn>=0.53.0",
@@ -53,7 +54,6 @@ agents = [
 course = [{ include-group = "agents" }]
 research = [{ include-group = "agents" }]
 work = [{ include-group = "agents" }]
-knowledge = [{ include-group = "agents" }]
 # 声のレイヤは Realtime API の WebSocket を aiohttp で直に叩く（aiohttp は本体の依存に入っている）
 voice = [{ include-group = "agents" }]
 dev = [
@@ -75,3 +75,7 @@ target-version = "py313"
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF100"]
 # ASYNC240/ASYNC109: 小さなファイル操作と、上限時間を渡す関数は、このBotでは素直に書く
 ignore = ["E501", "ASYNC240", "ASYNC109"]
+
+[tool.ruff.lint.isort]
+# モジュールのフォルダ（modules/<名前>/）は、起動のときに kei_agent_modules.<名前> として読む（kei_agent.modules.package）
+known-first-party = ["kei_agent_modules"]

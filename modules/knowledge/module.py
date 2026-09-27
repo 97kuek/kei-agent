@@ -7,7 +7,7 @@
 - 👍 … 読みものに依頼者が 👍 を付けたら、共通ホームの「読みもの」に入れて 📝 を付ける。外したらゴミ箱へ
 - 知識のチャンネルと、論文の新着のスレッドの質問 … 担当に聞いて答える
 
-担当（kei_agent_knowledge）は外の記事を読むので、Slack の鍵も Notion も持たない。材料は本体が読んで渡し、
+担当（同じフォルダの agent.py）は外の記事を読むので、Slack の鍵も Notion も持たない。材料は本体が読んで渡し、
 返ってきた記事・論文を本体が出す（docs/architecture.md の「知識」）。
 """
 
@@ -18,11 +18,10 @@ import time
 
 from kei_agent.api import Core, NotionError, Request, day_label, escape
 
+from .skills import PAPER_DIGEST, READING_DIGEST
+
 log = logging.getLogger(__name__)
 
-# 担当の仕事の名前（kei_agent_knowledge/skills.py と同じ）
-READING_DIGEST = "reading-digest"
-PAPER_DIGEST = "paper-digest"
 # 朝に出す本数（読みものは全体で、論文はテーマごと）
 READING_COUNT = 5
 PAPERS_PER_THEME = 5

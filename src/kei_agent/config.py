@@ -195,11 +195,15 @@ class Config:
     # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
     secrets_dir: Path | None = None
 
-    def prompt_file(self, name: str) -> Path:
-        """指示書。利用者のフォルダの prompts/ に同じ名前のファイルがあれば、そちらを使う（丸ごと差し替え）。"""
+    def prompt_file(self, name: str, module: str = "") -> Path:
+        """指示書。利用者のフォルダの prompts/ に同じ名前のファイルがあれば、そちらを使う（丸ごと差し替え）。
+
+        module を渡すと、そのモジュールの指示書（modules/<名前>/ の中）を探す。コアの指示書はリポジトリの prompts/。
+        """
         if self.user_dir is not None and (own := self.user_dir / "prompts" / name).is_file():
             return own
-        return self.repo_root / "prompts" / name
+        spec = modules.known().get(module) if module else None
+        return (spec.path if spec is not None else self.repo_root / "prompts") / name
 
     @property
     def profile_text(self) -> str:
