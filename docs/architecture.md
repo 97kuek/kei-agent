@@ -331,7 +331,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `response_output.py` | 出力契約 |
 | `guard.py` | 柵（Kei Agent 自身に直させない） |
 | `store.py` | SQLite（スレッド、session、ジョブ、定期処理、実行時間、接続先、モジュールの記録） |
-| `schedule.py` / `morning.py` / `digest.py` / `deadline.py` | 定期実行、朝の予定、材料集め、締切の読み方 |
+| `schedule.py` / `briefing.py` / `morning.py` / `digest.py` / `deadline.py` | 定期実行、朝の一覧を集める・組み立てる、材料集め、締切の読み方 |
 | `modules.py` / `api.py` | モジュールの定義（`module.toml`）と動き（`module.py`）の読み込み、モジュールの窓口（`Core`・`Records`）。知識の本体側は `modules/knowledge/module.py`（[extensibility.md](extensibility.md)） |
 | `version.py` | 動いている版（担当の版ずれを見つける） |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
