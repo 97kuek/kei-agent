@@ -241,6 +241,24 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 
 手で動かすコマンド（setup など）は、同じフォルダの `commands.py` に `COMMANDS = {"名前": main(argv)}` を置く。`kei-agent-module <名前> <コマンド> [引数...]` で動く（`pyproject.toml` にコマンドの名前を足さない）。コマンドからモジュールの記録を読み書きするのは `records(config, 名前)`（本体側の `core.records` と同じもの）、本体の代わりにボタンつきの投稿を置くなら、ボタンの名前は `action_id(名前, ボタン)`（本体側の `core.action_id` と同じ。押されると本体側の `on_action`）。見本は `modules/time/commands.py`（時間記録のカードを置く）。
 
+### テストの書き方（kei_agent.testing）
+
+`ModuleKit` が、モジュール1つを本番と同じ読み方の設定（一時フォルダの config.toml。頼るモジュールもオンにする）と、偽物の Slack・AI・Notion・担当と一緒に、本体の中で動かす。依頼者として頼み、Kei Agent が出した文を確かめる。
+
+```python
+async def test_memo(module_kit):                 # pytest の plugin（kei_agent.testing.plugin）の fixture
+    kit = module_kit("modules/memo", settings={"mark": "✏️"})   # フォルダの場所か、組み込みの名前
+    kit.ai.answer("メモしたよ")                   # AI（FakeAI）が次に返す答え
+    ts = await kit.message("牛乳を買う")           # このモジュールのチャンネルで @Kei Agent に頼み、終わるまで待つ
+    assert kit.thread(ts) == ["メモしたよ"]        # そのスレッドに返した文（流して見せた返事も）
+    assert kit.ai.calls[0]["use_case"] == "memo_sum"
+```
+
+- 依頼者のすること: `message`（`thread=` でスレッドの中）、`reply`（メンションなしの返信）、`invite`（招く。案内が出る）、`slash`、`action`（ボタン）、`view`（入力の画面）、`schedule`（定期処理を1回）、`tick`、`emit`、`home`（App Home）
+- 見るもの: `texts()` / `thread(ts)`、`slack`（FakeSlack。呼んだ Slack の API は `calls`）、`ai`（FakeAI）、`records`、`module`（class Module）、`core`、`notion`（FakeNotion）・`hub`（FakeHub）
+- 担当プロセス（`[process]`）は、同じプロセスの中で agent.py の Executor を動かす（`LocalAgent`。A2A のサーバーは立てない）。`kit.skill("仕事", {...})` で担当の仕事を直接頼める。`local_agent=False` なら `FakeAgent`（`kit.agent.reply("仕事", "返事")` で並べる）。本物の番地の担当には届かない
+- テストのあいだ、本物の秘密情報（本体とモジュールの `[secrets]` の名前）を環境変数から外し、利用者のフォルダを一時フォルダにし、本物の状態・launchd・用途の分類器（本物の AI）に触れない。pytest では `-p kei_agent.testing.plugin`（いちばん上の conftest.py なら `pytest_plugins = ["kei_agent.testing.plugin"]`）で、どのテストにも同じ柵が効く。pytest の外では `with ModuleKit(フォルダ, 一時フォルダ) as kit:`
+
 ## 設定と置き場所
 
 - **自分のものは `~/.config/kei-agent/`**（場所は環境変数 `KEI_AGENT_HOME` で変えられる）
@@ -332,7 +350,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 - 反映は `deploy/update.sh`（main で、依存をそろえ、変わった plist だけ登録し直し、全部を起動し直し、版を確かめる）
 - **作る人への支え**
   - `kei-agent module new <名前>` で、ひな形（定義・Python・指示書・テスト）を作る
-  - テスト用の偽物（Slack・Notion・AI・担当）を `kei_agent.testing` として出す
+  - テスト用の偽物（Slack・Notion・AI・担当）と、モジュールを本体の中で動かす `ModuleKit` を `kei_agent.testing` として出す（上の「テストの書き方」）
   - GitHub Actions で、組み込みのモジュールとひな形のテストを毎回走らせる
 
 ## 段階
@@ -343,6 +361,6 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
 | 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①②は済み（2026-09-27）。自己改善は ① 枠を広げる（本体のチャンネルの会話を受け持つ `core_channels`、自分のフォルダで AI を動かす `work(folder=)`・`run_ai`、柵の確認、新しい版での起動し直しと `on_start`・`last_update`）② 自己改善を `modules/improve/` へ（柵・起動し直し・困りごとの知らせは本体に残す。AI は本体の中で動かし、プロセスは増やさない）。①は済み（2026-09-27）、②は反映待ち。Daily・振り返りは ① 枠を広げる（本体の定期処理を受け持つ `core_schedules`、朝の一覧 `morning`、材料 `digest`、研究全体を読む `run_ai(overview=)`、`publish`、振り返りの結論 `collect_conclusions`）② Daily と振り返りを `modules/daily/` へ（朝の一覧と材料を集めるのは本体の枠のまま）。①②は反映待ち（自己改善②のあとの Daily を確かめてから） |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録。順番は ① `doctor`（点検。読むだけ）→ ② manifest の生成（`kei-agent manifest`。`slack/manifest.yaml` も同じ出力）→ ③ `module list` / `add` / `remove`（`config.toml` の `modules` の行だけを書き換える。書く前に新しい設定を読めるか確かめ、前のものを `config.toml.bak` に残す。常駐を持つモジュールは launchd に登録する・外す。そのあとにやることを並べる）→ ④ `setup`（対話。もうあるファイルは書き換えない。秘密情報は画面に出さずに聞く。要る秘密情報は `module.toml` の `[secrets]` に書けるようにし、`doctor` も同じものを確かめる。オフのモジュールの `[channels]` の名前は残してよい）。コマンドは `kei-agent <名前>`（何も付けなければ今までどおり Kei Agent を動かす） | ①②③④は反映待ち |
-| 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
+| 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions。順番は ① `kei_agent.testing`（偽物・`ModuleKit`・担当を同じプロセスで動かす `LocalAgent`・pytest の plugin）→ ② `kei-agent module new`（ひな形。テストは①を使う）→ ③ 作り方の文書 → ④ GitHub Actions（ひな形のテストも）→ ⑤ README | ①は反映待ち |
 
 過去のコミットに残っている個人の値（Notion のページ ID、学校名）は、履歴を書き換えずにそのまま残す。鍵やトークンは入っていないことを確かめた（2026-09-26）。

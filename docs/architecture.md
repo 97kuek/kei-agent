@@ -326,6 +326,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 |---|---|
 | `cli.py` / `setup_command.py` / `doctor.py` / `slack_manifest.py` / `module_command.py` | `kei-agent` のコマンド（何も付けなければ起動）、はじめの設定（`kei-agent setup`）、点検（`kei-agent doctor`）、Slack App の manifest（`kei-agent manifest`）、モジュールのオン・オフ（`kei-agent module`） |
 | `app.py` | 起動、Slack のイベントとボタンの登録 |
+| `testing/` | モジュールを作る人のためのテストの道具（偽物の Slack・AI・Notion・担当、`ModuleKit`、pytest の plugin。docs/extensibility.md の「テストの書き方」） |
 | `assistant.py` | 依頼の受け付けから返信までの本筋 |
 | `themes.py` | チャンネル → テーマ → 作業場 |
 | `router.py` / `agents.py` / `a2a.py` / `questions.py` | 振り分け、ほかのエージェントに頼む口、声からの問い合わせ口 |
