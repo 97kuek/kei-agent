@@ -237,7 +237,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 - `🛠 着手` / `📦 取り込み` は、その回が依頼者の投稿で始まったときだけ効く
 - 取り込む前に、変えたファイル、差分（添付）、テストの結果を出す。依存の追加は先頭に出す
 - 取り込み: 柵のファイルに触れた差分は捨てる。手元に未コミットの変更があれば止める。main が進んでいれば合わせ直し、テスト・`ruff`・鍵・大きなファイルを確かめてから早送りで取り込んで push する
-- 動いている作業がなくなったら、ほかのプロセス（ゲートウェイ・担当・声）を起動し直してから自分で終了し、launchd が新しい版で起動する。`update-pending` を残し、つながらないまま3回起動し直したら `deploy/run.sh` が `git revert` して前の版で起動し、Slack で知らせる
+- 動いている作業がなくなったら、ほかのプロセス（ゲートウェイ・担当・声）を起動し直してから自分で終了し、launchd が新しい版で起動する。`update-pending` を残し（`updates.py`）、つながらないまま3回起動し直したら `deploy/run.sh` が `git revert` して前の版で起動し、Slack で知らせる
 - 同時に直すのは1つだけ
 
 ## 10. Notion
@@ -336,4 +336,5 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
 | `home.py` / `settings.py` / `settings_actions.py` | App Home と設定 |
 | `improve.py` / `self_fix.py` / `issues.py` | 自己改善、要望の GitHub issue |
+| `updates.py` | 新しい版での起動し直し（入れ替え）と、その結果（`update-pending`、`deploy/run.sh` が戻したか） |
 | `timelog.py` | Toggl の API（時間記録と大学のモジュールが窓口から使う）と、Kei Agent の稼働時間の数え方 |
