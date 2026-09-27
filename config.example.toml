@@ -93,6 +93,20 @@ hub_home = ""       # 共通ホーム（自分の名前のページなど。Dail
 research_home = ""  # 研究ホーム（notion.json の home_page_id）
 course_home = ""    # 授業ホーム（notion-course.json の home_page_id）
 
+[course]
+# 大学のモジュールの設定（書けるものは modules/course/module.toml の [settings]）
+# 学校の部品。時限の時刻・学期の既定と、成績の取り込み方が入っている。同梱は "waseda"（早稲田大学）。
+# 自分で書いた部品は、そのファイルの場所（書き方は modules/course/school.py）
+school = ""
+# 時限の時刻と学期を、自分の学校に合わせるとき（学校の部品の既定を置き換える）。時刻が分からないと、朝の一覧に授業が出ない
+# [course.periods]
+# 1 = "09:00-10:30"
+# 2 = "10:40-12:10"
+# [course.terms]
+# "前期" = [4, 5, 6, 7, 8, 9]
+# "後期" = [10, 11, 12, 1, 2, 3]
+# "通年" = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]
+
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["overview", "research-overview"]

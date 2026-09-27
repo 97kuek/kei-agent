@@ -98,7 +98,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ### エージェントごとの中身
 
 - **研究** … テーマの作業場で provider を1回動かして最終結果を返す。長い処理は pueue（グループ `kei-agent`）に入れ、本体が毎分状態を見て、終わったらその会話を再開する。ジョブは作業場の中のスクリプトだけで、`--expect` で宣言したファイルができたかを確かめる。Notion はゲートウェイ経由、W&B は `managing-wandb` skill
-- **大学** … 大学はモジュール（`modules/course/`）で、Box の読む道具は `module.toml` の `[[actor.connectors]]`、skill と二の柵は `modules/course/plugin/`、setup などのコマンドは `kei-agent-module course <コマンド>`（`commands.py`）。作業場は `~/course`（設定の `course_root`）。Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。締切の一覧（`list-due`）への返事は本体が組み立て、「一番近い」のように件数を言われたら、その件数だけ（振り分け係が `limit` を拾う）、見た期間に締切が無ければ、その先のいちばん近いものを添える（`course.due_answer`）。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
+- **大学** … 大学はモジュール（`modules/course/`）で、Box の読む道具は `module.toml` の `[[actor.connectors]]`、skill と二の柵は `modules/course/plugin/`、setup などのコマンドは `kei-agent-module course <コマンド>`（`commands.py`）。作業場は `~/course`（設定の `course_root`）。学校ごとの違い（時限の時刻・学期・成績の読み方）は設定の `[course]` と学校の部品（`modules/course/schools/`。同梱は早稲田）で決まる（`modules/course/school.py`）。Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。締切の一覧（`list-due`）への返事は本体が組み立て、「一番近い」のように件数を言われたら、その件数だけ（振り分け係が `limit` を拾う）、見た期間に締切が無ければ、その先のいちばん近いものを添える（`course.due_answer`）。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
 - **知識** … 朝の読みもの（`reading-digest`）と、テーマごとの論文の新着（`paper-digest`）を作る。材料（「収集」ページの興味と情報源、テーマの `CLAUDE.md` の検索キーワードと前提、先行研究 DB にある ID）は本体側（`modules/knowledge/module.py`。コアとは窓口 `kei_agent.api` でだけやり取りする）が本文の JSON で渡し、結果も本体側が Slack と Notion に出す。RSS・arXiv・記事の本文はプログラムが読み（`modules/knowledge/feeds.py`。arXiv は混んでいると 406 などでしばらく断るので、30秒・90秒・3分あけてやり直す）、一度候補にしたものは作業場の `seen.json` に90日覚える。読みものには、本体が覚えている最近の 👍（題名・出どころ・興味）も渡り、同じ出どころ・興味の候補に少し点を足し（`LIKE_BOOST`）、選ぶ回に好みの例として見せる。選ぶ・要約するのは Web を使えない回（`module.toml` の `offline = true`）、質問に答える `ask` だけが Web を読む
 - **仕事** … 会社アカウントに付いた Microsoft 365 の連携（Outlook の予定・メール・人・空き時間、Teams、SharePoint）を、読む道具だけで使う。送信・投稿・予定の作成・変更・削除はしない。Codex では Outlook（メールと予定の App）だけを読む（Teams・SharePoint の App は、道具の名前を確かめてから表に足す）。予定の一覧（`list-events`）も共通の起動口で、読むだけの1回として動かす。仕事はモジュール（`modules/work/`）で、読む道具の一覧は `module.toml` の `[[actor.connectors]]`、skill と二の柵は `modules/work/plugin/`、指示書は `modules/work/work.md`。会議は予定の口（`agenda`）から、朝の一覧・声・予定カレンダー（出典 Outlook）・振り返りの材料に載る
 
@@ -270,7 +270,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 ### 授業ホーム
 
-`kei-agent-module course setup` が5つの DB をそろえる（DB の ID は `notion-course.json`）。
+`kei-agent-module course setup` が5つの DB をそろえる（DB の ID は `notion-course.json`）。「授業」の「学期」と「科目群」の選択肢は学校（設定の `[course]` と学校の部品）から作り、`--seed <ファイル>` で自分のフォルダに置いた履修科目を入れる。
 
 | DB | 中身 |
 |---|---|
@@ -280,7 +280,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | 🎓 単位要件 | 大区分、要件名、所定・既得・算入・残り単位。`総合計` の行が卒業要件の全体 |
 | 📈 GPA推移 | 春学期・秋学期・通算の GPA |
 
-`授業` ← `課題` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は大学の成績 HTML をローカルで読んで入れ（`kei-agent-module course academic-import`）、HTML 自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
+`授業` ← `課題` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は、学校の部品が成績のファイルをローカルで読んで入れ（`kei-agent-module course academic-import`。早稲田は成績と単位の HTML）、ファイル自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
 
 ## 11. 時間の記録
 

@@ -91,11 +91,15 @@ knowledge = ["knowledge"]
 label = "読みもの"
 short = "読みもの"              # App Home のチェックに出す短い名前
 default = "07:00"               # 空文字なら、既定では動かさない
+
+# [settings]                    # 設定（持つなら）。名前 = 既定の値。利用者は config.toml の、モジュールの名前の表で変える
+# school = ""                   # （大学なら [course] school = "waseda"）。値は既定と同じ形（文字・数・真偽・配列・表）にする
 ```
 
 - 用途・定期処理・チャンネルの種類・番地は、モジュールどうしでぶつかってはいけない（ぶつかれば設定を読むときに断る）
 - 同じ時刻なら、夜間の Task → モジュールの定期処理（設定の modules の順）→ Daily → 振り返り → 保守の順に動く
 - 担当プロセスの名前（`deploy/install.sh <名前>` など）は、`[process]` を持つモジュールから起動スクリプトが見つける
+- 設定は `config.toml` の、モジュールの名前の表（大学なら `[course]`）に書く。書けるのは `[settings]` にある名前だけで、形が既定と違えば読むときに断る。モジュールをオフにしても、設定は消さずに残しておける。本体の設定の表（`[notion]` など）と同じ名前のモジュールは、設定を持てない
 - `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る。`[process]` なら `agent.py`、`[actor]` なら `prompt` の指示書（どれも、無ければ設定を読むときに断る）
 
 ### module.py の書き方（枠の版 1）
@@ -147,6 +151,7 @@ class Module:
 - Slack: `post`（ts を返す）、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
 - 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
+- 設定: `settings`（module.toml の `[settings]` の既定に、config.toml の `[<名前>]` を重ねた写し）
 - 予定カレンダー: `sync_calendar(出典, 予定, day=, days=, complete=, expected_count=)`（出典と ID で照合し、手入力の行には触らない。見えなくなった行は消さずに「要確認」）
 - そのほか: `notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
 
@@ -178,7 +183,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 - `SkillExecutor`（`handle` を書く。`done` / `fail` / `answer`）、`AgentSkill`、`ASK`、`progress(updater, {"activity": …})`（経過を本体に流す）
 - `run_ai(config, store, 担当, 用途, 文, provider=…, prompt_file=…, profile=…)`: その担当の用途（`[use_cases]`）で AI を1回動かし、答えの本文を返す。作業場は読むだけ。上限に当たったら `AIError`（`limit_reset_at` つき）
 - `workspace(config, 担当)`（覚えておきたいものを置く作業場）、`json_object` / `json_list`（AI の答えから JSON を取り出す）、`requested_days(本文, 既定)`（本文の JSON の days）
-- Notion（ゲートウェイ経由。`gateway_notion(名前)` の名前で届くホームが決まる）と `Setup`（DB を作る setup の土台）、Toggl（`load_toggl`）、日付（`WEEKDAYS`・`weekday`・`day_label`・`parse_time`）、`load_config`
+- Notion（ゲートウェイ経由。`gateway_notion(名前)` の名前で届くホームが決まる）と `Setup`（DB を作る setup の土台）、Toggl（`load_toggl`）、日付（`WEEKDAYS`・`weekday`・`day_label`・`parse_time`）、`load_config`、`settings(config, 名前)`（そのモジュールの設定。本体側の `core.settings` と同じもの）
 
 手で動かすコマンド（setup など）は、同じフォルダの `commands.py` に `COMMANDS = {"名前": main(argv)}` を置く。`kei-agent-module <名前> <コマンド> [引数...]` で動く（`pyproject.toml` にコマンドの名前を足さない）。
 
@@ -236,6 +241,9 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 - **大学**: 大学モジュールは汎用にし、学校ごとの違いは部品にする。早稲田はその1つとして同梱する
   - 設定にするもの: 時限の時刻、学期
   - 部品にするもの: 成績の取り込み方
+  - 設定は `config.toml` の `[course]`: `school`（学校の部品）、`periods`（時限の時刻）、`terms`（学期と、開かれる月）。時限と学期は、書かなければ学校の部品の既定を使う。学校を選ばず時刻も書かなければ、授業に時刻が付かない（朝の一覧に出ない）
+  - 学校の部品は `modules/course/schools/<名前>.py`（同梱は `waseda`）。自分で書いた部品は、そのファイルの場所を `school` に書く。部品に置けるもの（時限・学期の既定、成績の読み方、成績と授業・GPA・単位要件の対応）は `modules/course/school.py` に書いてある
+  - 個人の履修科目はコードに持たず、自分のフォルダのファイルから入れる（`kei-agent-module course setup --seed <ファイル>`。書き方は `modules/course/courses.example.toml`）
 - **Notion**: 今の DB の形（名前・列）を「標準の形」として固定し、setup が作る。使うかどうかは任意
 - **指示書**
   - コアの指示書は汎用に書き、個人の前提はプロフィールから差し込む
@@ -259,7 +267,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①は済み（2026-09-27）、②は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②は済み（2026-09-27）、③は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 

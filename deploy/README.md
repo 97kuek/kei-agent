@@ -134,16 +134,16 @@ uv run kei-agent-hub-setup
 uv run kei-agent-hub-setup --apply
 ```
 
-**授業ホーム**: 6つの DB をそろえる（`--seed <年度>` で `notion_setup.py` の履修科目を入れる）
+**授業ホーム**: 5つの DB をそろえる。時限の時刻・学期・成績の読み方は `config.toml` の `[course]`（早稲田なら `school = "waseda"`）。`--seed <ファイル>` で履修科目を入れる（書き方は `modules/course/courses.example.toml`。自分のファイルは `~/.config/kei-agent/` に置く）
 
 ```zsh
 source ~/.config/kei-agent/secrets/kei-agent.zsh          # ゲートウェイの親の合言葉
 source ~/.config/kei-agent/secrets/kei-agent-course.zsh   # MOODLE_ICS_URL
-uv run kei-agent-module course setup --seed 2026
+uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml
 uv run kei-agent-module course sync            # 手で締切を取り込む（--all で履修外も）
 uv run kei-agent-module course inspect         # Moodle と「授業」を読むだけで照合する
-uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.html>
-uv run kei-agent-module course academic-import --apply <grades.html> <credits.html>   # --delete-inputs で入力を消す
+uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.html>   # 早稲田の部品は成績と単位の HTML
+uv run kei-agent-module course academic-import --apply <grades.html> <credits.html>     # --delete-inputs で入力を消す
 ```
 
 ## 6. そのほかの最初の1回
