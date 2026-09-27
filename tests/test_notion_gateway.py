@@ -111,9 +111,9 @@ def test_homes_come_from_config_toml_not_from_notion_json(settings, world, gw_co
 
 
 def test_home_ids_are_compared_without_dashes_or_case():
-    roots = client_roots(NotionConfig(research_home="3DE4FB5D-2D07-80B9-A193-F4604D5EA09C"))
-    assert roots == {"research": {"3de4fb5d2d0780b9a193f4604d5ea09c"},
-                     "kei-agent": {"3de4fb5d2d0780b9a193f4604d5ea09c"}}
+    roots = client_roots(NotionConfig(research_home="4B310000-0000-0000-0000-0000000000AA"))
+    assert roots == {"research": {"4b3100000000000000000000000000aa"},
+                     "kei-agent": {"4b3100000000000000000000000000aa"}}
 
 
 def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_config):
@@ -271,7 +271,7 @@ def test_rules_collect_every_reference_in_a_body():
 
 
 def test_rules_find_page_references_in_notion_markdown():
-    page, child, user = "3de4fb5d2d0780b9a193f4604d5ea09c", "1" * 32, "2" * 32
+    page, child, user = "4b3100000000000000000000000000aa", "1" * 32, "2" * 32
     text = (f'中身 <mention-page url="https://www.notion.so/Cafe-{page}">メモ</mention-page>\n'
             f'<page url="https://notion.so/{child}">子</page> <mention-user url="user://{user}">人</mention-user>')
     found = plan("POST", "/pages", body={"parent": {"type": "page_id", "page_id": page}, "markdown": text}).targets
