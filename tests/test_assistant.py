@@ -347,9 +347,9 @@ async def test_improve_channel_files_the_request_as_a_public_issue(env, config, 
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 経過をもっと細かく"})
     await settle(assistant)
 
-    # 要約だけを公開の issue にしたうえで、直し方の案を考える（書けるのは一時ディレクトリだけ）
+    # 要約だけを公開の issue にしたうえで、直し方の案を考える（自己改善のモジュール。書けるのは作業用のフォルダだけ）
     assert len(fake_github.created()) == 1
-    assert claude.calls[0]["cwd"] == config.state_dir / "improve" / "20.1"
+    assert claude.calls[0]["cwd"] == config.module_state("improve") / "talk" / "20.1"
     assert "GitHub issue <https://github.com/97kuek/kei-agent/issues/1|#1>" in "\n".join(slack.texts())
     assert not (config.overview_dir / "backlog.md").exists()
 
@@ -1491,7 +1491,7 @@ async def test_every_agent_request_starts_with_todays_date(env, monkeypatch):
     assert claude.calls[0]["prompt"] == today + "図を作って"
 
 
-async def test_self_fix_without_a_provider_says_to_choose_one(env, store):
+async def test_improve_without_a_provider_says_to_choose_one(env, store):
     """自己改善の AI が選ばれていないときは「接続に失敗」ではなく、選ぶよう伝える。"""
     from dataclasses import replace
 
@@ -1500,8 +1500,8 @@ async def test_self_fix_without_a_provider_says_to_choose_one(env, store):
 
     assistant, slack, claude, _ = env
     assistant.config = replace(assistant.config, agent_profiles={
-        **assistant.config.agent_profiles, "self_fix": AgentProfile(provider="")})
-    assert settings.selected_provider(assistant.config, store, "self_fix") == ""
+        **assistant.config.agent_profiles, "improve": AgentProfile(provider="")})
+    assert settings.selected_provider(assistant.config, store, "improve") == ""
 
     result = await assistant.run_agent(themes.resolve(assistant.config, "00_kei-agent"), "直して")
 

@@ -67,7 +67,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
-    assert config.modules == ("course", "knowledge", "notion", "research", "time", "voice", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
+    assert config.modules == ("course", "improve", "knowledge", "notion", "research", "time", "voice", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
     _module(home_dir / "modules", "knowledge", 'api = 1\nname = "knowledge"\n')
     with pytest.raises(ConfigError, match="組み込みのモジュール「knowledge」と同じ名前"):

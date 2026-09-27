@@ -32,13 +32,12 @@ def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
 
     removed = maintenance.cleanup(config, projects)
 
-    assert removed == {"sessions": 1, "thread_logs": 0, "worktrees": 0}
+    assert removed == {"sessions": 1, "thread_logs": 0}
     assert not (theme_project / "old.jsonl").exists() and (theme_project / "new.jsonl").exists()
     assert (other_project / "old.jsonl").exists()  # ほかのプロジェクトには触らない
 
 
 def test_claude_project_dir_name_matches_claude_code():
-    from pathlib import Path
     assert maintenance.claude_project_dir_name(Path("/Users/k/research/_overview")) == "-Users-k-research--overview"
 
 
@@ -180,36 +179,6 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
     monkeypatch.setattr(maintenance.asyncio, "create_subprocess_exec", never_finishes)
     with pytest.raises(maintenance.BackupError, match="終わりませんでした"):
         await maintenance._git(repo, "push", "-q", timeout=0.3)
-
-
-def test_cleanup_removes_leftover_worktrees_and_scratch(config, store, tmp_path, monkeypatch):
-    """取り込みや失敗で使い終わった worktree と、案を考えるときの一時ディレクトリを片付ける。"""
-    from kei_agent import improve
-
-    store.start_improvement("C9", "20.1", "進行中", worktree=str(config.state_dir / "worktrees" / "improve-20-1"))
-    leftovers = []
-
-    def fake_remove(cfg, path, branch):
-        leftovers.append((Path(path).name, branch))
-
-    monkeypatch.setattr(improve, "remove_worktree", fake_remove)
-    worktrees = improve.worktree_root(config)
-    worktrees.mkdir(parents=True)
-    (worktrees / "improve-20-1").mkdir()      # まだ使っている
-    (worktrees / "improve-19-9").mkdir()      # もう使っていない
-    scratch = config.state_dir / "improve"
-    (scratch / "19.9").mkdir(parents=True)
-    (scratch / "20.1").mkdir(parents=True)
-    monkeypatch.setattr(improve, "worktree_root", lambda cfg: worktrees)
-
-    busy = store.improvements_in("working", "review", "restarting")
-    removed = maintenance.cleanup(config, tmp_path / "projects", None,
-                                  frozenset(Path(r["worktree"]).name for r in busy if r["worktree"]),
-                                  frozenset(r["thread_ts"] for r in busy))
-
-    assert leftovers == [("improve-19-9", "kei-agent/improve-19-9")]
-    assert removed["worktrees"] == 1
-    assert not (scratch / "19.9").exists() and (scratch / "20.1").exists()
 
 
 async def test_dump_state_works_from_another_thread(config, store):

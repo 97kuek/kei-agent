@@ -12,7 +12,7 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import api, modules, runner, themes, updates
+from kei_agent import api, guard, modules, runner, themes, updates
 from kei_agent.assistant import Assistant
 from kei_agent.config import ConfigError, load_config
 from kei_agent.jobs import JobManager
@@ -95,7 +95,8 @@ class RecordingClaude(FakeClaude):
 @pytest.fixture
 def env(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(_fixer(tmp_path / "user-modules").parent)
-    config = replace(config, modules=(*config.modules, "fixer"),
+    # 組み込みの自己改善は外す（Kei Agent のチャンネルを受け持てるのは1つだけ）
+    config = replace(config, modules=(*[name for name in config.modules if name != "improve"], "fixer"),
                      agent_profiles={**config.agent_profiles, "fixer": config.agent_profiles["work"]})
     slack = FakeSlack({"C9": "00_kei-agent", "C1": "vlm"})
     claude = RecordingClaude()
@@ -122,9 +123,9 @@ def test_a_module_takes_the_kei_agent_channel(tmp_path):
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "00_kei-agent")
     assert (ws.kind, ws.module, themes.actor_of(ws)) == (ChannelKind.IMPROVE, "fixer", "fixer")
-    # 受け持つモジュールが無ければ、今までどおり本体の自己改善
+    # 受け持つモジュールが無ければ、担当はいない（困りごとの知らせだけの場所になる）
     plain = themes.resolve(replace(config, modules=()), "kei-agent")
-    assert (plain.module, themes.actor_of(plain)) == ("", "self_fix")
+    assert (plain.module, themes.actor_of(plain)) == ("", "")
 
 
 def test_only_known_core_channels_can_be_taken(tmp_path):
@@ -158,7 +159,6 @@ async def test_the_module_answers_in_its_own_folder_and_hides_its_marks(env, con
     assert call["cwd"] == config.module_state("fixer") / "talk" / "20.1"
     assert module.answers == ["こう直すね\n🛠 着手"]                   # 合図の行はモジュールが受け取る
     assert slack.streamed() == ["こう直すね"]                          # Slack には出さない
-    assert assistant.store.improvement("C9", "20.1") is None          # 本体の自己改善は動かない
 
 
 async def test_joining_the_kei_agent_channel_shows_the_modules_welcome(env):
@@ -264,9 +264,6 @@ async def test_the_next_start_tells_the_module_what_happened(env, config, marker
     assert assistant.modules["fixer"].started == [updates.Update(state, "0123456789", "20.1")]
     # 印は消える（残ると deploy/run.sh が前の版に戻す）
     assert not updates.pending_path(config).exists() and not updates.rolled_back_path(config).exists()
-    # 本体の自己改善は、受け持つモジュールがあれば知らせない
-    await assistant.announce_update()
-    assert slack.texts() == []
 
 
 async def test_a_failing_on_start_is_reported_and_does_not_stop_the_others(env, monkeypatch):
@@ -307,3 +304,40 @@ def test_the_module_folder_is_under_the_state_folder(env, config):
     core = assistant.cores["fixer"]
     assert core.state_dir == config.state_dir / "modules" / "fixer" and core.state_dir.is_dir()
     assert core.repo_root == config.repo_root
+
+
+# 本体の柵（guard.check_change）
+
+@pytest.fixture
+def repo(tmp_path):
+    """Kei Agent のリポジトリに見立てた git リポジトリ。"""
+    path = tmp_path / "fenced"
+    (path / "src").mkdir(parents=True)
+    _git(tmp_path, "init", "-q", "-b", "main", str(path))
+    _git(path, "config", "user.email", "kei-agent@example.com")
+    _git(path, "config", "user.name", "Kei Agent")
+    (path / "src" / "app.py").write_text("x = 1\n")
+    (path / "config.example.toml").write_text('research_root = "~/research"\n')
+    _git(path, "add", "-A")
+    _git(path, "commit", "-q", "-m", "はじめ")
+    _git(path, "checkout", "-q", "-b", "work")
+    return path
+
+
+def test_the_fence_rejects_protected_paths(repo):
+    (repo / "config.example.toml").write_text('research_root = "/tmp"\n')
+    _git(repo, "commit", "-qam", "柵を触る")
+    assert any("柵のファイル" in p for p in guard.check_change(repo, "main", "HEAD"))
+
+
+def test_the_fence_rejects_secrets(repo):
+    (repo / "src" / "app.py").write_text('TOKEN = "' + "xoxb" + '-1234567890-abcdefghij"\n')
+    _git(repo, "commit", "-qam", "鍵を書く")
+    problems = guard.check_change(repo, "main", "HEAD")
+    assert any("秘密情報" in p for p in problems), problems
+
+
+def test_the_fence_accepts_a_normal_fix(repo):
+    (repo / "src" / "app.py").write_text("x = 2\n")
+    _git(repo, "commit", "-qam", "直す")
+    assert guard.check_change(repo, "main", "HEAD") == []

@@ -97,9 +97,6 @@ POLICIES: dict[str, AgentPolicy] = {
     # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),
-    # 自己改善。書けるのは一時ディレクトリか worktree の中だけ（作業場で決まる）
-    "self_fix": AgentPolicy("self_fix", "system.md", plugin=False, files="write", shell=True, web=True,
-                            notion="none"),
 }
 
 

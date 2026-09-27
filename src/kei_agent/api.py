@@ -170,6 +170,13 @@ class Core:
         self.records = Records(assistant.store, spec.name)
 
     @property
+    def provider(self) -> str:
+        """App Home で選んだ、このモジュールの実行役の provider（claude / codex）。選ばれていないか、実行役が無ければ空文字。"""
+        if self.spec.actor is None:
+            return ""
+        return settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
+
+    @property
     def settings(self) -> dict:
         """このモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
         return self._assistant.config.settings(self.name)

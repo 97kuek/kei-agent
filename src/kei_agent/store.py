@@ -72,23 +72,6 @@ CREATE TABLE IF NOT EXISTS deferred_runs (
     created_at REAL NOT NULL,
     done INTEGER NOT NULL DEFAULT 0
 );
--- Kei Agent 自身を直す流れ（improve.py）
-CREATE TABLE IF NOT EXISTS improvements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel TEXT NOT NULL,
-    thread_ts TEXT NOT NULL UNIQUE,
-    request TEXT NOT NULL,
-    -- planning（案を出している） / working（直している） / review（取り込み待ち）
-    -- / restarting（取り込んで再起動待ち） / done / failed
-    status TEXT NOT NULL,
-    branch TEXT,
-    worktree TEXT,
-    base_commit TEXT,
-    merge_commit TEXT,
-    detail TEXT,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
 -- Slack から変える設定（settings.py）
 CREATE TABLE IF NOT EXISTS theme_domains (
     theme TEXT NOT NULL,
@@ -226,8 +209,6 @@ def _schedule_status(detail: str | None) -> str:
 
 # あとから足した列。既存のデータベースにも同じ形を用意する
 ADDED_COLUMNS = {
-    # 要望から作った GitHub issue の番号（improve.py）
-    "improvements": {"issue_number": "INTEGER"},
     # ジョブが作るはずのファイル（JSON の配列）。終わったときに、あるかどうかを確かめる
     "jobs": {"expects": "TEXT"},
     # Kei Agent の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
@@ -268,6 +249,7 @@ class Store:
             self._move_course_notices()
             self._move_voice_switches()
             self._move_time_records()
+            self._move_improvements()
 
     def _move_reading_posts(self) -> None:
         """朝の読みものの控え（2026-09 の reading_posts）を、知識のモジュールの記録に写して、表を消す。"""
@@ -341,6 +323,34 @@ class Store:
             self.conn.execute(
                 "INSERT OR IGNORE INTO module_records (module, kind, key, value, updated_at, expires_at) "
                 "VALUES ('time', ?, ?, ?, ?, ?)", (kind, key, json.dumps(value, ensure_ascii=False), now, expires))
+
+    def _move_improvements(self) -> None:
+        """自己改善の記録（2026-09 に本体が持っていた improvements）を、自己改善のモジュールの記録にする（自己改善が
+        モジュール modules/improve/ になった）。App Home で選んだ AI（agent.self_fix.provider）も、モジュールの実行役の
+        名前（agent.improve.provider）に写す。
+
+        写すのは一度だけ（settings の moved.improvements が目印）。本体の表は念のため消さずに残す。
+        """
+        now = time.time()
+        if self.conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('moved.improvements', ?)",
+                             (str(now),)).rowcount == 0:
+            return      # もう写した（ほかのプロセスが先に写した）
+        self.conn.execute("INSERT OR IGNORE INTO settings (key, value) "
+                          "SELECT 'agent.improve.provider', value FROM settings WHERE key = 'agent.self_fix.provider'")
+        self.conn.execute("DELETE FROM settings WHERE key = 'agent.self_fix.provider'")
+        try:
+            rows = self.conn.execute("SELECT * FROM improvements").fetchall()
+        except sqlite3.OperationalError:
+            return      # 表が無い（新しく入れたとき）
+        for row in map(dict, rows):
+            value = {"channel": row["channel"], "thread_ts": row["thread_ts"], "request": row["request"],
+                     "status": row["status"], "branch": row["branch"] or "", "worktree": row["worktree"] or "",
+                     "base_commit": row["base_commit"] or "", "merge_commit": row["merge_commit"] or "",
+                     "detail": row["detail"] or "", "issue_number": row.get("issue_number"),
+                     "created_at": row["created_at"], "updated_at": row["updated_at"]}
+            self.conn.execute(
+                "INSERT OR IGNORE INTO module_records (module, kind, key, value, updated_at, expires_at) "
+                "VALUES ('improve', 'fix', ?, ?, ?, NULL)", (row["thread_ts"], json.dumps(value, ensure_ascii=False), now))
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。
@@ -419,56 +429,6 @@ class Store:
     def finish_deferred(self, deferred_id: int) -> None:
         with self.conn:
             self.conn.execute("UPDATE deferred_runs SET done = 1 WHERE id = ?", (deferred_id,))
-
-    # Kei Agent 自身を直す流れ（improve.py）
-
-    def improvement(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM improvements WHERE channel = ? AND thread_ts = ?", (channel, thread_ts)).fetchone()
-
-    def improvement_by_thread(self, thread_ts: str) -> sqlite3.Row | None:
-        return self.conn.execute("SELECT * FROM improvements WHERE thread_ts = ?", (thread_ts,)).fetchone()
-
-    def improvements_in(self, *statuses: str) -> list[sqlite3.Row]:
-        marks = ", ".join("?" * len(statuses))
-        return self.conn.execute(
-            f"SELECT * FROM improvements WHERE status IN ({marks}) ORDER BY id", statuses).fetchall()
-
-    def start_improvement(self, channel: str, thread_ts: str, request: str, **values) -> sqlite3.Row:
-        now = time.time()
-        with self.conn:
-            self.conn.execute(
-                """INSERT INTO improvements (channel, thread_ts, request, status, created_at, updated_at)
-                   VALUES (?, ?, ?, 'working', ?, ?)
-                   ON CONFLICT (thread_ts) DO UPDATE SET status = 'working', updated_at = excluded.updated_at""",
-                (channel, thread_ts, request, now, now),
-            )
-        return self.update_improvement(channel, thread_ts, **values)
-
-    def request_improvement(self, channel: str, thread_ts: str, request: str,
-                            issue_number: int | None) -> sqlite3.Row:
-        """要望を受けた時点の行（planning）。着手したら start_improvement が working にする。"""
-        now = time.time()
-        with self.conn:
-            self.conn.execute(
-                """INSERT INTO improvements (channel, thread_ts, request, status, issue_number, created_at, updated_at)
-                   VALUES (?, ?, ?, 'planning', ?, ?, ?)
-                   ON CONFLICT (thread_ts) DO UPDATE SET
-                     issue_number = COALESCE(excluded.issue_number, improvements.issue_number),
-                     updated_at = excluded.updated_at""",
-                (channel, thread_ts, request, issue_number, now, now),
-            )
-        return self.improvement(channel, thread_ts)
-
-    def update_improvement(self, channel: str, thread_ts: str, **values) -> sqlite3.Row:
-        if values:
-            sets = ", ".join(f"{k} = ?" for k in values)
-            with self.conn:
-                self.conn.execute(
-                    f"UPDATE improvements SET {sets}, updated_at = ? WHERE channel = ? AND thread_ts = ?",
-                    (*values.values(), time.time(), channel, thread_ts),
-                )
-        return self.improvement(channel, thread_ts)
 
     def set_prompt_version(self, channel: str, thread_ts: str, version: str) -> None:
         with self.conn:

@@ -67,8 +67,6 @@ class ChannelKind(Enum):
     IMPROVE = "improve"
     # モジュールのチャンネル（module.toml の [channels]）。そのモジュールの module.py に取り次ぐだけで、ファイルは持たない
     MODULE = "module"
-    # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
-    SELF_FIX = "self_fix"
     # モジュールが自分のフォルダ（状態の置き場の modules/<名前>/ の中）で AI を動かすとき（core.run_ai の folder）。
     # 書き込めるのはその中だけ
     FOLDER = "folder"
@@ -157,17 +155,10 @@ def catch_all_module(config: Config) -> str:
     return ""
 
 
-# チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は、研究テーマを受け持つモジュール。モジュールはそのモジュール）
-_ACTORS = {ChannelKind.IMPROVE: "self_fix"}
-
-
 def actor_of(ws: Workspace) -> str:
-    """そのチャンネルで会話を続ける担当。モジュールのチャンネルと、研究テーマ・研究全体は、そのモジュール
-    （研究テーマを受け持つモジュールが無ければ空文字。そのチャンネルでは答えない）。Kei Agent のチャンネルは、
-    会話を受け持つモジュールがあればそのモジュール、無ければ本体の自己改善。"""
-    if ws.kind in (ChannelKind.MODULE, ChannelKind.THEME, ChannelKind.OVERVIEW, ChannelKind.FOLDER):
-        return ws.module
-    return ws.module or _ACTORS.get(ws.kind, "")
+    """そのチャンネルで会話を続ける担当。モジュールのチャンネル・研究テーマ・研究全体・Kei Agent のチャンネルは、
+    それを受け持つモジュール（無ければ空文字。そのチャンネルでは答えない）。振り分けの係などは担当を持たない。"""
+    return ws.module
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:

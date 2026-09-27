@@ -1,13 +1,17 @@
-"""要望を、要約した公開の GitHub issue にする（docs/architecture.md の「自己改善」）。"""
+"""要望を、要約した公開の GitHub issue にする（自己改善のモジュールの issues.py）。"""
 
 import subprocess
 from dataclasses import replace
 
 import pytest
+from fakes import FakePueue, FakeSlack
 
-from kei_agent import issues, runner
+from kei_agent import runner
+from kei_agent.api import AIError, contains_secret
+from kei_agent.assistant import Assistant
 from kei_agent.config import AgentProfile
-from kei_agent.model_policy import UseCase
+from kei_agent.jobs import JobManager
+from kei_agent_modules.improve import issues
 
 # conftest がすべてのテストで偽物に差し替える前の、本物
 SUMMARIZE = issues.summarize
@@ -17,21 +21,10 @@ REQUEST = "返事が来るまで経過が見えないので、作業中の様子
 GOOD = issues.Summary("作業中の経過を短く見せる", "- 返事を待つ間も、いま何をしているかを1行で出す\n- 終わったら消す")
 
 
-def model_returning(**fields):
-    """runner.run_model の代わり。呼ばれた実行要求とプロンプトを残す。"""
-    calls = []
-
-    async def run_model(config, request, prompt, on_activity=None):
-        calls.append((request, prompt))
-        return runner.RunResult(provider=request.recipe.provider, **fields)
-
-    return run_model, calls
-
-
 # 要約を確かめる
 
 def test_a_generalized_summary_passes():
-    assert issues.problems(GOOD, REQUEST) == []
+    assert issues.problems(GOOD, REQUEST, contains_secret) == []
 
 
 @pytest.mark.parametrize("title, body, reason", [
@@ -58,7 +51,7 @@ def test_a_generalized_summary_passes():
     ("題", "- " + "xoxb" + "-1234567890-abcdefghij で送る", "秘密"),
 ])
 def test_summaries_that_could_leak_or_break_the_format_are_rejected(title, body, reason):
-    found = issues.problems(issues.Summary(title, body), REQUEST)
+    found = issues.problems(issues.Summary(title, body), REQUEST, contains_secret)
     assert any(reason in p for p in found), found
 
 
@@ -66,9 +59,9 @@ def test_copying_twenty_characters_of_the_request_is_rejected():
     close = replace(GOOD, body="- 返事が来るまで経過が見えないので、作業を短く見せる")      # 原文と19字同じ
     copied = replace(GOOD, body="- 返事が来るまで経過が見えないので、作業中を短く見せる")   # 20字同じ
     spaced = replace(GOOD, body="- 返事が来るまで 経過が見えないので、 作業中の様子を出す")  # 空白を挟んでも写し
-    assert issues.problems(close, REQUEST) == []
-    assert any("原文" in p for p in issues.problems(copied, REQUEST))
-    assert any("原文" in p for p in issues.problems(spaced, REQUEST))
+    assert issues.problems(close, REQUEST, contains_secret) == []
+    assert any("原文" in p for p in issues.problems(copied, REQUEST, contains_secret))
+    assert any("原文" in p for p in issues.problems(spaced, REQUEST, contains_secret))
 
 
 def test_parse_reads_the_json_even_with_words_around_it():
@@ -83,56 +76,63 @@ def test_parse_reads_the_json_even_with_words_around_it():
 
 # 要約のモデル
 
-async def test_summarize_uses_the_light_recipe_with_the_self_fix_provider(config, store, monkeypatch):
-    run_model, calls = model_returning(text='{"title": "作業中の経過を短く見せる", "body": "- 様子を1行で出す"}')
-    monkeypatch.setattr(runner, "run_model", run_model)
-    # 振り分け（router）は Claude のまま。自己改善で選んだ Codex を使う
-    config = replace(config, agent_profiles={**config.agent_profiles, "self_fix": AgentProfile(provider="codex")})
+def answering(text="", error=None):
+    """core.run_ai の代わり。頼まれた用途とプロンプトを残す。"""
+    calls = []
 
-    summary = await SUMMARIZE(config, store, REQUEST)
+    async def run_ai(use_case, prompt):
+        calls.append((use_case, prompt))
+        if error is not None:
+            raise error
+        return text
 
+    return run_ai, calls
+
+
+async def test_summarize_asks_the_light_use_case_once():
+    run_ai, calls = answering('{"title": "作業中の経過を短く見せる", "body": "- 様子を1行で出す"}')
+    summary = await SUMMARIZE(run_ai, REQUEST, contains_secret)
     assert summary == issues.Summary("作業中の経過を短く見せる", "- 様子を1行で出す")
-    (request, prompt), = calls
-    recipe = request.recipe
-    assert (recipe.actor, recipe.use_case, recipe.provider, recipe.model) == \
-        ("router", UseCase.ROUTING, "codex", "gpt-6-luna")
-    assert request.read_only and request.session_id is None
-    assert request.workspace.cwd == config.state_dir / "classifier" / "self_fix"
+    (use_case, prompt), = calls
+    assert use_case == issues.SUMMARY_USE_CASE == "improve_issue"
     assert REQUEST in prompt and "JSON" in prompt
 
 
-async def test_summarize_does_not_run_without_a_self_fix_provider(config, store, monkeypatch):
-    run_model, calls = model_returning(text="{}")
+async def test_the_summary_runs_read_only_with_the_improve_provider(config, store, monkeypatch):
+    """要約は、自己改善で選んだ provider の軽い用途（振り分けは Claude のままでも、自己改善で選んだ Codex を使う）。"""
+    calls = []
+
+    async def run_model(config, request, prompt, on_activity=None):
+        calls.append(request)
+        return runner.RunResult(provider=request.recipe.provider, text='{"title": "経過を見せる", "body": "- 1行"}')
+
     monkeypatch.setattr(runner, "run_model", run_model)
-    config = replace(config, agent_profiles={**config.agent_profiles, "self_fix": AgentProfile()})
+    config = replace(config, agent_profiles={**config.agent_profiles, "improve": AgentProfile(provider="codex")})
+    assistant = Assistant(config, store, FakeSlack({}), JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    await SUMMARIZE(assistant.cores["improve"].run_ai, REQUEST, contains_secret)
 
-    with pytest.raises(issues.NoProvider):
-        await SUMMARIZE(config, store, REQUEST)
-    assert calls == []
+    request, = calls
+    recipe = request.recipe
+    assert (recipe.actor, str(recipe.use_case), recipe.provider, recipe.model) == \
+        ("improve", "improve_issue", "codex", "gpt-6-luna")
+    assert request.read_only and request.session_id is None and not request.workspace.system_prompt
 
 
-@pytest.mark.parametrize("fields", [
-    {"text": "要約できません"},                                              # JSON でない
-    {"text": '{"title": "詳しくは https://example.com", "body": "- 見る"}'},  # 公開の条件に合わない
-    {"is_error": True, "errors": ["boom"]},                                  # 失敗
-    {"is_error": True, "limit_reset_at": 1.0},                               # 上限
+@pytest.mark.parametrize("answer", [
+    "要約できません",                                              # JSON でない
+    '{"title": "詳しくは https://example.com", "body": "- 見る"}',  # 公開の条件に合わない
 ])
-async def test_summarize_refuses_unusable_output(config, store, monkeypatch, fields):
-    run_model, _ = model_returning(**fields)
-    monkeypatch.setattr(runner, "run_model", run_model)
-
-    with pytest.raises(issues.IssueError) as raised:
-        await SUMMARIZE(config, store, REQUEST)
-    assert not isinstance(raised.value, issues.NoProvider)
-
-
-async def test_summarize_survives_a_broken_runner(config, store, monkeypatch):
-    async def broken(*args, **kwargs):
-        raise FileNotFoundError("claude")
-
-    monkeypatch.setattr(runner, "run_model", broken)
+async def test_summarize_refuses_unusable_output(answer):
+    run_ai, _ = answering(answer)
     with pytest.raises(issues.IssueError):
-        await SUMMARIZE(config, store, REQUEST)
+        await SUMMARIZE(run_ai, REQUEST, contains_secret)
+
+
+@pytest.mark.parametrize("error", [AIError("boom"), AIError("上限", 1.0), FileNotFoundError("claude")])
+async def test_summarize_refuses_when_the_ai_cannot_run(error):
+    run_ai, _ = answering(error=error)
+    with pytest.raises(issues.IssueError, match="要約の AI を動かせません"):
+        await SUMMARIZE(run_ai, REQUEST, contains_secret)
 
 
 # gh
@@ -174,7 +174,7 @@ async def test_gh_works_on_the_origin_repository(config, monkeypatch):
 
     monkeypatch.setattr(issues, "run_gh", run_gh)
     monkeypatch.setattr(issues, "repo_slug", repo_slug)
-    assert await GH(config, "issue", "close", "3") == "done"
+    assert await GH(config.repo_root, "issue", "close", "3") == "done"
     assert seen == [("issue", "close", "3", "--repo", "97kuek/kei-agent")]
 
 
@@ -191,7 +191,7 @@ async def test_gh_refuses_a_repository_that_is_not_on_github(config, monkeypatch
     monkeypatch.setattr(issues, "run_gh", run_gh)
     monkeypatch.setattr(issues, "repo_slug", repo_slug)
     with pytest.raises(issues.IssueError):
-        await GH(config, "issue", "list")
+        await GH(config.repo_root, "issue", "list")
     assert seen == []
 
 
@@ -227,7 +227,7 @@ async def test_run_gh_that_cannot_be_started(tmp_path, monkeypatch):
 # issue を作る・閉じる
 
 async def test_create_opens_a_labelled_issue_with_only_the_summary(config, fake_github):
-    issue = await issues.create(config, GOOD)
+    issue = await issues.create(config.repo_root, GOOD)
 
     assert issue == issues.Issue(1, "https://github.com/97kuek/kei-agent/issues/1")
     assert fake_github.calls[0][:3] == ("label", "create", "kei-agent-request")
@@ -237,13 +237,13 @@ async def test_create_opens_a_labelled_issue_with_only_the_summary(config, fake_
 async def test_create_accepts_a_label_that_already_exists(config, fake_github):
     fake_github.fail["label create"] = issues.IssueError(
         "gh が失敗しました", 'label with name "kei-agent-request" already exists; use `--force` to update')
-    assert (await issues.create(config, GOOD)).number == 1
+    assert (await issues.create(config.repo_root, GOOD)).number == 1
 
 
 async def test_create_stops_when_the_label_cannot_be_made(config, fake_github):
     fake_github.fail["label create"] = issues.IssueError("gh が失敗しました", "HTTP 403: Resource not accessible")
     with pytest.raises(issues.IssueError):
-        await issues.create(config, GOOD)
+        await issues.create(config.repo_root, GOOD)
     assert fake_github.created() == []
 
 
@@ -253,9 +253,9 @@ async def test_create_needs_the_number_of_the_new_issue(config, monkeypatch):
 
     monkeypatch.setattr(issues, "gh", gh)
     with pytest.raises(issues.IssueError):
-        await issues.create(config, GOOD)
+        await issues.create(config.repo_root, GOOD)
 
 
 async def test_close_leaves_the_short_sha_of_the_merge(config, fake_github):
-    await issues.close(config, 12, "abcdef1234567890")
+    await issues.close(config.repo_root, 12, "abcdef1234567890")
     assert fake_github.closed() == [("12", "abcdef1 で取り込みました。")]

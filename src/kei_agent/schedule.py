@@ -15,7 +15,6 @@ import time
 from contextlib import suppress
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
-from pathlib import Path
 
 import aiohttp
 
@@ -468,13 +467,9 @@ class Scheduler:
 
     async def run_maintenance(self, day: str) -> dict:
         detail: dict = {"status": "done"}
-        # いま直している最中の worktree と一時ディレクトリは残す（SQLite は別スレッドから触れない）
-        busy = self.store.improvements_in("working", "review", "restarting")
-        keep_worktrees = frozenset(Path(r["worktree"]).name for r in busy if r["worktree"])
-        keep_scratch = frozenset(r["thread_ts"] for r in busy)
+        # 自己改善の worktree と作業用のフォルダは、自己改善のモジュールが片づける
         detail["removed"] = await asyncio.to_thread(
-            maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None,
-            keep_worktrees, keep_scratch)
+            maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None)
         detail["notices"] = self.store.drop_old_notices(time.time() - NOTICE_RETENTION_DAYS * 86400)
         # 声をかけてもさらに同じ時間が過ぎた返事待ちは閉じる（放っておくと何日も残る）
         detail["awaits"] = self.store.forget_stale_awaits(

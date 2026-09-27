@@ -202,7 +202,7 @@ def test_module_channel_belongs_to_its_module(config):
     assert (ws.kind, ws.module, ws.cwd) == (ChannelKind.MODULE, "knowledge", None)
     assert [themes.actor_of(themes.resolve(config, name)) for name in (
         "40_knowledge", "20_course", "30_work", "00_kei-agent", "vlm", "01_overview")] == [
-        "knowledge", "course", "work", "self_fix", "research", "research"]
+        "knowledge", "course", "work", "improve", "research", "research"]
     assert themes.agent_workspace(config, "knowledge").cwd == config.state_dir / "agents" / "knowledge"
     # 設定の [channels] で名前を変えたら、その名前がモジュールのもの。モジュールを外せば、ただのテーマ
     renamed = replace(config, module_channels={"knowledge": ("reading",)})

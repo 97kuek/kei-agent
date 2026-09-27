@@ -1,0 +1,34 @@
+# 自己改善のモジュール（docs/extensibility.md）。Kei Agent のチャンネルで要望を聞き、Kei Agent 自身のコードを直して取り込む
+api = 1
+name = "improve"
+label = "自己改善"
+description = "Kei Agent のチャンネルで要望を聞いて直し方を相談し、Kei Agent 自身のコードを直して取り込む。要望は要約して公開の GitHub issue にする"
+# Kei Agent のチャンネル（#00_kei-agent。名前は設定の [channels] improve）の会話を受け持つ。困りごとの知らせは本体が出す
+core_channels = ["improve"]
+
+# AI の実行役（provider は App Home で選ぶ）。本体の中で動かす（プロセスは持たない）。
+# 相談では Kei Agent のコードを読むだけで、書けるのは作業用のフォルダだけ。直すときは worktree の中だけを書き換え、
+# テストを回す（コマンドを使う）。柵（guard.py・config.example.toml・deploy/）に触れた差分は取り込まない
+[actor]
+prompt = "improve.md"
+files = "write"
+shell = true
+web = true
+notion = "none"
+default_use_case = "improve_design"
+
+# 直し方を相談する
+[use_cases.improve_design]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "xhigh" }
+
+# worktree で直す
+[use_cases.improve_fix]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "high" }
+
+# 要望を、公開の issue 用に要約する（軽いモデル。Web は使わない）
+[use_cases.improve_issue]
+offline = true
+claude = { model = "claude-haiku-4-5" }
+codex = { model = "gpt-6-luna", effort = "low" }

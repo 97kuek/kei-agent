@@ -409,7 +409,7 @@ def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
 
 
 def test_agents_without_notion_get_no_gateway_credentials(config):
-    for policy in (policy_of("work"), policy_of("router"), policy_of("self_fix"), None):
+    for policy in (policy_of("work"), policy_of("router"), policy_of("improve"), None):
         env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"},
                                "C1", "1", policy)
         assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env

@@ -4,7 +4,6 @@ Slack Bolt に依存しないようにし、Slack API は `slack`（AsyncWebClie
 役割ごとの処理は、次のファイルに分けて Assistant に混ぜている。
 
 - settings_actions.py: 接続先の申し出のボタンと App Home
-- self_fix.py: Slack から Kei Agent 自身を直す流れ
 - handoff.py: 長くなったスレッドを区切って、新しいスレッドで続ける
 """
 
@@ -26,7 +25,6 @@ from kei_agent import (
     api,
     ask,
     guard,
-    improve,
     modules,
     router,
     runner,
@@ -68,7 +66,6 @@ from kei_agent.response_output import (
     validate_daily,
     validate_review,
 )
-from kei_agent.self_fix import SelfFix
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
     AWAITING_MARKER,
@@ -145,6 +142,9 @@ class ThemeRuns:
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える。モジュールの担当は module.toml の default_use_case）
+# Kei Agent のチャンネルの会話を受け持つモジュール（自己改善）が、オンになっていないとき
+NO_IMPROVE_OWNER = ("このチャンネルでは、Kei Agent で確認が必要なことを知らせるだけだよ。要望を聞いて直すには、"
+                    "config.toml の modules に improve を足してね。")
 # 研究テーマ（ほかのどれにも当たらないチャンネル）を受け持つモジュールが、オンになっていないとき
 NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがないよ。研究テーマに使うなら、config.toml の modules に"
                   " research を足してね。")
@@ -152,7 +152,7 @@ NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがない�
 VOICE_USE_CASES = {"research": "research_extract"}
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
+class Assistant(SettingsActions, Handoff, ThemeInvite):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -432,15 +432,12 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
             return
         created = themes.ensure_workspace(ws)
         self.registered_themes.add(name)
-        if ws.kind is ChannelKind.IMPROVE and ws.module:
-            # Kei Agent のチャンネル。会話はモジュール（core_channels）が受け持つ
+        if ws.kind is ChannelKind.IMPROVE:
+            # Kei Agent のチャンネル。会話は、受け持つモジュール（core_channels。自己改善）があれば、そのモジュール
             text = "Kei Agent です。このチャンネルには、Kei Agent で確認が必要なことが起きたときに知らせます。"
-            welcome = getattr(self.modules.get(ws.module), "welcome", None)
+            welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
             if welcome is not None:
                 text += "\n" + welcome()
-        elif ws.kind is ChannelKind.IMPROVE:
-            text = ("Kei Agent です。このチャンネルでメンションされた要望は、要約して公開の GitHub issue にします"
-                    "（Slack の文はそのまま載せません）。")
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
         elif ws.kind is ChannelKind.MODULE:
@@ -794,24 +791,21 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         どちらで動かしても、同じ制限の表（agent_policy.py）と `config.toml` の柵で動く。
         """
         actor = themes.actor_of(ws)
-        agent = self.agents.get(actor) if actor != "self_fix" else None
+        agent = self.agents.get(actor)
         provider = provider or settings.selected_provider(self.config, self.store, actor)
         if provider not in PROVIDERS:
             # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
             return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
-        if actor == "self_fix":
-            use_case = UseCase.SELF_FIX_DESIGN
-        else:
-            if use_case is None:
-                use_case, prompt = explicit_use_case(actor, prompt)
-            if use_case is None:
-                from kei_agent.model_classifier import UsageLimited, classify
-                try:
-                    use_case = await classify(self.config, self.store, actor, request_text or prompt,
-                                              provider=provider)
-                except UsageLimited as e:
-                    return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
-                                            limit_reset_at=e.reset_at)
+        if use_case is None:
+            use_case, prompt = explicit_use_case(actor, prompt)
+        if use_case is None:
+            from kei_agent.model_classifier import UsageLimited, classify
+            try:
+                use_case = await classify(self.config, self.store, actor, request_text or prompt,
+                                          provider=provider)
+            except UsageLimited as e:
+                return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
+                                        limit_reset_at=e.reset_at)
         try:
             # 手動指定だけの用途は、依頼者の [[名前]] からしか来ない（分類器は選ばない）
             recipe = resolve(actor, provider, use_case, manual=is_manual(use_case))
@@ -976,12 +970,12 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
             return None
         if await self.tell_if_waiting(req):
             return None
-        if ws.kind is ChannelKind.IMPROVE and ws.module:
-            # Kei Agent のチャンネルの会話を受け持つモジュール（core_channels）
-            await self._dispatch(req, ws.module, "")
-            return None
         if ws.kind is ChannelKind.IMPROVE:
-            return await self.improve(req, ws)
+            # Kei Agent のチャンネル。会話は、受け持つモジュール（core_channels。自己改善）が答える
+            if not (ws.module and await self._dispatch(req, ws.module, "")):
+                await self.post(req, NO_IMPROVE_OWNER)
+                await self.mark_answered(req, failed=True)
+            return None
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
         if ws.kind in (ChannelKind.THEME, ChannelKind.OVERVIEW) and themes.actor_of(ws) not in self.modules:
@@ -1400,9 +1394,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         shown, contract_failed = self.render_reply(result)
         # 合図の行（モジュールが hide で渡したもの。着手・取り込みなど）は、検出に使うだけで Slack には出さない
         # （result.text は残す）。区切りの合図は、題をボタンに出すので本文からは消す
-        shown = strip_lines(shown, hide)
-        shown = (improve.strip_markers(shown) if ws.kind is ChannelKind.IMPROVE and not ws.module
-                 else strip_handoff(shown))
+        shown = strip_handoff(strip_lines(shown, hide))
         streamed = await ui.finish(shown, awaiting and not result.is_error)
         if shown:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Kei Agent", shown)

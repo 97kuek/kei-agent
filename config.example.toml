@@ -28,7 +28,7 @@ handoff_after_turns = 8
 
 # 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
 # ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）
-modules = ["course", "knowledge", "notion", "research", "time", "voice", "work"]
+modules = ["course", "improve", "knowledge", "notion", "research", "time", "voice", "work"]
 
 # agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
 # model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
@@ -49,7 +49,7 @@ provider = ""
 [agents.router]
 provider = ""
 
-[agents.self_fix]
+[agents.improve]
 provider = ""
 
 [schedule]
@@ -122,7 +122,8 @@ school = ""
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
 overview = ["overview", "research-overview"]
-# Kei Agent の改善: 要望は要約して公開の GitHub issue にする（原文は Slack に残る）
+# Kei Agent のチャンネル: 困りごとの知らせ（本体）と、自己改善の相談（モジュール improve。要望は要約して公開の
+# GitHub issue にする。原文は Slack に残る）
 # チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
 improve = ["research-agent", "kei-agent"]
 # 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない

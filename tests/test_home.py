@@ -58,7 +58,7 @@ def test_home_shows_agent_provider_controls(config, store):
     controls = [block.get("accessory", {}) for block in view["blocks"]]
     assert {element.get("action_id") for element in controls} >= {
         "kei_agent_home_provider:research", "kei_agent_home_provider:course", "kei_agent_home_provider:work",
-        "kei_agent_home_provider:router", "kei_agent_home_provider:self_fix",
+        "kei_agent_home_provider:router", "kei_agent_home_provider:improve",
         "kei_agent_home_provider:knowledge",
     }
 

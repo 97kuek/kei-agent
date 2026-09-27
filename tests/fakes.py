@@ -308,7 +308,7 @@ def _gh_flags(args: tuple[str, ...]) -> dict[str, str]:
 
 
 class FakeGitHub:
-    """issues.gh の代わり。本物の GitHub（公開リポジトリ）には届かない。conftest がすべてのテストで差し替える。
+    """自己改善のモジュールの issues.gh の代わり。本物の GitHub（公開リポジトリ）には届かない。conftest がすべてのテストで差し替える。
 
     `fail` に操作の先頭2語（`issue create` など）と例外を入れると、その操作だけ失敗させられる。
     """

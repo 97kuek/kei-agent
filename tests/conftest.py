@@ -7,7 +7,7 @@ import pytest
 from fakes import FakeGitHub
 
 from kei_agent import config as config_module
-from kei_agent import issues, model_classifier, modules, updates
+from kei_agent import model_classifier, modules, updates
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
 
@@ -130,14 +130,16 @@ def fake_model_classifier(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fake_github(monkeypatch):
-    """要望の issue 化で、本物の gh（公開リポジトリ）と要約のモデルを動かさない。
+    """要望の issue 化（自己改善のモジュール）で、本物の gh（公開リポジトリ）と要約のモデルを動かさない。
 
     確かめたいテストは、引数に `fake_github` を書いて偽物を受け取る。
     """
+    from kei_agent_modules.improve import issues
+
     github = FakeGitHub()
     monkeypatch.setattr(issues, "gh", github)
 
-    async def summarize(_config, _store, _text: str):
+    async def summarize(_run_ai, _text: str, _has_secret):
         return issues.Summary("Kei Agent への要望", "- 要望の要約")
 
     monkeypatch.setattr(issues, "summarize", summarize)

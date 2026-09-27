@@ -34,9 +34,6 @@ class UseCase(StrEnum):
     ROUTING = "routing"
     OVERVIEW_DAILY = "overview_daily"
     OVERVIEW_PLAN = "overview_plan"
-    SELF_FIX_DESIGN = "self_fix_design"
-    SELF_FIX_IMPLEMENTATION = "self_fix_implementation"
-    SELF_FIX_REVIEW = "self_fix_review"
 
 
 @dataclass(frozen=True)
@@ -58,19 +55,10 @@ _RECIPES: dict[tuple[str, UseCase], tuple[str, str]] = {
     ("claude", UseCase.OVERVIEW_DAILY): ("claude-sonnet-5", "medium"),
     ("codex", UseCase.OVERVIEW_PLAN): ("gpt-6-sol", "high"),
     ("claude", UseCase.OVERVIEW_PLAN): ("claude-opus-5", "high"),
-    ("codex", UseCase.SELF_FIX_DESIGN): ("gpt-6-sol", "xhigh"),
-    ("claude", UseCase.SELF_FIX_DESIGN): ("claude-opus-5", "high"),
-    ("codex", UseCase.SELF_FIX_IMPLEMENTATION): ("gpt-6-sol", "high"),
-    ("claude", UseCase.SELF_FIX_IMPLEMENTATION): ("claude-sonnet-5", "high"),
-    ("codex", UseCase.SELF_FIX_REVIEW): ("gpt-6-sol", "medium"),
-    ("claude", UseCase.SELF_FIX_REVIEW): ("claude-sonnet-5", "high"),
 }
 
 _ACTOR_USE_CASES = {
     "router": frozenset({UseCase.ROUTING, UseCase.OVERVIEW_DAILY, UseCase.OVERVIEW_PLAN}),
-    "self_fix": frozenset({
-        UseCase.SELF_FIX_DESIGN, UseCase.SELF_FIX_IMPLEMENTATION, UseCase.SELF_FIX_REVIEW,
-    }),
 }
 
 

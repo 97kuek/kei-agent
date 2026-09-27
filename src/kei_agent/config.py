@@ -32,7 +32,9 @@ HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 # 本体の担当で skill を持つもの（研究はモジュールになったので、今は無い）
 AGENT_PLUGINS: frozenset[str] = frozenset()
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
-CORE_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
+CORE_ACTORS = AGENT_PLUGINS | frozenset({"router"})
+# 前の名前の実行役（config.toml の [agents.<名前>] に残っていても読めるように）。自己改善はモジュール improve になった
+LEGACY_ACTORS = {"self_fix": "improve"}
 
 
 def model_actors() -> frozenset[str]:
@@ -479,6 +481,9 @@ def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
     """[agents.<name>] を読み、未指定の actor は provider 未選択にする。"""
     if not isinstance(data, dict):
         raise ConfigError("config.toml の [agents] はテーブルにしてください")
+    # 前の名前（[agents.self_fix]）は、今の名前（[agents.improve]）として読む。両方あれば今の名前を使う
+    data = {**{LEGACY_ACTORS.get(name, name): raw for name, raw in data.items() if name in LEGACY_ACTORS},
+            **{name: raw for name, raw in data.items() if name not in LEGACY_ACTORS}}
     unknown = sorted(set(data) - model_actors())
     if unknown:
         raise ConfigError(f"config.toml の [agents] に知らないagentがあります: {', '.join(unknown)}")
