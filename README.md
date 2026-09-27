@@ -34,7 +34,7 @@ Kei Agent 本体（オーケストレーター, src/kei_agent/）   :8786  声�
 使える道具と届く範囲は同じ制限の表（`src/kei_agent/agent_policy.py`）で決まる。
 すべて同じ Mac の launchd で常駐する。
 
-自分の設定は、リポジトリの外の `~/.config/kei-agent/` に置く（`config.example.toml` と `profile.example.md` を写して書き換える。手順は [`deploy/README.md`](deploy/README.md)）。
+自分の設定は、リポジトリの外の `~/.config/kei-agent/` に置く。`uv run kei-agent setup` の質問に答えると、設定・プロフィール・秘密情報のファイルができる（`config.example.toml` と `profile.example.md` を写して書き換えてもよい。手順は [`deploy/README.md`](deploy/README.md)）。
 
 ## ドキュメント
 

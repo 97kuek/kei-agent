@@ -2,6 +2,8 @@
 
 使い方は [`docs/using.md`](../docs/using.md)、仕組みは [`docs/architecture.md`](../docs/architecture.md)。
 
+**はじめて入れるとき**は、リポジトリを `~/src` などに置き、`brew install pueue ffmpeg && brew services start pueue`・`uv sync --all-groups` のあと、`uv run kei-agent setup` の質問に答える。話し方 → 使うモジュール → Slack App → 秘密情報 → 常駐の登録の順に進み、最後に点検する（もうあるファイルは書き換えない。途中でやめても、もう一度動かすと残りから進む）。下の各節は、setup がしていることの中身と、手でやるときの手順。
+
 ## 1. Slack
 
 1. 個人用のワークスペースを作り、チャンネルを作る（`#00_kei-agent`、`#01_overview`、`#10_<テーマ>`、`#20_course`、`#30_work`、`#40_knowledge`）。番号を外した名前を `config.toml` の `[channels]` と合わせる
@@ -27,7 +29,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md       # 話し方、所属�
 
 指示書を丸ごと変えたいときは、`~/.config/kei-agent/prompts/` に `prompts/` と同じ名前のファイルを置く（そちらが使われる）。
 
-秘密情報は `~/.config/kei-agent/secrets/` に置き、`chmod 600` にする（Git に入れない）。値はここに書かない。置き場所は `config.toml` の `[paths] secrets` で変えられる（どこにしても、AI には読ませない）。
+秘密情報は `~/.config/kei-agent/secrets/` に置き、`chmod 600` にする（Git に入れない）。値はここに書かない。置き場所は `config.toml` の `[paths] secrets` で変えられる（どこにしても、AI には読ませない）。要る鍵は、本体のものと、オンにしたモジュールの `module.toml` の `[secrets]` に書いてあるもの（`kei-agent setup` が聞き、`kei-agent doctor` が有無を確かめる）。
 
 **`kei-agent.zsh`（共通。全プロセスが読む）**
 
@@ -43,7 +45,6 @@ export TOGGL_API_TOKEN="toggl_sk_..."
 export TOGGL_ORGANIZATION_ID="..."
 export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Notion にだけ書く
 # export CLAUDE_CODE_OAUTH_TOKEN="..."        # 手元と別の Claude アカウントで動かすとき（claude setup-token）
-# export S2_API_KEY="..."                     # Semantic Scholar
 ```
 
 - `KEI_AGENT_A2A_TOKEN` と `KEI_AGENT_NOTION_GATEWAY_TOKEN` は、生成したコマンドではなく値をファイルに貼る。全プロセスが同じ値を読む必要があり、作り直すとつながらなくなる
@@ -56,7 +57,7 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-research.zsh` | 研究のモジュールの担当（`deploy/run-agent.sh research`）。なし（置かなくてよい） |
+| `kei-agent-research.zsh` | 研究のモジュールの担当（`deploy/run-agent.sh research`）。任意で `S2_API_KEY`（Semantic Scholar。共通のファイルに書いてもよい） |
 | `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
 | `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |

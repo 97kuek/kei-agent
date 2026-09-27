@@ -1,5 +1,6 @@
 # Kei Agent の設定（例）
 # ~/.config/kei-agent/config.toml に写して書き換える（場所は環境変数 KEI_AGENT_HOME で変えられる）。
+# kei-agent setup は、答えに合わせてこれを写す（使うモジュール・研究テーマの置き場所・Notion のホーム）。
 # プロフィールは profile.example.md を ~/.config/kei-agent/profile.md に写す。docs/extensibility.md も参照
 
 # テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない。

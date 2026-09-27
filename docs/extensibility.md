@@ -110,6 +110,13 @@ default = "07:00"               # 空文字なら、既定では動かさない
 
 # [settings]                    # 設定（持つなら）。名前 = 既定の値。利用者は config.toml の、モジュールの名前の表で変える
 # school = ""                   # （大学なら [course] school = "waseda"）。値は既定と同じ形（文字・数・真偽・配列・表）にする
+
+# [secrets]                     # 要る秘密情報（環境変数の名前 = 説明と扱い。値は書かない）。kei-agent setup が聞いて秘密情報の
+#                               # ファイルに書き、kei-agent doctor が有無を確かめる（本体のものは modules.CORE_SECRETS）
+# OPENAI_API_KEY = { description = "OpenAI の API キー", required = true, own_file = true }
+#                               # required: 無いと動かない（書かなければ任意）。own_file: そのプロセスだけのファイル
+#                               # kei-agent-<名前>.zsh に置く（[process] を持つモジュールだけ）。generate = true なら setup が
+#                               # 値を作る（プロセスどうしの合言葉）。group = "Toggl" の任意の鍵は、そろって初めて使う
 ```
 
 - 用途・定期処理・チャンネルの種類・番地は、モジュールどうしでぶつかってはいけない（ぶつかれば設定を読むときに断る）
@@ -307,7 +314,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
   - 柵（`guard.py`）・新しい版での起動し直し（`updates.py`、`deploy/run.sh`）・困りごとの知らせは本体に残す。モジュールは `core.check_change`・`core.restart_for_update`・`on_start` と `core.last_update()` で使う
   - オフにすると、Kei Agent のチャンネルは困りごとを知らせるだけの場所になる
   - 記録は本体の表（`improvements`）から一度だけモジュールの記録に写した（表は念のため残してある）。App Home で選んだ AI（前の名前 `self_fix`）も `improve` に写し、`config.toml` の `[agents.self_fix]` もそのまま読める
-- **Notion**: 今の DB の形（名前・列）を「標準の形」として固定し、setup が作る。使うかどうかは任意
+- **Notion**: 今の DB の形（名前・列）を「標準の形」として固定する。setup はホームのページを聞いて設定に書き、DB はゲートウェイが動いてから今のコマンド（`kei-agent-hub-setup` など）で作る。使うかどうかは任意
   - ホームのページ ID は `config.toml` の `[notion]` にまとめる（研究は `research_home`、大学は `course_home`、ほかのモジュールは `[notion.homes]` に「名前 = ページ ID」）。ホームを書いたモジュールは、自分の名前の合言葉で、そのホームの下だけに届く（AI の道具も、Python の `gateway_notion(名前)` も）
   - ホームの無い担当には Notion の道具を渡さない。シェルを使える AI の実行役がいるモジュールは、Python からの `/notion/v1`（何でも送れる口）を使えず、MCP の道具だけ
 - **指示書**
@@ -317,7 +324,9 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 ## セットアップと、作る人への支え
 
 - **セットアップ**
-  - `kei-agent setup`（対話）: 呼び方と口調 → 使うモジュール → AI の provider → Slack App（選んだモジュールに合わせた manifest を作る）→ 秘密情報 → Notion → 常駐の登録 → 動くかの確かめ
+  - `kei-agent setup`（対話）: 話し方と呼び方（profile.md）→ 使うモジュール（できることと要る鍵を並べて選ぶ）・研究テーマの置き場所・Notion のホームのページ（config.toml）→ AI（claude・codex があるか。担当ごとの AI は今までどおり App Home で選ぶ）→ Slack App（`kei-agent manifest` の出力を貼る手順と、作るチャンネル）→ 秘密情報（本体と、オンのモジュールの `[secrets]`。画面に出さずに聞き、本人だけが読めるファイルに書く。合言葉は作る）→ 常駐の登録（聞いてから）→ 点検（`kei-agent doctor` と同じ）
+  - もうあるファイル（config.toml・profile.md・秘密情報）は書き換えず、その段を飛ばす。途中でやめても、もう一度動かすと残りから進む
+  - Notion の DB は、ゲートウェイが動いてから今のコマンド（`kei-agent-hub-setup` など）で作る（setup は案内する）
   - 作ったものはただのファイルなので、あとは直接書き換えてよい
   - `kei-agent doctor` で確かめ、`kei-agent module add <名前>` で足す（`remove` で外す。`list` で一覧）
 - 反映は `deploy/update.sh`（main で、依存をそろえ、変わった plist だけ登録し直し、全部を起動し直し、版を確かめる）
@@ -333,7 +342,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
 | 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①②は済み（2026-09-27）。自己改善は ① 枠を広げる（本体のチャンネルの会話を受け持つ `core_channels`、自分のフォルダで AI を動かす `work(folder=)`・`run_ai`、柵の確認、新しい版での起動し直しと `on_start`・`last_update`）② 自己改善を `modules/improve/` へ（柵・起動し直し・困りごとの知らせは本体に残す。AI は本体の中で動かし、プロセスは増やさない）。①は済み（2026-09-27）、②は反映待ち。Daily・振り返りは ① 枠を広げる（本体の定期処理を受け持つ `core_schedules`、朝の一覧 `morning`、材料 `digest`、研究全体を読む `run_ai(overview=)`、`publish`、振り返りの結論 `collect_conclusions`）② Daily と振り返りを `modules/daily/` へ（朝の一覧と材料を集めるのは本体の枠のまま）。①②は反映待ち（自己改善②のあとの Daily を確かめてから） |
-| 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録。順番は ① `doctor`（点検。読むだけ）→ ② manifest の生成（`kei-agent manifest`。`slack/manifest.yaml` も同じ出力）→ ③ `module list` / `add` / `remove`（`config.toml` の `modules` の行だけを書き換える。書く前に新しい設定を読めるか確かめ、前のものを `config.toml.bak` に残す。常駐を持つモジュールは launchd に登録する・外す。そのあとにやることを並べる）→ ④ `setup`（対話）。コマンドは `kei-agent <名前>`（何も付けなければ今までどおり Kei Agent を動かす） | ①②③は反映待ち |
+| 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録。順番は ① `doctor`（点検。読むだけ）→ ② manifest の生成（`kei-agent manifest`。`slack/manifest.yaml` も同じ出力）→ ③ `module list` / `add` / `remove`（`config.toml` の `modules` の行だけを書き換える。書く前に新しい設定を読めるか確かめ、前のものを `config.toml.bak` に残す。常駐を持つモジュールは launchd に登録する・外す。そのあとにやることを並べる）→ ④ `setup`（対話。もうあるファイルは書き換えない。秘密情報は画面に出さずに聞く。要る秘密情報は `module.toml` の `[secrets]` に書けるようにし、`doctor` も同じものを確かめる。オフのモジュールの `[channels]` の名前は残してよい）。コマンドは `kei-agent <名前>`（何も付けなければ今までどおり Kei Agent を動かす） | ①②③④は反映待ち |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 
 過去のコミットに残っている個人の値（Notion のページ ID、学校名）は、履歴を書き換えずにそのまま残す。鍵やトークンは入っていないことを確かめた（2026-09-26）。
