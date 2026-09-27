@@ -13,7 +13,7 @@
 7. 自分のメンバー ID（`U…`）を控える
 8. Kei Agent を各チャンネルに招待する
 
-モジュールを足したり外したりしたら、`uv run kei-agent manifest` の出力を **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。スラッシュコマンド（`commands` の scope）を足したマニフェストにしたら、一度入れ直すまでそのコマンドは使えない。
+モジュールを足したり外したり（`kei-agent module`。7. 日々の運用）したら、`uv run kei-agent manifest` の出力を **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。スラッシュコマンド（`commands` の scope）を足したマニフェストにしたら、一度入れ直すまでそのコマンドは使えない。
 
 ## 2. 設定と秘密情報
 
@@ -161,6 +161,7 @@ gh auth status                                         # 要望を GitHub issue 
 ## 7. 日々の運用
 
 - 困ったら、まず点検: `uv run kei-agent doctor`（読むだけ。設定・秘密情報の有無・担当ごとの AI・常駐と版・Notion のホーム・道具・最近のログを見て、直し方を並べる。鍵の中身は出さない。`--all` でうまくいっているものも並べる。問題があれば終了コード 1）
+- モジュールを足す・外す: `uv run kei-agent module add <名前>` / `remove <名前>`（`list` で一覧。`config.toml` の `modules` の行だけを書き換え、前のものを `config.toml.bak` に残す。書き換えると設定が読めなくなる変更（頼っているモジュールを外すなど）は断る。常駐を持つモジュールは launchd にも登録する・外す。そのあとにやること（起動し直す、manifest の貼り直し、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ）
 - 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance|toggl_import>`（`--record` を付けなければ今日の本番に影響しない）
 - 声を通さず依頼を渡す: `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ）
 - Toggl のアプリで直接測った記録は、22:00 の「Toggl の取り込み」（時間記録のモジュール）が「時間記録」に入れる
