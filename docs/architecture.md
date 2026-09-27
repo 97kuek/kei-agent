@@ -301,7 +301,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | 作業 | `propose_request` で下書きし、読み上げて確認してから `send_request`。`<state_dir>/asks/` にファイルを置き、本体が拾ってスレッドを立てる（`src/kei_agent/ask.py`） |
 | 顔 | `KEI_AGENT_STACKCHAN_URL` があれば Stack-chan に HTTP で表情だけ送る（`face.py`）。ロボットは未購入 |
 
-- 本体 → 声は A2A の `notify` を投げっぱなしで送る（`src/kei_agent/voice.py`）。渡すのは出来事（`schedule` `due` `working` `done` `failed` `limited` `awaiting` `listen`）だけで、言い方と顔は声のレイヤが決める
+- 本体とモジュールは出来事を配る（`core.emit`。受け取るのは `on_event` を持つモジュール）。声には同じ出来事を A2A の `notify` で投げっぱなしで送る（`src/kei_agent/voice.py`）。渡すのは出来事（`schedule` `due` `working` `done` `failed` `limited` `awaiting` `listen`）だけで、言い方と顔は声のレイヤが決める
 - 「知らせる」だけのときは通知のたびに短い接続を作って読み上げ、マイクは開かない。「聞く」が入のときだけマイクを開けて会話する。どちらも既定は切で、設定は再起動後も戻る
 - `OPENAI_API_KEY` が無ければつながらないが落ちない
 - 会話は60分で切れるのでつなぎ直す。会話は残さず、Slack に残るのは依頼だけ
