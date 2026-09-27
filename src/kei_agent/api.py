@@ -25,6 +25,12 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
   読めなかったら None を返す（空の [] と分ける。予定カレンダーの行を「要確認」にしないため）
 - `async prepare(kind, day) -> list[str]` … Daily（kind = "daily"）と振り返り（"review"）の前の取り込み。
   うまくいかなかったことの短い名前（例: "課題の取り込み"）を返すと、朝の一覧の「うまくいかなかったこと」に載る
+- `async on_event(kind, data)` … 本体やほかのモジュールが配った出来事（core.emit）。受け取ったら自分で扱う
+  （声なら喋る）。投げっぱなしなので、返事は要らない。出来事の種類は docs/extensibility.md の「出来事」
+- `home() -> list[dict]` … App Home に出す、このモジュールの項目（Slack の blocks。見出しは本体が付ける）。
+  押せるものの action_id は core.home_action_id(名前) で作る（チェックなら core.home_checkboxes）
+- `async on_home_action(name, action)` … App Home の、このモジュールの項目が押されたとき（name は
+  home_action_id に渡した名前、action は Slack の action）。依頼者のときだけ呼ばれ、終わると App Home を作り直す
 - `welcome() -> str` … モジュールのチャンネルに招かれたときの案内（できること）
 - `default_question` … 本文の無いメンションのときに、担当に聞くこと
 """
@@ -34,17 +40,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, dates, deadline, modules, router, settings, themes
+from kei_agent import agents, dates, deadline, home, modules, router, settings, themes
 from kei_agent.agents import Reply
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.notion import NotionError
+from kei_agent.records import Records
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape, split_text
@@ -55,10 +61,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "checked_text",
-           "day_label", "due_clock", "due_day", "escape", "failure_text", "parse_time", "weekday"]
+           "day_label", "due_clock", "due_day", "escape", "failure_text", "parse_time", "selected_values", "weekday"]
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
-_KEEP = object()
 
 
 def failure_text(kind: str = "connection") -> str:
@@ -91,6 +96,14 @@ def due_clock(at: datetime) -> str:
     return deadline.clock(at)
 
 
+def selected_values(action: dict) -> set[str]:
+    """App Home で押された action の、選ばれている値（チェックなら付いているもの全部、選ぶ形なら1つ）。"""
+    chosen = {str(option.get("value")) for option in action.get("selected_options") or []}
+    if action.get("selected_option"):
+        chosen.add(str(action["selected_option"].get("value")))
+    return chosen
+
+
 def checked_text(text: str) -> str | None:
     """担当が返した文を、Slack に出せる形か確かめる（手元のパスや作業の実況を出さない）。出せなければ None。"""
     try:
@@ -107,46 +120,6 @@ class Theme:
     # テーマの CLAUDE.md の「## 検索キーワード」と、CLAUDE.md の本文（前提）
     keywords: tuple[str, ...]
     premises: str
-
-
-class Records:
-    """そのモジュールだけの記録。種類と鍵で1件、中身は JSON にできる辞書。
-
-    keep_days を付けたものは、その日数を過ぎると毎晩の保守で消える（付けなければ、消すまで残る）。
-    """
-
-    def __init__(self, store, module: str):
-        self._store = store
-        self._module = module
-
-    def put(self, kind: str, key: str, value: dict, *, keep_days: float | None = None) -> None:
-        self._store.put_module_record(self._module, kind, key, json.dumps(value, ensure_ascii=False),
-                                      _expires(keep_days))
-
-    def get(self, kind: str, key: str) -> dict | None:
-        row = self._store.module_record(self._module, kind, key)
-        return json.loads(row["value"]) if row is not None else None
-
-    def update(self, kind: str, key: str, *, keep_days: float | None | object = _KEEP, **changes) -> dict | None:
-        """中身の一部を書き換える。keep_days を渡せば、残す日数も変える（None なら消すまで残す）。無ければ None。"""
-        row = self._store.module_record(self._module, kind, key)
-        if row is None:
-            return None
-        value = {**json.loads(row["value"]), **changes}
-        expires = row["expires_at"] if keep_days is _KEEP else _expires(keep_days)
-        self._store.put_module_record(self._module, kind, key, json.dumps(value, ensure_ascii=False), expires)
-        return value
-
-    def items(self, kind: str) -> list[dict]:
-        """その種類の記録の中身（新しく書いた順）。"""
-        return [json.loads(row["value"]) for row in self._store.module_records(self._module, kind)]
-
-    def delete(self, kind: str, key: str) -> None:
-        self._store.delete_module_record(self._module, kind, key)
-
-
-def _expires(keep_days: float | None) -> float | None:
-    return None if keep_days is None else time.time() + keep_days * 86400
 
 
 class Core:
@@ -184,6 +157,14 @@ class Core:
     async def channel_ids(self) -> dict[str, str]:
         """Kei Agent がいるチャンネル（番号を外した名前 → ID）。"""
         return await self._assistant.channel_ids()
+
+    def home_action_id(self, name: str) -> str:
+        """App Home に出す、押せるものの action_id（押されると、このモジュールの on_home_action(name, action)）。"""
+        return home.module_action_id(self.name, name)
+
+    def home_checkboxes(self, name: str, options: dict[str, str], chosen: set[str]) -> dict:
+        """App Home に出すチェック（値 → 表示名）。付いているものは chosen。押されると on_home_action(name, action)。"""
+        return home.checkboxes(self.home_action_id(name), options, chosen)
 
     def channels(self, kind: str) -> tuple[str, ...]:
         """module.toml の [channels] の種類に当たるチャンネルの名前（設定の [channels] で変えたものも）。"""
@@ -227,9 +208,12 @@ class Core:
     def mark_noticed(self, key: str) -> None:
         self._assistant.store.record_notice(f"module.{self.name}.{key}")
 
-    def notify_voice(self, kind: str, **data) -> None:
-        """声のレイヤに出来事を知らせる（due・schedule など。言い方は声のレイヤが決める）。"""
-        self._assistant.notify_voice(kind, **data)
+    def emit(self, kind: str, **data) -> None:
+        """出来事を配る（締切が近い、など）。受け取るのは on_event を持つモジュール（声なら喋る）。
+
+        投げっぱなしで、誰も受け取らなくても、受け取った側が落ちても、呼んだ側は気にしなくてよい。
+        """
+        self._assistant.emit(kind, **data)
 
     def notice_once(self, key: str) -> bool:
         """その目印でまだ知らせていなければ True を返し、知らせたことにする（同じことを何度も知らせない）。

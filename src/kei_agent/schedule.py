@@ -555,10 +555,10 @@ class Scheduler:
         if synced or unread:
             detail["agenda"] = {"synced": synced, "unread": unread}
         detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
-        # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく。
+        # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく（出来事 schedule）。
         # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
         # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
-        self.assistant.notify_voice("schedule", items=[
+        self.assistant.emit("schedule", items=[
             {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
              "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
             for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])

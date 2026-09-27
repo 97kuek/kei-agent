@@ -267,7 +267,7 @@ def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
     _agent_module(home_dir / "modules")
     monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
     started = []
-    monkeypatch.setattr(server, "serve", lambda name, build_card, build_executor, rpc_path, port, prefix:
+    monkeypatch.setattr(server, "serve", lambda name, build_card, build_executor, rpc_path, port, prefix, build_app:
                         started.append((name, build_card("http://127.0.0.1:8800"), port, prefix)))
 
     launch.main(["weather"])

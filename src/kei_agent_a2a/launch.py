@@ -9,8 +9,11 @@ commands.py の COMMANDS から動かす（例: `kei-agent-module course setup -
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 import sys
 from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import AgentCard
@@ -20,6 +23,8 @@ from kei_agent import modules
 from kei_agent.config import load_config
 from kei_agent_a2a import server
 from kei_agent_a2a.card import RPC_PATH, agent_card
+
+log = logging.getLogger(__name__)
 
 
 def env_prefix(spec: modules.ModuleSpec) -> str:
@@ -44,6 +49,41 @@ def parts(spec: modules.ModuleSpec) -> tuple[Callable[[str], AgentCard], Callabl
     return build_card, build_executor
 
 
+def app_builder(spec: modules.ModuleSpec) -> Callable[[AgentCard, AgentExecutor, str, str], Starlette]:
+    """A2A のアプリの作り方。agent.py に background(executor) があれば、担当と同じプロセスで動かし続ける。
+
+    background は起動のときに始め、止めるときに止める。落ちたらログに残す（A2A の口は動かし続ける）。
+    """
+    background = getattr(modules.load_agent(spec), "background", None)
+
+    def build(card: AgentCard, executor: AgentExecutor, rpc_path: str, token: str) -> Starlette:
+        app = server.build_app(card, executor, rpc_path, token)
+        if background is not None:
+            app.router.lifespan_context = _lifespan(spec, background, executor)
+        return app
+
+    return build
+
+
+def _lifespan(spec: modules.ModuleSpec, background, executor: AgentExecutor):
+    @asynccontextmanager
+    async def lifespan(_app):
+        def stopped(done: asyncio.Task) -> None:
+            if not done.cancelled() and done.exception() is not None:
+                log.error("モジュール「%s」の background が止まりました", spec.name, exc_info=done.exception())
+
+        task = asyncio.create_task(background(executor))
+        task.add_done_callback(stopped)
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    return lifespan
+
+
 def build_app(spec: modules.ModuleSpec, base_url: str, token: str,
               executor: AgentExecutor | None = None) -> Starlette:
     """担当の A2A アプリ（テスト用。本番は main が同じものを uvicorn で動かす）。"""
@@ -51,7 +91,7 @@ def build_app(spec: modules.ModuleSpec, base_url: str, token: str,
     if executor is None:
         executor = build_executor()
     executor.agent = spec.name
-    return server.build_app(build_card(base_url), executor, RPC_PATH, token)
+    return app_builder(spec)(build_card(base_url), executor, RPC_PATH, token)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -82,7 +122,8 @@ def main(argv: list[str] | None = None) -> None:
     if spec.port is None or spec.name not in config.modules:
         parser.error(f"担当プロセスを持つ、オンのモジュールではありません: {name}")
     build_card, build_executor = parts(spec)
-    server.serve(f"{spec.label}エージェント", build_card, build_executor, RPC_PATH, spec.port, env_prefix(spec))
+    server.serve(f"{spec.label}エージェント", build_card, build_executor, RPC_PATH, spec.port, env_prefix(spec),
+                 build_app=app_builder(spec))
 
 
 if __name__ == "__main__":

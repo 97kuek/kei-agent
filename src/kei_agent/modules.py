@@ -416,6 +416,16 @@ def load_code(spec: ModuleSpec) -> type | None:
             inspect.signature(agenda).bind(None, 7, None)
         except TypeError:
             raise ModuleError(f"{where}: agenda は agenda(self, days, kinds=None) の形にしてください") from None
+    for hook, args, shape in (("on_event", (None, "", {}), "on_event(self, kind, data)"),
+                              ("home", (None,), "home(self)"),
+                              ("on_home_action", (None, "", {}), "on_home_action(self, name, action)")):
+        found = getattr(cls, hook, None)
+        if found is None:
+            continue
+        try:
+            inspect.signature(found).bind(*args)
+        except (TypeError, ValueError):
+            raise ModuleError(f"{where}: {hook} は {shape} の形にしてください") from None
     on_message = getattr(cls, "on_message", None)
     if spec.channels and not callable(on_message):
         raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req, skill, params) を書いてください")
@@ -429,13 +439,25 @@ def load_code(spec: ModuleSpec) -> type | None:
 
 
 def load_agent(spec: ModuleSpec):
-    """担当プロセスの動き（agent.py の SKILLS と class Executor）を読み込む。共通の起動コマンドが使う。"""
+    """担当プロセスの動き（agent.py の SKILLS と class Executor）を読み込む。共通の起動コマンドが使う。
+
+    `async background(executor)` があれば、担当と同じプロセスで動かし続ける仕事（声ならマイクの会話）。
+    """
     where = spec.path / AGENT_FILE
     importlib.invalidate_caches()
     code = importlib.import_module(f"{package(spec)}.agent")
     if not isinstance(getattr(code, "SKILLS", None), (list, tuple)) or not isinstance(getattr(code, "Executor", None),
                                                                                        type):
         raise ModuleError(f"{where} に SKILLS（名刺に載せる仕事の一覧）と class Executor を書いてください")
+    background = getattr(code, "background", None)
+    if background is not None:
+        try:
+            inspect.signature(background).bind(None)
+            ok = inspect.iscoroutinefunction(background)
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            raise ModuleError(f"{where}: background は async def background(executor) の形にしてください")
     return code
 
 

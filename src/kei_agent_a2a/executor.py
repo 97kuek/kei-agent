@@ -18,6 +18,7 @@ from kei_agent import themes
 from kei_agent.config import Config, load_config
 from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import ModelPolicyError
+from kei_agent.records import Records
 from kei_agent.store import Store
 from kei_agent.themes import Workspace
 from kei_agent_a2a import envelope, run
@@ -58,6 +59,11 @@ class SkillExecutor(AgentExecutor):
     def __init__(self, config: Config | None = None, store: Store | None = None):
         self.config = config or load_config()
         self.store = store or Store(self.config.db_path)
+
+    @property
+    def records(self) -> Records:
+        """このモジュールだけの記録（本体側の core.records と同じもの。App Home のオン・オフなども読める）。"""
+        return Records(self.store, self.agent)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = dict(getattr(context, "metadata", None) or {})

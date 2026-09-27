@@ -552,7 +552,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
         await self._react(self.slack.reactions_remove, req.channel, req.message_ts, SEEN_REACTION)
         await self._react(self.slack.reactions_add, req.channel, req.message_ts,
                           FAILED_REACTION if failed else DONE_REACTION)
-        self.notify_voice("failed" if failed else "done", theme=req.channel_name)
+        self.emit("failed" if failed else "done", theme=req.channel_name)
 
     async def notify_owner(self, req: Request, text: str) -> None:
         """スレッド内の投稿は通知が来ないので、依頼者へのメンション付きの短い投稿を足す。"""
@@ -824,6 +824,54 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
                 await self.notify_trouble(f"モジュール「{name}」がリアクションを扱えませんでした")
         return False
 
+    def emit(self, kind: str, **fields) -> None:
+        """出来事を配る（受け取るのは on_event を持つモジュール）。投げっぱなしで、届かなくても呼んだ側は気にしない。
+
+        空の中身（None と空文字）は外して渡す。声のレイヤがモジュールになるまでは、声にも同じものを送る。
+        """
+        data = {key: value for key, value in fields.items() if value not in (None, "")}
+        for name, module in self.modules.items():
+            on_event = getattr(module, "on_event", None)
+            if callable(on_event):
+                self.spawn(self._deliver_event(name, on_event, kind, dict(data)))
+        self.notify_voice(kind, **fields)
+
+    @staticmethod
+    async def _deliver_event(name: str, on_event, kind: str, data: dict) -> None:
+        try:
+            await on_event(kind, data)
+        except Exception:
+            # 知らせを受け取れなかっただけで、配った側の仕事は終わっている
+            log.exception("モジュール「%s」が出来事（%s）を受け取れませんでした", name, kind)
+
+    def module_home(self) -> list[tuple[str, list[dict]]]:
+        """App Home に並べる、モジュールの項目（class Module の home）。作れなかったモジュールは飛ばす。"""
+        sections = []
+        for name, module in self.modules.items():
+            build = getattr(module, "home", None)
+            if not callable(build):
+                continue
+            try:
+                blocks = [block for block in build() or [] if isinstance(block, dict)]
+            except Exception:
+                log.exception("モジュール「%s」の App Home の項目を作れませんでした", name)
+                continue
+            if blocks:
+                sections.append((modules.known()[name].label, blocks))
+        return sections
+
+    async def module_home_action(self, module: str, name: str, action: dict) -> bool:
+        """App Home のモジュールの項目が押された（class Module の on_home_action）。扱ったら True。"""
+        on_home_action = getattr(self.modules.get(module), "on_home_action", None)
+        if not callable(on_home_action):
+            return False
+        try:
+            await on_home_action(name, action)
+        except Exception:
+            log.exception("モジュール「%s」が App Home の操作（%s）を扱えませんでした", module, name)
+            await self.notify_trouble(f"モジュール「{module}」が App Home の操作を扱えませんでした")
+        return True
+
     async def on_reaction_added(self, event: dict) -> None:
         """自分のメッセージに 🌙 をつけると、夜間の Task になる。モジュールの投稿へのリアクションは、そのモジュールが扱う。"""
         if await self.module_reaction(event, added=True) or not self._own_night_reaction(event):
@@ -1027,7 +1075,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
             await self.drop_deferred_for(req)
         if req.message_ts:
             await self._react(self.slack.reactions_add, req.channel, req.message_ts, SEEN_REACTION)
-        self.notify_voice("working", theme=req.channel_name)
+        self.emit("working", theme=req.channel_name)
         self.spawn(self._process_and_report(req))
 
     async def _process_and_report(self, req: Request) -> None:
@@ -1233,7 +1281,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
         awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         if awaiting:
-            self.notify_voice("awaiting", theme=req.channel_name)
+            self.emit("awaiting", theme=req.channel_name)
         await self.sync_review_conclusion(req)
         await self._reply(req, ws, ui, result, awaiting)
         await self._attach_outputs(req, ws.cwd, before)
@@ -1575,7 +1623,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
         self.store.defer_run("request", {**req.to_payload(), "provider": provider}, until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
         await self.post(req, f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。")
-        self.notify_voice("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
+        self.emit("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
 
     # 再起動で途中で止まった依頼
 

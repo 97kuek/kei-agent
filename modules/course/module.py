@@ -311,7 +311,7 @@ class Module:
             if self.core.noticed(key):
                 continue
             await self.core.post(channel, soon_text(item, now))
-            self.core.notify_voice("due", title=item.get("title"), at=item.get("at"))
+            self.core.emit("due", title=item.get("title"), at=item.get("at"))
             self.core.mark_noticed(key)
         await self.notify_unstarted(channel, now)
 

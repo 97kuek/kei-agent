@@ -1,7 +1,8 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
 見出しと操作だけの1画面にする（説明文は置かない。2026-09-26）。置くのは、動いているもの、担当ごとの AI、
-定期実行の時刻とオン・オフ、声、テーマごとに許可した接続先だけ。基本の接続先など `config.toml` の柵は出さない。
+定期実行の時刻とオン・オフ、モジュールの項目（class Module の home）、声、テーマごとに許可した接続先だけ。
+基本の接続先など `config.toml` の柵は出さない。
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
 TIME_ACTION = "kei_agent_home_time"              # :<定期実行>
 SCHEDULES_ACTION = "kei_agent_home_schedules"
 VOICE_ACTION = "kei_agent_home_voice"
+MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
@@ -58,7 +60,12 @@ def _button(text: str, action_id: str, value: str, style: str | None = None) -> 
     return button
 
 
-def _checkboxes(action_id: str, options: dict[str, str], chosen: set[str]) -> dict:
+def module_action_id(module: str, name: str) -> str:
+    """モジュールの項目の action_id（押されると、そのモジュールの on_home_action(name, action)）。"""
+    return f"{MODULE_ACTION}:{module}:{name}"
+
+
+def checkboxes(action_id: str, options: dict[str, str], chosen: set[str]) -> dict:
     """値 → 表示名のチェック。Slack は空の initial_options を受け付けないので、選んだものが無ければ付けない。"""
     element = {"type": "checkboxes", "action_id": action_id,
                "options": [_option(text, value) for value, text in options.items()]}
@@ -84,7 +91,9 @@ def _now_working(config: Config, store: Store, now: float | None = None) -> list
     return lines
 
 
-def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool) -> dict:
+def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool,
+               module_sections: list[tuple[str, list[dict]]] = ()) -> dict:
+    """module_sections は、モジュールの表示名と項目（class Module の home が返した blocks）。定期実行の下に並べる。"""
     if not is_owner:
         return {"type": "home", "blocks": [_mrkdwn("設定を変えられるのは依頼者だけです")]}
 
@@ -112,7 +121,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         {"type": "divider"},
         _mrkdwn("*定期実行*"),
         {"type": "actions", "elements": [
-            _checkboxes(SCHEDULES_ACTION, {name: settings.schedule_label(config, name, short=True) for name in names},
+            checkboxes(SCHEDULES_ACTION, {name: settings.schedule_label(config, name, short=True) for name in names},
                         running)]},
     ]
     for name in names:
@@ -124,12 +133,15 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": settings.schedule_label(config, name)},
                        "accessory": picker})
 
+    for label, items in module_sections:
+        blocks += [{"type": "divider"}, _mrkdwn(f"*{label}*"), *items]
+
     voice = {name for name, on in (("voice", settings.voice_enabled(store)),
                                    ("listen", settings.listening_enabled(store))) if on}
     blocks += [
         {"type": "divider"},
         _mrkdwn("*声*"),
-        {"type": "actions", "elements": [_checkboxes(VOICE_ACTION, VOICE_OPTIONS, voice)]},
+        {"type": "actions", "elements": [checkboxes(VOICE_ACTION, VOICE_OPTIONS, voice)]},
         {"type": "divider"},
         _mrkdwn("*接続先*"),
     ]

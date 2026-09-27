@@ -6,16 +6,20 @@ Kei Agent の部品は、この kei_agent_a2a.api だけ。本体側（module.py
 agent.py には次を置く。起動は共通のコマンド（`kei-agent-module <名前>`）が、module.toml の [process] の番地で行う。
 
 - `SKILLS` … 名刺に載せる仕事の一覧（AgentSkill）。本体の振り分け係が読む。自由な質問は id を ASK にする
+- `async background(executor)`（任意）… 担当と同じプロセスで動かし続ける仕事（声ならマイクの会話）。起動のときに
+  始まり、止めるときに止まる
 - `class Executor(SkillExecutor)` … `async handle(updater, metadata, text)` で仕事をこなす。
   `metadata["skill"]` が仕事の id、`text` が本文（本体の core.ask_agent が渡した材料の JSON）、
   `metadata["provider"]` が App Home で選んだ provider。終わったら `await self.done(updater, 一言, data)`、
   断るなら `await self.fail(updater, 理由)`。自由な質問（ASK）は `await self.answer(updater, text)` に渡すと、
-  会話の続きも含めて、ほかの担当と同じ形で答える。`self.config` と `self.store` は土台が用意する
+  会話の続きも含めて、ほかの担当と同じ形で答える。`self.config` と `self.store` は土台が用意し、
+  `self.records` はこのモジュールだけの記録（本体側の core.records と同じもの）
 - `DESCRIPTION`（任意）… 名刺の説明。無ければ module.toml の description
 
 手で動かすコマンド（setup など）は commands.py に `COMMANDS = {"名前": main(argv)}` を置く（`kei-agent-module
 <名前> <コマンド>`）。Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
 モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
+本体の問い合わせ口に研究・大学・仕事の中身を聞くのは `ask_orchestrator`、Slack の外から依頼を置くのは `put_request`。
 """
 
 from __future__ import annotations
@@ -27,21 +31,23 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentSkill
 
-from kei_agent import modules, runner, themes
+from kei_agent import a2a, agents, ask, modules, runner, themes
 from kei_agent.config import Config, load_config
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.model_json import json_list, json_object
 from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
 from kei_agent.notion import Notion, NotionError, Setup, gateway_notion
+from kei_agent.records import Records
 from kei_agent.timelog import Toggl, TogglError, load_toggl
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
 from kei_agent_a2a.run import progress
 
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionError", "Setup",
-           "SkillExecutor", "TaskUpdater", "Toggl", "TogglError", "asked_days", "day_label", "gateway_notion",
-           "json_list", "json_object", "load_config", "load_toggl", "parse_time", "progress", "requested_days",
-           "run_ai", "settings", "weekday", "workspace"]
+__all__ = ["API_VERSION", "ASK", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionError",
+           "OrchestratorError", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl", "TogglError",
+           "ask_orchestrator", "asked_days", "day_label", "gateway_notion", "json_list", "json_object", "load_config",
+           "load_toggl", "parse_time", "progress", "put_request", "requested_days", "run_ai", "settings", "weekday",
+           "workspace"]
 # 本文の JSON の days で受け付ける上限（日）
 MAX_DAYS = 400
 
@@ -52,6 +58,37 @@ class AIError(RuntimeError):
     def __init__(self, reason: str, limit_reset_at: float | None = None):
         super().__init__(reason)
         self.limit_reset_at = limit_reset_at
+
+
+class OrchestratorError(RuntimeError):
+    """本体の問い合わせ口に聞けなかった（住所が無い、つながらない、断られた）。理由は本文。"""
+
+
+async def ask_orchestrator(config: Config, actor: str, question: str, theme: str = "") -> str:
+    """本体の問い合わせ口（config.toml の [a2a] orchestrator）に、研究・大学・仕事の中身を聞く。
+
+    担当を呼べるのは本体だけ。本体が選択済みの provider で、読むだけで担当に聞き、Slack に出すときと同じ出力の
+    確認を通した答えを返す。actor は research / course / work（研究なら theme も）。聞けなければ OrchestratorError。
+    """
+    url = config.a2a.orchestrator
+    if not url:
+        raise OrchestratorError("本体の住所が config.toml の [a2a] orchestrator にありません")
+    # 本体は担当の AI を動かすので、待つ時間はその上限時間を足しておく
+    timeout = config.run_timeout_minutes * 60 + config.a2a.timeout_seconds
+    reply = await agents.ask(a2a.Agent(url, config.a2a_token, timeout=timeout), agents.ASK,
+                             text=json.dumps({"actor": actor, "question": question, "theme": theme},
+                                             ensure_ascii=False))
+    if not reply.ok:
+        raise OrchestratorError(reply.text or "返事が空でした")
+    return reply.text
+
+
+def put_request(config: Config, theme: str, text: str, *, note: bool = False) -> Path:
+    """Slack の外から依頼を置く。本体が数秒で拾い、テーマのチャンネルにスレッドを立てて、いつもどおり作業する。
+
+    theme は Slack のチャンネル名。note なら作業させず、決まったこととして記録だけする。置いたファイルの場所を返す。
+    """
+    return ask.write_ask(config, theme, text, "note" if note else "request")
 
 
 def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:

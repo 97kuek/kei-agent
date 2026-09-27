@@ -99,7 +99,9 @@ class SettingsActions:
         return [p.name for p in themes.theme_dirs(self.config)]
 
     async def publish_home(self, user_id: str) -> None:
-        view = home.build_home(self.config, self.store, self._theme_names(), is_owner=self.is_allowed(user_id))
+        owner = self.is_allowed(user_id)
+        view = home.build_home(self.config, self.store, self._theme_names(), is_owner=owner,
+                               module_sections=self.module_home() if owner else [])
         await self.slack.views_publish(user_id=user_id, view=view)
 
     async def on_home_opened(self, event: dict) -> None:
@@ -144,6 +146,10 @@ class SettingsActions:
             if listen != settings.listening_enabled(self.store):
                 settings.set_listening(self.store, listen)
                 self.notify_listening(listen)
+        elif kind == home.MODULE_ACTION:
+            module, _, item = name.partition(":")
+            if not await self.module_home_action(module, item, action):
+                return
         elif kind == home.PROVIDER_ACTION and name in home.agent_labels(self.config):
             provider = ((action.get("selected_option") or {}).get("value") or "")
             if provider:
