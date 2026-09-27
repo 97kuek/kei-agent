@@ -95,7 +95,7 @@ deploy/install.sh research         # 127.0.0.1:8788
 deploy/install.sh work             # 127.0.0.1:8789
 deploy/install.sh knowledge        # 127.0.0.1:8792（モジュールの担当。自分のモジュールも [process] があれば同じく名前で）
 deploy/install.sh voice            # 127.0.0.1:8790
-deploy/install.sh notion-gateway   # 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
+deploy/install.sh notion           # Notion のゲートウェイ 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
 deploy/install.sh remove           # 本体の登録を外す（エージェントは deploy/install.sh course remove など）
 ```
 
@@ -118,7 +118,7 @@ Notion に届くのはゲートウェイだけなので、下の setup もゲー
 1. Notion でコネクト「Kei Agent」（アクセストークン方式）を作り、トークンを `NOTION_TOKEN` に貼る
 2. 共通ホーム（`Keitaro Ueki`）、研究ホーム、授業ホームを、どれもこのコネクトに共有する
 3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home` / `research_home` / `course_home`）に書く。ゲートウェイはこの下だけを通す
-4. ゲートウェイを動かす（`deploy/install.sh notion-gateway`。手元なら別の端末で `uv run kei-agent-notion-gateway`）
+4. ゲートウェイを動かす（`deploy/install.sh notion`。手元なら別の端末で `uv run --group agents kei-agent-module notion`）
 
 **研究ホーム**: 作るもの・足すものを確かめてから反映する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
 
@@ -171,7 +171,7 @@ gh auth status                                         # 要望を GitHub issue 
 | 返事が来ない | App Home で provider が選ばれているか。`kei-agent.log` |
 | 大学・研究・仕事だけ失敗する | `curl -s http://127.0.0.1:8787/.well-known/agent-card.json`（ポートを替えて）と `<名前>-launchd.log`。`KEI_AGENT_A2A_TOKEN` が全プロセスで同じか |
 | `<名前>-launchd.log` に `can't open input file` | 登録してある plist が、いまはない起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
-| Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-gateway-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全プロセスで同じか |
+| Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全プロセスで同じか |
 | Notion で `can't reach` と断られる | そのホームの外を触ろうとしている。ホームがコネクト「Kei Agent」に共有されているか、`config.toml` の `[notion]` が合っているか |
 | 大学・仕事の連携が見えない | Claude なら、エージェントのファイルの `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR`、そのプロファイルでのログイン。Codex なら、ChatGPT のログインと Codex アプリの連携 |
 | 声が出ない・聞かない | `ffmpeg` があるか、マイクの許可、`OPENAI_API_KEY`、App Home のスイッチ、`voice-launchd.log` |

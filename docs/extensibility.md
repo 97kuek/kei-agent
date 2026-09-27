@@ -81,8 +81,10 @@ offline = true                  # Web を使わない回（外の文を材料と
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
 
-[process]                       # 担当プロセス（持つなら）
+[process]                       # 常駐のプロセス（持つなら）
 port = 8792                     # 127.0.0.1 のこの番地。設定の [a2a.agents] に書かなければ、ここを使う
+# kind = "service"              # A2A の担当ではない口（agent.py の代わりに service.py の serve(config, port)。
+#                               # Notion のゲートウェイ）。/health で {"version": RUNNING_VERSION} を返す
 
 [channels]                      # チャンネルの種類 = 既定の名前（番号を外した名前。設定の [channels] で変えられる）
 knowledge = ["knowledge"]
@@ -100,7 +102,8 @@ default = "07:00"               # 空文字なら、既定では動かさない
 - 同じ時刻なら、夜間の Task → モジュールの定期処理（設定の modules の順）→ Daily → 振り返り → 保守の順に動く
 - 担当プロセスの名前（`deploy/install.sh <名前>` など）は、`[process]` を持つモジュールから起動スクリプトが見つける
 - 設定は `config.toml` の、モジュールの名前の表（大学なら `[course]`）に書く。書けるのは `[settings]` にある名前だけで、形が既定と違えば読むときに断る。モジュールをオフにしても、設定は消さずに残しておける。本体の設定の表（`[notion]` など）と同じ名前のモジュールは、設定を持てない
-- `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る。`[process]` なら `agent.py`、`[actor]` なら `prompt` の指示書（どれも、無ければ設定を読むときに断る）
+- `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る。`[process]` なら `agent.py`（`kind = "service"` なら `service.py`）、`[actor]` なら `prompt` の指示書（どれも、無ければ設定を読むときに断る）
+- `kind = "service"` のプロセスは担当ではないので、本体は A2A でつながない。起動し直すときは担当より先にし、反映のあとは `/health` の版を確かめる
 
 ### module.py の書き方（枠の版 1）
 
@@ -285,7 +288,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ。①は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①は済み（2026-09-27）、②は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 

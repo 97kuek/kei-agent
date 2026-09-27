@@ -4,7 +4,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 1. プロセス
 
-すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。plist はどれも `deploy/com.kei-agent.plist.template` から作り、起動スクリプト（本体 `run.sh`、担当 `run-agent.sh <名前>`、ゲートウェイ `run-notion-gateway.sh`）は、`uv sync` で依存をそろえてから仮想環境の Python を直に起動する（`uv run` のように uv を親として常駐させない）。取り込んだ main の反映は `deploy/update.sh`（`deploy/README.md`）。
+すべて同じ Mac の launchd で常駐し、`127.0.0.1` だけで話す。plist はどれも `deploy/com.kei-agent.plist.template` から作り、起動スクリプト（本体 `run.sh`、担当とモジュールの常駐のプロセス `run-agent.sh <名前>`）は、`uv sync` で依存をそろえてから仮想環境の Python を直に起動する（`uv run` のように uv を親として常駐させない）。取り込んだ main の反映は `deploy/update.sh`（`deploy/README.md`）。
 
 | プロセス | コマンド | ポート | パッケージ | 役目 |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 仕事エージェント | `kei-agent-module work` | 8789 | `modules/work/` | Microsoft 365 を読む。モジュールの担当プロセス（`agent.py`） |
 | 知識エージェント | `kei-agent-module knowledge` | 8792 | `modules/knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない）。モジュールの担当プロセス（`agent.py`） |
 | 声 | `kei-agent-module voice` | 8790 | `modules/voice/` | Realtime API、マイク、スピーカー。モジュールの担当プロセス（`agent.py`）で、マイクの会話も同じプロセス（`background`） |
-| Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章） |
+| Notion ゲートウェイ | `kei-agent-module notion` | 8791 | `modules/notion/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章）。Notion のモジュールの、A2A ではない常駐のプロセス（`service.py`） |
 
 `src/kei_agent_a2a/` は A2A サーバーの共通部分（`server.py`）、返事の封筒（`envelope.py`）、受け付けの土台と共通の `ask`（`executor.py`）、provider を1回動かす処理（`run.py`）、モジュールの担当プロセスの窓口（`api.py`）と共通の起動コマンド（`launch.py`、`kei-agent-module <名前>`）。
 
@@ -177,11 +177,11 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 | 柵そのもの | `src/kei_agent/guard.py`、`config.example.toml`、`deploy/` は Kei Agent 自身に直させない（`PROTECTED_PATHS`）。本物の設定はリポジトリの外（`~/.config/kei-agent/`）にあり、自己改善の作業場からは届かない |
 | Slack から変えられないもの | 同時に動かす数、上限時間、書き込み先、読ませない場所、基本の接続先 |
 
-**Notion ゲートウェイ**（`127.0.0.1:8791`、`src/kei_agent_notion_gateway/`）
+**Notion ゲートウェイ**（`127.0.0.1:8791`、Notion のモジュール `modules/notion/`）
 
-- Notion に届くのはこのプロセスだけで、`NOTION_TOKEN` を持つのもここだけ（ほかの起動スクリプトは読んだあとで消す）
+- Notion に届くのはこのプロセスだけで、`NOTION_TOKEN` を持つのもここだけ（`run-agent.sh` は、Notion のモジュールのほかは読んだあとで消す）。ほかのプロセスが使うので、起動し直すときは先にする（`deploy/restart-all.sh`）
 - 合言葉は client ごと。親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN` で client 名を HMAC-SHA256 したもの（`kei_agent.notion.gateway_client_token`）だけを定数時間で比べて受け付け、親そのものは通さない。`/health` 以外はどれかの合言葉が要る
-- 届くホームは `config.toml` の `[notion]` で決まる。client は本体と、ホームを書いたモジュール（と研究）で、名前はモジュールの名前（`kei_agent_notion_gateway/clients.py`）。ほかのモジュールのホームは `[notion.homes]` に「名前 = ページ ID」で足す
+- 届くホームは `config.toml` の `[notion]` で決まる。client は本体と、ホームを書いたモジュール（と研究）で、名前はモジュールの名前（`modules/notion/clients.py`）。ほかのモジュールのホームは `[notion.homes]` に「名前 = ページ ID」で足す
 
 | client | 使うところ | 届くホーム | 口 |
 |---|---|---|---|
