@@ -27,4 +27,13 @@ jobs:
       - name: 書き方を確かめる
         run: uvx ruff check .
       - name: テストを実行する
+        # tests/ の中に、kei-agent module new の4種類のひな形を作って、そのテストを通すものもある
         run: uv run python -m pytest
+      - name: モジュールのテストを実行する
+        # テストを自分のフォルダ（modules/<名前>/tests/）に持つ組み込みのモジュールは、作る人と同じ柵を付けて動かす
+        run: |
+          for tests in modules/*/tests; do
+            if [ -d "$tests" ]; then
+              uv run kei-agent module test "$(basename "$(dirname "$tests")")"
+            fi
+          done
