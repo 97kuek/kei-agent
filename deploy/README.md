@@ -93,7 +93,7 @@ deploy/install.sh                  # 本体
 deploy/install.sh course           # 127.0.0.1:8787
 deploy/install.sh research         # 127.0.0.1:8788
 deploy/install.sh work             # 127.0.0.1:8789
-deploy/install.sh knowledge        # 127.0.0.1:8792
+deploy/install.sh knowledge        # 127.0.0.1:8792（モジュールの担当。自分のモジュールも [process] があれば同じく名前で）
 deploy/install.sh voice            # 127.0.0.1:8790
 deploy/install.sh notion-gateway   # 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
 deploy/install.sh remove           # 本体の登録を外す（エージェントは deploy/install.sh course remove など）

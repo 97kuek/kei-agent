@@ -54,7 +54,7 @@ requires = []                   # 必須のモジュール（設定の modules �
 optional = ["notion"]           # あれば使うモジュール
 
 [actor]                         # AI の実行役（持つなら）。provider は App Home で選ぶ
-prompt = "knowledge.md"         # 指示書（prompts/。利用者のフォルダの prompts/ で差し替えられる）
+prompt = "knowledge.md"         # 指示書（module.toml と同じフォルダ。利用者のフォルダの prompts/ に同じ名前を置けば差し替え）
 files = "none"                  # none / read / write
 shell = false
 web = true
@@ -82,7 +82,7 @@ default = "07:00"               # 空文字なら、既定では動かさない
 - 用途・定期処理・チャンネルの種類・番地は、モジュールどうしでぶつかってはいけない（ぶつかれば設定を読むときに断る）
 - 同じ時刻なら、夜間の Task → モジュールの定期処理（設定の modules の順）→ Daily → 振り返り → 保守の順に動く
 - 担当プロセスの名前（`deploy/install.sh <名前>` など）は、`[process]` を持つモジュールから起動スクリプトが見つける
-- `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る（無ければ設定を読むときに断る）
+- `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る。`[process]` なら `agent.py`、`[actor]` なら `prompt` の指示書（どれも、無ければ設定を読むときに断る）
 
 ### module.py の書き方（枠の版 1）
 
@@ -131,6 +131,35 @@ class Module:
 - 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`converse(req)`（担当と会話として答える）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
 - そのほか: `notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
+
+### agent.py の書き方（枠の版 1）
+
+`[process]` を持つモジュールの担当プロセス（A2A のサーバー）。`modules/knowledge/agent.py` が見本。Kei Agent の部品で読み込んでよいのは窓口の `kei_agent_a2a.api` だけで（本体側の `kei_agent.api` とは別）、同じフォルダのファイルは `from . import digest` のように読める。起動は共通のコマンド `kei-agent-module <名前>` が、module.toml の番地で行う（launchd からは `deploy/run-agent.sh <名前>`。依存は担当に共通の `agents` のグループ）。
+
+```python
+from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, run_ai
+
+DESCRIPTION = "明日の天気を調べる"          # 名刺の説明（無ければ module.toml の description）
+SKILLS = [                                   # 名刺に載せる仕事。本体の振り分け係が読む
+    AgentSkill(id="forecast", name="天気", description="本文の JSON（place）の明日の天気を返す", tags=["weather"]),
+    AgentSkill(id=ASK, name="天気の質問に答える", description="選択済み provider が答える", tags=["weather"]),
+]
+
+
+class Executor(SkillExecutor):               # self.config と self.store は土台が用意する
+    async def handle(self, updater, metadata, text):
+        if metadata.get("skill") == ASK:
+            await self.answer(updater, text)          # 自由な質問は、ほかの担当と同じ形で
+            return
+        summary = await run_ai(self.config, self.store, "weather", "weather_brief", f"{text} の明日の天気を短く")
+        await self.done(updater, summary, {"place": text})   # 断るなら self.fail(updater, 理由)
+```
+
+窓口 `kei_agent_a2a.api` でできること（`src/kei_agent_a2a/api.py`）:
+
+- `SkillExecutor`（`handle` を書く。`done` / `fail` / `answer`）、`AgentSkill`、`ASK`、`progress(updater, {"activity": …})`（経過を本体に流す）
+- `run_ai(config, store, 担当, 用途, 文, provider=…, prompt_file=…, profile=…)`: その担当の用途（`[use_cases]`）で AI を1回動かし、答えの本文を返す。作業場は読むだけ。上限に当たったら `AIError`（`limit_reset_at` つき）
+- `workspace(config, 担当)`（覚えておきたいものを置く作業場）、`json_object` / `json_list`（AI の答えから JSON を取り出す）
 
 ## 設定と置き場所
 
@@ -208,7 +237,7 @@ class Module:
 | 段 | やること | 状態 |
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
-| 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | ①②済み（2026-09-27）、③はこれから |
+| 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
 | 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善） | |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |

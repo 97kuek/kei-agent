@@ -12,11 +12,11 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 大学エージェント | `kei-agent-course` | 8787 | `src/kei_agent_course/` | Moodle・Box・授業ホーム・Toggl |
 | 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
 | 仕事エージェント | `kei-agent-work` | 8789 | `src/kei_agent_work/` | Microsoft 365 を読む |
-| 知識エージェント | `kei-agent-knowledge` | 8792 | `src/kei_agent_knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない） |
+| 知識エージェント | `kei-agent-module knowledge` | 8792 | `modules/knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない）。モジュールの担当プロセス（`agent.py`） |
 | 声のレイヤ | `kei-agent-voice` | 8790 | `src/kei_agent_voice/` | Realtime API、マイク、スピーカー |
 | Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章） |
 
-`src/kei_agent_a2a/` は A2A サーバーの共通部分（`server.py`）、返事の封筒（`envelope.py`）、受け付けの土台と共通の `ask`（`executor.py`）、provider を1回動かす処理（`run.py`）。
+`src/kei_agent_a2a/` は A2A サーバーの共通部分（`server.py`）、返事の封筒（`envelope.py`）、受け付けの土台と共通の `ask`（`executor.py`）、provider を1回動かす処理（`run.py`）、モジュールの担当プロセスの窓口（`api.py`）と共通の起動コマンド（`launch.py`、`kei-agent-module <名前>`）。
 
 `config.toml` の `[a2a.agents]` から `research` の行を消すと、研究の実行は本体のプロセスの中で動く。
 
@@ -98,7 +98,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 - **研究** … テーマの作業場で provider を1回動かして最終結果を返す。長い処理は pueue（グループ `kei-agent`）に入れ、本体が毎分状態を見て、終わったらその会話を再開する。ジョブは作業場の中のスクリプトだけで、`--expect` で宣言したファイルができたかを確かめる。Notion はゲートウェイ経由、W&B は `managing-wandb` skill
 - **大学** … Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
-- **知識** … 朝の読みもの（`reading-digest`）と、テーマごとの論文の新着（`paper-digest`）を作る。材料（「収集」ページの興味と情報源、テーマの `CLAUDE.md` の検索キーワードと前提、先行研究 DB にある ID）は本体側（`modules/knowledge/module.py`。コアとは窓口 `kei_agent.api` でだけやり取りする）が本文の JSON で渡し、結果も本体側が Slack と Notion に出す。RSS・arXiv・記事の本文はプログラムが読み（`feeds.py`。arXiv は混んでいると 406 などでしばらく断るので、30秒・90秒・3分あけてやり直す）、一度候補にしたものは作業場の `seen.json` に90日覚える。読みものには、本体が覚えている最近の 👍（題名・出どころ・興味）も渡り、同じ出どころ・興味の候補に少し点を足し（`LIKE_BOOST`）、選ぶ回に好みの例として見せる。選ぶ・要約するのは Web を使えない回（`OFFLINE_USE_CASES`）、質問に答える `ask` だけが Web を読む
+- **知識** … 朝の読みもの（`reading-digest`）と、テーマごとの論文の新着（`paper-digest`）を作る。材料（「収集」ページの興味と情報源、テーマの `CLAUDE.md` の検索キーワードと前提、先行研究 DB にある ID）は本体側（`modules/knowledge/module.py`。コアとは窓口 `kei_agent.api` でだけやり取りする）が本文の JSON で渡し、結果も本体側が Slack と Notion に出す。RSS・arXiv・記事の本文はプログラムが読み（`modules/knowledge/feeds.py`。arXiv は混んでいると 406 などでしばらく断るので、30秒・90秒・3分あけてやり直す）、一度候補にしたものは作業場の `seen.json` に90日覚える。読みものには、本体が覚えている最近の 👍（題名・出どころ・興味）も渡り、同じ出どころ・興味の候補に少し点を足し（`LIKE_BOOST`）、選ぶ回に好みの例として見せる。選ぶ・要約するのは Web を使えない回（`module.toml` の `offline = true`）、質問に答える `ask` だけが Web を読む
 - **仕事** … 会社アカウントに付いた Microsoft 365 の連携（Outlook の予定・メール・人・空き時間、Teams、SharePoint）を、読む道具だけで使う。送信・投稿・予定の作成・変更・削除はしない。Codex では Outlook（メールと予定の App）だけを読む（Teams・SharePoint の App は、道具の名前を確かめてから表に足す）。予定の一覧（`list-events`）も共通の起動口で、読むだけの1回として動かす
 
 ## 5. provider とモデル
