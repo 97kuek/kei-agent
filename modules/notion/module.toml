@@ -9,3 +9,9 @@ description = "Notion に届く唯一の口（ゲートウェイ）。使う側�
 [process]
 port = 8791
 kind = "service"
+
+# 秘密情報（値はここに書かない。kei-agent setup が聞いて秘密情報のファイルに書き、kei-agent doctor が有無を確かめる）。
+# NOTION_TOKEN は共通のファイルに置くが、起動スクリプトがこのプロセス以外では消す
+[secrets]
+NOTION_TOKEN = { description = "Notion のコネクト「Kei Agent」のアクセストークン（ntn_ で始まる）", required = true }
+KEI_AGENT_NOTION_GATEWAY_TOKEN = { description = "ゲートウェイの親の合言葉。ここから、使う側ごとの合言葉を作る", required = true, generate = true }

@@ -46,7 +46,12 @@ def test_a_broken_config_is_the_only_finding(tmp_path):
 
 def test_secrets_are_checked_by_name_only(config, tmp_path):
     ok = _secrets(config, tmp_path, FULL)
-    assert levels(doctor.check_secrets(ok)) == [(OK, "kei-agent.zsh に要る鍵がそろっている")]
+    # 声の鍵（module.toml の [secrets] で own_file）は、そのプロセスだけのファイルにある
+    assert "OPENAI_API_KEY（kei-agent-voice.zsh）" in levels(doctor.check_secrets(ok))[0][1]
+    voice = tmp_path / "secrets" / "kei-agent-voice.zsh"
+    voice.write_text('export OPENAI_API_KEY="sk-1"\n', encoding="utf-8")
+    voice.chmod(0o600)
+    assert levels(doctor.check_secrets(ok)) == [(OK, "要る鍵がそろっている")]
 
     # 例の書き方のまま・空・無いものは、足りない鍵として名前だけ出す（値は出さない）
     missing = _secrets(config, tmp_path, FULL.replace("xapp-1", "xapp-...").replace('"abc"', '""')
@@ -61,7 +66,12 @@ def test_a_missing_secrets_file_and_partial_toggl(config, tmp_path):
     none = replace(config, secrets_dir=tmp_path / "nowhere")
     assert doctor.check_secrets(none)[0].level == ERROR
     partial = _secrets(config, tmp_path, FULL.replace('export TOGGL_WORKSPACE_ID="2"\n', ""))
-    assert any("Toggl の鍵が一部だけ" in text for _, text in levels(doctor.check_secrets(partial)))
+    assert (WARN, "Toggl の鍵が一部だけ: TOGGL_API_TOKEN、TOGGL_ORGANIZATION_ID（TOGGL_WORKSPACE_ID も入れないと使わない）") \
+        in levels(doctor.check_secrets(partial))
+    without = _secrets(config, tmp_path, FULL.split("export TOGGL_API_TOKEN")[0])
+    assert (OK, "Toggl の鍵は入れていない（任意）") in levels(doctor.check_secrets(without))
+    # 時間記録をオフにすれば、Toggl の鍵は聞かない
+    assert not any("Toggl" in text for _, text in levels(doctor.check_secrets(replace(without, modules=("research",)))))
 
 
 # AI

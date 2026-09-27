@@ -25,3 +25,10 @@ default = "22:00"
 prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
 # 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
 pick_course = ["course"]
+
+# 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）。
+# 3つそろわなければ Toggl には送らず、時間は共通ホームの「時間記録」にだけ書く
+[secrets]
+TOGGL_API_TOKEN = { description = "Toggl の API トークン（Toggl の Profile → API Token）", group = "Toggl" }
+TOGGL_ORGANIZATION_ID = { description = "Toggl の組織の ID（focus.toggl.com/<組織>/workspaces/<ワークスペース>/ の URL から）", group = "Toggl" }
+TOGGL_WORKSPACE_ID = { description = "Toggl のワークスペースの ID（同じ URL から）", group = "Toggl" }

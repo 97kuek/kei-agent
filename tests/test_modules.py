@@ -56,10 +56,28 @@ def test_the_knowledge_module_is_described_by_its_definition():
     ('api = 1\nname = "x"\n[actor]\nprompt = "x.md"\n[use_cases.a]\nclaude = { effort = "low" }\n', "model"),
     ('api = 1\nname = "x"\n[settings]\nPlace = "東京"\n', "設定の名前"),
     ('api = 1\nname = "x"\n[settings]\nsince = 2026-09-27\n', "既定の値"),
+    ('api = 1\nname = "x"\n[secrets]\nApiKey = { description = "鍵" }\n', "環境変数の名前"),
+    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { required = true }\n', "description"),
+    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", required = "yes" }\n', "true か false"),
+    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", own_file = true }\n', "[process]"),
+    ('api = 1\nname = "x"\n[secrets]\nSLACK_BOT_TOKEN = { description = "鍵" }\n', "本体の秘密情報"),
 ])
 def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
     with pytest.raises(modules.ModuleError, match=message.replace("[", r"\[").replace("]", r"\]")):
         modules.load_spec(_module(tmp_path, "x", text))
+
+
+def test_secrets_come_from_the_core_and_the_modules_that_are_on():
+    """要る秘密情報は、本体のものと、オンのモジュールの [secrets]（kei-agent setup が聞き、doctor が確かめる）。"""
+    names = [(owner.name if owner else "", secret.name) for owner, secret in modules.secrets(["voice", "time"])]
+    assert names[:4] == [("", "SLACK_BOT_TOKEN"), ("", "SLACK_APP_TOKEN"), ("", "KEI_AGENT_ALLOWED_USER_ID"),
+                         ("", "KEI_AGENT_A2A_TOKEN")]
+    assert names[4:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
+                         ("time", "TOGGL_WORKSPACE_ID")]
+    openai = modules.builtin()["voice"].secrets[0]
+    assert openai.required and openai.own_file and not openai.generate
+    gateway = next(s for s in modules.builtin()["notion"].secrets if s.name == "KEI_AGENT_NOTION_GATEWAY_TOKEN")
+    assert gateway.generate and {s.group for s in modules.builtin()["time"].secrets} == {"Toggl"}
 
 
 def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):

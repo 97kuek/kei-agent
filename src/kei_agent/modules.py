@@ -28,6 +28,33 @@ CORE_CHANNELS = ("improve",)
 # 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は設定の [schedule] と App Home のまま、
 # 順番も今のまま（夜間の Task → モジュールの定期処理 → Daily → 振り返り → 保守）
 CORE_SCHEDULES = ("daily", "review")
+
+
+@dataclass(frozen=True)
+class SecretSpec:
+    """秘密情報の名前と説明（値はどこにも書かない）。kei-agent setup が聞いて秘密情報のファイルに書き、doctor が有無を確かめる。"""
+    name: str
+    description: str
+    # 無いと動かない（書かなければ任意）
+    required: bool = False
+    # setup が値を作る（プロセスどうしの合言葉など、人が決める値ではないもの）
+    generate: bool = False
+    # そのモジュールのプロセスだけのファイル（kei-agent-<名前>.zsh）に置く。書かなければ、共通の kei-agent.zsh
+    own_file: bool = False
+    # 同じ group の任意の鍵は、そろって初めて使う（Toggl の3つなど）
+    group: str = ""
+
+
+# 本体が要る秘密情報（どのプロセスも読む共通のファイル kei-agent.zsh に置く）。モジュールのものは module.toml の [secrets]
+CORE_SECRETS = (
+    SecretSpec("SLACK_BOT_TOKEN", "Slack の Bot User OAuth Token（xoxb- で始まる。Slack App の Install App の画面）",
+               required=True),
+    SecretSpec("SLACK_APP_TOKEN", "Slack の App-Level Token（xapp- で始まる。Basic Information → App-Level Tokens。"
+               "scope は connections:write）", required=True),
+    SecretSpec("KEI_AGENT_ALLOWED_USER_ID", "あなたの Slack のメンバー ID（U で始まる。プロフィールの ︙ → メンバー ID を"
+               "コピー）。この人の依頼だけを受ける", required=True),
+    SecretSpec("KEI_AGENT_A2A_TOKEN", "プロセスどうしの合言葉", required=True, generate=True),
+)
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
 SPEC_FILE = "module.toml"
@@ -49,7 +76,9 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "core_channels", "core_schedules", "schedules", "settings", "slash_commands"}
+             "core_channels", "core_schedules", "schedules", "settings", "slash_commands", "secrets"}
+_SECRET = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_SECRET_KEYS = {"description", "required", "generate", "own_file", "group"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
@@ -158,6 +187,8 @@ class ModuleSpec:
     core_channels: tuple[str, ...] = ()
     # 受け持つ本体の定期処理（CORE_SCHEDULES の中から）
     core_schedules: tuple[str, ...] = ()
+    # 要る秘密情報（[secrets]。値は書かない）
+    secrets: tuple[SecretSpec, ...] = ()
 
     @property
     def catch_all(self) -> bool:
@@ -295,6 +326,29 @@ def _settings(data: dict, where: str) -> dict[str, object]:
     return dict(data)
 
 
+def _secrets(data: dict, where: str, has_process: bool) -> tuple[SecretSpec, ...]:
+    found = []
+    core = {secret.name for secret in CORE_SECRETS}
+    for name, spec in data.items():
+        at = f"{where} の [secrets] {name}"
+        if not _SECRET.match(name) or not isinstance(spec, dict):
+            raise ModuleError(f"{at}: 名前は環境変数の名前（英大文字・数字・_）で、中身は {{ description = \"…\" }} の表に"
+                              "してください")
+        _check_keys(spec, _SECRET_KEYS, at)
+        description, group = spec.get("description"), spec.get("group", "")
+        flags = {key: spec.get(key, False) for key in ("required", "generate", "own_file")}
+        if not isinstance(description, str) or not description or not isinstance(group, str) \
+                or not all(isinstance(value, bool) for value in flags.values()):
+            raise ModuleError(f"{at}: description は説明の文字、required・generate・own_file は true か false、"
+                              "group は文字にしてください")
+        if flags["own_file"] and not has_process:
+            raise ModuleError(f"{at}: own_file（そのプロセスだけのファイル）は、[process] を持つモジュールだけが使えます")
+        if name in core:
+            raise ModuleError(f"{at}: 本体の秘密情報と同じ名前です（書かなくても本体が聞く）")
+        found.append(SecretSpec(name, description, **flags, group=group))
+    return tuple(found)
+
+
 def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     """1つのモジュールの定義を読んで確かめる。"""
     path = directory / SPEC_FILE
@@ -371,7 +425,8 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
         settings=_settings(_table(data, "settings", where), where), slash_commands=slash, slash_hints=hints,
-        core_channels=core_channels, core_schedules=core_schedules)
+        core_channels=core_channels, core_schedules=core_schedules,
+        secrets=_secrets(_table(data, "secrets", where), where, bool(process)))
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:
@@ -430,6 +485,19 @@ def enabled(names) -> list[ModuleSpec]:
     """設定の modules の順に、知っているモジュールの定義を並べる（知らない名前は、設定を読むときに断ってある）。"""
     specs = known()
     return [specs[name] for name in names if name in specs]
+
+
+def secrets(names) -> list[tuple[ModuleSpec | None, SecretSpec]]:
+    """本体と、オンのモジュール（names は設定の modules）が要る秘密情報を、持ち主と並べる（本体は None）。
+    同じ名前をいくつかのモジュールが書いていれば、最初のものだけ。"""
+    found: list[tuple[ModuleSpec | None, SecretSpec]] = [(None, secret) for secret in CORE_SECRETS]
+    seen = {secret.name for secret in CORE_SECRETS}
+    for spec in enabled(names):
+        for secret in spec.secrets:
+            if secret.name not in seen:
+                seen.add(secret.name)
+                found.append((spec, secret))
+    return found
 
 
 def action_id(module: str, name: str) -> str:

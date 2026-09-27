@@ -54,3 +54,7 @@ port = 8788
 # ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ
 [channels]
 theme = ["*"]
+
+# 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
+[secrets]
+S2_API_KEY = { description = "Semantic Scholar の API キー（論文を探す回数の上限が上がる）", own_file = true }

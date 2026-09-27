@@ -24,14 +24,9 @@ from kei_agent.config import Config, ConfigError, load_config
 
 OK, WARN, ERROR = "ok", "warn", "error"
 MARKS = {OK: "✅", WARN: "⚠️", ERROR: "❌"}
-# 共通の秘密情報のファイル（deploy/_common.sh の require_secrets と同じ）
+# 共通の秘密情報のファイル（deploy/_common.sh の require_secrets と同じ）。要る鍵は、本体の modules.CORE_SECRETS と
+# オンのモジュールの module.toml の [secrets]
 SECRETS_FILE = "kei-agent.zsh"
-# どのプロセスも要る鍵
-REQUIRED_SECRETS = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "KEI_AGENT_ALLOWED_USER_ID", "KEI_AGENT_A2A_TOKEN")
-# Notion のモジュール（ゲートウェイ）をオンにしたときに要る鍵
-NOTION_SECRETS = ("NOTION_TOKEN", "KEI_AGENT_NOTION_GATEWAY_TOKEN")
-# Toggl（3つそろっていないと送らない）
-TOGGL_SECRETS = ("TOGGL_API_TOKEN", "TOGGL_ORGANIZATION_ID", "TOGGL_WORKSPACE_ID")
 _ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$")
 # 最近のログの ERROR を数える時間（秒）
 RECENT_LOG_SECONDS = 3600
@@ -73,29 +68,48 @@ def assigned(path: Path) -> dict[str, bool]:
     return found
 
 
+def own_secrets_file(directory: Path, module: str) -> Path:
+    """そのモジュールのプロセスだけの秘密情報のファイル（共通のもののあとに読む。deploy/run-agent.sh）。"""
+    return directory / f"kei-agent-{module}.zsh"
+
+
 def check_secrets(config: Config) -> list[Finding]:
     directory = config.secrets_dir or (config.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
     path = directory / SECRETS_FILE
     if not path.is_file():
         return [Finding(ERROR, "秘密情報", f"共通の秘密情報のファイルが無い: {path}",
-                        "deploy/README.md の「秘密情報」を見て作る")]
+                        "kei-agent setup で作るか、deploy/README.md の「秘密情報」を見て作る")]
     findings = []
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
-        findings.append(Finding(WARN, "秘密情報", f"{path.name} をほかの人も読める（{oct(mode)}）", f"chmod 600 {path}"))
-    found = assigned(path)
-    need = list(REQUIRED_SECRETS) + (list(NOTION_SECRETS) if "notion" in config.modules else [])
-    missing = [name for name in need if not found.get(name)]
+    for file in sorted(directory.glob("kei-agent*.zsh")):
+        mode = stat.S_IMODE(file.stat().st_mode)
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            findings.append(Finding(WARN, "秘密情報", f"{file.name} をほかの人も読める（{oct(mode)}）", f"chmod 600 {file}"))
+    common = assigned(path)
+
+    def present(owner: modules.ModuleSpec | None, name: str) -> bool:
+        # 担当プロセスを持つモジュールの鍵は、そのプロセスだけのファイルにあってもよい
+        own = own_secrets_file(directory, owner.name) if owner is not None and owner.port is not None else None
+        return common.get(name, False) or (own is not None and own.is_file() and assigned(own).get(name, False))
+
+    wanted = modules.secrets(config.modules)
+    missing = [f"{secret.name}（{own_secrets_file(directory, owner.name).name}）" if owner and secret.own_file
+               else secret.name for owner, secret in wanted if secret.required and not present(owner, secret.name)]
     if missing:
-        findings.append(Finding(ERROR, "秘密情報", f"{path.name} に要る鍵が無い: {'、'.join(missing)}",
-                                "deploy/README.md の「秘密情報」を見て書き足す（値はここに出さない）"))
+        findings.append(Finding(ERROR, "秘密情報", f"要る鍵が無い: {'、'.join(missing)}",
+                                f"{SECRETS_FILE}（括弧の付いたものは、そのファイル）に書き足す。値はここに出さない"))
     else:
-        findings.append(Finding(OK, "秘密情報", f"{path.name} に要る鍵がそろっている"))
-    toggl = [name for name in TOGGL_SECRETS if found.get(name)]
-    if "time" in config.modules and toggl and len(toggl) < len(TOGGL_SECRETS):
-        findings.append(Finding(WARN, "秘密情報", f"Toggl の鍵が一部だけ: {'、'.join(toggl)}（3つそろわないと Toggl には送らない）"))
-    elif "time" in config.modules and not toggl:
-        findings.append(Finding(WARN, "秘密情報", "Toggl の鍵が無い（時間は共通ホームの「時間記録」にだけ書く）"))
+        findings.append(Finding(OK, "秘密情報", "要る鍵がそろっている"))
+    groups: dict[str, list[tuple[str, bool]]] = {}
+    for owner, secret in wanted:
+        if secret.group:
+            groups.setdefault(secret.group, []).append((secret.name, present(owner, secret.name)))
+    for group, names in groups.items():
+        found = [name for name, ok in names if ok]
+        if found and len(found) < len(names):
+            findings.append(Finding(WARN, "秘密情報", f"{group} の鍵が一部だけ: {'、'.join(found)}"
+                                    f"（{'、'.join(name for name, ok in names if not ok)} も入れないと使わない）"))
+        elif not found:
+            findings.append(Finding(OK, "秘密情報", f"{group} の鍵は入れていない（任意）"))
     return findings
 
 

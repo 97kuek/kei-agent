@@ -65,3 +65,7 @@ school = ""
 periods = {}
 # 学期と、開かれる月（"春学期" = [4, 5, 6, 7, 8] の表）。書かなければ学校の部品の既定
 terms = {}
+
+# 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
+[secrets]
+MOODLE_ICS_URL = { description = "Moodle のカレンダーの書き出し URL（課題の締切を取り込む）", own_file = true }

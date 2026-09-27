@@ -8,3 +8,7 @@ description = "本体やモジュールの出来事（依頼が終わった、�
 # 声の種類は KEI_AGENT_REALTIME_VOICE、マイクは KEI_AGENT_MIC、Stack-chan の住所は KEI_AGENT_STACKCHAN_URL
 [process]
 port = 8790
+
+# 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
+[secrets]
+OPENAI_API_KEY = { description = "OpenAI の API キー（声の会話に使う）", required = true, own_file = true }
