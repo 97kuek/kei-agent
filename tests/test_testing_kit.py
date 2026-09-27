@@ -26,7 +26,7 @@ default = "06:00"
 mark = "📌"
 '''
 
-MEMO_CODE = '''from kei_agent.api import Core, Request, final_answer
+MEMO_CODE = '''from kei_agent.api import Core, Request
 
 
 class Module:
@@ -38,8 +38,8 @@ class Module:
 
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         if req.text.startswith("まとめて"):
-            answer = await self.core.run_ai("memo_sum", req.text, req=req)
-            await self.core.reply(req, final_answer(answer))
+            # req を渡すと、経過と答えをスレッドに出す
+            await self.core.run_ai("memo_sum", req.text, req=req)
             return
         ts = await self.core.post(req.channel, self.core.settings["mark"] + " " + req.text,
                                   blocks=[{"type": "actions", "elements": [
@@ -147,7 +147,7 @@ async def test_the_ai_answers_what_was_queued_and_remembers_how_it_was_asked(tmp
     kit = module_kit(folder)
     kit.ai.answer("3件のメモ: 牛乳・卵・パン")
     ts = await kit.message("まとめて")
-    assert kit.thread(ts)[-1] == "3件のメモ: 牛乳・卵・パン"
+    assert kit.thread(ts) == ["3件のメモ: 牛乳・卵・パン"]
     call, = kit.ai.calls
     assert (call["actor"], call["use_case"], call["provider"]) == ("memo", "memo_sum", "claude")
     assert kit.ai.prompts() == [call["prompt"]] and "まとめて" in call["prompt"]

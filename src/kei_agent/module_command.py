@@ -1,4 +1,4 @@
-"""モジュールのオン・オフ（`kei-agent module list / add / remove`）。
+"""モジュールのオン・オフ（`kei-agent module list / add / remove`）。ひな形とテストは `new` / `test`（module_scaffold.py）。
 
 - `list` … 知っているモジュール（組み込みと、利用者のフォルダの modules/）と、オンかどうか、持っているもの
 - `add <名前>` / `remove <名前>` … config.toml の `modules` を書き換え（ほかの行とコメントは残す。書く前に、新しい設定を
@@ -18,7 +18,7 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
-from kei_agent import modules
+from kei_agent import module_scaffold, modules
 from kei_agent.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 
 # 書き足すときに添える行
@@ -220,7 +220,8 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="kei-agent module", description="モジュールを一覧にする・足す・外す")
+    parser = argparse.ArgumentParser(prog="kei-agent module",
+                                     description="モジュールを一覧にする・足す・外す・作る・テストする")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="知っているモジュールと、オンかどうか")
     for command, text in (("add", "モジュールを足す"), ("remove", "モジュールを外す")):
@@ -228,7 +229,24 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("name", help="モジュールの名前")
         sub.add_argument("--dry-run", action="store_true", help="何が変わるかだけを見る（書き換えない）")
         sub.add_argument("--no-launchd", action="store_true", help="常駐の登録は変えない")
-    args = parser.parse_args(argv)
+    new = commands.add_parser("new", help="モジュールのひな形を作る（設定は変えない。オンにするのは add）")
+    new.add_argument("name", help="モジュールの名前（英小文字・数字・-）")
+    new.add_argument("--ai", action="store_true", help="AI の実行役（指示書と用途）を足す")
+    new.add_argument("--process", action="store_true", help="担当プロセス（agent.py と番地）を足す")
+    new.add_argument("--builtin", action="store_true", help="リポジトリの modules/ に作る（Kei Agent に足して公開するとき）")
+    new.add_argument("--label", default="", help="表示名（無ければ名前）")
+    new.add_argument("--description", default="", help="何をするモジュールか")
+    test = commands.add_parser("test", help="モジュールの tests/ を、本物に触れない柵を付けて pytest で動かす")
+    test.add_argument("name", help="モジュールの名前")
+    args, rest = parser.parse_known_args(argv)
+    if args.command == "test":
+        # 残りの引数（-k など）は pytest に渡す
+        return module_scaffold.run_tests(args.name, rest)
+    if rest:
+        parser.error(f"知らない引数です: {' '.join(rest)}")
     if args.command == "list":
         return list_modules()
+    if args.command == "new":
+        return module_scaffold.create(args.name, ai=args.ai, process=args.process, builtin=args.builtin,
+                                      label=args.label, description=args.description)
     return change(args.name, args.command == "add", dry_run=args.dry_run, launchd=not args.no_launchd)
