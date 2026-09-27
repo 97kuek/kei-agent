@@ -29,6 +29,8 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ├── logs/                 ジョブのログ（論文は研究ホームの先行研究 DB に残し、ここには置かない）
 └── .kei-agent/           スレッドのログ、ジョブの状態（Kei Agent が書く）
 ~/course/                 大学エージェントの作業場（資料は Box に置いたまま）
+<themes.toml のフォルダ>/  既存のフォルダを使う研究テーマ（~/.config/kei-agent/themes.toml）。inputs/ などは使うときに作り、
+                          記録は .kei-agent/ に（Git のリポジトリなら .git/info/exclude に入れる）。毎晩の保存はしない
 ~/kei-agent/              Kei Agent 自身のもの（agent_root）
 ├── overview/             #01_overview などの作業場。Daily・レトプラ・時間はここに置かず、Notion の共通ホームに残す
 └── state/                毎晩の保守が書き出す SQLite の中身と Notion の ID

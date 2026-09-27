@@ -88,6 +88,8 @@ uv run kei-agent
 
 launchd のプロセスは `~/Documents`・`~/Desktop`・`~/Downloads` を読めないので、リポジトリはその外（例 `~/src/kei-agent`）に置く。
 
+**保護フォルダ**: 研究テーマに書類・デスクトップ・ダウンロードの中のフォルダを使いたいときは、`config.toml` に `allow_protected_folders = true` と書き、システム設定の「プライバシーとセキュリティ」→「フルディスクアクセス」で、仮想環境の Python（`.venv/bin/python3` の実体）を許可する。保護フォルダ全体が Kei Agent から読めるようになり、Python を更新するたびに許可し直しが要る。既定では選べない
+
 ```zsh
 deploy/install.sh                  # 本体
 deploy/install.sh course           # 127.0.0.1:8787
