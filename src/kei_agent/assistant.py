@@ -724,10 +724,26 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                 return str(await self.modules[module_name].on_slash_command(name, body) or "")
         return "このコマンドを受け持つモジュールがありません"
 
-    async def module_material(self, now: float) -> list[str]:
+    def module_notes(self, day: str, skip: str = "") -> list[str]:
+        """朝の一覧に足す、時刻の無い行（class Module の morning_notes）。作れなかったモジュールは飛ばす。"""
+        notes: list[str] = []
+        for name, module in self.modules.items():
+            morning_notes = getattr(module, "morning_notes", None)
+            if morning_notes is None or name == skip:
+                continue
+            try:
+                notes += [str(note) for note in morning_notes(day)]
+            except Exception:
+                # 朝の一覧は止めない
+                log.exception("モジュール「%s」の朝の一覧の行を作れませんでした", name)
+        return notes
+
+    async def module_material(self, now: float, skip: str = "") -> list[str]:
         """Daily と振り返りの材料に、モジュールが足す行（class Module の material）。作れなかったモジュールは飛ばす。"""
         lines: list[str] = []
         for name, module in self.modules.items():
+            if name == skip:
+                continue
             material = getattr(module, "material", None)
             if not callable(material):
                 continue

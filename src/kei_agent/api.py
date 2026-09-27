@@ -52,15 +52,29 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, dates, deadline, guard, home, modules, one_shot, router, settings, themes
+from kei_agent import (
+    agents,
+    briefing,
+    dates,
+    deadline,
+    digest,
+    guard,
+    home,
+    modules,
+    one_shot,
+    router,
+    settings,
+    themes,
+)
 from kei_agent.agents import Reply
 from kei_agent.auto_messages import history_prompt
+from kei_agent.briefing import Morning
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.notion import NotionError
 from kei_agent.one_shot import AIError
@@ -68,6 +82,7 @@ from kei_agent.records import Records
 from kei_agent.request import Request
 from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_structured_response
 from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
+from kei_agent.theme_files import append_thread_log
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.updates import Update
 
@@ -76,12 +91,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "FAILED_PREFIX", "AIError", "Core", "NotionError", "Records", "Reply", "Request",
+__all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Core", "Morning", "NotionError",
+           "Records", "Reply", "Request",
            "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_text", "contains_secret",
            "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "load_toggl", "parse_time",
            "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
 MODULE_PREFIX = modules.ACTION_PREFIX
+# Daily・振り返りの材料（core.digest）の上限の字数
+DIGEST_CHARS = digest.MAX_DIGEST_CHARS
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
 
@@ -212,8 +230,11 @@ class Core:
         return home.checkboxes(self.home_action_id(name), options, chosen)
 
     def channels(self, kind: str) -> tuple[str, ...]:
-        """module.toml の [channels] の種類に当たるチャンネルの名前（設定の [channels] で変えたものも）。"""
-        return self._assistant.config.module_channels.get(kind, ())
+        """その種類のチャンネルの名前（番号を外した名前。設定の [channels] で変えたものも）。module.toml の [channels] の
+        種類と、本体のチャンネル（overview は研究全体、improve は Kei Agent のチャンネル）。"""
+        config = self._assistant.config
+        core = {"overview": config.overview_channels, "improve": config.improve_channels}
+        return core[kind] if kind in core else config.module_channels.get(kind, ())
 
     async def post(self, channel: str, text: str, *, thread_ts: str | None = None,
                    blocks: list[dict] | None = None, markdown: bool = False) -> str:
@@ -418,39 +439,57 @@ class Core:
         return final_answer(result.text) if result is not None and not result.is_error else ""
 
     async def run_ai(self, use_case: str, prompt: str, *, folder: Path | None = None, req: Request | None = None,
-                     status: str = "") -> str:
+                     status: str = "", overview: bool = False, trigger: str = "") -> str:
         """このモジュールの実行役の用途で AI を1回動かし、答えの本文を返す（会話にはしない）。動かせなければ AIError。
 
         folder を渡さなければ、作業場を読むだけで動かす（要約などの係）。folder（このモジュールのフォルダ core.state_dir の
-        中）を渡すと、そこで動かし、書き込みもそこだけ（書けるかどうかは [actor] の files が決める）。req を渡すと、その
-        スレッドに経過（最初は status）を出し、終わったら答えのうち Slack に出す部分（final_answer）を見せて、依頼者の
-        返事を待つ形にする。返すのは AI の答えの本文そのまま（JSON を読む係などのため。Slack に出す部分は final_answer）。
-        動いている間は、Kei Agent の入れ替え（再起動）を待たせる。
+        中）を渡すと、そこで動かし、書き込みもそこだけ（書けるかどうかは [actor] の files が決める）。overview にすると、
+        研究全体の作業場で読むだけで動かす（研究テーマのフォルダとスレッドの記録を全部読める。Daily・振り返り）。
+        req を渡すと、そのスレッドに経過（最初は status）を出し、終わったら答えのうち Slack に出す部分（final_answer）を
+        見せて、依頼者の返事を待つ形にする。返すのは AI の答えの本文そのまま（JSON を読む係などのため）。
+        動いている間は、Kei Agent の入れ替え（再起動）を待たせる。動かした時間は Kei Agent の稼働として記録し
+        （trigger はその見出し。App Home の最近の動きに出る）、上限に当たったら明けるまで定期処理を止める。
         """
         assistant = self._assistant
-        target = None
+        config = assistant.config
+        target = workspace = None
         if folder is not None:
             target = self._inside(folder)
             target.mkdir(parents=True, exist_ok=True)
+        where = req.channel_name if req is not None else self.name
+        if overview:
+            where = config.overview_channels[0]
+            workspace = replace(themes.resolve(config, where), module=self.name)
+            themes.ensure_workspace(workspace)
         ui = assistant.thread_ui(req) if req is not None else None
         if ui is not None:
             await ui.start()
             if status:
                 await ui.show(status)
+        run_id = assistant.store.start_run(req.channel if req is not None else "",
+                                           req.thread_ts if req is not None else "", where, trigger or self.name)
+        result = None
         try:
             with assistant.claude_running():
-                text = await one_shot.run_once(
-                    assistant.config, assistant.store, self.name, use_case, prompt, folder=target,
+                result = await one_shot.run_result(
+                    config, assistant.store, self.name, use_case, prompt, folder=target, workspace=workspace,
                     channel=req.channel if req is not None else "", thread_ts=req.thread_ts if req is not None else "",
                     on_activity=ui.activity if ui is not None else None)
-        except Exception:
-            if ui is not None:
+        finally:
+            assistant.store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None)
+            if ui is not None and (result is None or result.is_error):
                 with suppress(Exception):
                     await ui.finish("")
-            raise
+        if result.limit_reset_at is not None and result.provider:
+            # 上限に当たった。明けるまで、その provider の定期処理を始めない
+            assistant.store.set_limit_until(result.provider, max(assistant.store.limit_until(result.provider),
+                                                                 assistant.limit_until(result.limit_reset_at)))
+        await assistant.tell_failure(self.name, result)
+        if result.is_error:
+            raise AIError(result.failure_reason(), result.limit_reset_at)
         if ui is not None:
-            await ui.finish(final_answer(text) or safe_failure("conversation"), awaiting=True)
-        return text
+            await ui.finish(final_answer(result.text) or safe_failure("conversation"), awaiting=True)
+        return result.text
 
     async def converse(self, req: Request) -> None:
         """そのスレッドの会話として、このモジュールの担当（[actor] と [process]）に聞いて答える。
@@ -458,6 +497,67 @@ class Core:
         会話の続き・経過の表示・上限に当たったときのやり直し・出力の確認は、大学や仕事の担当と同じ。
         """
         await self._assistant.converse_with_agent(req, self.name)
+
+    # Daily・振り返り（本体の定期処理を受け持つモジュール。module.toml の core_schedules）
+
+    async def morning(self, now: datetime) -> Morning:
+        """朝の一覧（今日の予定を時刻順に1通。Slack にそのまま出せる形）。
+
+        集めるのは、モジュールの取り込み（prepare）・予定（agenda）・朝の一覧の行（morning_notes）と、前回の Daily から
+        うまくいかなかった定期処理。会議は出典ごとに共通ホームの予定カレンダーにも写し、声には1週間ぶんの予定を
+        出来事（schedule）で渡す。Slack に出せたら mark_shown(notices) を呼ぶ。
+        """
+        return await briefing.build(self._assistant, now, skip=self.name)
+
+    def mark_shown(self, notices) -> None:
+        """朝の一覧を Slack に出せたあとに呼ぶ（出した締切を、24時間前の知らせで繰り返さないための目印を残す）。"""
+        for key in notices:
+            self._assistant.store.record_notice(key)
+
+    async def gather_prepare(self, kind: str, day: str) -> list[str]:
+        """モジュールに取り込み直してもらう（class Module の prepare。kind は daily / review）。
+        うまくいかなかったことの短い名前を返す。"""
+        return await self._assistant.module_prepare(kind, day)
+
+    async def gather_agenda(self, days: int, kinds=None) -> tuple[dict[str, list[dict]], list[str]]:
+        """モジュールの予定（class Module の agenda）。読めたモジュールの名前 → 予定と、読めなかったモジュールの表示名。"""
+        return await self._assistant.module_agenda(days, frozenset(kinds) if kinds is not None else None)
+
+    async def digest(self, since: float, now: float, title: str, *, agenda: bool = False) -> str:
+        """Daily・振り返りの材料（DIGEST_CHARS 字までで、超えた分は後ろのノートから省いたもの）。
+
+        本体の記録（やり取りのあったスレッドとその記録の場所・終わったジョブ・夜間の Task・止まっているテーマ・
+        返事待ち・Kei Agent の稼働）、モジュールの材料（material）、研究ホームの Task とノート、前日の振り返り。
+        agenda にすると、モジュールの予定（今日あったもの・明日のもの・締切）も入れる。
+        """
+        ids = await self._assistant.channel_ids()
+        return await digest.DigestBuilder(self._assistant.config, self._assistant.store, self._assistant).build(
+            since, now, title, set(ids), domains=agenda, skip=self.name)
+
+    async def publish(self, channel: str, header: str, text: str) -> str:
+        """チャンネルに見出しを出し、そのスレッドに本文（Markdown。長ければ分ける）を出す。スレッドの ts を返す。
+
+        スレッドへの返信は、そのチャンネルの担当が続ける（研究全体のチャンネルなら、研究テーマを受け持つモジュール）。
+        本文はスレッドの記録にも残す（続きの会話で読めるように）。
+        """
+        assistant = self._assistant
+        posted = await assistant.slack.chat_postMessage(channel=channel, text=header)
+        thread_ts = str(posted["ts"])
+        name = await assistant.channel_name(channel)
+        # 返信を拾えるように、スレッドを覚えておく
+        assistant.store.upsert_thread(channel, thread_ts, name, None)
+        if text.strip():
+            with suppress(ValueError):
+                ws = themes.resolve(assistant.config, name)
+                if ws.cwd is not None:
+                    append_thread_log(ws.cwd, name, thread_ts, "Kei Agent", text)
+            for chunk in split_text(text):
+                await assistant.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, markdown_text=chunk)
+        return thread_ts
+
+    def collect_conclusions(self, channel: str, thread_ts: str, page_id: str) -> None:
+        """そのスレッド（振り返り）に依頼者が貼った結論を、共通ホームの日別記録のページに書き足すようにする。"""
+        self._assistant.store.link_notion(channel, thread_ts, page_id, "review")
 
     # 共通ホームの予定カレンダー
 
@@ -540,6 +640,11 @@ class Core:
         return self._assistant.last_update
 
     # 定期処理と研究テーマ
+
+    def last_ran(self, name: str, before_day: str = "") -> float | None:
+        """その定期処理が最後に動いた時刻（before_day を渡せば、その日より前の日の分から）。まだなら None。"""
+        row = self._assistant.store.last_schedule(name, before_day=before_day or None)
+        return float(row["ran_at"]) if row is not None else None
 
     def schedule_detail(self, name: str, day: str) -> dict:
         """その定期処理の、その日の記録（run_schedule が返した辞書）。まだなら空。"""

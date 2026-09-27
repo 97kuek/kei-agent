@@ -9,14 +9,17 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from kei_agent import deadline, modules, themes, timelog
-from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.dates import parse_time
 from kei_agent.notion import NotionError
 from kei_agent.slack_text import format_duration
 from kei_agent.store import Store
+
+if TYPE_CHECKING:
+    from kei_agent.assistant import Assistant
 
 # 材料に入れるノートの本文の長さ
 NOTE_EXCERPT = 1500
@@ -90,11 +93,12 @@ class DigestBuilder:
         self.assistant = assistant
 
     async def build(self, since: float, now: float, title: str, active_channels: set[str],
-                    domains: bool = False) -> str:
+                    domains: bool = False, skip: str = "") -> str:
         """active_channels は Kei Agent が参加しているチャンネル名。アーカイブしたテーマは材料に入れない。
 
         `domains` を立てると、大学とモジュールの予定（仕事の会議など）の材料も集める。ここは相手のエージェントに
         聞きに行き、仕事の予定は claude を1回動かすので、朝（すでに朝のまとめで聞いている）では立てない。
+        skip は材料を足さないモジュール（材料を集めている、Daily のモジュール自身）。
         """
         lines = [f"# {title}", "", f"対象: {_ts(since)} 〜 {_ts(now)}", ""]
         lines += self._threads(since)
@@ -102,7 +106,7 @@ class DigestBuilder:
         lines += self._night(since)
         lines += self._stalled(now, active_channels)
         lines += self._waiting(active_channels)
-        lines += await self.assistant.module_material(now)
+        lines += await self.assistant.module_material(now, skip)
         lines += self._agent_time(now)
         if domains:
             lines += await self._agenda(now)

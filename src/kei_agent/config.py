@@ -425,6 +425,11 @@ def _enabled_modules(data: dict, home: Path) -> list[modules.ModuleSpec]:
             # 本体のチャンネルの会話を受け持てるのも、オンのモジュールのうち1つだけ
             raise ConfigError(f"モジュール「{owners[0]}」と「{owners[1]}」が、どちらも本体のチャンネル（{kind}）の会話を"
                               "受け持とうとしています。config.toml の modules でどちらかを外してください")
+    for schedule in modules.CORE_SCHEDULES:
+        owners = [spec.name for spec in enabled if schedule in spec.core_schedules]
+        if len(owners) > 1:
+            raise ConfigError(f"モジュール「{owners[0]}」と「{owners[1]}」が、どちらも本体の定期処理（{schedule}）を"
+                              "受け持とうとしています。config.toml の modules でどちらかを外してください")
     for spec in enabled:
         missing = [r for r in spec.requires if r not in names]
         if missing:

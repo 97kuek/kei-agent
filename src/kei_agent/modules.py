@@ -25,6 +25,9 @@ ALL_CHANNELS = "*"
 # 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は config.toml の [channels]）。
 # improve は Kei Agent のチャンネル（#00_kei-agent）。困りごとの知らせは、受け持つモジュールが無くても本体が出す
 CORE_CHANNELS = ("improve",)
+# 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は設定の [schedule] と App Home のまま、
+# 順番も今のまま（夜間の Task → モジュールの定期処理 → Daily → 振り返り → 保守）
+CORE_SCHEDULES = ("daily", "review")
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
 SPEC_FILE = "module.toml"
@@ -46,7 +49,7 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "core_channels", "schedules", "settings", "slash_commands"}
+             "core_channels", "core_schedules", "schedules", "settings", "slash_commands"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
@@ -151,6 +154,8 @@ class ModuleSpec:
     slash_commands: dict[str, str] = field(default_factory=dict)
     # 会話を受け持つ本体のチャンネル（CORE_CHANNELS の中から）
     core_channels: tuple[str, ...] = ()
+    # 受け持つ本体の定期処理（CORE_SCHEDULES の中から）
+    core_schedules: tuple[str, ...] = ()
 
     @property
     def catch_all(self) -> bool:
@@ -333,15 +338,20 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     if unknown:
         raise ModuleError(f"{where} の core_channels に、受け持てない本体のチャンネルがあります: {', '.join(unknown)}"
                           f"（受け持てるもの: {', '.join(CORE_CHANNELS)}）")
+    core_schedules = _names(data.get("core_schedules", []), f"{where} の core_schedules")
+    unknown = sorted(set(core_schedules) - set(CORE_SCHEDULES))
+    if unknown:
+        raise ModuleError(f"{where} の core_schedules に、受け持てない本体の定期処理があります: {', '.join(unknown)}"
+                          f"（受け持てるもの: {', '.join(CORE_SCHEDULES)}）")
     schedules = _schedules(_table(data, "schedules", where), where)
     slash = _table(data, "slash_commands", where)
     for command, text in slash.items():
         if not _SLASH.match(command) or not isinstance(text, str):
             raise ModuleError(f"{where} の [slash_commands] {command}: 名前は英小文字・数字・_・-（/ は付けない）で、"
                               "値は説明の文字にしてください")
-    if (channels or core_channels or schedules or slash) and not (directory / CODE_FILE).is_file():
-        raise ModuleError(f"{where}: [channels]・core_channels・[schedules]・[slash_commands] を動かす {CODE_FILE}"
-                          "（class Module）が、同じフォルダにありません")
+    if (channels or core_channels or core_schedules or schedules or slash) and not (directory / CODE_FILE).is_file():
+        raise ModuleError(f"{where}: [channels]・core_channels・core_schedules・[schedules]・[slash_commands] を動かす "
+                          f"{CODE_FILE}（class Module）が、同じフォルダにありません")
     return ModuleSpec(
         name=name, label=str(data.get("label") or name), description=str(data.get("description") or ""),
         path=directory, builtin=builtin,
@@ -349,7 +359,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
         settings=_settings(_table(data, "settings", where), where), slash_commands=dict(slash),
-        core_channels=core_channels)
+        core_channels=core_channels, core_schedules=core_schedules)
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:
@@ -420,6 +430,11 @@ def schedule_owner(names, schedule: str) -> ModuleSpec | None:
     return next((spec for spec in enabled(names) if any(s.name == schedule for s in spec.schedules)), None)
 
 
+def core_schedule_owner(names, schedule: str) -> ModuleSpec | None:
+    """本体の定期処理（Daily・振り返り）を受け持つ、オンのモジュール（core_schedules）。無ければ None。"""
+    return next((spec for spec in enabled(names) if schedule in spec.core_schedules), None)
+
+
 def use_case_owner(use_case: str) -> ModuleSpec | None:
     """その用途を持つモジュール。コアの用途なら None。"""
     for spec in known().values():
@@ -462,8 +477,9 @@ def load_code(spec: ModuleSpec) -> type | None:
     cls = getattr(code, "Module", None)
     if not isinstance(cls, type):
         raise ModuleError(f"{where} に class Module がありません")
-    if spec.schedules and not callable(getattr(cls, "run_schedule", None)):
-        raise ModuleError(f"{where}: [schedules] があるので、class Module に run_schedule(name, day) を書いてください")
+    if (spec.schedules or spec.core_schedules) and not callable(getattr(cls, "run_schedule", None)):
+        raise ModuleError(f"{where}: [schedules] か core_schedules があるので、class Module に run_schedule(name, day) を"
+                          "書いてください")
     agenda = getattr(cls, "agenda", None)
     if callable(agenda):
         try:

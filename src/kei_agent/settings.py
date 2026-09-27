@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
+from datetime import datetime
 
 from kei_agent import modules
 from kei_agent.config import HHMM, AgentProfile, Config, model_actors
@@ -43,6 +45,27 @@ def schedule_label(config: Config, name: str, short: bool = False) -> str:
         return CORE_SCHEDULES[name][1 if short else 0]
     spec = next((s for s in module_schedules(config) if s.name == name), None)
     return (spec.short if short else spec.label) if spec else name
+
+
+def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
+    """前回の Daily から今までに、うまくいかなかった定期処理の見出し（朝の一覧の「うまくいかなかったこと」）。
+
+    Notion に残せなかった Daily・振り返りも入れる（何日も残っていなかったのに気づけなかった。2026-09-26）。
+    """
+    today = now.date().isoformat()
+    last = store.last_schedule("daily", before_day=today)
+    since = last["ran_at"] if last else now.timestamp() - 86400
+    failed = []
+    for row in store.schedule_runs_since(since):
+        label = schedule_label(config, row["name"]) if row["name"] in schedule_names(config) else None
+        if label is None or (row["name"] == "daily" and row["day"] == today):
+            continue    # 定期処理でないもの、いま作っている Daily
+        detail = json.loads(row["detail"] or "{}") or {}
+        if detail.get("status") == "error":
+            failed.append(label)
+        elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):
+            failed.append(f"{label}（Notion に残せず）")
+    return failed
 
 
 def _known_schedule(name: str) -> bool:

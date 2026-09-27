@@ -19,6 +19,7 @@ from datetime import time as dtime
 import aiohttp
 
 from kei_agent import (
+    briefing,
     dates,
     digest,
     jobs,
@@ -30,13 +31,6 @@ from kei_agent import (
     version,
 )
 from kei_agent.assistant import Assistant
-from kei_agent.calendar_sync import (
-    JST,
-    CalendarSnapshot,
-    IncompleteSnapshot,
-    outlook_items,
-    sync_calendar,
-)
 from kei_agent.config import Config
 from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
@@ -60,8 +54,8 @@ NIGHT_CATCH_UP_HOURS = 12
 VERSION_CHECK_SECONDS = 3600
 # 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
 NOTICE_RETENTION_DAYS = 60
-# 声のレイヤに渡す日数。「明日の予定」「今週の予定」に答えられるように1週間ぶん
-VOICE_DAYS = 7
+# 声のレイヤに渡す日数（briefing.py）
+VOICE_DAYS = briefing.VOICE_DAYS
 # レトプラのスレッドに並べる締切（明日・明後日まで）
 REVIEW_DUE_DAYS = 2
 # Daily と Retro & Planning の材料は、ファイルにせずプロンプトのこの間に入れる
@@ -174,7 +168,9 @@ class Scheduler:
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
         log.info("定期処理を始めます: %s（%s）", name, day)
         try:
-            owner = modules.schedule_owner(self.config.modules, name)
+            # モジュールの定期処理と、モジュールが受け持つ本体の定期処理（core_schedules。Daily・振り返り）
+            owner = (modules.schedule_owner(self.config.modules, name)
+                     or modules.core_schedule_owner(self.config.modules, name))
             module = self.assistant.modules.get(owner.name) if owner is not None else None
             detail = await (module.run_schedule(name, day) if module is not None else getattr(self, f"run_{name}")(day))
         except Exception as e:
@@ -188,9 +184,10 @@ class Scheduler:
         """定期処理が使う明示 provider。保守はモデルを使わない。"""
         if name == "maintenance":
             return None
-        if name in ("daily", "review"):
+        owner = modules.core_schedule_owner(self.config.modules, name)
+        if name in ("daily", "review") and owner is None:
             return settings.selected_provider(self.config, self.store, "router")
-        owner = modules.schedule_owner(self.config.modules, name)
+        owner = owner or modules.schedule_owner(self.config.modules, name)
         if owner is not None:
             # モジュールの処理は、そのモジュールの実行役の provider（AI を使わないモジュールなら要らない）
             return settings.selected_provider(self.config, self.store, owner.name) if owner.actor else None
@@ -311,25 +308,8 @@ class Scheduler:
     # Daily と振り返り
 
     async def sync_meetings(self, events: list[dict], now: datetime, source: str) -> dict | str:
-        """朝に読んだ会議（7日ぶん）を、共通ホームの予定カレンダーに足す（出典は source）。
-
-        AI が読んだ一覧は全部とは言い切れないので、見つからなくなった会議は消さずに「要確認」にする
-        （0件のときは読み損ねを疑って、印も付けない）。
-        """
-        hub = self.assistant.hub
-        if hub is None:
-            return "no_hub"
-        try:
-            snapshot = CalendarSnapshot(source, False, outlook_items(events))
-            report = await asyncio.to_thread(sync_calendar, hub, snapshot, now.astimezone(JST), VOICE_DAYS)
-        except (IncompleteSnapshot, NotionError, ValueError, TypeError) as e:
-            log.warning("会議を予定カレンダーに書けません: %s", e)
-            return "error"
-        except Exception:
-            # 朝のまとめは止めない
-            log.exception("会議を予定カレンダーに書けません")
-            return "error"
-        return report.__dict__
+        """朝に読んだ会議を、共通ホームの予定カレンダーに足す（briefing.py）。"""
+        return await briefing.sync_meetings(self.assistant, events, now, source)
 
     async def _material(self, kind: str, day: str, since: float, ids: dict[str, str]) -> str:
         """プロンプトに入れる材料（上限の字数で切ったもの）。ファイルには残さない。"""
@@ -502,83 +482,17 @@ class Scheduler:
     # 授業（大学エージェント）
 
     async def morning_text(self, now: datetime) -> tuple[str, dict, list[str]]:
-        """朝のまとめ（今日の時系列）。集められなかったものは黙って飛ばす。"""
-        detail: dict = {}
-        classes: list[dict] = []
-        dues: list[dict] = []
-        events: list[dict] = []
-        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
-        # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
-        notices: list[str] = []
-        # モジュールは、まず取り込み直す（大学なら Moodle の課題）
-        prepared = await self.assistant.module_prepare("daily", now.date().isoformat())
-        # モジュールの予定（agenda。仕事なら Outlook の会議、大学なら授業と締切）。声のレイヤが「今週の会議」に
-        # 答えられるように1週間ぶん取り、朝の一覧と声に載せ、会議は出典ごとに予定カレンダーにも書く
-        agenda, unread = await self.assistant.module_agenda(VOICE_DAYS)
-        synced: dict[str, dict | str] = {}
-        for name, items in agenda.items():
-            meetings = [item for item in items if item.get("kind", "meeting") == "meeting"]
-            events += meetings
-            classes += [item for item in items if item.get("kind") == "class"]
-            module_dues = [item for item in items if item.get("kind") == "due"]
-            dues += module_dues
-            # モジュールの締切の目印は、そのモジュールの core.notice_once と同じ名前で記録する
-            notices += [f"module.{name}.{item['notice']}" for item in morning.soon(module_dues, now) if item.get("notice")]
-            for source in dict.fromkeys(str(item.get("source") or name) for item in meetings):
-                synced[source] = await self.sync_meetings(
-                    [item for item in meetings if str(item.get("source") or name) == source], now, source)
-        if synced or unread:
-            detail["agenda"] = {"synced": synced, "unread": unread}
-        detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
-        # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく（出来事 schedule）。
-        # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
-        # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
-        self.assistant.emit("schedule", items=[
-            {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
-             "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
-            for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
-        failed_now = ["会議の書き込み"] if "error" in synced.values() else []
-        failed_now += prepared + [f"{label}の予定の読み取り" for label in unread]
-        return morning.text(classes, events, dues, now, self.morning_notes(now, failed_now)), detail, notices
+        """朝のまとめ（今日の時系列。briefing.py）。"""
+        found = await briefing.build(self.assistant, now)
+        return found.text, found.detail, list(found.notices)
 
     def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:
-        """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で。無ければ空文字。
-
-        Daily とレトプラが何日も Notion に残っていなかったのに、気づけなかった（2026-09-26）。
-        """
-        today = now.date().isoformat()
-        last = self.store.last_schedule("daily", before_day=today)
-        since = last["ran_at"] if last else now.timestamp() - 86400
-        failed = []
-        for row in self.store.schedule_runs_since(since):
-            label = settings.schedule_label(self.config, row["name"]) if row["name"] in settings.schedule_names(self.config) else None
-            if label is None or (row["name"] == "daily" and row["day"] == today):
-                continue    # 定期処理でないもの、いま作っている Daily
-            detail = json.loads(row["detail"] or "{}") or {}
-            if detail.get("status") == "error":
-                failed.append(label)
-            elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):
-                failed.append(f"{label}（Notion に残せず）")
-        failed += failed_now or []
-        return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
+        """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で（briefing.py）。"""
+        return briefing.failure_note(self.assistant, now, failed_now)
 
     def morning_notes(self, now: datetime | None = None, failed_now: list[str] | None = None) -> list[str]:
-        """時刻の無いもの（モジュールの今朝の分、うまくいかなかったこと）を、1行ずつ。"""
-        now = now or datetime.now()
-        today = now.date().isoformat()
-        notes = []
-        for name, module in self.assistant.modules.items():
-            if not hasattr(module, "morning_notes"):
-                continue
-            try:
-                notes += [str(note) for note in module.morning_notes(today)]
-            except Exception:
-                # 朝の一覧は止めない
-                log.exception("モジュール「%s」の朝の一覧の行を作れませんでした", name)
-        failure = self.failure_note(now, failed_now)
-        if failure:
-            notes.append(failure)
-        return notes
+        """時刻の無いもの（モジュールの今朝の分、うまくいかなかったこと）を、1行ずつ（briefing.py）。"""
+        return briefing.notes(self.assistant, now or datetime.now(), failed_now)
 
     async def notify_unrestarted(self, now: datetime) -> None:
         """取り込んだ新しい版で、1時間たっても起動し直していなければ、一度だけ知らせる。"""
