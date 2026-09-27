@@ -21,8 +21,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from kei_agent.config import notion_id
-from kei_agent.notion import NotionError
+from kei_agent_a2a.api import NotionError, notion_id
 
 # Notion の ID（ハイフンの有無は問わない）。前後に16進の文字が続くものは ID ではない
 _ID = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?"

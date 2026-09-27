@@ -25,6 +25,8 @@ API_VERSION = 1
 SPEC_FILE = "module.toml"
 CODE_FILE = "module.py"
 AGENT_FILE = "agent.py"
+# A2A ではない常駐のプロセス（[process] kind = "service"）。serve(config, port) を置く
+SERVICE_FILE = "service.py"
 # 手で動かすコマンド（setup など）。COMMANDS = {"名前": main(argv)} を置く
 COMMANDS_FILE = "commands.py"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
@@ -49,7 +51,9 @@ _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 PLUGIN_DIR = "plugin"
 _USE_CASE_KEYS = {"offline", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
-_PROCESS_KEYS = {"port"}
+_PROCESS_KEYS = {"port", "kind"}
+# 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
+PROCESS_KINDS = ("a2a", "service")
 _SCHEDULE_KEYS = {"label", "short", "default"}
 # 設定（[settings]）の既定の値に使える形。利用者の設定（config.toml の [<名前>]）は、既定と同じ形にする
 SETTING_TYPES = (str, int, float, bool, list, dict)
@@ -123,8 +127,10 @@ class ModuleSpec:
     requires: tuple[str, ...] = ()
     optional: tuple[str, ...] = ()
     actor: ActorSpec | None = None
-    # 担当プロセス（A2A のサーバー）の番地。持たないモジュールは None
+    # 常駐のプロセスの番地。持たないモジュールは None
     port: int | None = None
+    # その常駐のプロセスが A2A の担当ではない（service.py の serve で動く。Notion のゲートウェイなど）
+    service: bool = False
     # チャンネルの種類 → 既定の名前（番号を外した名前。設定の [channels] で変えられる）
     channels: dict[str, tuple[str, ...]] = field(default_factory=dict)
     schedules: tuple[ScheduleSpec, ...] = ()
@@ -288,8 +294,14 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     port = process.get("port")
     if process and (not isinstance(port, int) or not 1024 <= port <= 65535):
         raise ModuleError(f"{where} の [process] port は 1024〜65535 の整数にしてください")
-    if process and not (directory / AGENT_FILE).is_file():
+    kind = process.get("kind", "a2a")
+    if kind not in PROCESS_KINDS:
+        raise ModuleError(f"{where} の [process] kind は {' / '.join(PROCESS_KINDS)} のどれかにしてください")
+    if process and kind == "a2a" and not (directory / AGENT_FILE).is_file():
         raise ModuleError(f"{where}: [process] で動かす {AGENT_FILE}（SKILLS と class Executor）が、同じフォルダにありません")
+    if process and kind == "service" and not (directory / SERVICE_FILE).is_file():
+        raise ModuleError(f"{where}: [process] kind = \"service\" で動かす {SERVICE_FILE}（serve(config, port)）が、"
+                          "同じフォルダにありません")
     channels = {kind: _names(names, f"{where} の [channels] {kind}")
                 for kind, names in _table(data, "channels", where).items()}
     schedules = _schedules(_table(data, "schedules", where), where)
@@ -300,7 +312,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         path=directory, builtin=builtin,
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
-        actor=actor, port=port, channels=channels, schedules=schedules,
+        actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
         settings=_settings(_table(data, "settings", where), where))
 
 
@@ -458,6 +470,19 @@ def load_agent(spec: ModuleSpec):
             ok = False
         if not ok:
             raise ModuleError(f"{where}: background は async def background(executor) の形にしてください")
+    return code
+
+
+def load_service(spec: ModuleSpec):
+    """A2A ではない常駐のプロセス（service.py の serve(config, port)）を読み込む。共通の起動コマンドが使う。"""
+    where = spec.path / SERVICE_FILE
+    importlib.invalidate_caches()
+    code = importlib.import_module(f"{package(spec)}.service")
+    serve = getattr(code, "serve", None)
+    try:
+        inspect.signature(serve).bind(None, 0)
+    except (TypeError, ValueError):
+        raise ModuleError(f"{where} に serve(config, port) を書いてください") from None
     return code
 
 

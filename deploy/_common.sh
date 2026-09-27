@@ -35,8 +35,9 @@ trim_launchd_log() {
   fi
 }
 
-# Notion の鍵を持つのは Notion ゲートウェイ（run-notion-gateway.sh）だけ。ほかのプロセスは、
+# Notion の鍵を持てるのは、Notion のモジュール（modules/notion/ のゲートウェイ）のプロセスだけ。ほかのプロセスは、
 # 共通の秘密情報を読んだあとで消す（Notion には client ごとの合言葉でゲートウェイを通して届く）
+NOTION_MODULE=notion
 drop_notion_secrets() {
   unset NOTION_TOKEN NOTION_COURSE_TOKEN
 }
@@ -54,6 +55,16 @@ module_processes() {
 }
 agent_names() {
   print -r -- $CORE_AGENTS $(module_processes)
+}
+# そのうち、A2A ではない常駐のプロセス（[process] に kind = "service"。Notion のゲートウェイ）。
+# ほかのプロセスが使うので、起動し直すときは先にする
+service_processes() {
+  local file
+  for file in "${REPO:-}"/modules/*/module.toml(N) "${KEI_AGENT_HOME:-$HOME/.config/kei-agent}"/modules/*/module.toml(N); do
+    if grep -qE '^kind *= *"service"' "$file"; then
+      print -r -- "${file:h:t}"
+    fi
+  done
 }
 
 # 仮想環境の Python で直に起動する。`uv run` だと uv が親として残り、プロセスごとに 20MB ほど余分に使う。

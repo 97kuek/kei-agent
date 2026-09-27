@@ -16,9 +16,10 @@ import re
 import urllib.parse
 from collections.abc import Sequence
 
-from kei_agent.notion import Notion, NotionError, safe_to_resend
-from kei_agent_notion_gateway.rules import Refused, plan
-from kei_agent_notion_gateway.scope import Scope, ScopeError, Tree, parse_id
+from kei_agent_a2a.api import Notion, NotionError, safe_to_resend
+
+from .rules import Refused, plan
+from .scope import Scope, ScopeError, Tree, parse_id
 
 log = logging.getLogger("kei-agent-notion-gateway")
 _CONNECTION_ERRORS = (OSError, http.client.HTTPException)

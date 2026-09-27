@@ -5,7 +5,7 @@
     uv run kei-agent-notion-setup [<研究ホームのページID>]            作るもの・足すものを見るだけ
     uv run kei-agent-notion-setup --apply [<研究ホームのページID>]    書き込む
 
-Notion を直接呼べるのはゲートウェイ（`kei-agent-notion-gateway`）だけ。ここからは
+Notion を直接呼べるのはゲートウェイ（Notion のモジュール、`kei-agent-module notion`）だけ。ここからは
 `gateway_notion()` でゲートウェイの `/notion/v1` を呼び、どのホームを触れるかはゲートウェイが決める。
 
 何度実行しても、すでにあるデータベース・ビュー・見出しは作り直さない。作ったものの ID は

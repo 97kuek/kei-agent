@@ -21,12 +21,12 @@ from fakes import FakeNotionAPI
 from kei_agent import notion as notion_module
 from kei_agent.config import NotionConfig, notion_id
 from kei_agent.notion import Notion, NotionError, gateway_client_token
-from kei_agent_notion_gateway.app import build_app
-from kei_agent_notion_gateway.clients import Tokens, client_roots
-from kei_agent_notion_gateway.config import load_gateway_config
-from kei_agent_notion_gateway.gateway import Gateway
-from kei_agent_notion_gateway.rules import Refused, plan, references
-from kei_agent_notion_gateway.scope import Scope, ScopeError, Tree
+from kei_agent_modules.notion.clients import Tokens, client_roots
+from kei_agent_modules.notion.config import load_gateway_config
+from kei_agent_modules.notion.gateway import Gateway
+from kei_agent_modules.notion.rules import Refused, plan, references
+from kei_agent_modules.notion.scope import Scope, ScopeError, Tree
+from kei_agent_modules.notion.service import build_app
 
 MASTER = "test-master"
 LOGGER = "kei-agent-notion-gateway"
@@ -122,7 +122,7 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
     シェルを使える AI の実行役がいなければ、Python から /notion/v1 も使える（研究は MCP だけ）。
     """
     from kei_agent import modules
-    from kei_agent_notion_gateway.clients import proxy_clients
+    from kei_agent_modules.notion.clients import proxy_clients
 
     for name, actor in (("weather", ""), ("diary", '[actor]\nprompt = "diary.md"\nshell = true\n'
                                                    '[use_cases.diary_answer]\nclaude = { model = "claude-sonnet-5" }\n')):

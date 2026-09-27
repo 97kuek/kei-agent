@@ -20,6 +20,9 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
 <名前> <コマンド>`）。Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
 モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
 本体の問い合わせ口に研究・大学・仕事の中身を聞くのは `ask_orchestrator`、Slack の外から依頼を置くのは `put_request`。
+
+A2A ではない常駐のプロセス（module.toml の [process] に kind = "service"）は、agent.py の代わりに service.py に
+`serve(config, port) -> int` を置く（Notion のモジュールのゲートウェイ）。起動は同じく `kei-agent-module <名前>`。
 """
 
 from __future__ import annotations
@@ -31,23 +34,38 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentSkill
 
-from kei_agent import a2a, agents, ask, modules, runner, themes
-from kei_agent.config import Config, load_config
+from kei_agent import a2a, agents, ask, modules, runner, themes, version
+from kei_agent.agent_policy import policy_of
+from kei_agent.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.model_json import json_list, json_object
 from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
-from kei_agent.notion import Notion, NotionError, Setup, gateway_notion
+from kei_agent.notion import (
+    GATEWAY_TOKEN_ENV,
+    Notion,
+    NotionError,
+    Setup,
+    append_blocks,
+    gateway_client_token,
+    gateway_notion,
+    safe_to_resend,
+)
+from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
 from kei_agent.records import Records
 from kei_agent.timelog import Toggl, TogglError, load_toggl
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
 from kei_agent_a2a.run import progress
 
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionError",
-           "OrchestratorError", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl", "TogglError",
-           "ask_orchestrator", "asked_days", "day_label", "gateway_notion", "json_list", "json_object", "load_config",
-           "load_toggl", "parse_time", "progress", "put_request", "requested_days", "run_ai", "settings", "weekday",
+__all__ = ["API_VERSION", "ASK", "GATEWAY_TOKEN_ENV", "MAIN_CLIENT", "RUNNING_VERSION", "WEEKDAYS", "AIError",
+           "AgentSkill", "Config", "Notion", "NotionConfig", "NotionError", "OrchestratorError", "Records", "Setup",
+           "SkillExecutor", "TaskUpdater", "Toggl", "TogglError", "ai_runs_shell", "append_blocks", "ask_orchestrator",
+           "asked_days", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
+           "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
+           "put_request", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings", "weekday",
            "workspace"]
+# このプロセスが起動したときの版（commit）。常駐のプロセス（[process] kind = "service"）は /health で返す
+RUNNING_VERSION = version.RUNNING
 # 本文の JSON の days で受け付ける上限（日）
 MAX_DAYS = 400
 
@@ -58,6 +76,14 @@ class AIError(RuntimeError):
     def __init__(self, reason: str, limit_reset_at: float | None = None):
         super().__init__(reason)
         self.limit_reset_at = limit_reset_at
+
+
+def ai_runs_shell(actor: str) -> bool:
+    """その名前の AI の実行役が、シェル（コマンド）を使えるか。実行役がいなければ False。"""
+    try:
+        return policy_of(actor).shell
+    except ValueError:
+        return False
 
 
 class OrchestratorError(RuntimeError):

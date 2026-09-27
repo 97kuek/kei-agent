@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import guard
+from kei_agent import guard, modules
 from kei_agent.config import Config
 
 log = logging.getLogger(__name__)
@@ -147,11 +147,13 @@ def restart_service(name: str) -> bool:
 
 
 def installed_services(home: Path | None = None) -> list[str]:
-    """launchd に登録した Kei Agent のプロセス（本体を除く）。ゲートウェイを先にする（deploy/restart-all.sh と同じ）。"""
+    """launchd に登録した Kei Agent のプロセス（本体を除く）。A2A ではない常駐のプロセス（Notion のゲートウェイ）を
+    先にする（ほかのプロセスが使う。deploy/restart-all.sh と同じ）。"""
     agents_dir = (home or Path.home()) / "Library" / "LaunchAgents"
     names = [path.name.removeprefix("com.kei-agent.").removesuffix(".plist")
              for path in sorted(agents_dir.glob("com.kei-agent.*.plist"))]
-    return sorted((name for name in names if name != "assistant"), key=lambda name: name != "notion-gateway")
+    services = {name for name, spec in modules.known().items() if spec.service}
+    return sorted((name for name in names if name != "assistant"), key=lambda name: name not in services)
 
 
 def restart_agents() -> list[str]:

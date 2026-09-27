@@ -1,9 +1,14 @@
 #!/bin/zsh
 # 取り込んだあとに、Kei Agent のプロセスを全部、新しい版で起動し直す（担当が古い版のまま残らないように）。
 # 使い方: deploy/restart-all.sh
-# 登録してあるもの（~/Library/LaunchAgents/com.kei-agent.*.plist）だけを、ゲートウェイ → 担当 → 本体の順に。
-# 本体は起動したときに担当の版を確かめるので、最後にする。plist を変えたときは deploy/install.sh を使う
+# 登録してあるもの（~/Library/LaunchAgents/com.kei-agent.*.plist）だけを、A2A ではない常駐のプロセス（Notion の
+# ゲートウェイ）→ 担当 → 本体の順に。本体は起動したときに担当の版を確かめるので、最後にする。
+# plist を変えたときは deploy/install.sh を使う
 set -eu
+
+REPO="${0:A:h:h}"
+source "$REPO/deploy/_common.sh"
+services=(${(f)"$(service_processes)"})
 
 DOMAIN="gui/$(id -u)"
 labels=()
@@ -15,7 +20,15 @@ if (( ${#labels} == 0 )); then
   exit 1
 fi
 
-ordered=(${(M)labels:#com.kei-agent.notion-gateway} ${labels:#com.kei-agent.(notion-gateway|assistant)} ${(M)labels:#com.kei-agent.assistant})
+first=() rest=()
+for label in $labels; do
+  if (( ${services[(Ie)${label#com.kei-agent.}]} )); then
+    first+=("$label")
+  elif [[ "$label" != com.kei-agent.assistant ]]; then
+    rest+=("$label")
+  fi
+done
+ordered=($first $rest ${(M)labels:#com.kei-agent.assistant})
 failed=0
 for label in $ordered; do
   if launchctl kickstart -k "$DOMAIN/$label"; then

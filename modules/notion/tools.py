@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import json
 
-from kei_agent.notion import append_blocks as append_in_chunks
-from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
-from kei_agent_notion_gateway.gateway import ClientNotion, Gateway
-from kei_agent_notion_gateway.scope import node_of, parse_id
+from kei_agent_a2a.api import append_blocks as append_in_chunks
+from kei_agent_a2a.api import markdown_to_blocks, plain_text, rich_text
+
+from .gateway import ClientNotion, Gateway
+from .scope import node_of, parse_id
 
 # 1回に返す本文の文字数（続きは cursor で読む）
 TEXT_CHARS = 12_000

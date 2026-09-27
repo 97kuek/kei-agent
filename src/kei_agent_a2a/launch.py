@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
@@ -121,6 +122,11 @@ def main(argv: list[str] | None = None) -> None:
         return
     if spec.port is None or spec.name not in config.modules:
         parser.error(f"担当プロセスを持つ、オンのモジュールではありません: {name}")
+    if spec.service:
+        # A2A ではない常駐のプロセス（Notion のゲートウェイなど）。止められるまで戻らない。番地は担当と同じく
+        # 環境変数 KEI_AGENT_<名前>_PORT で変えられる
+        port = int(os.environ.get(f"{env_prefix(spec)}_PORT", spec.port))
+        raise SystemExit(modules.load_service(spec).serve(config, port) or 0)
     build_card, build_executor = parts(spec)
     server.serve(f"{spec.label}エージェント", build_card, build_executor, RPC_PATH, spec.port, env_prefix(spec),
                  build_app=app_builder(spec))

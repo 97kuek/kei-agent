@@ -74,7 +74,7 @@ async def test_an_agent_that_stays_old_is_reported(assistant, monkeypatch):
 def test_installed_services_restart_the_gateway_first_and_leave_the_main_process(tmp_path):
     agents_dir = tmp_path / "Library" / "LaunchAgents"
     agents_dir.mkdir(parents=True)
-    for name in ("assistant", "course", "notion-gateway", "research", "voice", "work"):
+    for name in ("assistant", "course", "notion", "research", "voice", "work"):
         (agents_dir / f"com.kei-agent.{name}.plist").touch()
 
-    assert improve.installed_services(tmp_path) == ["notion-gateway", "course", "research", "voice", "work"]
+    assert improve.installed_services(tmp_path) == ["notion", "course", "research", "voice", "work"]

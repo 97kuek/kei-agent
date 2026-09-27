@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from kei_agent.config import Config
-from kei_agent.notion import GATEWAY_TOKEN_ENV
-from kei_agent_notion_gateway.clients import client_roots, proxy_clients
+from kei_agent_a2a.api import GATEWAY_TOKEN_ENV, Config
+
+from .clients import client_roots, proxy_clients
 
 TOKEN_ENV = GATEWAY_TOKEN_ENV
 
@@ -23,7 +23,7 @@ class GatewayConfig:
     proxy: frozenset[str] = frozenset()
 
 
-def load_gateway_config(config: Config, env: Mapping[str, str]) -> GatewayConfig:
+def load_gateway_config(config: Config, env: Mapping[str, str], port: int = 8791) -> GatewayConfig:
     master = env.get(TOKEN_ENV, "").strip()
     notion_token = env.get("NOTION_TOKEN", "").strip()
     if not master:
@@ -33,4 +33,4 @@ def load_gateway_config(config: Config, env: Mapping[str, str]) -> GatewayConfig
     roots = client_roots(config.notion)
     if not any(roots.values()):
         raise RuntimeError("config.toml の [notion] にホームのページ ID がありません")
-    return GatewayConfig("127.0.0.1", 8791, master, notion_token, roots, proxy_clients(config.notion))
+    return GatewayConfig("127.0.0.1", port, master, notion_token, roots, proxy_clients(config.notion))

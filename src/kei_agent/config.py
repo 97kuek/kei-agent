@@ -289,8 +289,9 @@ class Config:
 
     @property
     def notion_gateway_url(self) -> str:
-        """Notion ゲートウェイの MCP の口（src/kei_agent_notion_gateway）。"""
-        return "http://127.0.0.1:8791/mcp"
+        """Notion ゲートウェイの MCP の口（Notion のモジュール modules/notion/ の常駐のプロセス）。"""
+        spec = modules.known().get("notion")
+        return f"http://127.0.0.1:{spec.port if spec is not None and spec.port else 8791}/mcp"
 
     @property
     def notion_gateway_api(self) -> str:
@@ -383,7 +384,8 @@ def _a2a(data: dict, enabled: list[modules.ModuleSpec]) -> A2AConfig:
     orchestrator = data.get("orchestrator", "")
     if not isinstance(orchestrator, str):
         raise ConfigError("config.toml の [a2a] orchestrator は住所の文字列で書いてください")
-    defaults = {spec.name: f"http://127.0.0.1:{spec.port}" for spec in enabled if spec.port}
+    # A2A ではない常駐のプロセス（Notion のゲートウェイなど）は、担当ではないので並べない
+    defaults = {spec.name: f"http://127.0.0.1:{spec.port}" for spec in enabled if spec.port and not spec.service}
     return A2AConfig(agents={**defaults, **agents}, timeout_seconds=float(data.get("timeout_seconds", 300)),
                      orchestrator=orchestrator)
 

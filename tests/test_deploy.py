@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import plistlib
-import re
 import shutil
 import subprocess
 import tomllib
@@ -17,10 +16,10 @@ DEPLOY = REPO_ROOT / "deploy"
 # 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する。本体に組み込みの担当は kei-agent-<名前>、
 # 担当プロセスを持つモジュールは共通の kei-agent-module <名前> で動く
 CORE_AGENTS = ("research",)
-MODULE_AGENTS = ("course", "knowledge", "voice", "work")
+MODULE_AGENTS = ("course", "knowledge", "notion", "voice", "work")
 AGENTS = (*CORE_AGENTS, *MODULE_AGENTS)
 # install.sh で登録できるもの（名前なしは本体）
-INSTALLABLE = ("", *AGENTS, "notion-gateway")
+INSTALLABLE = ("", *AGENTS)
 ZSH = shutil.which("zsh")
 needs_zsh = pytest.mark.skipif(ZSH is None, reason="起動スクリプトは macOS の zsh で動く")
 
@@ -44,23 +43,16 @@ def _launches() -> dict[str, tuple[str, list[str], str]]:
     return found
 
 
-def test_notion_gateway_has_launchd_files():
-    assert (DEPLOY / "run-notion-gateway.sh").exists()
-    assert (DEPLOY / "com.kei-agent.plist.template").exists()
-    assert "notion-gateway" in (DEPLOY / "install.sh").read_text(encoding="utf-8")
-
-
-def test_notion_gateway_runs_only_from_the_common_secrets():
-    """gateway は NOTION_TOKEN を読む。ほかのエージェントの秘密情報は読まない。"""
-    script = (DEPLOY / "run-notion-gateway.sh").read_text(encoding="utf-8")
-    assert "kei-agent-notion-gateway" in script
-    assert not re.search(r"kei-agent-[\w$]+\.zsh", script)
+def test_the_notion_gateway_is_a_module_process():
+    """Notion のゲートウェイは Notion のモジュールの常駐のプロセス（A2A ではない）。起動は担当と同じ run-agent.sh。"""
+    assert not (DEPLOY / "run-notion-gateway.sh").exists()
+    assert "deploy/install.sh notion" in (DEPLOY / "install.sh").read_text(encoding="utf-8")
 
 
 def test_deploy_readme_tells_how_to_make_the_gateway_token():
     readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" in readme
-    assert "deploy/install.sh notion-gateway" in readme
+    assert "deploy/install.sh notion" in readme and "notion-gateway" not in readme
 
 
 def test_no_secret_is_written_into_the_repository():
@@ -113,14 +105,11 @@ def test_every_launchd_script_trims_its_own_launchd_log():
 
 
 def test_only_the_gateway_keeps_the_notion_token():
-    """Notion の鍵はゲートウェイだけが持つ。ほかは共通の秘密情報を読んだあとで消す（~/.config は直さない）。"""
+    """Notion の鍵はゲートウェイ（Notion のモジュール）だけが持つ。ほかは共通の秘密情報を読んだあとで消す（~/.config は直さない）。"""
     common = (DEPLOY / "_common.sh").read_text(encoding="utf-8")
-    assert "unset NOTION_TOKEN NOTION_COURSE_TOKEN" in common
+    assert "unset NOTION_TOKEN NOTION_COURSE_TOKEN" in common and "NOTION_MODULE=notion" in common
     for script in sorted(DEPLOY.glob("run*.sh")):
         body = script.read_text(encoding="utf-8")
-        if script.name == "run-notion-gateway.sh":
-            assert "drop_notion_secrets" not in body
-            continue
         assert "drop_notion_secrets" in body, script.name
         # 秘密情報をすべて読んでから消す（あとから読み直すと戻ってしまう）
         assert body.index("drop_notion_secrets") > body.rindex('source "$'), script.name
@@ -190,6 +179,16 @@ def _started(result: subprocess.CompletedProcess) -> tuple[str, str, str, dict[s
     assert result.returncode == 0, result.stderr
     uv, cwd, argv, *env = result.stdout.splitlines()
     return uv, cwd, argv, dict(line.split("=", 1) for line in env if "=" in line)
+
+
+@needs_zsh
+def test_only_the_notion_module_process_keeps_the_notion_token(tmp_path):
+    """Notion の鍵（NOTION_TOKEN）が残るのは Notion のモジュールのプロセス（ゲートウェイ）だけ。親の合言葉は全員に残る。"""
+    common = 'export NOTION_TOKEN="ntn_x"\nexport KEI_AGENT_NOTION_GATEWAY_TOKEN="master"\n'
+    *_, env = _started(_run_agent(tmp_path / "notion", "notion", common=common))
+    assert env.get("NOTION_TOKEN") == "ntn_x"
+    *_, env = _started(_run_agent(tmp_path / "course", "course", common=common))
+    assert "NOTION_TOKEN" not in env and env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "master"
 
 
 @needs_zsh

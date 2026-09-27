@@ -301,7 +301,7 @@ async def prepared(env, monkeypatch):
 
 async def test_merge_marker_merges_pushes_and_asks_for_a_restart(env, monkeypatch, no_real_restarts):
     assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    monkeypatch.setattr(improve, "installed_services", lambda home=None: ["notion-gateway", "course"])
+    monkeypatch.setattr(improve, "installed_services", lambda home=None: ["notion", "course"])
     await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
     await settle(assistant)
 
@@ -312,7 +312,7 @@ async def test_merge_marker_merges_pushes_and_asks_for_a_restart(env, monkeypatc
     assert improve.read_pending(cfg) == (row["base_commit"], "20.1")             # 戻せるようにしてある
     await asyncio.wait_for(assistant.restart_requested.wait(), 1)                 # 作業がないので終了へ
     # 担当も一緒に入れ替える（テストでは本物の launchd には触らない）
-    assert no_real_restarts == ["notion-gateway", "course"]
+    assert no_real_restarts == ["notion", "course"]
 
 
 async def test_merge_stops_when_the_repository_has_uncommitted_changes(env, monkeypatch):

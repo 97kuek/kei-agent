@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
-from kei_agent_notion_gateway.scope import parse_id
+from .scope import parse_id
 
 # 本文の中で、その値が Notion の ID を指すキー
 _ID_KEYS = {"page_id": "page", "block_id": "block", "database_id": "database", "data_source_id": "data_source",

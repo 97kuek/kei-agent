@@ -67,7 +67,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
-    assert config.modules == ("course", "knowledge", "voice", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
+    assert config.modules == ("course", "knowledge", "notion", "voice", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
     _module(home_dir / "modules", "knowledge", 'api = 1\nname = "knowledge"\n')
     with pytest.raises(ConfigError, match="組み込みのモジュール「knowledge」と同じ名前"):
@@ -286,6 +286,44 @@ def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
         with pytest.raises(SystemExit):
             launch.main([name])
     assert len(started) == 1
+
+
+def test_a_module_process_can_be_a_service_instead_of_an_agent(tmp_path, monkeypatch):
+    """A2A ではない常駐のプロセス（Notion のゲートウェイ）は kind = "service" と service.py の serve(config, port)。
+
+    本体は担当としてつながない（[a2a.agents] に並べない）。起動は同じ共通のコマンド。
+    """
+    pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
+    from kei_agent_a2a import launch
+
+    home_dir = _config(tmp_path, 'modules = ["knowledge", "bridge"]\n')
+    text = 'api = 1\nname = "bridge"\n[process]\nport = 8803\nkind = "service"\n'
+    folder = _module(home_dir / "modules", "bridge", text)
+    with pytest.raises(ConfigError, match="service.py"):
+        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
+    (folder / "service.py").write_text("SERVED = []\n\n\ndef serve(config, port):\n    SERVED.append(port)\n    return 0\n",
+                                       encoding="utf-8")
+    monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
+    config = load_config()
+    assert modules.known()["bridge"].service and "bridge" not in config.a2a.agents
+    with pytest.raises(SystemExit) as stopped:
+        launch.main(["bridge"])
+    assert stopped.value.code == 0 and modules.load_service(modules.known()["bridge"]).SERVED == [8803]
+
+
+@pytest.mark.parametrize(("text", "code", "message"), [
+    ('[process]\nport = 8803\nkind = "daemon"\n', None, "a2a / service"),
+    ('[process]\nport = 8803\nkind = "service"\n', "def serve():\n    return 0\n", "serve\\(config, port\\)"),
+])
+def test_a_broken_service_is_refused(tmp_path, text, code, message):
+    folder = _module(tmp_path, "bridge", 'api = 1\nname = "bridge"\n' + text)
+    if code is None:
+        with pytest.raises(modules.ModuleError, match=message):
+            modules.load_spec(folder)
+        return
+    (folder / "service.py").write_text(code, encoding="utf-8")
+    with pytest.raises(modules.ModuleError, match=message):
+        modules.load_service(modules.load_spec(folder))
 
 
 def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch):

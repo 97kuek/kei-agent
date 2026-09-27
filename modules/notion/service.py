@@ -1,4 +1,7 @@
-"""Kei Agent の Notion ゲートウェイ（127.0.0.1:8791）。Notion に届くのはこのプロセスだけ。
+"""Kei Agent の Notion ゲートウェイ（Notion のモジュールの常駐のプロセス。127.0.0.1:8791）。Notion に届くのはこのプロセスだけ。
+
+起動は共通のコマンド `kei-agent-module notion`（module.toml の [process] kind = "service"。launchd からは
+deploy/run-agent.sh notion）。
 
 `NOTION_TOKEN` を持つのはこのプロセスだけで、ほかのプロセスと LLM は client ごとの合言葉で
 ここを呼ぶ。どのホームに届くかは合言葉（client）で決まり、要求ごとにここで確かめる。
@@ -25,15 +28,14 @@ from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from kei_agent import version
-from kei_agent.config import load_config
-from kei_agent.notion import Notion, NotionError
-from kei_agent_notion_gateway.clients import Tokens
-from kei_agent_notion_gateway.config import GatewayConfig, load_gateway_config
-from kei_agent_notion_gateway.gateway import Gateway, error_body
-from kei_agent_notion_gateway.rules import Refused
-from kei_agent_notion_gateway.scope import ScopeError
-from kei_agent_notion_gateway.service import NotionTools, bounded
+from kei_agent_a2a.api import RUNNING_VERSION, Config, Notion, NotionError
+
+from .clients import Tokens
+from .config import GatewayConfig, load_gateway_config
+from .gateway import Gateway, error_body
+from .rules import Refused
+from .scope import ScopeError
+from .tools import NotionTools, bounded
 
 log = logging.getLogger("kei-agent-notion-gateway")
 
@@ -185,7 +187,7 @@ def build_app(settings: GatewayConfig, gateway: Gateway) -> Starlette:
     @mcp.custom_route(HEALTH_PATH, methods=["GET"])
     async def health(request: Request) -> JSONResponse:
         # version は起動したときの commit（deploy/update.sh が、新しい版で動いているかを見る）
-        return JSONResponse({"ok": True, "version": version.RUNNING})
+        return JSONResponse({"ok": True, "version": RUNNING_VERSION})
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, json_response=True, host=settings.host)
     app.add_route(PROXY_PATH + "/{path:path}", proxy_endpoint(gateway, settings.proxy),
@@ -194,12 +196,13 @@ def build_app(settings: GatewayConfig, gateway: Gateway) -> Starlette:
     return app
 
 
-def main() -> int:
+def serve(config: Config, port: int) -> int:
+    """常駐する（止められるまで戻らない）。起動できなければ理由を出して 1 を返す（launchd が間をおいて起動し直す）。"""
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     try:
-        settings = load_gateway_config(load_config(), dict(os.environ))
+        settings = load_gateway_config(config, dict(os.environ), port)
     except RuntimeError as e:
         print(f"起動できません: {e}", file=sys.stderr)
         return 1
@@ -209,7 +212,3 @@ def main() -> int:
     log.info("Notion gateway を始めます: http://%s:%d（届くホームの数: %s）", settings.host, settings.port, homes)
     uvicorn.run(build_app(settings, gateway), host=settings.host, port=settings.port, log_level="info")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

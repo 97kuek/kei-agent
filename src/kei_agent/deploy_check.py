@@ -1,6 +1,7 @@
 """デプロイのあと、全部のプロセスが新しい版で動いているかを確かめる（deploy/update.sh から呼ぶ）。
 
-担当と本体の口（声からの問い合わせ）は名刺の version、Notion ゲートウェイは /health の version を見る。
+担当と本体の口（声からの問い合わせ）は名刺の version、A2A ではない常駐のプロセス（Notion のゲートウェイ）は
+/health の version を見る。
 起動には少しかかるので、WAIT_SECONDS まで見直しながら待つ。
 """
 
@@ -13,7 +14,8 @@ import time
 
 import aiohttp
 
-from kei_agent.config import Config, gateway_endpoint, load_config
+from kei_agent import modules
+from kei_agent.config import Config, load_config
 
 WAIT_SECONDS = 90
 POLL_SECONDS = 3
@@ -25,7 +27,9 @@ def targets(config: Config) -> dict[str, str]:
     found = {name: url.rstrip("/") + CARD_PATH for name, url in config.a2a.agents.items()}
     if config.a2a.orchestrator:
         found["本体"] = config.a2a.orchestrator.rstrip("/") + CARD_PATH
-    found["notion-gateway"] = gateway_endpoint(config.notion_gateway_url, "health")
+    for spec in modules.enabled(config.modules):
+        if spec.service and spec.port:
+            found[spec.name] = f"http://127.0.0.1:{spec.port}/health"
     return found
 
 

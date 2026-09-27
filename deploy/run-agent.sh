@@ -3,7 +3,8 @@
 # 使い方: deploy/run-agent.sh <名前>。名前は本体に組み込みの担当（research）か、
 # 担当プロセスを持つモジュール（module.toml に [process] がある）。どれも同じ形で、違うのは名前だけ。
 # モジュールの担当は、共通の起動コマンド（kei-agent-module <名前>）が modules/<名前>/agent.py を動かす。
-# 声（voice）は、口（A2A）と耳（マイク）を同じプロセスで持つ。マイクは既定では開けない（App Home から入れる）
+# 声（voice）は、口（A2A）と耳（マイク）を同じプロセスで持つ。マイクは既定では開けない（App Home から入れる）。
+# Notion（notion）は A2A ではない常駐のプロセス（ゲートウェイ）で、Notion の鍵を持てるのはこれだけ
 set -eu
 
 AGENT="${1:-}"
@@ -19,7 +20,10 @@ require_secrets
 source "$SECRETS"
 AGENT_SECRETS="$SECRETS_DIR/kei-agent-$AGENT.zsh"
 [[ -r "$AGENT_SECRETS" ]] && source "$AGENT_SECRETS"
-drop_notion_secrets
+# Notion の鍵（NOTION_TOKEN）を残すのは、Notion のモジュールのプロセス（ゲートウェイ）だけ
+if [[ "$AGENT" != "$NOTION_MODULE" ]]; then
+  drop_notion_secrets
+fi
 
 # ログは launchd の標準出力（~/Library/Logs/kei-agent/<名前>-launchd.log）に出る
 trim_launchd_log "$AGENT-launchd.log"

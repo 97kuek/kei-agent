@@ -15,12 +15,12 @@ from test_notion_gateway import MASTER, area
 
 from kei_agent.config import NotionConfig, notion_id
 from kei_agent.notion import gateway_client_token
-from kei_agent_notion_gateway import service
-from kei_agent_notion_gateway.app import build_app, build_mcp
-from kei_agent_notion_gateway.clients import client_roots
-from kei_agent_notion_gateway.config import load_gateway_config
-from kei_agent_notion_gateway.gateway import Gateway
-from kei_agent_notion_gateway.service import NotionTools
+from kei_agent_modules.notion import tools as service
+from kei_agent_modules.notion.clients import client_roots
+from kei_agent_modules.notion.config import load_gateway_config
+from kei_agent_modules.notion.gateway import Gateway
+from kei_agent_modules.notion.service import build_app, build_mcp
+from kei_agent_modules.notion.tools import NotionTools
 
 TOOLS = {"read", "search", "query", "create_page", "update_page", "append_blocks", "replace_content",
          "update_block", "delete_block", "create_database", "update_data_source", "move"}
