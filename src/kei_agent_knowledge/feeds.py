@@ -31,8 +31,9 @@ SUMMARY_CHARS = 400
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_TIMEOUT_SECONDS = 30
 # arXiv は混んでいるときや立て続けに読んだときに、しばらく断る（406・429・5xx。本文は空）。
-# 朝に1テーマ1回しか読まないので、間をだんだん長くあけて、やり直す（秒）
-ARXIV_WAITS = (5.0, 15.0, 45.0)
+# 朝に1テーマ1回しか読まないので、間をだんだん長くあけて、やり直す（秒）。断る時間は数分続くことがあり、
+# 5・15・45秒では足りなかった（2026-09-27）。合わせて約5分待っても、朝の Daily（08:00）には間に合う
+ARXIV_WAITS = (30.0, 90.0, 180.0)
 _BUSY_CODES = {406, 429, 500, 502, 503, 504}
 ATOM = "{http://www.w3.org/2005/Atom}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
