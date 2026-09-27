@@ -622,20 +622,6 @@ async def test_falls_back_to_a_plain_post_when_the_new_slack_api_is_unavailable(
     assert slack.streamed() == []
 
 
-async def test_publish_records_the_thread_even_without_a_session(env, config, store):
-    """claude がセッションを作る前に落ちた日でも、そのスレッドへの返信に反応できるようにする。"""
-    assistant, slack, claude, _ = env
-    from kei_agent import themes
-
-    ws = themes.resolve(config, "research-overview")
-    themes.ensure_workspace(ws)
-    result = runner.RunResult(session_id=None, text="", is_error=True, errors=["起動できません"])
-
-    thread_ts = await assistant.publish("C5", "research-overview", ws, "🌙 振り返りの材料", result)
-
-    assert store.get_thread("C5", thread_ts) is not None
-
-
 def test_message_text_reads_messages_posted_as_markdown():
     """流して見せた返事や markdown_text の投稿は、text が空で blocks に入る。"""
     from kei_agent.slack_text import message_text

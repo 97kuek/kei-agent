@@ -14,7 +14,8 @@ def test_architecture_documents_actor_scoped_read_only_execution_without_legacy_
 
 
 def test_every_user_facing_agent_prompt_requires_only_a_final_region():
-    for path in ("prompts/system.md", "modules/course/course.md", "modules/work/work.md", "modules/improve/improve.md"):
+    for path in ("prompts/system.md", "modules/course/course.md", "modules/work/work.md", "modules/improve/improve.md",
+                 "modules/daily/daily.md"):
         text = Path(path).read_text(encoding="utf-8")
         assert "<<kei-agent-final>>" in text
         assert "<<kei-agent-final-end>>" in text

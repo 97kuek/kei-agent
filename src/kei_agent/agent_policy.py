@@ -94,7 +94,7 @@ def _read(access: Access) -> Access:
 
 
 POLICIES: dict[str, AgentPolicy] = {
-    # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
+    # 振り分け・分類。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),
 }

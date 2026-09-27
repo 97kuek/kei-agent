@@ -28,7 +28,7 @@ handoff_after_turns = 8
 
 # 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
 # ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）
-modules = ["course", "improve", "knowledge", "notion", "research", "time", "voice", "work"]
+modules = ["course", "daily", "improve", "knowledge", "notion", "research", "time", "voice", "work"]
 
 # agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
 # model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
@@ -47,6 +47,9 @@ provider = ""
 provider = ""
 
 [agents.router]
+provider = ""
+
+[agents.daily]
 provider = ""
 
 [agents.improve]

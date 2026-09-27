@@ -91,7 +91,8 @@ class RecordingClaude(FakeClaude):
 @pytest.fixture
 def env(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(_brief(tmp_path / "user-modules").parent)
-    config = replace(config, modules=(*config.modules, "brief"),
+    # 組み込みの Daily・振り返りは外す（本体の定期処理を受け持てるのは1つだけ）
+    config = replace(config, modules=(*[name for name in config.modules if name != "daily"], "brief"),
                      agent_profiles={**config.agent_profiles, "brief": config.agent_profiles["work"]})
     slack = FakeSlack({"C5": "01_overview", "C9": "00_kei-agent"})
     claude = RecordingClaude()

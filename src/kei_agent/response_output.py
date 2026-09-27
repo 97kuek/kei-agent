@@ -7,15 +7,6 @@ import re
 FINAL_OPEN = "<<kei-agent-final>>"
 FINAL_CLOSE = "<<kei-agent-final-end>>"
 
-DAILY_HEADINGS = (
-    "**今日のタスク**",
-    "**夜間処理の結果**",
-    "**確認待ち・期日・止まっているテーマ・返事待ち**",
-    "**今日考えるとよい問い**",
-)
-REVIEW_HEADINGS = ("**今日の成果**", "**未完了タスク**")
-NIGHT_QUESTION = "夜間に実行したいタスクはありますか？"
-
 _LOCAL_PATH = re.compile(r"(?:file://\S+|~/(?:\S+)|(?:^|[\s([{\"])\/(?:\S+))")
 _WEB_URL = re.compile(r"https?://\S+")
 _RELATIVE_LOCAL_PATH = re.compile(
@@ -104,7 +95,7 @@ def _heading_name(line: str) -> str:
     return line.strip().lstrip("#").strip().strip("*").strip().rstrip(":：").strip()
 
 
-def _validate_sections(text: str, headings: tuple[str, ...], message: str) -> str:
+def validate_sections(text: str, headings: tuple[str, ...], message: str = "決まった形ではありません") -> str:
     """決まった見出しがこの順で1回ずつあり、どれも中身がある返答だけを受け入れる。
 
     見出しの書き方（`###` や末尾のコロン）と、見出しや項目のあいだの空行の違いでは捨てず、
@@ -125,21 +116,6 @@ def _validate_sections(text: str, headings: tuple[str, ...], message: str) -> st
             raise OutputError(message)
         parts.append(f"**{name}**\n{body}")
     return "\n\n".join(parts)
-
-
-def validate_daily(text: str) -> str:
-    """Daily の四つの section だけを受け入れる。"""
-    return _validate_sections(text, DAILY_HEADINGS, "Daily の返答が指定形式ではありません")
-
-
-def validate_review(text: str) -> str:
-    """Retro の二つの section と夜間質問だけを受け入れる。夜間質問は決まった文なので、無ければ足す。"""
-    normalized = text.strip().replace("\r\n", "\n")
-    if normalized.endswith(NIGHT_QUESTION):
-        normalized = normalized[:-len(NIGHT_QUESTION)].rstrip()
-    return _validate_sections(
-        normalized, REVIEW_HEADINGS, "Retro の返答が指定形式ではありません"
-    ) + "\n\n" + NIGHT_QUESTION
 
 
 def safe_failure(kind: str = "conversation") -> str:

@@ -67,7 +67,8 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
-    assert config.modules == ("course", "improve", "knowledge", "notion", "research", "time", "voice", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
+    assert config.modules == ("course", "daily", "improve", "knowledge", "notion", "research", "time", "voice",
+                              "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
     _module(home_dir / "modules", "knowledge", 'api = 1\nname = "knowledge"\n')
     with pytest.raises(ConfigError, match="組み込みのモジュール「knowledge」と同じ名前"):
@@ -89,7 +90,8 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
     assert config.modules == ("knowledge", "weather")
     assert config.module_channels == {"knowledge": ("knowledge",)}
     assert config.a2a.agents["knowledge"] == "http://127.0.0.1:8792"       # 書かなければ module.toml の番地
-    assert task_names(config) == ("night", "literature", "reading", "weather", "daily", "review", "maintenance")
+    # Daily と振り返りは、受け持つモジュール（daily）をオンにしたときだけ
+    assert task_names(config) == ("night", "literature", "reading", "weather", "maintenance")
     assert settings.schedule_time(config, _store(config), "weather") == "06:30"
     assert settings.schedule_label(config, "weather") == "天気と電車"
     assert home.agent_labels(config)["knowledge"] == "知識" and "weather" not in home.agent_labels(config)
@@ -98,7 +100,7 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
 def test_turning_a_module_off_removes_what_it_brings(tmp_path):
     config = load_config(env={"KEI_AGENT_HOME": str(_config(tmp_path, "modules = []\n"))})
     assert config.modules == () and config.module_channels == {} and "knowledge" not in config.a2a.agents
-    assert task_names(config) == ("night", "daily", "review", "maintenance")
+    assert task_names(config) == ("night", "maintenance")
     assert "knowledge" not in home.agent_labels(config)
 
 

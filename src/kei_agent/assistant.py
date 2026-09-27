@@ -52,7 +52,6 @@ from kei_agent.model_policy import (
     explicit_use_case,
     is_manual,
     resolve,
-    resolve_selected,
 )
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
@@ -63,8 +62,6 @@ from kei_agent.response_output import (
     finalize_conversation,
     safe_failure,
     trouble_notice,
-    validate_daily,
-    validate_review,
 )
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
@@ -861,79 +858,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             return await agents.run_ask(agent, payload, on_activity)
 
     # 決まった時刻の処理から使う（schedule.py）
-
-    async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str,
-                           *, actor: str = "",
-                           use_case: UseCase | str | None = None) -> runner.RunResult:
-        """スレッドを作らずに claude -p を動かす（定期処理用）。結果を見てから投稿先を決める。
-
-        担当を渡さなければ、作業場の担当（研究テーマなら、テーマを受け持つモジュール）。
-        """
-        assert ws.cwd is not None
-        actor = actor or themes.actor_of(ws)
-        themes.ensure_workspace(ws)
-        async with self.semaphore:
-            run_id = self.store.start_run("", "", channel_name, trigger)
-            if use_case is None:
-                result = await self.run_agent(ws, prompt)
-            else:
-                try:
-                    recipe = resolve_selected(self.config, self.store, actor, use_case)
-                except ModelPolicyError as e:
-                    result = runner.RunResult(is_error=True, errors=[str(e)])
-                else:
-                    agent = self.agents.get(actor) if actor in modules.known() else None
-                    if agent is not None:
-                        result = await agents.run_in_workspace(agent, ws, prompt, None, "", "", use_case,
-                                                               provider=recipe.provider)
-                    else:
-                        result = await runner.run_model(
-                            self.config, runner.ExecutionRequest(ws, recipe, None, "", ""), prompt,
-                        )
-            self.store.end_run(run_id, result.is_error, result.cost_usd)
-            if result.limit_reset_at is not None:
-                provider = result.provider
-                if provider:
-                    self.store.set_limit_until(provider, max(
-                        self.store.limit_until(provider), self.limit_until(result.limit_reset_at)))
-        await self.tell_failure(actor, result)
-        return result
-
-    async def publish(self, channel: str, channel_name: str, ws: Workspace, header: str,
-                      result: runner.RunResult, footer: str = "", output_kind: str = "conversation") -> str:
-        """見出しをチャンネルに投稿し、結果をそのスレッドに返す。スレッドで続きを話せるようにする。"""
-        assert ws.cwd is not None
-        resp = await self.slack.chat_postMessage(channel=channel, text=header)
-        thread_ts = resp["ts"]
-        req = Request(channel, channel_name, thread_ts, None, "")
-        # セッションが作れなかった日でも、このスレッドへの返信には反応できるようにする
-        self.store.upsert_thread(channel, thread_ts, channel_name, result.session_id)
-        shown = ""
-        if not result.is_error:
-            try:
-                shown = finalize_conversation(result.text)
-                if output_kind == "daily":
-                    shown = validate_daily(shown)
-                elif output_kind == "review":
-                    shown = validate_review(shown)
-            except OutputError as e:
-                # 形式を確かめる前の本文は出さない
-                shown = ""
-                log.warning("%s の出力契約に違反: %s", output_kind, e)
-                result.is_error = True
-                result.errors.append(f"invalid {output_kind} output")
-        if shown:
-            result.text = shown
-            append_thread_log(ws.cwd, channel_name, thread_ts, "Kei Agent", shown)
-            for chunk in split_text(shown):
-                await self.post(req, chunk, markdown=True)
-        if result.is_error:
-            failure_kind = ("login" if result.failure_kind == "login"
-                            else output_kind if output_kind in {"daily", "review"} else "connection")
-            await self.post(req, safe_failure(failure_kind))
-        if footer:
-            await self.post(req, footer)
-        return thread_ts
 
     def render_reply(self, result: runner.RunResult) -> tuple[str, bool]:
         """モデルの raw text を Slack 用の最終回答へ変換する唯一の入口。"""

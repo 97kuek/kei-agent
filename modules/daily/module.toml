@@ -1,0 +1,28 @@
+# Daily・振り返りのモジュール（docs/extensibility.md）。朝の一覧と Daily、夜の振り返り（Retro & Planning）
+api = 1
+name = "daily"
+label = "Daily・振り返り"
+description = "朝に今日の予定の一覧と Daily を、夜に振り返り（今日の成果と未完了）を研究全体のチャンネルに出し、共通ホームの日別記録に残す"
+# 本体の定期処理 daily（朝）と review（夜）を受け持つ。時刻は設定の [schedule] daily / review と App Home のまま。
+# 朝の一覧と材料を集めるのは本体の枠（core.morning・core.digest）で、ここは書いて出して残す
+core_schedules = ["daily", "review"]
+
+# AI の実行役（provider は App Home で選ぶ）。材料はプロンプトで渡し、研究全体の作業場（研究テーマのフォルダと
+# スレッドの記録）を読むだけ。何も書き換えず、コマンド・Web・Notion は使わない
+[actor]
+prompt = "daily.md"
+files = "read"
+shell = false
+web = false
+notion = "none"
+default_use_case = "daily_write"
+
+# 朝の Daily
+[use_cases.daily_write]
+claude = { model = "claude-sonnet-5", effort = "medium" }
+codex = { model = "gpt-6-luna", effort = "medium" }
+
+# 夜の振り返り（明日の計画にもつながるので、強いモデル）
+[use_cases.review_write]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "high" }

@@ -250,6 +250,7 @@ class Store:
             self._move_voice_switches()
             self._move_time_records()
             self._move_improvements()
+            self._copy_daily_provider()
 
     def _move_reading_posts(self) -> None:
         """朝の読みものの控え（2026-09 の reading_posts）を、知識のモジュールの記録に写して、表を消す。"""
@@ -351,6 +352,18 @@ class Store:
             self.conn.execute(
                 "INSERT OR IGNORE INTO module_records (module, kind, key, value, updated_at, expires_at) "
                 "VALUES ('improve', 'fix', ?, ?, ?, NULL)", (row["thread_ts"], json.dumps(value, ensure_ascii=False), now))
+
+    def _copy_daily_provider(self) -> None:
+        """Daily と振り返りは、振り分けの係（router）の AI で動いていた（2026-09）。Daily・振り返りがモジュール
+        （modules/daily/）になったので、App Home で選んだ router の AI を、daily にも写す（振り分けは router のまま）。
+
+        写すのは一度だけ（settings の moved.daily が目印。あとで daily だけ選び直せるように）。
+        """
+        if self.conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('moved.daily', ?)",
+                             (str(time.time()),)).rowcount == 0:
+            return
+        self.conn.execute("INSERT OR IGNORE INTO settings (key, value) "
+                          "SELECT 'agent.daily.provider', value FROM settings WHERE key = 'agent.router.provider'")
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。

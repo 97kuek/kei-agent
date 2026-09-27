@@ -80,7 +80,13 @@ from kei_agent.notion import NotionError
 from kei_agent.one_shot import AIError
 from kei_agent.records import Records
 from kei_agent.request import Request
-from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_structured_response
+from kei_agent.response_output import (
+    OutputError,
+    finalize_conversation,
+    safe_failure,
+    validate_sections,
+    validate_structured_response,
+)
 from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.theme_files import append_thread_log
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
@@ -93,7 +99,8 @@ log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Core", "Morning", "NotionError",
            "Records", "Reply", "Request",
-           "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_text", "contains_secret",
+           "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_sections", "checked_text",
+           "contains_secret",
            "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "load_toggl", "parse_time",
            "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
@@ -158,6 +165,15 @@ def final_answer(text: str) -> str:
 def contains_secret(text: str) -> bool:
     """秘密情報らしい文字列（鍵やトークンの形）を含むか。公開の場所（GitHub など）に書く前に確かめる。"""
     return any(pattern.search(text) for pattern in guard.SECRET_PATTERNS)
+
+
+def checked_sections(text: str, headings: tuple[str, ...]) -> str | None:
+    """AI の答え（Slack に出す部分）が、決まった見出し（`**今日のタスク**` など）をこの順で1回ずつ持ち、どれも中身が
+    あるか確かめる。見出しの書き方はそろえて返す。形が違うもの・手元のパスや作業の実況を含むものは None。"""
+    try:
+        return validate_sections(text, headings)
+    except OutputError:
+        return None
 
 
 def checked_text(text: str) -> str | None:

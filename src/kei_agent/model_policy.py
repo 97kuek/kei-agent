@@ -32,8 +32,6 @@ class ModelPolicyError(ValueError):
 
 class UseCase(StrEnum):
     ROUTING = "routing"
-    OVERVIEW_DAILY = "overview_daily"
-    OVERVIEW_PLAN = "overview_plan"
 
 
 @dataclass(frozen=True)
@@ -51,14 +49,10 @@ class ResolvedModel:
 _RECIPES: dict[tuple[str, UseCase], tuple[str, str]] = {
     ("codex", UseCase.ROUTING): ("gpt-6-luna", "low"),
     ("claude", UseCase.ROUTING): ("claude-haiku-4-5", ""),
-    ("codex", UseCase.OVERVIEW_DAILY): ("gpt-6-luna", "medium"),
-    ("claude", UseCase.OVERVIEW_DAILY): ("claude-sonnet-5", "medium"),
-    ("codex", UseCase.OVERVIEW_PLAN): ("gpt-6-sol", "high"),
-    ("claude", UseCase.OVERVIEW_PLAN): ("claude-opus-5", "high"),
 }
 
 _ACTOR_USE_CASES = {
-    "router": frozenset({UseCase.ROUTING, UseCase.OVERVIEW_DAILY, UseCase.OVERVIEW_PLAN}),
+    "router": frozenset({UseCase.ROUTING}),
 }
 
 

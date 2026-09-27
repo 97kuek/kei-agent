@@ -15,31 +15,6 @@ from kei_agent.jobs import JobManager
 from kei_agent.notion_store import Note
 from kei_agent.schedule import Scheduler, due_day
 
-REVIEW_REPLY = """**今日の成果**
-なし
-
-**未完了タスク**
-なし
-
-夜間に実行したいタスクはありますか？"""
-
-DAILY_REPLY = """**今日のタスク**
-なし
-
-**夜間処理の結果**
-なし
-
-**確認待ち・期日・止まっているテーマ・返事待ち**
-なし
-
-**今日考えるとよい問い**
-1. 僕は何から進めよう？"""
-
-
-def material(prompt: str) -> str:
-    """プロンプトに入れた材料の部分だけ。"""
-    return prompt.split(schedule_module.MATERIAL_START, 1)[1].split(schedule_module.MATERIAL_END, 1)[0]
-
 
 @pytest.fixture
 def env(config, store, monkeypatch):
@@ -333,188 +308,6 @@ async def test_night_skips_when_notion_is_down(env, config):
     assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
 
-# Daily と振り返り
-
-async def test_daily_posts_to_overview_and_notion(env, config, store):
-    scheduler, assistant, slack, claude = env
-    ws = make_theme(config, "vlm")
-    store.upsert_thread("C1", "10.1", "vlm", "s1")
-    (ws.cwd / ".kei-agent" / "threads").mkdir(parents=True)
-    (ws.cwd / ".kei-agent" / "threads" / "10.1.md").write_text("# log")
-    store.record_schedule("literature", "2026-09-18", {"themes": {"vlm": {"status": "no_new"}}})
-    store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
-        {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
-    assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
-    assistant.notion.notes.append(Note("note-1", "条件Bの考察", "考察", "2026-09-17",
-                                       "https://notion.example/note-1", "質問を先に見せると精度が上がる"))
-    claude.behaviors = [{"text": DAILY_REPLY, "session_id": "daily-sess"}]
-
-    detail = await scheduler.run_daily("2026-09-18")
-
-    call, = claude.calls
-    assert call["cwd"] == config.overview_dir
-    # 材料はファイルにせず、プロンプトにそのまま入れる。Daily のファイルもグラフも作らせない
-    assert not (config.overview_dir / ".kei-agent" / "digest").exists()
-    assert "daily/" not in call["prompt"] and "outputs/" not in call["prompt"]
-    text = material(call["prompt"])
-    assert "10.1.md" in text
-    # 先行研究はテーマのチャンネルに流すので、Daily の材料には入れない（2026-09-22）
-    assert "先行研究" not in text
-    # 「今日のタスク」の元になる（済みも入れて、取り消し線にする）
-    assert "## Notion: 今日が期日の Task（済みを含む）" in text
-    assert "条件Cも回して（vlm）: 完了 71%" in text
-    assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
-    assert "返事が要る" in text and "中間発表" in text
-    header, body = slack.posted()
-    # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
-    assert header["channel"] == "C5" and header["text"].endswith("🌅 Daily 9/18（金）")
-    assert header["text"].startswith("☀️")
-    note = assistant.hub.notes[-1]
-    assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
-    assert [n.kind for n in assistant.notion.notes] == ["考察"]
-    assert detail["notion_url"] == note.url
-    assert not (config.overview_dir / "daily").exists()
-
-
-async def test_daily_posts_only_four_bold_sections(env):
-    scheduler, _assistant, slack, claude = env
-    claude.behaviors = [{"text": "手順を確認します\n<<kei-agent-final>>\n" + DAILY_REPLY + "\n<<kei-agent-final-end>>"}]
-
-    result = await scheduler.run_daily("2026-09-24")
-
-    assert result["status"] == "posted"
-    assert "手順を確認" not in "\n".join(slack.texts())
-    assert slack.texts()[1] == DAILY_REPLY
-
-
-async def test_invalid_daily_is_not_saved_to_notion(env):
-    scheduler, assistant, _slack, claude = env
-    claude.behaviors = [{"text": "<<kei-agent-final>>\n*今日のタスク*\nなし\n<<kei-agent-final-end>>"}]
-
-    result = await scheduler.run_daily("2026-09-24")
-
-    assert result["status"] == "error"
-    assert assistant.notion.notes == []
-    assert assistant.hub.notes == []
-
-
-async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
-    from kei_agent.digest import DigestBuilder
-    scheduler, assistant, *_ = env
-    make_theme(config, "old-theme")
-    make_theme(config, "archived")
-    store.upsert_thread("C7", "1.1", "old-theme", "s")
-    store.upsert_thread("C8", "2.1", "archived", "s")
-    store.conn.execute("UPDATE threads SET updated_at = ?", (time.time() - 5 * 86400,))
-    store.set_awaiting("C7", "1.1", True)
-    store.set_awaiting("C8", "2.1", True)
-
-    digest = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "t", {"old-theme"})
-
-    stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
-    waiting = digest.split("## 返事待ちのスレッド")[1].split("##")[0]
-    assert "#old-theme" in stalled and "archived" not in stalled
-    assert "#old-theme" in waiting and "archived" not in waiting
-
-
-async def test_digest_skips_theme_never_asked(env, config, store):
-    """招待しただけで一度も依頼のないテーマは、止まっているテーマに数えない。"""
-    import os
-
-    from kei_agent.digest import DigestBuilder
-    scheduler, assistant, *_ = env
-    ws = make_theme(config, "just-invited")
-    old = time.time() - 5 * 86400
-    os.utime(ws.cwd, (old, old))
-
-    digest = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "t", {"just-invited"})
-
-    stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
-    assert "just-invited" not in stalled and "なし" in stalled
-
-
-async def test_review_is_saved_only_to_the_day_row_and_syncs_conclusion(env, config, store):
-    scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": REVIEW_REPLY}]
-    await scheduler.run_review("2026-09-18")
-
-    prompt = claude.calls[0]["prompt"]
-    # 材料はプロンプトに入れ、振り返りのファイルは書かせない（Notion の日別記録だけに残す）
-    assert "reviews/" not in prompt and "今日が期日の Task" in material(prompt)
-    texts = slack.texts()
-    assert texts[0] == "🌙 Retro & Planning 9/18（金）" and texts[1] == REVIEW_REPLY
-    note = assistant.hub.notes[-1]
-    # 日別記録には、振り返るときの問いも残す（Slack には出さない）
-    assert note.kind == "振り返り" and note.body.startswith(REVIEW_REPLY)
-    assert "振り返りの問い" in note.body and "明日やることは何か" in note.body
-    assert "振り返りの問い" not in "".join(texts)
-    assert len(texts) == 2
-    assert assistant.notion.notes == []
-
-    await assistant.on_message({"channel": "C5", "user": "UME", "ts": "1001.5", "thread_ts": "1001.000",
-                                "text": "条件Bの差は質問の順番で説明できる"})
-    while assistant.tasks:
-        import asyncio
-        await asyncio.gather(*list(assistant.tasks))
-    (page_id, conclusion), = assistant.hub.appended
-    assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in conclusion
-    assert not (config.overview_dir / "reviews").exists()
-
-
-async def test_review_never_posts_model_progress_narration(env):
-    scheduler, _assistant, slack, claude = env
-    claude.behaviors = [{"text": "まず材料を確認します。\n" + REVIEW_REPLY}]
-
-    result = await scheduler.run_review("2026-09-23")
-
-    assert result["status"] == "error"
-    assert all("まず材料を確認します" not in text for text in slack.texts())
-    assert any("振り返りを利用者向けの形に整えられなかったよ" in text for text in slack.texts())
-
-
-async def test_review_does_not_post_extra_footer(env):
-    scheduler, _assistant, slack, claude = env
-    claude.behaviors = [{"text": REVIEW_REPLY}]
-
-    await scheduler.run_review("2026-09-23")
-
-    assert slack.texts() == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
-
-
-async def test_review_without_hub_never_writes_research_notes(env, config):
-    scheduler, assistant, slack, claude = env
-    assistant.hub = None
-    claude.behaviors = [{"text": REVIEW_REPLY}]
-
-    result = await scheduler.run_review("2026-09-23")
-
-    assert result["notion_url"] is None
-    assert assistant.notion.notes == []
-    # Slack には出し、日別記録に残せなかったことを知らせる。代わりのファイルは作らない
-    assert REVIEW_REPLY in slack.texts()
-    notice = slack.posted()[-1]
-    assert notice["channel"] == "C9" and "日別記録に保存できませんでした" in notice["text"]
-    assert not (config.overview_dir / "reviews").exists()
-
-
-async def test_daily_without_hub_still_posts_and_says_so(env, config):
-    scheduler, assistant, slack, claude = env
-    assistant.hub = None
-    claude.behaviors = [{"text": DAILY_REPLY}]
-
-    result = await scheduler.run_daily("2026-09-24")
-
-    assert result["status"] == "posted" and result["notion_url"] is None
-    assert DAILY_REPLY in slack.texts()
-    assert any("Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in t
-               for t in slack.texts())
-    assert not (config.overview_dir / "daily").exists()
-    # 人の時間は読めないと材料に書く（落ちない）
-    assert "共通 Notion ホームが使えない" in material(claude.calls[0]["prompt"])
-
-
 async def test_member_joined_registers_theme_in_notion(env, config):
     """まだフォルダの無いテーマは、置き場所を聞いてから作る。既定の場所を選ぶと、フォルダを作って研究ホームに登録する。"""
     scheduler, assistant, slack, claude = env
@@ -665,15 +458,6 @@ async def test_moon_removed_from_someone_elses_message_is_ignored(env):
 
 
 # 契約の上限（Claude AI usage limit）
-
-
-def test_claude_limit_does_not_block_codex_daily(env, store):
-    from kei_agent import settings
-
-    scheduler, _, *_ = env
-    settings.set_agent_provider(store, "router", "codex")
-    store.set_limit_until("claude", time.time() + 3600)
-    assert scheduler.can_run("daily", time.time())
 
 
 async def test_limited_schedule_is_deferred_only_once_per_day(env):
@@ -1012,26 +796,6 @@ async def test_scheduled_sync_stays_quiet_without_changes(env):
 
     assert await assistant.modules["course"].sync_assignments() is True
     assert len(slack.posted()) == before
-
-
-async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
-    """明日の計画に使うので、振り返りの前に取り込み、明日・明後日の締切をスレッドと日別記録に並べる。"""
-    scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": REVIEW_REPLY}]
-    tomorrow = (datetime.now() + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0)
-    later = datetime.now() + timedelta(days=10)
-    agent = FakeCourseAgent([due_item(tomorrow.isoformat(), "レポート", "情報"),
-                             due_item(later.isoformat(), "期末", "情報", uid="2@moodle")])
-    assistant.agents["course"] = agent
-
-    result = await scheduler.run_review("2026-09-26")
-
-    skills = [skill for skill, _ in agent.asked]
-    assert result["prepared"] == [] and skills.index("sync-assignments") < skills.index("list-due")
-    post, = [p for p in slack.posted() if p.get("text", "").startswith("📌 明日・明後日の締切")]
-    assert post.get("thread_ts") and "情報 レポート" in post["text"] and "期末" not in post["text"]
-    note = assistant.hub.notes[-1]
-    assert "📌 明日・明後日の締切" in note.body and note.body.endswith("明日やることは何か")
 
 
 # 締切3日前の未着手、うまくいかなかったこと、起動し直していない新しい版

@@ -1,6 +1,7 @@
-"""決まった時刻の処理: 🌙 の夜間 Task、Daily、Retro & Planning、保守、放置されたスレッドへの声かけ。
+"""決まった時刻の処理: 🌙 の夜間 Task、保守、放置されたスレッドへの声かけ。
 
-モジュールの定期処理（module.toml の [schedules]）も同じ順番の中で動かし、中身はモジュールの run_schedule に任せる。
+モジュールの定期処理（module.toml の [schedules]）と、モジュールが受け持つ本体の定期処理（core_schedules。
+Daily と Retro & Planning）も同じ順番の中で動かし、中身はモジュールの run_schedule に任せる。
 """
 
 from __future__ import annotations
@@ -20,21 +21,17 @@ import aiohttp
 
 from kei_agent import (
     briefing,
-    dates,
-    digest,
     jobs,
     maintenance,
     modules,
-    morning,
     settings,
     themes,
     version,
 )
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
-from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
-from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
+from kei_agent.notion_store import Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
 from kei_agent.slack_text import AWAITING_MARKER, clean_text, format_duration
 from kei_agent.store import Store
@@ -45,9 +42,11 @@ log = logging.getLogger(__name__)
 def task_names(config: Config) -> tuple[str, ...]:
     """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ Daily → 振り返り → 保守。
 
-    夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。
+    夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。Daily と振り返りは、受け持つモジュール
+    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。
     """
-    return ("night", *(s.name for s in settings.module_schedules(config)), "daily", "review", "maintenance")
+    taken = tuple(name for name in modules.CORE_SCHEDULES if modules.core_schedule_owner(config.modules, name))
+    return ("night", *(s.name for s in settings.module_schedules(config)), *taken, "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
@@ -56,15 +55,6 @@ VERSION_CHECK_SECONDS = 3600
 NOTICE_RETENTION_DAYS = 60
 # 声のレイヤに渡す日数（briefing.py）
 VOICE_DAYS = briefing.VOICE_DAYS
-# レトプラのスレッドに並べる締切（明日・明後日まで）
-REVIEW_DUE_DAYS = 2
-# Daily と Retro & Planning の材料は、ファイルにせずプロンプトのこの間に入れる
-MATERIAL_START = "--- 材料ここから ---"
-MATERIAL_END = "--- 材料ここまで ---"
-# 振り返るときの問い（Codex のアプリなどで振り返る材料）。Slack には出さず、日別記録のレトプラにだけ残す
-REVIEW_QUESTIONS = ("### 振り返りの問い\n"
-                    "1. 今日分かったことは何か（〜について、など具体的に）\n"
-                    "2. 明日やることは何か")
 
 
 def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
@@ -83,10 +73,6 @@ def due_day(now: datetime, hhmm: str, catch_up_hours: float) -> str | None:
 def offline(error: BaseException) -> bool:
     """ネットにつながらない（名前を引けない、つながらない、待ちきれない）ときの例外か。"""
     return isinstance(error, (aiohttp.ClientConnectionError, ConnectionError, TimeoutError, socket.gaierror))
-
-
-def label(day: str) -> str:
-    return dates.day_label(date.fromisoformat(day))
 
 
 class Scheduler:
@@ -184,10 +170,8 @@ class Scheduler:
         """定期処理が使う明示 provider。保守はモデルを使わない。"""
         if name == "maintenance":
             return None
-        owner = modules.core_schedule_owner(self.config.modules, name)
-        if name in ("daily", "review") and owner is None:
-            return settings.selected_provider(self.config, self.store, "router")
-        owner = owner or modules.schedule_owner(self.config.modules, name)
+        owner = (modules.core_schedule_owner(self.config.modules, name)
+                 or modules.schedule_owner(self.config.modules, name))
         if owner is not None:
             # モジュールの処理は、そのモジュールの実行役の provider（AI を使わないモジュールなら要らない）
             return settings.selected_provider(self.config, self.store, owner.name) if owner.actor else None
@@ -310,138 +294,6 @@ class Scheduler:
     async def sync_meetings(self, events: list[dict], now: datetime, source: str) -> dict | str:
         """朝に読んだ会議を、共通ホームの予定カレンダーに足す（briefing.py）。"""
         return await briefing.sync_meetings(self.assistant, events, now, source)
-
-    async def _material(self, kind: str, day: str, since: float, ids: dict[str, str]) -> str:
-        """プロンプトに入れる材料（上限の字数で切ったもの）。ファイルには残さない。"""
-        title = {"daily": f"Daily の材料 {day}", "review": f"Retro & Planning の材料 {day}"}[kind]
-        text = await digest.DigestBuilder(self.config, self.store, self.assistant).build(
-            since, time.time(), title, set(ids), domains=kind == "review")
-        return (f"{MATERIAL_START}\n{text.strip()}\n{MATERIAL_END}\n"
-                f"（材料は {digest.MAX_DIGEST_CHARS} 字までで、超えた分は後ろのノートから省いています）")
-
-    async def _save_note(self, channel: str, thread_ts: str, title: str, kind: str, day: str,
-                         markdown: str) -> Note | None:
-        """共通ホームの日別記録に1日1行で残す。残せなくても Slack には出ているので、知らせるだけにする。"""
-        hub = self.assistant.hub
-        if not markdown.strip():
-            return None
-        if hub is None:
-            await self.assistant.notify_trouble(
-                f"{title} を日別記録に保存できませんでした。共通 Notion ホームが使えません"
-                "（Slack には出ています。共有と kei-agent-hub-setup を確認してください）")
-            return None
-        try:
-            link = await self.assistant.permalink(channel, thread_ts)
-            return await asyncio.to_thread(hub.upsert_day, kind, day, title, markdown, link)
-        except NotionError as e:
-            await self.assistant.notify_trouble(f"{title} を日別記録に保存できませんでした: {e}")
-            return None
-
-    async def run_daily(self, day: str) -> dict:
-        ids = await self.assistant.channel_ids()
-        channel = ids.get(self.overview_channel_name)
-        if channel is None:
-            return {"status": "no_channel"}
-        last = self.store.last_schedule("daily", before_day=day)
-        since = last["ran_at"] if last else time.time() - 86400
-        material = await self._material("daily", day, since, ids)
-        ws = themes.resolve(self.config, self.overview_channel_name)
-        prompt = (
-            f"[Kei Agent の定期処理: Daily {day}]\n"
-            "次は前回の Daily からの材料です。\n\n"
-            f"{material}\n\n"
-            "材料（Notion のノートと Task を含む）と、そこに書かれたスレッドのログを読み、"
-            "今日の議論の起点になる Daily を書いてください。\n\n"
-            "**次の4つを、この順と見出しで書いてください。**ほかの見出しは足さないでください。\n"
-            "スマホでも読めるように、全体を1画面に収めます。\n\n"
-            "**今日のタスク**\n"
-            "材料の「今日が期日の Task」を1行ずつ。**済みのものは `~取り消し線~` にする**"
-            "（やったことも見えるように）。1件も無ければ「なし」の1行。\n\n"
-            "**夜間処理の結果**\n"
-            "夜間に終わったジョブと Task。無ければ1行で。\n\n"
-            "**確認待ち・期日・止まっているテーマ・返事待ち**\n"
-            "確認待ちの Task、期日が近い Task とマイルストーン、止まっているテーマ、返事待ちのスレッド、"
-            "今週の時間の気になる点。**何も無いものはまとめて1行にする**（「いずれもなし」）。\n\n"
-            "**今日考えるとよい問い**\n"
-            "2〜3個。番号を振る。前日のスレッドの結果と、振り返り・考察のノートを踏まえる。\n\n"
-            "**前日の動きの説明と、先行研究の新着は書かないでください。**前者は長くなって読み飛ばすため、"
-            "後者はテーマのチャンネルに別で流れているためです（朝の予定に「どのテーマに新着があったか」だけ出ます）。\n\n"
-            "返答は Kei Agent がそのまま共通 Notion ホームの日別記録に保存します。ファイルは作らないでください。\n"
-            "Slack に出す本文は、次の marker の間にだけ書いてください。"
-            "marker の外には何も書かず、作業手順・tool 名・ファイル名は本文に入れません。\n"
-            "<<kei-agent-final>>\n（ここに4 section）\n<<kei-agent-final-end>>"
-        )
-        result = await self.assistant.run_detached(
-            ws, self.overview_channel_name, prompt, "daily", actor="router",
-            use_case=UseCase.OVERVIEW_DAILY)
-        title = f"Daily {label(day)}"
-        # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
-        timeline, gathered, notices = await self.morning_text(datetime.now())
-        thread_ts = await self.assistant.publish(
-            channel, self.overview_channel_name, ws, f"{timeline}\n\n🌅 {title}", result, output_kind="daily")
-        for key in notices:
-            self.store.record_notice(key)
-        note = None
-        if not result.is_error:
-            note = await self._save_note(channel, thread_ts, title, "Daily", day, result.text)
-        return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
-                "notion_url": note.url if note else None, "morning": gathered}
-
-    async def run_review(self, day: str) -> dict:
-        ids = await self.assistant.channel_ids()
-        channel = ids.get(self.overview_channel_name)
-        if channel is None:
-            return {"status": "no_channel"}
-        now = datetime.now()
-        # 明日の計画に使うので、振り返りの前にモジュールが取り込み直す（大学なら Moodle の課題）
-        prepared = await self.assistant.module_prepare("review", day)
-        since = datetime.combine(date.fromisoformat(day), dtime(0, 0)).timestamp()
-        material = await self._material("review", day, since, ids)
-        ws = themes.resolve(self.config, self.overview_channel_name)
-        prompt = (
-            f"[Kei Agent の定期処理: Retro & Planning {day}]\n"
-            "次は今日の材料です。\n\n"
-            f"{material}\n\n"
-            "材料と、そこに書かれたスレッドのログを読み、今日を振り返ってください。\n\n"
-            "**Slack への返答は、次の2つの見出しと最後の1行だけ**にしてください。"
-            "ほかの見出しや説明を足さないでください。\n\n"
-            "**今日の成果**\n"
-            "材料の「今日が期日の Task」のうち**済みのもの**を1行ずつ。"
-            "Task になっていないが今日片付いたことがあれば、それも1行で足してよい。無ければ「なし」。\n\n"
-            "**未完了タスク**\n"
-            "同じ Task のうち**終わっていないもの**を1行ずつ。無ければ「なし」。\n\n"
-            "最後に、次の1行をそのまま書いてください。\n"
-            "夜間に実行したいタスクはありますか？\n\n"
-            "返答は Kei Agent がそのまま共通 Notion ホームの日別記録（レトプラ）に保存します。ファイルは作らないでください。"
-            "このあと、このスレッドに振り返りの結論が貼られたら、Kei Agent が同じ日別記録に追記します。"
-            "ファイルには書かず、受け取ったことだけを短く返してください。\n\n"
-            "Slack に出す本文は次の marker の間にだけ書いてください。marker の外には何も書かず、"
-            "作業手順・tool 名・ファイル名・provider 名は本文に入れません。\n"
-            "<<kei-agent-final>>\n（ここに指定の3 block）\n<<kei-agent-final-end>>"
-        )
-        result = await self.assistant.run_detached(
-            ws, self.overview_channel_name, prompt, "review", actor="router",
-            use_case=UseCase.OVERVIEW_PLAN)
-        title = f"Retro & Planning {label(day)}"
-        thread_ts = await self.assistant.publish(
-            channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result,
-            output_kind="review",
-        )
-        # モジュールの締切を並べる（締切だけを頼む。会議を AI でもう一度読まない）
-        agenda, _ = await self.assistant.module_agenda(REVIEW_DUE_DAYS + 1, frozenset({"due"}))
-        dues = [item for items in agenda.values() for item in items]
-        deadlines = morning.soon_deadlines(dues, now, REVIEW_DUE_DAYS)
-        if deadlines and thread_ts:
-            await self.assistant.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, text=deadlines)
-        note = None
-        if not result.is_error:
-            note = await self._save_note(channel, thread_ts, title, "振り返り", day,
-                                         "\n\n".join(part for part in (result.text, deadlines, REVIEW_QUESTIONS) if part))
-            if note:
-                # このスレッドに貼られた結論を、同じ行のレトプラに足す（assistant.sync_review_conclusion）
-                self.store.link_notion(channel, thread_ts, note.id, "review")
-        return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
-                "notion_url": note.url if note else None, "prepared": prepared}
 
     # 保守
 

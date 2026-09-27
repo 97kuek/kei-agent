@@ -35,8 +35,13 @@ def module_schedules(config: Config) -> list[modules.ScheduleSpec]:
 
 
 def schedule_names(config: Config) -> tuple[str, ...]:
-    """App Home で扱う定期処理（モジュールのものを先に。朝の読みものなどは Daily より前に並べる）。"""
-    return (*(s.name for s in module_schedules(config)), *CORE_SCHEDULES)
+    """App Home で扱う定期処理（モジュールのものを先に。朝の読みものなどは Daily より前に並べる）。
+
+    Daily と振り返りは、受け持つモジュール（core_schedules）があるときだけ。
+    """
+    core = tuple(name for name in CORE_SCHEDULES
+                 if name not in modules.CORE_SCHEDULES or modules.core_schedule_owner(config.modules, name))
+    return (*(s.name for s in module_schedules(config)), *core)
 
 
 def schedule_label(config: Config, name: str, short: bool = False) -> str:

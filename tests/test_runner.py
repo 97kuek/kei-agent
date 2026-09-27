@@ -156,7 +156,7 @@ def test_execution_request_rejects_a_forged_manual_recipe(config):
 
 def test_router_execution_request_has_no_research_plugin_or_notion(config):
     execution = runner.ExecutionRequest(
-        router.workspace(config), resolve("router", "claude", UseCase.OVERVIEW_PLAN), None, "", "",
+        router.workspace(config), resolve("router", "claude", UseCase.ROUTING), None, "", "",
     )
 
     command = runner.build_command(config, execution)
