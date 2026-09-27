@@ -20,7 +20,7 @@ from kei_agent.config import config_home
 # 利用者のモジュールの担当プロセスの番地は、ここから空いているものを使う（組み込みは 8786〜8792）
 FIRST_PORT = 8800
 
-MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/extensibility.md の「module.toml の書き方」）
+MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/modules.md の「module.toml の書き方」）
 api = 1
 name = "${name}"
 label = "${label}"
@@ -71,7 +71,7 @@ PROCESS = Template('''
 port = ${port}
 ''')
 
-MODULE_PY = Template('''"""${label}のモジュール（本体側）。kei-agent module new が作った。書き方は docs/extensibility.md の「module.py の書き方」。
+MODULE_PY = Template('''"""${label}のモジュール（本体側）。kei-agent module new が作った。書き方は docs/modules.md の「module.py の書き方」。
 
 コアとのやり取りは窓口 core（kei_agent.api.Core）だけを通す。
 """
@@ -106,7 +106,7 @@ BODIES = {
 ''',
 }
 
-AGENT_PY = Template('''"""${label}の担当プロセス。kei-agent module new が作った。書き方は docs/extensibility.md の「agent.py の書き方」。
+AGENT_PY = Template('''"""${label}の担当プロセス。kei-agent module new が作った。書き方は docs/modules.md の「agent.py の書き方」。
 
 読み込んでよい Kei Agent の部品は、窓口の kei_agent_a2a.api だけ。
 """
@@ -132,15 +132,19 @@ ${ask_branch}        if skill != "hello":
 
 PROMPT_MD = Template('''# ${label}
 
-あなたは Kei Agent の${label}の担当。依頼者の頼みに、短く答える。
+あなたは Kei Agent の${label}の担当。依頼者の頼みに答える（何を受け持つかを、ここに書く）。
 
+## 返答
+
+- `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間だけが Slack に出る。marker の外には何も書かない
+- 作業手順、tool / skill / CLI / provider 名、手元の絶対パス、環境エラーは Slack に出さない
+- 話し方（一人称・口調）は、最後の「依頼者のプロフィール」の「話し方」に従う（無ければ、です・ます調）で、短く
 - 分からないことは、分からないと言う
-- 最後の答えは、Slack にそのまま出せる形で書く
 ''')
 
 TEST_PY = Template('''"""${label}のモジュールのテスト（kei-agent module test ${name} で動かす）。
 
-module_kit が、このモジュールを偽物の Slack・AI・担当と一緒に本体の中で動かす（docs/extensibility.md の
+module_kit が、このモジュールを偽物の Slack・AI・担当と一緒に本体の中で動かす（docs/modules.md の
 「テストの書き方」）。本物の秘密情報・状態・launchd には触れない。
 """
 

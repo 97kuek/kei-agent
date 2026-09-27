@@ -24,6 +24,11 @@ def test_every_skeleton_loads_and_its_own_tests_pass(tmp_path, capsys, ai, proce
     spec = modules.load_spec(folder)
     assert (spec.label, spec.actor is not None, spec.port is not None) == ("見本", ai, process)
     assert (folder / "sample.md").is_file() == ai and (folder / "agent.py").is_file() == process
+    if ai:
+        # 組み込みの指示書と同じく、Slack に出す答えは印の中だけ（印が無いと、答えが空になる）
+        prompt = (folder / "sample.md").read_text(encoding="utf-8")
+        assert "<<kei-agent-final>>" in prompt and "<<kei-agent-final-end>>" in prompt
+        assert "作業手順" in prompt and "Slack に出さない" in prompt
     assert spec.port is None or spec.port >= module_scaffold.FIRST_PORT
     assert "kei-agent module test sample" in out and "kei-agent module add sample" in out
     # 作ったひな形のテストが、そのまま通る（本物に触れない柵を付けた pytest を、別のプロセスで動かす）
