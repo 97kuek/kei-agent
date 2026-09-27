@@ -151,7 +151,7 @@ uv run kei-agent-module course academic-import --apply <grades.html> <credits.ht
 ## 6. そのほかの最初の1回
 
 ```zsh
-uv run kei-agent-time-cards                            # 10_/20_/30_ に時間記録カードを投稿する。投稿後、Slack で各カードを手で固定する
+uv run kei-agent-module time cards                     # 10_/20_/30_ に時間記録カードを投稿する（先に kei-agent.zsh を source）。投稿後、Slack で各カードを手で固定する
 deploy/backup-init.sh                                  # ~/research を非公開リポジトリ research-data にして最初の push をする
 sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00       # 00:00 の夜間 Task のために毎晩 Mac を起こす（やめるときは sudo pmset repeat cancel）
 ffmpeg -f avfoundation -i ":default" -t 1 -f null -    # マイクの許可を先に手で通す（launchd からだと無音になることがある）
@@ -160,9 +160,10 @@ gh auth status                                         # 要望を GitHub issue 
 
 ## 7. 日々の運用
 
-- 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance>`（`--record` を付けなければ今日の本番に影響しない）
+- 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance|toggl_import>`（`--record` を付けなければ今日の本番に影響しない）
 - 声を通さず依頼を渡す: `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ）
-- 22:00 の保守は、`~/research` の下のセッションの記録を90日で消し、Toggl のアプリで直接測った記録を時間記録に取り込み、使い終わった worktree を消してから、`~/research` → `research-data`、`~/kei-agent` → もう1つの非公開リポジトリに push する（`~/kei-agent` は自分で Git にして remote を付けておく。Git でなければ研究側だけ保存し、その旨を結果に出す）。50MB を超えるファイルはコミットから外す
+- Toggl のアプリで直接測った記録は、22:00 の「Toggl の取り込み」（時間記録のモジュール）が「時間記録」に入れる
+- 22:00 の保守は、`~/research` の下のセッションの記録を90日で消し、使い終わった worktree を消してから、`~/research` → `research-data`、`~/kei-agent` → もう1つの非公開リポジトリに push する（`~/kei-agent` は自分で Git にして remote を付けておく。Git でなければ研究側だけ保存し、その旨を結果に出す）。50MB を超えるファイルはコミットから外す
 - 別の Mac に移すときは、`research-data` を `~/research` に clone し、`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql` で状態を戻す
 
 ## 8. 困ったとき

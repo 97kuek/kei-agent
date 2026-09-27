@@ -176,7 +176,7 @@ class Module:
 
 窓口 `core` でできること（`src/kei_agent/api.py`）:
 
-- Slack: `post`（ts を返す。`blocks=` でボタンも置ける）、`update`（自分の投稿を書き換える）、`open_view` / `update_view`（入力の画面）、`permalink`、`channel_name`（番号つきの名前）、`action_id` / `view_id`、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
+- Slack: `post`（ts を返す。`blocks=` でボタンも置ける）、`update`（自分の投稿を書き換える）、`open_view` / `update_view`（入力の画面）、`permalink`、`channel_name`（番号つきの名前。番号を外したテーマの名前は `theme_name(名前)`）、`action_id` / `view_id`、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
 - 担当: `work(req)`（研究テーマのチャンネルで、そのチャンネルの作業場を使って担当と会話して答える。添付・できたファイル・接続先の許可・引き継ぎ・ジョブは研究と同じ流れ）、`ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`tell_agent(skill, 材料)`（AI を動かさない知らせだけを渡す。届かなくても困りごととして知らせない）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
 - 設定: `settings`（module.toml の `[settings]` の既定に、config.toml の `[<名前>]` を重ねた写し）
@@ -219,7 +219,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 - `workspace(config, 担当)`（覚えておきたいものを置く作業場）、`json_object` / `json_list`（AI の答えから JSON を取り出す）、`requested_days(本文, 既定)`（本文の JSON の days）
 - Notion（ゲートウェイ経由。`gateway_notion(名前)` の名前で届くホームが決まる）と `Setup`（DB を作る setup の土台）、Toggl（`load_toggl`）、日付（`WEEKDAYS`・`weekday`・`day_label`・`parse_time`）、`load_config`、`settings(config, 名前)`（そのモジュールの設定。本体側の `core.settings` と同じもの）
 
-手で動かすコマンド（setup など）は、同じフォルダの `commands.py` に `COMMANDS = {"名前": main(argv)}` を置く。`kei-agent-module <名前> <コマンド> [引数...]` で動く（`pyproject.toml` にコマンドの名前を足さない）。
+手で動かすコマンド（setup など）は、同じフォルダの `commands.py` に `COMMANDS = {"名前": main(argv)}` を置く。`kei-agent-module <名前> <コマンド> [引数...]` で動く（`pyproject.toml` にコマンドの名前を足さない）。コマンドからモジュールの記録を読み書きするのは `records(config, 名前)`（本体側の `core.records` と同じもの）、本体の代わりにボタンつきの投稿を置くなら、ボタンの名前は `action_id(名前, ボタン)`（本体側の `core.action_id` と同じ。押されると本体側の `on_action`）。見本は `modules/time/commands.py`（時間記録のカードを置く）。
 
 ## 設定と置き場所
 
@@ -282,6 +282,10 @@ class Executor(SkillExecutor):               # self.config と self.store は土
   - 設定は `config.toml` の `[course]`: `school`（学校の部品）、`periods`（時限の時刻）、`terms`（学期と、開かれる月）。時限と学期は、書かなければ学校の部品の既定を使う。学校を選ばず時刻も書かなければ、授業に時刻が付かない（朝の一覧に出ない）
   - 学校の部品は `modules/course/schools/<名前>.py`（同梱は `waseda`）。自分で書いた部品は、そのファイルの場所を `school` に書く。部品に置けるもの（時限・学期の既定、成績の読み方、成績と授業・GPA・単位要件の対応）は `modules/course/school.py` に書いてある
   - 個人の履修科目はコードに持たず、自分のフォルダのファイルから入れる（`kei-agent-module course setup --seed <ファイル>`。書き方は `modules/course/courses.example.toml`）
+- **時間記録**: 時間記録はモジュール（`modules/time/`）。`/toggl` と固定したカードで測り、Toggl と共通ホームの「時間記録」に送る。Toggl のアプリで直接測った記録の取り込みは、そのモジュールの定期処理（「Toggl の取り込み」、既定 22:00）
+  - 設定は `config.toml` の `[time]`: `prefixes`（時間を測るチャンネルの名前の頭 → 領域。既定は `10_` 研究・`20_` 大学・`30_` 仕事）、`pick_course`（始めるときに今学期の科目を選ぶチャンネル。大学のモジュールに聞く）
+  - 計測の記録はモジュールの記録に置く。本体が持っていたころの表（`time_entries` など）からは一度だけ写し、表は念のため残してある。前のボタンの名前のままのカードは、起動して最初の見回りで描き直す（消されていたカードは置き直さずに忘れる）
+  - カードを置くのは `kei-agent-module time cards`（カードのあるチャンネルには置かない）
 - **Notion**: 今の DB の形（名前・列）を「標準の形」として固定し、setup が作る。使うかどうかは任意
   - ホームのページ ID は `config.toml` の `[notion]` にまとめる（研究は `research_home`、大学は `course_home`、ほかのモジュールは `[notion.homes]` に「名前 = ページ ID」）。ホームを書いたモジュールは、自分の名前の合言葉で、そのホームの下だけに届く（AI の道具も、Python の `gateway_notion(名前)` も）
   - ホームの無い担当には Notion の道具を渡さない。シェルを使える AI の実行役がいるモジュールは、Python からの `/notion/v1`（何でも送れる口）を使えず、MCP の道具だけ
@@ -307,7 +311,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①は済み（2026-09-27）、②は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 

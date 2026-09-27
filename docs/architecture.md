@@ -204,7 +204,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 8. 定期実行
 
-本体のスケジューラが毎分動く（`src/kei_agent/schedule.py`）。時刻は `config.toml` の `[schedule]` が既定で、App Home で変えたものは SQLite から毎分読み直す。モジュールの定期処理（知識の `literature` と `reading`）は、同じ順番の中でそのモジュールの `run_schedule` を呼ぶ。
+本体のスケジューラが毎分動く（`src/kei_agent/schedule.py`）。時刻は `config.toml` の `[schedule]` が既定で、App Home で変えたものは SQLite から毎分読み直す。モジュールの定期処理（知識の `literature` と `reading`、時間記録の `toggl_import`）は、同じ順番の中でそのモジュールの `run_schedule` を呼ぶ。
 
 | 名前 | 既定 | 中身 |
 |---|---|---|
@@ -212,10 +212,11 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 | `reading` | 07:00 | 共通ホームの「収集」ページの興味と情報源、最近60日に 👍 した記事（最大20件）を知識エージェントに渡し、興味ごとに偏らない5件を要約つきで `#40_knowledge` に1記事ずつ出す（記事は知識のモジュールの記録に控え、👍 しなかったものは30日で忘れる）。新着がなければ出さない |
 | `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily |
 | `review` | 21:00 | Retro & Planning。Slack には成果と未完了だけ。直前に Moodle の課題を取り込み、スレッドに明日・明後日の締切を並べる |
-| `maintenance` | 22:00 | 古いファイルの整理、Toggl だけで測った時間の取り込み（11章）、バックアップ（`[maintenance]`） |
+| `toggl_import` | 22:00 | Toggl のアプリで直接測った時間を「時間記録」に取り込む（時間記録のモジュール。11章） |
+| `maintenance` | 22:00 | 古いファイルの整理、バックアップ（`[maintenance]`） |
 | `night` | 00:00 | Notion の「今夜やる」Task を1件ずつ、一晩5件まで。テーマのない Task は「確認待ち」にする |
 
-- Daily と Retro & Planning は actor `router` で動く。材料（`digest.py`）はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りと今週の時間は共通ホームから読む
+- Daily と Retro & Planning は actor `router` で動く。材料（`digest.py`）はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りは共通ホームから読み、今週の人の時間は時間記録のモジュールが材料に足す（`material`）
 - 返事はそのまま共通ホームの「日別記録」に1日1行で保存し、手元には残さない。保存できなければ改善チャンネルに知らせる（Slack には出ている）。Retro のスレッドに貼った結論は同じ行のレトプラに足す
 - Moodle の課題は Daily と Retro の前に授業ホームへ取り込み、新しい課題と締切の変わった課題を `#20_course` に知らせる（大学のモジュールの `prepare`）
 - 08:00 以降に1回、授業ホームの課題（これからの全部）を共通ホームの予定カレンダーに写す（大学のモジュールの見回り `tick`。写せなければ1時間おき。AI は動かさない）
@@ -290,11 +291,12 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 ## 11. 時間の記録
 
-- 人の時間は Slack の `/toggl` コマンドか固定した時間記録カード（`src/kei_agent/time_cards.py`、`time_tracking.py`）で測る。1人1本で、別のチャンネルで始めると前の計測は止まる。`/toggl` の返事は ephemeral で、新しいカードは投稿しない（カードがあれば表示を更新する）
+- 時間記録はモジュール（`modules/time/`）。人の時間は Slack の `/toggl` コマンドか固定した時間記録カードで測る。1人1本で、別のチャンネルで始めると前の計測は止まる。`/toggl` の返事は ephemeral で、新しいカードは投稿しない（カードがあれば表示を更新する）。測るチャンネルは設定の `[time] prefixes`（既定は `10_` 研究・`20_` 大学・`30_` 仕事）、科目を選んでから測るチャンネルは `pick_course`（既定は `20_course`。今学期の科目は大学のモジュールに聞く）
+- 計測の記録は、時間記録のモジュールの記録（`module_records`）に置く。送り終えたものは30日で忘れる（Toggl と「時間記録」に残っている）
 - 止めたらまず Toggl（`focus.toggl.com/api`、`toggl_sk_` の鍵）に送る。Toggl の環境変数が無ければ送らず（`not_configured`）Notion にだけ書く。そのあと研究・大学・仕事のどれも、共通ホームの「時間記録」に1件書く（記録 ID で1回だけ、出典 Slack）
-- 送れなかったものは SQLite に保留して再送する。共通ホームが使えない間も保留にし、使えるようになってから送る。Toggl に届いたか分からないときだけ手で再送する
-- Toggl のアプリで直接測った記録は、毎晩の保守で直近7日ぶんを「時間記録」に取り込む（プロジェクト名が `研究/` `大学/` `仕事/` で始まるものだけ。記録 ID `toggl:<id>`、出典 Toggl）。Slack から送った記録（開始と長さが1分以内で一致）は重ねない
-- 週ごとの合計は「時間記録」のグラフのビュー（週ごとの時間）で見る。Kei Agent の稼働は SQLite の `runs` テーブルから数え、今週の合計を Daily の材料に入れる
+- 送れなかったものは保留にして、毎分の見回り（`tick`）で送り直す（定期処理を待たせないよう裏で1本ずつ）。共通ホームが使えない間も保留にし、使えるようになってから送る。Toggl に届いたか分からないときだけ手で再送する
+- Toggl のアプリで直接測った記録は、定期処理「Toggl の取り込み」（既定 22:00）で直近7日ぶんを「時間記録」に取り込む（プロジェクト名が `研究/` `大学/` `仕事/` で始まるものだけ。記録 ID `toggl:<id>`、出典 Toggl）。Slack から送った記録（開始と長さが1分以内で一致）は重ねない
+- 週ごとの合計は「時間記録」のグラフのビュー（週ごとの時間）で見る。今週の合計は、時間記録のモジュールが Daily の材料に入れる。Kei Agent の稼働は SQLite の `runs` テーブルから本体が数え、別の見出しで材料に入れる
 
 ## 12. 声のレイヤ
 
@@ -327,11 +329,11 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `agent_policy.py` / `execution_contract.py` / `runner.py` / `codex_apps.py` | 制限の表、実行条件、AI の起動口、Codex の App の ID |
 | `response_output.py` | 出力契約 |
 | `guard.py` | 柵（Kei Agent 自身に直させない） |
-| `store.py` | SQLite（スレッド、session、ジョブ、定期処理、実行時間、接続先、時間記録、モジュールの記録） |
+| `store.py` | SQLite（スレッド、session、ジョブ、定期処理、実行時間、接続先、モジュールの記録） |
 | `schedule.py` / `morning.py` / `digest.py` / `deadline.py` | 定期実行、朝の予定、材料集め、締切の読み方 |
 | `modules.py` / `api.py` | モジュールの定義（`module.toml`）と動き（`module.py`）の読み込み、モジュールの窓口（`Core`・`Records`）。知識の本体側は `modules/knowledge/module.py`（[extensibility.md](extensibility.md)） |
 | `version.py` | 動いている版（担当の版ずれを見つける） |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
 | `home.py` / `settings.py` / `settings_actions.py` | App Home と設定 |
 | `improve.py` / `self_fix.py` / `issues.py` | 自己改善、要望の GitHub issue |
-| `time_cards.py` / `time_tracking.py` / `timelog.py` | 時間記録と Toggl |
+| `timelog.py` | Toggl の API（時間記録と大学のモジュールが窓口から使う）と、Kei Agent の稼働時間の数え方 |
