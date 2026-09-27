@@ -104,8 +104,13 @@ class Module:
             return
         await self.core.reply(req, events_text(events_of(reply.data), datetime.now(), period))
 
-    async def agenda(self, days: int) -> list[dict] | None:
-        """これから days 日の会議（朝の一覧・声・予定カレンダー・振り返りの材料）。読めなければ None。"""
+    async def agenda(self, days: int, kinds: frozenset[str] | None = None) -> list[dict] | None:
+        """これから days 日の会議（朝の一覧・声・予定カレンダー・振り返りの材料）。読めなければ None。
+
+        会議を頼まれていないとき（振り返りで締切だけを集めるときなど）は、AI で Outlook を読まない。
+        """
+        if kinds is not None and "meeting" not in kinds:
+            return []
         reply = await self.core.ask_agent(LIST_EVENTS, {"days": days})
         if not reply.ok:
             return None

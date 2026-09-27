@@ -174,6 +174,24 @@ class Scheduler:
         await self.notify_due_soon(now)
         await self.nudge_stale_threads()
         await self.notify_unrestarted(now)
+        await self.module_ticks(now)
+
+    async def module_ticks(self, now: datetime) -> None:
+        """モジュールの見回り（class Module の tick）。毎分呼び、間隔はモジュールが決める。
+
+        1つのモジュールが落ちても、ほかのモジュールは止めない。ネットにつながらないときだけは、
+        safe_tick が始めと終わりを1行ずつ残せるよう、そのまま投げる。
+        """
+        for name, module in self.assistant.modules.items():
+            tick = getattr(module, "tick", None)
+            if tick is None:
+                continue
+            try:
+                await tick(now)
+            except Exception as e:
+                if offline(e):
+                    raise
+                log.exception("モジュール「%s」の見回りが落ちました", name)
 
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
         log.info("定期処理を始めます: %s（%s）", name, day)
@@ -463,8 +481,9 @@ class Scheduler:
             return {"status": "no_channel"}
         now = datetime.now()
         has_course = course.AGENT in self.assistant.agents
-        # 明日の計画に使うので、振り返りの前に Moodle の課題を取り込む
+        # 明日の計画に使うので、振り返りの前に Moodle の課題を取り込む（モジュールも取り込み直す）
         synced = await self.sync_assignments() if has_course else False
+        await self.assistant.module_prepare("review", day)
         since = datetime.combine(date.fromisoformat(day), dtime(0, 0)).timestamp()
         material = await self._material("review", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
@@ -497,10 +516,11 @@ class Scheduler:
             channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result,
             output_kind="review",
         )
-        deadlines = ""
-        if has_course:
-            dues = await self.assistant.course_due(REVIEW_DUE_DAYS + 1, now) or []
-            deadlines = morning.soon_deadlines(dues, now, REVIEW_DUE_DAYS)
+        dues = await self.assistant.course_due(REVIEW_DUE_DAYS + 1, now) or [] if has_course else []
+        # モジュールの締切も並べる（締切だけを頼む。会議を AI でもう一度読まない）
+        agenda, _ = await self.assistant.module_agenda(REVIEW_DUE_DAYS + 1, frozenset({"due"}))
+        dues += [item for items in agenda.values() for item in items]
+        deadlines = morning.soon_deadlines(dues, now, REVIEW_DUE_DAYS)
         if deadlines and thread_ts:
             await self.assistant.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, text=deadlines)
         note = None
@@ -591,22 +611,29 @@ class Scheduler:
             detail["synced"] = await self.sync_assignments()
             classes = (await self.assistant.ask_course(course.LIST_CLASSES)).data.get("items") or []
             dues = await self.assistant.course_due(course.DIGEST_DAYS, now) or []
-        # モジュールの予定（agenda。仕事なら Outlook の会議）。声のレイヤが「今週の会議」に答えられるように
-        # 1週間ぶん取り、朝の一覧と声に載せ、出典ごとに予定カレンダーにも書く（AI をもう一度動かさない）
+        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
+        # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
+        notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
+        # モジュールは、まず取り込み直す（大学なら Moodle の課題）
+        prepared = await self.assistant.module_prepare("daily", now.date().isoformat())
+        # モジュールの予定（agenda。仕事なら Outlook の会議、大学なら授業と締切）。声のレイヤが「今週の会議」に
+        # 答えられるように1週間ぶん取り、朝の一覧と声に載せ、会議は出典ごとに予定カレンダーにも書く
         agenda, unread = await self.assistant.module_agenda(VOICE_DAYS)
         synced: dict[str, dict | str] = {}
         for name, items in agenda.items():
             meetings = [item for item in items if item.get("kind", "meeting") == "meeting"]
             events += meetings
+            classes += [item for item in items if item.get("kind") == "class"]
+            module_dues = [item for item in items if item.get("kind") == "due"]
+            dues += module_dues
+            # モジュールの締切の目印は、そのモジュールの core.notice_once と同じ名前で記録する
+            notices += [f"module.{name}.{item['notice']}" for item in morning.soon(module_dues, now) if item.get("notice")]
             for source in dict.fromkeys(str(item.get("source") or name) for item in meetings):
                 synced[source] = await self.sync_meetings(
                     [item for item in meetings if str(item.get("source") or name) == source], now, source)
         if synced or unread:
             detail["agenda"] = {"synced": synced, "unread": unread}
         detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
-        # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
-        # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
-        notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
         # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく。
         # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
         # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
@@ -617,7 +644,7 @@ class Scheduler:
         failed_now = [label for label, failed in (
             ("課題の取り込み", detail.get("synced") is False),
             ("会議の書き込み", "error" in synced.values())) if failed]
-        failed_now += [f"{label}の予定の読み取り" for label in unread]
+        failed_now += [f"{label}の予定の読み取り" for label in unread] + prepared
         return morning.text(classes, events, dues, now, self.morning_notes(now, failed_now)), detail, notices
 
     def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:

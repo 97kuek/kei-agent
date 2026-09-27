@@ -1,7 +1,9 @@
-"""モジュールの担当プロセスを起動する共通のコマンド（`kei-agent-module <名前>`。docs/extensibility.md）。
+"""モジュールの共通のコマンド（`kei-agent-module <名前> [コマンド]`。docs/extensibility.md）。
 
-module.toml の [process] の番地で、modules/<名前>/agent.py の SKILLS と Executor を A2A のサーバーとして動かす。
-担当を足すのに、src/ と pyproject.toml は触らなくてよい。launchd からは deploy/run-agent.sh <名前> で起動する。
+コマンドを書かなければ、module.toml の [process] の番地で、modules/<名前>/agent.py の SKILLS と Executor を
+A2A のサーバーとして動かす（launchd からは deploy/run-agent.sh <名前>）。コマンドを書けば、そのモジュールの
+commands.py の COMMANDS から動かす（例: `kei-agent-module course setup --apply`）。
+担当やコマンドを足すのに、src/ と pyproject.toml は触らなくてよい。
 """
 
 from __future__ import annotations
@@ -52,12 +54,25 @@ def build_app(spec: modules.ModuleSpec, base_url: str, token: str,
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="kei-agent-module", description="モジュールの担当プロセスを起動する")
-    parser.add_argument("name", help="モジュールの名前（module.toml に [process] があり、設定の modules でオンのもの）")
-    args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(prog="kei-agent-module",
+                                     description="モジュールの担当プロセスを起動する。コマンドを書けば、そのコマンドを動かす")
+    parser.add_argument("name", help="モジュールの名前")
+    parser.add_argument("command", nargs="?", help="モジュールのコマンド（例: setup）。書かなければ担当プロセスを起動する")
+    args, rest = parser.parse_known_args(argv)
     config = load_config()
     spec = modules.known().get(args.name)
-    if spec is None or spec.port is None or spec.name not in config.modules:
+    if spec is None:
+        parser.error(f"知らないモジュールです: {args.name}")
+    if args.command:
+        commands = modules.load_commands(spec)
+        if args.command not in commands:
+            parser.error(f"モジュール「{spec.name}」に {args.command} というコマンドはありません"
+                         f"（あるもの: {', '.join(sorted(commands)) or 'なし'}）")
+        commands[args.command](rest)
+        return
+    if rest:
+        parser.error(f"知らない引数です: {' '.join(rest)}")
+    if spec.port is None or spec.name not in config.modules:
         parser.error(f"担当プロセスを持つ、オンのモジュールではありません: {args.name}")
     build_card, build_executor = parts(spec)
     server.serve(f"{spec.label}エージェント", build_card, build_executor, RPC_PATH, spec.port, env_prefix(spec))

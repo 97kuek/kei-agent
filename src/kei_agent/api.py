@@ -14,11 +14,17 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
   自分の投稿へのものなら扱って True を返す（ほかのモジュールと 🌙 には回らない）
 - `async run_schedule(name, day) -> dict` … module.toml の [schedules] の処理（day は YYYY-MM-DD）。
   返した辞書は記録に残り、{"status": "error"} なら朝の一覧の「うまくいかなかったこと」に載る。[schedules] があれば必須
+- `async tick(now)` … 毎分呼ばれる見回り（締切の知らせなど）。間隔はモジュールが決める（例: 1時間に1回だけ見る）
 - `morning_notes(day) -> list[str]` … 朝の一覧（Daily の投稿）に足す行
-- `async agenda(days) -> list[dict] | None` … これから days 日の、時刻のある予定。朝の一覧・声のレイヤ・
-  共通ホームの予定カレンダー（source ごと）・振り返りの材料に載る。1件は
-  `{"kind": "meeting", "subject", "start": "YYYY-MM-DDTHH:MM", "end", "location", "url", "id", "source"}`。
+- `async agenda(days, kinds=None) -> list[dict] | None` … これから days 日の、時刻のある予定。朝の一覧・
+  声のレイヤ・振り返りの材料に載る。kinds が来たら、その種類だけでよい（重い読み取りを省ける）。1件は
+  会議 `{"kind": "meeting", "subject", "start": "YYYY-MM-DDTHH:MM", "end", "location", "url", "id", "source"}`
+  （共通ホームの予定カレンダーにも source を出典として書く）、授業 `{"kind": "class", "subject", "start", "end"}`、
+  締切 `{"kind": "due", "title", "course", "at", "url", "id", "notice"}`（notice は、朝の一覧に出したら記録する
+  目印。24時間前の知らせで core.notice_once(notice) を使えば、朝に出したものを繰り返さない）。
   読めなかったら None を返す（空の [] と分ける。予定カレンダーの行を「要確認」にしないため）
+- `async prepare(kind, day) -> list[str]` … Daily（kind = "daily"）と振り返り（"review"）の前の取り込み。
+  うまくいかなかったことの短い名前（例: "課題の取り込み"）を返すと、朝の一覧の「うまくいかなかったこと」に載る
 - `welcome() -> str` … モジュールのチャンネルに招かれたときの案内（できること）
 - `default_question` … 本文の無いメンションのときに、担当に聞くこと
 """
@@ -27,14 +33,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
+from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kei_agent import agents, dates, modules, router, settings, themes
 from kei_agent.agents import Reply
+from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.notion import NotionError
 from kei_agent.request import Request
 from kei_agent.response_output import safe_failure
@@ -43,6 +52,7 @@ from kei_agent.slack_text import escape, split_text
 if TYPE_CHECKING:
     from kei_agent.assistant import Assistant
 
+log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "day_label", "escape",
            "failure_text", "parse_time"]
@@ -237,6 +247,36 @@ class Core:
         会話の続き・経過の表示・上限に当たったときのやり直し・出力の確認は、大学や仕事の担当と同じ。
         """
         await self._assistant.converse_with_agent(req, self.name)
+
+    # 共通ホームの予定カレンダー
+
+    async def sync_calendar(self, source: str, items: list[dict], *, day: str, days: int, complete: bool,
+                            expected_count: int | None = None) -> dict | str:
+        """共通ホームの予定カレンダーに、出典 source の予定を写す（出典と ID で照合し、手入力の行には触らない）。
+
+        items の1件は {"id", "title", "start", "end", "url", "location", "status"}（start は日付か日時）。
+        day（YYYY-MM-DD）から days 日の中で見えなくなった行は、消さずに「要確認」にする。全部を読めたと
+        言い切れるとき（complete）だけ、0件も「全部なくなった」と扱う。返すのは件数（作った・直した・要確認）か、
+        "no_hub"（共通ホームが無い）・"error"（写せなかった。理由はログ）。
+        """
+        hub = self._assistant.hub
+        if hub is None:
+            return "no_hub"
+        checked_at = datetime.combine(date.fromisoformat(day), dtime(9, 0), JST)
+        try:
+            rows = tuple(CalendarItem(source_id=str(item.get("id") or ""), title=str(item.get("title") or ""),
+                                      start=str(item.get("start") or ""), end=str(item.get("end") or ""),
+                                      url=str(item.get("url") or ""), location=str(item.get("location") or ""),
+                                      status=str(item.get("status") or ""))
+                         for item in items if isinstance(item, dict))
+            if len(rows) != len(items):
+                raise IncompleteSnapshot("予定に不正な行があります")
+            report = await asyncio.to_thread(sync_calendar, hub, CalendarSnapshot(source, complete, rows, expected_count),
+                                             checked_at, days)
+        except (IncompleteSnapshot, NotionError, ValueError, TypeError) as e:
+            log.warning("%s を予定カレンダーに写せません: %s", source, e)
+            return "error"
+        return report.__dict__
 
     # 定期処理と研究テーマ
 

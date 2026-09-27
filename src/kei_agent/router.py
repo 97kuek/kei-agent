@@ -94,7 +94,7 @@ def workspace(config: Config, actor: str = "router") -> Workspace:
     """
     cwd = config.state_dir / "router" if actor == "router" else config.state_dir / "classifier" / actor
     cwd.mkdir(parents=True, exist_ok=True)
-    return Workspace("router", ChannelKind.COURSE, cwd, timeout_minutes=TIMEOUT_MINUTES,
+    return Workspace("router", ChannelKind.ROUTER, cwd, timeout_minutes=TIMEOUT_MINUTES,
                      # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
                      system_prompt=config.prompt_file("router.md"), profile=False)
 

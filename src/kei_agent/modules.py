@@ -25,6 +25,8 @@ API_VERSION = 1
 SPEC_FILE = "module.toml"
 CODE_FILE = "module.py"
 AGENT_FILE = "agent.py"
+# 手で動かすコマンド（setup など）。COMMANDS = {"名前": main(argv)} を置く
+COMMANDS_FILE = "commands.py"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
 PACKAGE = "kei_agent_modules"
 BUILTIN_DIR = Path(__file__).resolve().parents[2] / "modules"
@@ -388,6 +390,12 @@ def load_code(spec: ModuleSpec) -> type | None:
         raise ModuleError(f"{where} に class Module がありません")
     if spec.schedules and not callable(getattr(cls, "run_schedule", None)):
         raise ModuleError(f"{where}: [schedules] があるので、class Module に run_schedule(name, day) を書いてください")
+    agenda = getattr(cls, "agenda", None)
+    if callable(agenda):
+        try:
+            inspect.signature(agenda).bind(None, 7, None)
+        except TypeError:
+            raise ModuleError(f"{where}: agenda は agenda(self, days, kinds=None) の形にしてください") from None
     on_message = getattr(cls, "on_message", None)
     if spec.channels and not callable(on_message):
         raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req, skill, params) を書いてください")
@@ -409,3 +417,18 @@ def load_agent(spec: ModuleSpec):
                                                                                        type):
         raise ModuleError(f"{where} に SKILLS（名刺に載せる仕事の一覧）と class Executor を書いてください")
     return code
+
+
+def load_commands(spec: ModuleSpec) -> dict:
+    """そのモジュールの、手で動かすコマンド（commands.py の COMMANDS）。無ければ空。
+
+    `kei-agent-module <名前> <コマンド> [引数...]` で動く。値は main(argv: list[str]) の関数。
+    """
+    if not (spec.path / COMMANDS_FILE).is_file():
+        return {}
+    importlib.invalidate_caches()
+    code = importlib.import_module(f"{package(spec)}.commands")
+    commands = getattr(code, "COMMANDS", None)
+    if not isinstance(commands, dict) or not all(isinstance(k, str) and callable(v) for k, v in commands.items()):
+        raise ModuleError(f"{spec.path / COMMANDS_FILE} に COMMANDS = {{\"名前\": main}} を書いてください")
+    return commands

@@ -12,10 +12,14 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
   断るなら `await self.fail(updater, 理由)`。自由な質問（ASK）は `await self.answer(updater, text)` に渡すと、
   会話の続きも含めて、ほかの担当と同じ形で答える。`self.config` と `self.store` は土台が用意する
 - `DESCRIPTION`（任意）… 名刺の説明。無ければ module.toml の description
+
+手で動かすコマンド（setup など）は commands.py に `COMMANDS = {"名前": main(argv)}` を置く（`kei-agent-module
+<名前> <コマンド>`）。Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,15 +27,22 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentSkill
 
 from kei_agent import modules, runner, themes
-from kei_agent.config import Config
+from kei_agent.config import Config, load_config
+from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.model_json import json_list, json_object
 from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
-from kei_agent_a2a.executor import ASK, SkillExecutor
+from kei_agent.notion import Notion, NotionError, Setup, gateway_notion
+from kei_agent.timelog import Toggl, TogglError, load_toggl
+from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
 from kei_agent_a2a.run import progress
 
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "AIError", "AgentSkill", "Config", "SkillExecutor", "TaskUpdater", "json_list",
-           "json_object", "progress", "run_ai", "workspace"]
+__all__ = ["API_VERSION", "ASK", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionError", "Setup",
+           "SkillExecutor", "TaskUpdater", "Toggl", "TogglError", "asked_days", "day_label", "gateway_notion",
+           "json_list", "json_object", "load_config", "load_toggl", "parse_time", "progress", "requested_days",
+           "run_ai", "weekday", "workspace"]
+# 本文の JSON の days で受け付ける上限（日）
+MAX_DAYS = 400
 
 
 class AIError(RuntimeError):
@@ -40,6 +51,18 @@ class AIError(RuntimeError):
     def __init__(self, reason: str, limit_reset_at: float | None = None):
         super().__init__(reason)
         self.limit_reset_at = limit_reset_at
+
+
+def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
+    """本文の JSON の days（何日先まで／何日ぶん）。無いか、数字でないか、範囲の外なら既定のまま。
+
+    本体（module.py）の core.ask_agent は、材料を本文の JSON で渡す（metadata には provider だけ）。
+    """
+    try:
+        days = int((json.loads(text) or {}).get("days", default))
+    except (TypeError, ValueError, AttributeError):
+        return default
+    return days if 1 <= days <= maximum else default
 
 
 def workspace(config: Config, agent: str) -> Path:

@@ -64,6 +64,10 @@ def cap(text: str, limit: int = MAX_DIGEST_CHARS) -> str:
     return f"{head}\n{TRUNCATED}\n"
 
 
+# 振り返りの材料に、モジュールの予定をどこまで入れるか（日。締切は、その先まで出るものを全部）
+DIGEST_AGENDA_DAYS = 7
+
+
 def _events(items: list[dict], day) -> str:
     """その日の会議を短い1行に（材料なので、件名と時刻だけで足りる）。"""
     found = []
@@ -128,14 +132,23 @@ class DigestBuilder:
         return [*lines, ""]
 
     async def _agenda(self, now: float) -> list[str]:
-        """モジュールの予定（今日あったもの、明日のもの）。材料なので、件名と時刻だけ。"""
+        """モジュールの予定（今日あったもの、明日のもの、締切）。材料なので、件名と時刻だけ。"""
         at = datetime.fromtimestamp(now)
-        agenda, unread = await self.assistant.module_agenda(2)
+        tomorrow = (at + timedelta(days=1)).date()
+        agenda, unread = await self.assistant.module_agenda(DIGEST_AGENDA_DAYS)
         lines: list[str] = []
         for name, items in agenda.items():
-            lines += ["", f"## {modules.known()[name].label}", "",
-                      f"- 今日あった予定: {_events(items, at.date()) or 'なし'}",
-                      f"- 明日の予定: {_events(items, (at + timedelta(days=1)).date()) or 'なし'}", ""]
+            timed = [item for item in items if item.get("kind", "meeting") in ("meeting", "class")]
+            dues = [item for item in items if item.get("kind") == "due"]
+            lines += ["", f"## {modules.known()[name].label}", ""]
+            if timed or not dues:
+                lines += [f"- 今日あった予定: {_events(timed, at.date()) or 'なし'}",
+                          f"- 明日の予定: {_events(timed, tomorrow) or 'なし'}"]
+            if dues:
+                lines += [f"- 今日が期限だったもの: {_dues([i for i in dues if _due_day(i) == at.date()]) or 'なし'}",
+                          "- 残っている締切: "
+                          + (_dues([i for i in dues if _due_day(i) and _due_day(i) > at.date()], with_day=True) or "なし")]
+            lines.append("")
         for label in unread:
             lines += ["", f"## {label}", "", "- 予定を読めなかった", ""]
         return lines

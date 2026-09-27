@@ -765,9 +765,29 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         return (event.get("reaction") == NIGHT_REACTION and item.get("type") == "message"
                 and self.is_allowed(event.get("user")) and event.get("item_user") == event.get("user"))
 
-    async def module_agenda(self, days: int) -> tuple[dict[str, list[dict]], list[str]]:
+    def _usable(self, name: str) -> bool:
+        """そのモジュールを動かせるか（担当プロセスを持つなら、その住所がある。使っていない担当は黙って飛ばす）。"""
+        return modules.known()[name].port is None or name in self.agents
+
+    async def module_prepare(self, kind: str, day: str) -> list[str]:
+        """Daily・振り返りの前の取り込み（class Module の prepare）。うまくいかなかったことの短い名前を返す。"""
+        failed: list[str] = []
+        for name, module in self.modules.items():
+            prepare = getattr(module, "prepare", None)
+            if prepare is None or not self._usable(name):
+                continue
+            try:
+                failed += [str(label) for label in await prepare(kind, day) or []]
+            except Exception:
+                log.exception("モジュール「%s」の取り込みが落ちました", name)
+                failed.append(f"{modules.known()[name].label}の取り込み")
+        return failed
+
+    async def module_agenda(self, days: int, kinds: frozenset[str] | None = None,
+                            ) -> tuple[dict[str, list[dict]], list[str]]:
         """モジュールの予定（class Module の agenda）。読めたモジュールの名前 → 予定と、読めなかったモジュールの表示名。
 
+        kinds を渡すと、その種類（meeting / class / due）だけを頼む（振り返りの締切のために、会議を AI で読まない）。
         読めなかった（None を返した・落ちた）モジュールは、予定が無いのとは分ける（予定カレンダーの行を
         「要確認」にしないため）。
         """
@@ -775,18 +795,18 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         failed: list[str] = []
         for name, module in self.modules.items():
             agenda = getattr(module, "agenda", None)
-            if agenda is None or (modules.known()[name].port is not None and name not in self.agents):
-                # 担当プロセスの住所が無い（使っていない）モジュールは、読めなかったことにせず飛ばす
+            if agenda is None or not self._usable(name):
                 continue
             try:
-                items = await agenda(days)
+                items = await agenda(days, kinds)
             except Exception:
                 log.exception("モジュール「%s」の予定を読めませんでした", name)
                 items = None
             if items is None:
                 failed.append(modules.known()[name].label)
                 continue
-            found[name] = [item for item in items if isinstance(item, dict)]
+            found[name] = [item for item in items if isinstance(item, dict)
+                           and (kinds is None or item.get("kind", "meeting") in kinds)]
         return found, failed
 
     async def module_reaction(self, event: dict, added: bool) -> bool:

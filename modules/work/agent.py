@@ -7,10 +7,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
-from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater
+from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater, requested_days
 
 from . import connector
 from .skills import LIST_EVENTS
@@ -42,15 +41,6 @@ NAMES = tuple(skill.id for skill in SKILLS)
 MAX_DAYS = 90
 
 
-def asked_days(text: str, default: int = connector.DEFAULT_DAYS) -> int:
-    """本文の JSON の days（何日先まで）。数字でないか範囲の外なら既定のまま。"""
-    try:
-        days = int((json.loads(text) or {}).get("days", default))
-    except (TypeError, ValueError, AttributeError):
-        return default
-    return days if 1 <= days <= MAX_DAYS else default
-
-
 class Executor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", LIST_EVENTS)
@@ -60,7 +50,7 @@ class Executor(SkillExecutor):
         if skill == ASK:
             await self.answer(updater, text)
             return
-        days = asked_days(text)
+        days = requested_days(text, connector.DEFAULT_DAYS, MAX_DAYS)
         try:
             events = await connector.events(self.config, self.store, days, provider=str(metadata.get("provider") or ""))
         except connector.WorkCalendarError as e:

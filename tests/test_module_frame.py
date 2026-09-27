@@ -70,7 +70,7 @@ class Module:
             return
         await self.core.reply(req, f"{len(reply.data.get('items') or [])} 件")
 
-    async def agenda(self, days: int):
+    async def agenda(self, days: int, kinds=None):
         reply = await self.core.ask_agent("list-events", {"days": days})
         if not reply.ok:
             return None
@@ -319,3 +319,126 @@ async def test_voice_can_ask_a_module_actor_read_only(env, monkeypatch):
     monkeypatch.setattr(assistant, "ask_agent", fake_ask_agent)
     answer = await assistant.answer_question("calendar", "明日の予定は？")
     assert answer == "明日は打ち合わせ" and asked == [("calendar", True, "calendar_list")]
+
+
+# 見回り（tick）
+
+async def test_module_ticks_run_every_minute_and_one_failure_does_not_stop_the_others(env, monkeypatch):
+    scheduler, assistant, slack, claude, agent = env
+    seen = []
+
+    async def calendar_tick(now):
+        seen.append(("calendar", now))
+
+    async def broken_tick(now):
+        raise RuntimeError("こわれた")
+
+    monkeypatch.setattr(assistant.modules["calendar"], "tick", calendar_tick, raising=False)
+    monkeypatch.setattr(assistant.modules["knowledge"], "tick", broken_tick, raising=False)
+    now = datetime(2026, 9, 28, 9, 0)
+    await scheduler.module_ticks(now)
+    assert seen == [("calendar", now)]
+
+    async def offline_tick(now):
+        raise ConnectionError("名前を引けない")
+
+    monkeypatch.setattr(assistant.modules["calendar"], "tick", offline_tick, raising=False)
+    with pytest.raises(ConnectionError):          # ネットにつながらないことは、safe_tick に任せる
+        await scheduler.module_ticks(now)
+
+
+# 予定カレンダー（core.sync_calendar）
+
+async def test_a_module_writes_its_own_rows_to_the_hub_calendar(env):
+    scheduler, assistant, slack, claude, agent = env
+    core = assistant.modules["calendar"].core
+    assistant.hub.calendar.append({"id": "cal-0", "出典": "手入力", "出典 ID": "", "名前": "自分で入れた予定",
+                                   "日付": "2026-09-29", "同期状態": ""})
+    items = [{"id": "a1", "title": "レポート", "start": "2026-10-25", "status": "未着手"}]
+
+    report = await core.sync_calendar("課題", items, day="2026-09-27", days=400, complete=True, expected_count=1)
+
+    assert report == {"created": 1, "updated": 0, "stale": 0}
+    assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("手入力", "自分で入れた予定"),
+                                                                           ("課題", "レポート")]
+    # 数が合わない（読み損ねた）ときは、何も書かない
+    assert await core.sync_calendar("課題", items, day="2026-09-27", days=400, complete=True,
+                                    expected_count=2) == "error"
+    assistant.hub = None
+    assert await core.sync_calendar("課題", items, day="2026-09-27", days=400, complete=True) == "no_hub"
+
+
+# 授業と締切（agenda の種類）、取り込み（prepare）
+
+def _school_items(now):
+    today = now.date().isoformat()
+    return [{"kind": "class", "subject": "データベース", "start": f"{today}T10:40", "end": f"{today}T12:20"},
+            {"kind": "due", "id": "r1", "title": "第3回レポート", "course": "データベース",
+             "at": f"{today}T17:00", "notice": "due:r1"}]
+
+
+async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, monkeypatch):
+    scheduler, assistant, slack, claude, agent = env
+    now = datetime(2026, 9, 28, 7, 30)
+    asked = []
+
+    async def agenda(days, kinds=None):
+        asked.append((days, kinds))
+        return _school_items(now)
+
+    async def prepare(kind, day):
+        return ["課題の取り込み"]
+
+    module = assistant.modules["calendar"]
+    monkeypatch.setattr(module, "agenda", agenda)
+    monkeypatch.setattr(module, "prepare", prepare, raising=False)
+
+    text, detail, notices = await scheduler.morning_text(now)
+
+    assert "`10:40–12:20` 🎓 データベース" in text and "⏰ 締切: データベース 第3回レポート" in text
+    assert "うまくいかなかったこと: 課題の取り込み" in text
+    # 朝に出した締切は、そのモジュールの目印で記録する（24時間前の知らせで繰り返さない）
+    assert notices == ["module.calendar.due:r1"]
+    assert asked == [(7, None)]
+
+
+async def test_review_lists_module_deadlines_without_reading_meetings(env, monkeypatch):
+    scheduler, assistant, slack, claude, agent = env
+    now = datetime(2026, 9, 28, 21, 0)
+    asked = []
+
+    async def agenda(days, kinds=None):
+        asked.append(kinds)
+        return [item for item in _school_items(now) if kinds is None or item["kind"] in kinds]
+
+    monkeypatch.setattr(assistant.modules["calendar"], "agenda", agenda)
+    agenda_items, _ = await assistant.module_agenda(3, frozenset({"due"}))
+
+    assert asked == [frozenset({"due"})]
+    assert [item["kind"] for item in agenda_items["calendar"]] == ["due"]
+
+
+async def test_dues_from_a_module_go_into_the_review_material(env, monkeypatch):
+    from kei_agent import digest
+
+    scheduler, assistant, slack, claude, agent = env
+    now = datetime(2026, 9, 28, 21, 0)
+
+    async def agenda(days, kinds=None):
+        return _school_items(now)
+
+    monkeypatch.setattr(assistant.modules["calendar"], "agenda", agenda)
+    lines = await digest.DigestBuilder(assistant.config, assistant.store, assistant)._agenda(now.timestamp())
+
+    assert "- 今日あった予定: 10:40–12:20 データベース" in lines
+    assert "- 今日が期限だったもの: データベース / 第3回レポート（17:00）" in lines
+
+
+def test_an_agenda_without_kinds_is_refused_at_startup(tmp_path):
+    folder = tmp_path / "old"
+    folder.mkdir()
+    (folder / "module.toml").write_text('api = 1\nname = "old"\n', encoding="utf-8")
+    (folder / "module.py").write_text("class Module:\n    async def agenda(self, days):\n        return []\n",
+                                      encoding="utf-8")
+    with pytest.raises(modules.ModuleError, match="agenda"):
+        modules.load_code(modules.load_spec(folder))

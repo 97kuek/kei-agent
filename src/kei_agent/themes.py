@@ -68,6 +68,8 @@ class ChannelKind(Enum):
     MODULE = "module"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
     SELF_FIX = "self_fix"
+    # 振り分け・分類の係（router.py）。何も書かず、材料はプロンプトで渡す
+    ROUTER = "router"
 
 
 @dataclass(frozen=True)

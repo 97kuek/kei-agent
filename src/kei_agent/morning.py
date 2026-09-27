@@ -86,6 +86,12 @@ def upcoming(classes: list[dict], events: list[dict], dues: list[dict], now: dat
     return sorted(found, key=lambda e: (e.at, e.icon))
 
 
+def soon(dues: list[dict], now: datetime, hours: int = 24) -> list[dict]:
+    """いまから hours 時間以内に締切のもの（過ぎたもの・時刻の読めないものは入れない）。"""
+    limit = now + timedelta(hours=hours)
+    return [item for item in dues or [] if (at := parse_time(item.get("at", ""))) is not None and now <= at <= limit]
+
+
 def later(dues: list[dict], now: datetime, days: int = 7) -> str:
     """今日より先の締切を1行で。"""
     limit = (now + timedelta(days=days)).date()

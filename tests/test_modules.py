@@ -239,3 +239,24 @@ def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
         with pytest.raises(SystemExit):
             launch.main([name])
     assert len(started) == 1
+
+
+def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch):
+    """手で動かすコマンド（setup など）は commands.py に置き、共通のコマンドから動かす（pyproject.toml を触らない）。"""
+    pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
+    from kei_agent_a2a import launch
+
+    home_dir = _config(tmp_path)
+    folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
+    (folder / "commands.py").write_text(
+        "RAN = []\n\n\ndef setup(argv):\n    RAN.append(argv)\n\n\nCOMMANDS = {\"setup\": setup}\n", encoding="utf-8")
+    monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
+
+    launch.main(["weather", "setup", "--apply"])
+
+    code = __import__(f"{modules.package(modules.known()['weather'])}.commands", fromlist=["RAN"])
+    assert code.RAN == [["--apply"]]
+    with pytest.raises(SystemExit):
+        launch.main(["weather", "nothing"])                 # 無いコマンド
+    with pytest.raises(SystemExit):
+        launch.main(["weather"])                            # 担当プロセスを持たない（コマンドだけのモジュール）
