@@ -13,7 +13,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
 | 仕事エージェント | `kei-agent-module work` | 8789 | `modules/work/` | Microsoft 365 を読む。モジュールの担当プロセス（`agent.py`） |
 | 知識エージェント | `kei-agent-module knowledge` | 8792 | `modules/knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない）。モジュールの担当プロセス（`agent.py`） |
-| 声のレイヤ | `kei-agent-voice` | 8790 | `src/kei_agent_voice/` | Realtime API、マイク、スピーカー |
+| 声 | `kei-agent-module voice` | 8790 | `modules/voice/` | Realtime API、マイク、スピーカー。モジュールの担当プロセス（`agent.py`）で、マイクの会話も同じプロセス（`background`） |
 | Notion ゲートウェイ | `kei-agent-notion-gateway` | 8791 | `src/kei_agent_notion_gateway/` | Notion を触る唯一の口。利用者ごとに届くホームを決める（10章） |
 
 `src/kei_agent_a2a/` は A2A サーバーの共通部分（`server.py`）、返事の封筒（`envelope.py`）、受け付けの土台と共通の `ask`（`executor.py`）、provider を1回動かす処理（`run.py`）、モジュールの担当プロセスの窓口（`api.py`）と共通の起動コマンド（`launch.py`、`kei-agent-module <名前>`）。
@@ -292,17 +292,19 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 ## 12. 声のレイヤ
 
+声はモジュール（`modules/voice/`）。本体側（`module.py`）が出来事を受け取って担当プロセスに渡し、App Home の「知らせる」「聞く（マイク）」を出す。担当プロセス（`agent.py`）が喋り、聞く。
+
 | 役割 | 担当 |
 |---|---|
 | 聞く・喋る・割り込み・ふだんの会話 | OpenAI Realtime API（`gpt-realtime-2.1-mini` 固定、声は `KEI_AGENT_REALTIME_VOICE`、既定 `cedar`） |
-| 音の出し入れ | Mac の `ffmpeg`（`audio.py`）。割り込みは鳴らしているプロセスを止めて実現する |
+| 音の出し入れ | Mac の `ffmpeg`（`modules/voice/audio.py`）。割り込みは鳴らしているプロセスを止めて実現する |
 | 予定・締切・様子 | 本体が押しておいた手元のデータ（`get_schedule` / `get_status`、朝に1週間ぶん） |
-| 研究・授業・仕事の中身 | 本体の問い合わせ口（`[a2a] orchestrator`、`src/kei_agent/questions.py`）に頼む。本体が読むだけで担当に聞き、Slack と同じ出力の確認を通した答えを返す（`handoff.py`） |
-| 作業 | `propose_request` で下書きし、読み上げて確認してから `send_request`。`<state_dir>/asks/` にファイルを置き、本体が拾ってスレッドを立てる（`src/kei_agent/ask.py`） |
-| 顔 | `KEI_AGENT_STACKCHAN_URL` があれば Stack-chan に HTTP で表情だけ送る（`face.py`）。ロボットは未購入 |
+| 研究・授業・仕事の中身 | 本体の問い合わせ口（`[a2a] orchestrator`、`src/kei_agent/questions.py`）に頼む。本体が読むだけで担当に聞き、Slack と同じ出力の確認を通した答えを返す（窓口の `ask_orchestrator`、`modules/voice/handoff.py`） |
+| 作業 | `propose_request` で下書きし、読み上げて確認してから `send_request`。`<state_dir>/asks/` にファイルを置き（窓口の `put_request`）、本体が拾ってスレッドを立てる（`src/kei_agent/ask.py`） |
+| 顔 | `KEI_AGENT_STACKCHAN_URL` があれば Stack-chan に HTTP で表情だけ送る（`modules/voice/face.py`）。ロボットは未購入 |
 
-- 本体とモジュールは出来事を配る（`core.emit`。受け取るのは `on_event` を持つモジュール）。声には同じ出来事を A2A の `notify` で投げっぱなしで送る（`src/kei_agent/voice.py`）。渡すのは出来事（`schedule` `due` `working` `done` `failed` `limited` `awaiting` `listen`）だけで、言い方と顔は声のレイヤが決める
-- 「知らせる」だけのときは通知のたびに短い接続を作って読み上げ、マイクは開かない。「聞く」が入のときだけマイクを開けて会話する。どちらも既定は切で、設定は再起動後も戻る
+- 本体とモジュールは出来事を配る（`core.emit`）。声のモジュールは `on_event` で受け取り、担当プロセスに A2A の `notify` で投げっぱなしで渡す（`core.tell_agent`。届かなくても困りごととして知らせない）。渡すのは出来事（`schedule` `due` `working` `done` `failed` `limited` `awaiting` と、App Home からの `listen`）だけで、言い方と顔は担当が決める
+- 「知らせる」だけのときは通知のたびに短い接続を作って読み上げ、マイクは開かない。「聞く」が入のときだけマイクを開けて会話する。どちらも既定は切で、設定は声のモジュールの記録に残り、再起動後も戻る
 - `OPENAI_API_KEY` が無ければつながらないが落ちない
 - 会話は60分で切れるのでつなぎ直す。会話は残さず、Slack に残るのは依頼だけ
 - 声の依頼は `asks/` を信じる（書けるのは自分だけという前提）。話し手の判定はしない

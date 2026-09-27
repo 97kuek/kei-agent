@@ -23,7 +23,7 @@ handoff_after_turns = 8
 
 # 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
 # ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）
-modules = ["course", "knowledge", "work"]
+modules = ["course", "knowledge", "voice", "work"]
 
 # agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
 # model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
@@ -80,11 +80,8 @@ orchestrator = "http://127.0.0.1:8786"
 [a2a.agents]
 # ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
 # 行を消すと、そのエージェントは使わない（research を消すと、claude は本体の中で動く）。
-# 担当プロセスを持つモジュール（知識など）は、書かなければ module.toml の番地を使う
-course = "http://127.0.0.1:8787"
+# 担当プロセスを持つモジュール（大学・仕事・知識・声）は、書かなければ module.toml の番地を使う
 research = "http://127.0.0.1:8788"
-work = "http://127.0.0.1:8789"
-voice = "http://127.0.0.1:8790"
 
 [notion]
 # Notion のホームのページ ID（URL の末尾32文字）。Notion を使わないなら空のまま。Notion を触るのはゲートウェイだけで、

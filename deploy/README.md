@@ -60,7 +60,7 @@ export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Not
 | `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
 | `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
 | `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |
-| `kei-agent-voice.zsh` | 声のレイヤ（`deploy/run-agent.sh voice`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
+| `kei-agent-voice.zsh` | 声のモジュールの担当（`deploy/run-agent.sh voice`）が同じ規則で読む。`OPENAI_API_KEY`、任意で `KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
 
 プロファイルは一度作ってログインしておく。
 
