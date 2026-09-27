@@ -1825,6 +1825,109 @@ async def test_course_channel_formats_the_deadlines(env):
     assert "（ほかに 2 件）" in reply
 
 
+class _DueAgent:
+    """締切の一覧（list-due）を返す大学エージェントの偽物。days ごとに、決めておいた締切を返す。"""
+    base_url = "http://127.0.0.1:8787"
+
+    def __init__(self, by_days: dict[int, list[dict]]):
+        self.by_days = by_days
+        self.asked: list[dict] = []
+
+    async def card(self):
+        return {"skills": [{"id": "list-due", "description": "締切"}, {"id": "ask", "description": "質問"}]}
+
+    async def ask(self, skill, text="", params=None):
+        import json as _json
+
+        from kei_agent import a2a
+
+        self.asked.append(dict(params or {}))
+        days = (params or {}).get("days", 14)
+        items = self.by_days.get(days, [])
+        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
+            "ok": True, "text": f"締切 {len(items)} 件", "limit_reset_at": None, "cost_usd": None,
+            "data": {"days": days, "more": 0, "items": items}}))
+
+
+DUES = [{"id": "a@moodle", "at": "2026-10-25T23:59:00+09:00", "course": "データベース", "title": "Assignment A"},
+        {"id": "b@moodle", "at": "2026-11-01T23:59:00+09:00", "course": "データベース", "title": "Assignment B"},
+        {"id": "c@moodle", "at": "2026-11-21T23:59:00+09:00", "course": "統計解析実習", "title": "課題#1"},
+        {"id": "d@moodle", "at": "2026-11-21T23:59:00+09:00", "course": "統計解析実習", "title": "課題#2"}]
+
+
+async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(env, monkeypatch):
+    """2週間に締切が無くても「ない」だけで終わらせず、その先のいちばん近いものを添える（2026-09-26 21:40）。"""
+    from kei_agent import router
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    agent = _DueAgent({14: [], 400: DUES})
+    assistant.agents["course"] = agent
+
+    async def fake_pick(config, skills, text, *, store=None):
+        return router.Choice(skill="list-due")
+
+    monkeypatch.setattr(router, "pick", fake_pick)
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "15.1",
+                                "text": "<@UBOT> 最近締め切りの課題ってあったけ"})
+    await settle(assistant)
+
+    assert [params.get("days") for params in agent.asked] == [None, 400]
+    reply = slack.texts()[-1]
+    assert reply.startswith("これから2週間の締切はないよ。いちばん近いのはこれ。")
+    assert "Assignment A" in reply and "Assignment B" not in reply
+
+
+@pytest.mark.parametrize(("choice", "text"), [
+    ({"days": 365, "limit": 1}, "一番近い課題は？"),     # 振り分け係が件数を拾った
+    ({"days": 365}, "一番締め切りが近い課題は？全期間で"),  # 拾えなくても、言い方で1件と分かる
+])
+async def test_course_channel_answers_the_nearest_deadline_alone(env, monkeypatch, choice, text):
+    """「一番近い」に全部を並べない（2026-09-26 21:41、1年ぶん30件を並べていた）。"""
+    from kei_agent import router
+
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    assistant.agents["course"] = _DueAgent({365: DUES})
+
+    async def fake_pick(config, skills, text, *, store=None):
+        return router.Choice(skill="list-due", params=dict(choice))
+
+    monkeypatch.setattr(router, "pick", fake_pick)
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "16.1", "text": f"<@UBOT> {text}"})
+    await settle(assistant)
+
+    reply = slack.texts()[-1]
+    assert "Assignment A" in reply and "Assignment B" not in reply and "ほかに" not in reply
+
+
+def test_first_items_keep_deadlines_at_the_same_time():
+    from kei_agent import course
+
+    assert [item["id"] for item in course.first_items(DUES, 3)] == ["a@moodle", "b@moodle", "c@moodle", "d@moodle"]
+    assert [item["id"] for item in course.first_items(DUES, 1)] == ["a@moodle"]
+
+
+async def test_an_expired_login_says_so_and_tells_the_improve_channel_once(env):
+    """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ（2026-09-27）。"""
+    assistant, slack, _, _ = env
+    slack.channels["C7"] = "20_course"
+    how = runner.login_help("claude", {"CLAUDE_CONFIG_DIR": "/Users/me/.claude-personal"})
+    failed = {"is_error": True, "failure_kind": "login", "provider": "claude",
+              "errors": [how, "Failed to authenticate: OAuth session expired and could not be refreshed"]}
+    assistant.agents["course"] = _AskAgent("http://127.0.0.1:8787", [dict(failed), dict(failed)])
+
+    for ts in ("17.1", "18.1"):
+        await assistant.on_mention({"channel": "C7", "user": "UME", "ts": ts, "text": "<@UBOT> 学校はいつから？"})
+        await settle(assistant)
+
+    shown = slack.texts() + slack.streamed()
+    replies = [text for text in shown if "ログインが切れていて" in text]
+    assert len(replies) == 2 and not any("接続に失敗" in text for text in shown)
+    notices = [text for text in slack.texts() if "大学の担当の AI が動きません" in text]
+    assert len(notices) == 1 and ".claude-personal" in notices[0] and "claude auth login" in notices[0]
+
+
 async def test_course_channel_tells_when_the_agent_is_down(env):
     """大学エージェントにつながらないときは、スレッドに言って `#00_kei-agent` にも知らせる。"""
     from kei_agent import a2a
@@ -1933,6 +2036,9 @@ def test_router_reads_the_choice_and_ignores_junk():
     assert router.parse('{"skill": "drop-database"}', allowed).skill == "ask"
     assert router.parse("よく分かりません", allowed).skill == "ask"
     assert router.parse('{"skill": "list-due", "days": 9999}', allowed).params == {}
+    # 件数（「一番近い」なら 1）も拾う。変な値は捨てる
+    assert router.parse('{"skill": "list-due", "days": 365, "limit": 1}', allowed).params == {"days": 365, "limit": 1}
+    assert router.parse('{"skill": "list-due", "limit": 0}', allowed).params == {}
 
 
 def test_router_catalog_comes_from_the_card():

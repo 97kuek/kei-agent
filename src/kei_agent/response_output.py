@@ -151,6 +151,8 @@ def safe_failure(kind: str = "conversation") -> str:
         "connection": "⚠️ 接続に失敗したよ。少し時間を置いてもう一度頼んでね。",
         "timeout": "⚠️ 時間がかかりすぎたよ。少し時間を置いてもう一度頼んでね。",
         "provider": "⚠️ 使う AI（Claude か Codex）がまだ選ばれていないよ。App Home の設定で選んでからもう一度頼んでね。",
+        "login": "⚠️ この担当が使う AI のログインが切れていて、答えられなかったよ。入り直し方は改善のチャンネルに知らせたので、"
+                 "入り直してからもう一度頼んでね。",
     }
     return messages.get(kind, messages["conversation"])
 

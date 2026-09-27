@@ -87,6 +87,9 @@ async def execute(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater
         ask["prompt"], on_activity=on_activity,
     )
     log.info("%s が終わりました: %s（エラー: %s）", recipe.provider, ws.channel_name, result.is_error)
+    if result.is_error:
+        # 理由が残っていないと、何が起きたかを追えない（ログインが切れていたのに、1週間気づけなかった）
+        log.warning("%s が答えられませんでした: %s", ws.channel_name, result.failure_reason())
     # 受け取る側が読む項目だけを渡す（検証前の途中の文など、内部の項目は外に出さない）
     data = {key: value for key, value in asdict(result).items() if key in RESULT_FIELDS}
     return envelope.reply(

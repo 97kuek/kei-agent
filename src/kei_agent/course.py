@@ -14,6 +14,7 @@ Assistant に混ぜて使う。self.agents、self.post などは Assistant の�
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 
 from kei_agent import agents, deadline, router, settings
@@ -45,6 +46,10 @@ CAN_DO = ("このチャンネルでできること。\n"
           "• 「今週どれくらいやった？」… Toggl の記録を科目ごとに集計する\n"
           "• そのほかの質問… Box の学部要項と過去問、Notion の授業と課題を読んで答える")
 NO_DUE = "締切の近い課題はないよ。"
+# 近い締切が無いとき、いちばん近いものを探す先の長さ（日）。大学エージェントが受け付ける上限
+NEAREST_DAYS = 400
+# 「一番近い」「次の締切」のように、1件を聞かれたときの言い方（振り分け係が件数を拾えなかったときの当て）
+ONE = re.compile(r"(一番|いちばん|最も|もっとも)[^。？?]{0,8}近い|直近の|次の(締切|締め切り|課題)")
 # 朝の一覧で見る先の長さ（日）と、個別に知らせる締切までの時間
 DIGEST_DAYS = 7
 SOON_HOURS = 24
@@ -100,6 +105,23 @@ def due_text(items: list[dict], more: int = 0, now: datetime | None = None) -> s
     if more:
         lines.append(f"（ほかに {more} 件）")
     return "\n".join(lines)
+
+
+def first_items(items: list[dict], limit: int) -> list[dict]:
+    """近い順の先頭 limit 件。同じ日時の締切は分けない（「一番近い」に、同時のものを落とさない）。"""
+    if limit >= len(items):
+        return items
+    last = parse_time(items[limit - 1].get("at"))
+    return [item for n, item in enumerate(items) if n < limit or parse_time(item.get("at")) == last]
+
+
+def nearest_text(items: list[dict], days: int, now: datetime) -> str:
+    """見た期間には締切が無いときの返事。その先のいちばん近いもの（同じ日時のものも）を添える。"""
+    span = "2週間" if days == 14 else f"{days}日"
+    if not items:
+        return NO_DUE
+    return "\n".join([f"これから{span}の締切はないよ。いちばん近いのはこれ。",
+                      *(_line(item, now=now) for item in first_items(items, 1))])
 
 
 def soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS) -> list[dict]:
@@ -168,8 +190,7 @@ class CourseChannel:
             await self.mark_answered(req, failed=True)
             return
         if skill == LIST_DUE:
-            items, more = due_items(reply.data)
-            await self.post(req, due_text(items, more, datetime.now()))
+            await self.post(req, await self.due_answer(req, reply.data, params))
         else:
             try:
                 await self.post(req, validate_structured_response(reply.text))
@@ -178,6 +199,20 @@ class CourseChannel:
                 await self.mark_answered(req, failed=True)
                 return
         await self.mark_answered(req, failed=False)
+
+    async def due_answer(self, req: Request, data: dict, params: dict) -> str:
+        """締切の一覧への返事。1件を聞かれたら1件で、見た期間に無ければ、その先のいちばん近いものを添える。"""
+        now = datetime.now()
+        items, more = due_items(data)
+        limit = params.get("limit") or (1 if ONE.search(req.text or "") else None)
+        if items and limit:
+            shown = first_items(items, limit)
+            return due_text(shown, 0 if limit == 1 else more + len(items) - len(shown), now)
+        days = int(data.get("days") or 0)
+        if items or not days or days >= NEAREST_DAYS:
+            return due_text(items, more, now)
+        later = await self.ask_course(LIST_DUE, days=NEAREST_DAYS)
+        return nearest_text(due_items(later.data)[0] if later.ok else [], days, now)
 
     async def course_skill(self, req: Request) -> tuple[str, dict]:
         """どの仕事かを決める。軽いモデルに選ばせ、選べなければ言葉で当てて、最後は `ask`。"""

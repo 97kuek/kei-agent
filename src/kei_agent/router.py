@@ -28,6 +28,8 @@ SELF = "self"
 STATUS_TEXT = "どこに聞くか選んでいる…"
 # 判定に渡す一言の長さ（長文は先頭だけで足りる）
 TEXT_LIMIT = 600
+# 件数の指定（「一番近い」なら 1）として受け取る上限
+MAX_LIMIT = 50
 
 PROMPT = """次の「言われたこと」が、どの仕事に当たるかを1つ選んでください。
 
@@ -38,7 +40,8 @@ PROMPT = """次の「言われたこと」が、どの仕事に当たるかを1�
 {text}
 
 JSON 1行だけで答えてください。ほかの文は書かないでください。
-形: {{"skill": "<仕事の id>", "days": <日数。要らなければ入れない>}}
+形: {{"skill": "<仕事の id>", "days": <日数。要らなければ入れない>, "limit": <件数。要らなければ入れない>}}
+limit は、件数を言われたときだけ入れてください（「一番近い」「次の」なら 1、「3つ」なら 3）。
 どれにも当てはまらない、または迷うときは {{"skill": "{ask}"}} にしてください。"""
 
 
@@ -78,6 +81,8 @@ def parse(text: str, allowed: set[str]) -> Choice:
     params = {}
     if isinstance(data.get("days"), int) and 1 <= data["days"] <= 400:
         params["days"] = data["days"]
+    if isinstance(data.get("limit"), int) and 1 <= data["limit"] <= MAX_LIMIT:
+        params["limit"] = data["limit"]
     return Choice(agent=agent, skill=skill or ASK, params=params)
 
 

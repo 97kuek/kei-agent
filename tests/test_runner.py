@@ -777,3 +777,17 @@ def test_failure_reason_says_what_happened_even_without_an_error_text():
         "利用上限：usage limit")
     assert runner.RunResult(is_error=True, errors=["x" * 300]).failure_reason(10) == "x" * 10
     assert runner.RunResult(is_error=True).failure_reason() == "理由不明"
+
+
+def test_an_expired_login_is_told_apart_from_other_failures():
+    """ログインが切れた回は、答えの代わりに返った理由の文を残し、入り直し方を先頭に置く（2026-09-27）。"""
+    said = "Failed to authenticate: OAuth session expired and could not be refreshed"
+    result = runner.finalize_run_result(runner.RunResult(text=said, is_error=True), returncode=1)
+    assert (result.failure_kind, result.text, result.errors) == ("login", "", [said])
+    assert result.failure_reason().startswith("ログインが切れている：")
+    help_ = runner.login_help("claude", {"CLAUDE_CONFIG_DIR": "/Users/me/.claude-personal"})
+    assert ".claude-personal" in help_ and "claude auth login" in help_ and "/Users" not in help_ and ":" not in help_
+    assert "codex login" in runner.login_help("codex", {})
+    # ほかの失敗は、今までどおり実行の失敗（途中の文は理由にしない）
+    other = runner.finalize_run_result(runner.RunResult(text="途中の答え"), returncode=1)
+    assert (other.failure_kind, other.errors) == ("runtime", [])

@@ -49,6 +49,7 @@ from kei_agent.config import Config
 from kei_agent.course import CourseChannel
 from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
+from kei_agent.home import agent_labels
 from kei_agent.jobs import JobManager, missing_outputs
 from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.notion import NotionError
@@ -923,6 +924,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
                 if provider:
                     self.store.set_limit_until(provider, max(
                         self.store.limit_until(provider), self.limit_until(result.limit_reset_at)))
+        await self.tell_failure(actor, result)
         return result
 
     async def publish(self, channel: str, channel_name: str, ws: Workspace, header: str,
@@ -954,7 +956,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             for chunk in split_text(shown):
                 await self.post(req, chunk, markdown=True)
         if result.is_error:
-            failure_kind = output_kind if output_kind in {"daily", "review"} else "connection"
+            failure_kind = ("login" if result.failure_kind == "login"
+                            else output_kind if output_kind in {"daily", "review"} else "connection")
             await self.post(req, safe_failure(failure_kind))
         if footer:
             await self.post(req, footer)
@@ -965,6 +968,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         if result.is_error:
             if NO_PROVIDER in result.errors:
                 return safe_failure("provider"), False
+            if result.failure_kind == "login":
+                return safe_failure("login"), False
             return safe_failure("timeout" if result.timed_out else "connection"), False
         try:
             return finalize_conversation(result.text), False
@@ -1272,6 +1277,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             result = await attempt(
                 history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped), None)
+        await self.tell_failure(actor, result)
         if not result.is_error:
             if result.session_id:
                 self.store.set_session(req.channel, req.thread_ts, actor, provider,
@@ -1310,6 +1316,22 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             result = await self.ask_agent(actor, prompt, read_only=True, use_case=use_case)
         answer, _ = self.render_reply(result)
         return answer
+
+    async def tell_failure(self, actor: str, result: runner.RunResult) -> None:
+        """担当の AI が答えられなかった理由をログに残す。ログインが切れていたら、改善のチャンネルに1回だけ知らせる。
+
+        ログインが切れると、入り直すまで何度頼んでも動かない。スレッドには固定の文しか出さないので、
+        入り直し方はこちらで知らせる（知らせた目印は毎晩の保守で60日たつと消え、切れたままなら、また知らせる）。
+        """
+        if not result.is_error or NO_PROVIDER in result.errors:
+            return
+        log.warning("%s の担当が答えられませんでした: %s", actor, result.failure_reason())
+        key = f"login:{actor}:{result.provider or ''}"
+        if result.failure_kind != "login" or self.store.noticed(key):
+            return
+        self.store.record_notice(key)
+        how = result.errors[0] if result.errors else "ログインが切れている"
+        await self.notify_trouble(f"{agent_labels(self.config).get(actor, actor)}の担当の AI が動きません。{how}")
 
     def default_question(self, actor: str) -> str:
         """メンションだけで本文が無いときに、担当に聞くこと。"""

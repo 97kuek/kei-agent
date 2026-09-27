@@ -337,7 +337,11 @@ def describe_tool(name: str, tool_input: dict) -> str:
 
 # 失敗の種類の言い方（RunResult.failure_reason）
 FAILURE_LABELS = {"quota": "利用上限", "timeout": "時間切れ", "session_missing": "会話が見つからない",
-                  "capability": "選んだ provider では使えない", "runtime": "実行の失敗"}
+                  "capability": "選んだ provider では使えない", "login": "ログインが切れている", "runtime": "実行の失敗"}
+# provider の CLI が、ログインが切れた・認証できないときに返す文。入り直すまで、何度やり直しても動かない
+# （2026-09-27、大学の担当の個人アカウントが切れていたのに「接続に失敗した」とだけ出て、1週間気づけなかった）
+LOGIN_EXPIRED = re.compile(r"Failed to authenticate|OAuth session|Please run /login|not logged in|log ?in again|"
+                           r"Invalid API key|401 Unauthorized|could not be refreshed|codex login", re.IGNORECASE)
 
 
 @dataclass
@@ -356,7 +360,7 @@ class RunResult:
     requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None
-    failure_kind: Literal["quota", "timeout", "session_missing", "capability", "runtime"] | None = None
+    failure_kind: Literal["quota", "timeout", "session_missing", "capability", "login", "runtime"] | None = None
     _final_candidate: str = field(default="", repr=False)
     # 成功の最後のイベント（result / turn.completed）まで届いたか
     _completed: bool = field(default=False, repr=False)
@@ -463,10 +467,28 @@ def finalize_run_result(result: RunResult, returncode: int | None) -> RunResult:
         result.failure_kind = "session_missing"
     elif returncode != 0 or result.is_error or not result.text.strip():
         result.is_error = True
-        result.failure_kind = "runtime"
+        said = " ".join([result.text, *result.errors])
+        result.failure_kind = "login" if LOGIN_EXPIRED.search(said) else "runtime"
+        if result.failure_kind == "login" and result.text.strip() and not result.errors:
+            # CLI が答えの代わりに返した理由の文。答えとしては出さないが、理由として残す
+            result.errors.append(result.text.strip()[:300])
     if result.is_error:
         result.text = ""
     return result
+
+
+def login_help(provider: str, env: Mapping[str, str]) -> str:
+    """ログインが切れたときの、入り直し方（どのアカウントか）。場所はフォルダの名前だけにする。
+
+    改善のチャンネルの1行に使うので、コロンで区切らない（trouble_notice はコロンより前だけを出す）。
+    """
+    if provider == "codex":
+        folder = env.get("CODEX_HOME", "")
+        where = f"（CODEX_HOME のフォルダ {Path(folder).name}）" if folder else ""
+        return f"codex のログインが切れている{where}。ターミナルで codex login を実行して入り直す"
+    folder = env.get("CLAUDE_CONFIG_DIR", "")
+    where = f"（CLAUDE_CONFIG_DIR のフォルダ {Path(folder).name}）" if folder else ""
+    return f"claude のログインが切れている{where}。ターミナルで CLAUDE_CONFIG_DIR にそのフォルダを指定して claude auth login を実行して入り直す"
 
 
 def parse_limit(text: str, now: float | None = None) -> float | None:
@@ -530,10 +552,11 @@ async def run_model(
         except (CapabilityUnavailable, codex_apps.AppsUnavailable) as exc:
             return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
         install_agent_skills(contract, ws.cwd)
+    env = build_env(config, dict(os.environ), request.channel, request.thread_ts, policy)
     proc = await asyncio.create_subprocess_exec(
         *build_command(config, request, contract, apps),
         cwd=ws.cwd,
-        env=build_env(config, dict(os.environ), request.channel, request.thread_ts, policy),
+        env=env,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -590,6 +613,8 @@ async def run_model(
         result.is_error = True
         result.errors.append(stderr[-2000:])
     finalize_run_result(result, returncode)
+    if result.failure_kind == "login":
+        result.errors.insert(0, login_help(recipe.provider, env))
     return result
 
 
