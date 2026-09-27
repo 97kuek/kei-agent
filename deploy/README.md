@@ -5,7 +5,7 @@
 ## 1. Slack
 
 1. 個人用のワークスペースを作り、チャンネルを作る（`#00_kei-agent`、`#01_overview`、`#10_<テーマ>`、`#20_course`、`#30_work`、`#40_knowledge`）。番号を外した名前を `config.toml` の `[channels]` と合わせる
-2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** で `slack/manifest.yaml` を貼る
+2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** で、`uv run kei-agent manifest` の出力を貼る（オンにしたモジュールのスラッシュコマンドが入る。組み込みを全部使うなら `slack/manifest.yaml` と同じ）
 3. **Install App** で入れ、**Bot User OAuth Token**（`xoxb-`）を控える
 4. **Basic Information** → **App-Level Tokens** で scope `connections:write` のトークン（`xapp-`）を作る
 5. **Display Information** → **App icon** に `slack/icon.png` を上げる（アイコンは Git に入れていない）
@@ -13,7 +13,7 @@
 7. 自分のメンバー ID（`U…`）を控える
 8. Kei Agent を各チャンネルに招待する
 
-マニフェストを変えたときは **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。`/toggl` コマンド（`commands` の scope と slash command）を足したマニフェストに更新したら、一度入れ直すまで `/toggl` は使えない。
+モジュールを足したり外したりしたら、`uv run kei-agent manifest` の出力を **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。スラッシュコマンド（`commands` の scope）を足したマニフェストにしたら、一度入れ直すまでそのコマンドは使えない。
 
 ## 2. 設定と秘密情報
 
