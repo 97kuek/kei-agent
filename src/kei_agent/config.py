@@ -516,6 +516,15 @@ def config_path(env: dict[str, str] | None = None) -> Path:
     return _expand(env["KEI_AGENT_CONFIG"]) if env.get("KEI_AGENT_CONFIG") else user_home(env) / CONFIG_FILE
 
 
+def config_home(env: dict[str, str] | None = None) -> Path:
+    """設定を読むときの利用者のフォルダ（load_config と同じ決め方。KEI_AGENT_HOME か、KEI_AGENT_CONFIG のファイルの
+    あるフォルダか、~/.config/kei-agent）。"""
+    env = dict(os.environ) if env is None else env
+    if env.get("KEI_AGENT_HOME") or not env.get("KEI_AGENT_CONFIG"):
+        return user_home(env)
+    return config_path(env).parent
+
+
 def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
     """設定を読む。場所は path、環境変数 KEI_AGENT_CONFIG、利用者のフォルダの config.toml の順に探す。
 

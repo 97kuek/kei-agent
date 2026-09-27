@@ -16,9 +16,10 @@ import re
 import subprocess
 import tomllib
 from collections.abc import Callable
+from pathlib import Path
 
 from kei_agent import modules
-from kei_agent.config import REPO_ROOT, Config, ConfigError, config_path, load_config, user_home
+from kei_agent.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 
 # 書き足すときに添える行
 COMMENT = "# 使うモジュール（kei-agent module add / remove が書き換える。書かなければ組み込みを全部使う）"
@@ -74,9 +75,20 @@ def with_modules(text: str, names: list[str]) -> str:
     return "".join([*head, COMMENT + "\n", line + "\n", *(["\n"] if tail else []), *tail])
 
 
+def check_text(path: Path, text: str, env: dict[str, str], home: Path) -> Config:
+    """その中身の設定を読めるか確かめる（同じフォルダの一時ファイルで。自分のモジュールと themes.toml も読む）。
+    読めなければ ConfigError。"""
+    trial = path.with_name(f".{path.name}.trial")
+    trial.write_text(text, encoding="utf-8")
+    try:
+        return load_config(path=trial, env={**env, "KEI_AGENT_HOME": str(home)})
+    finally:
+        trial.unlink(missing_ok=True)
+
+
 def install(name: str, remove: bool = False) -> bool:
-    """deploy/install.sh で、そのモジュールの常駐を launchd に登録する（remove なら外す）。"""
-    args = [str(REPO_ROOT / "deploy" / "install.sh"), name, *(["remove"] if remove else [])]
+    """deploy/install.sh で、そのモジュールの常駐を launchd に登録する（remove なら外す）。名前が空なら本体。"""
+    args = [str(REPO_ROOT / "deploy" / "install.sh"), *([name] if name else []), *(["remove"] if remove else [])]
     try:
         proc = subprocess.run(args, capture_output=True, text=True, timeout=300, check=False)
     except (OSError, subprocess.SubprocessError) as e:
@@ -87,7 +99,7 @@ def install(name: str, remove: bool = False) -> bool:
     return proc.returncode == 0
 
 
-def _describe(spec: modules.ModuleSpec, config: Config | None) -> str:
+def describe(spec: modules.ModuleSpec, config: Config | None) -> str:
     parts = []
     if spec.port is not None:
         parts.append(f"常駐 {spec.port}")
@@ -119,7 +131,7 @@ def list_modules(env: dict[str, str] | None = None) -> int:
     for name, spec in sorted(known.items()):
         mark = "✅" if name in config.modules else "・"
         mine = "" if spec.builtin else "（あなたのモジュール）"
-        print(f"  {mark} {name:<10} {spec.label}{mine}  {_describe(spec, config)}")
+        print(f"  {mark} {name:<10} {spec.label}{mine}  {describe(spec, config)}")
     return 0
 
 
@@ -152,7 +164,7 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
     if not path.is_file():
         print(f"❌ 設定ファイルが無い: {path}（先に kei-agent setup か、config.example.toml を写す）")
         return 1
-    home = user_home(env) if env.get("KEI_AGENT_HOME") or not env.get("KEI_AGENT_CONFIG") else path.parent
+    home = config_home(env)
     try:
         modules.register_user_modules(home / "modules")
     except modules.ModuleError as e:
@@ -179,16 +191,11 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
     if not only_modules_changed(text, new_text, new_names):
         print(f"❌ modules の行をうまく書き換えられないので、書き換えなかった（{path} の modules を手で直してください）")
         return 1
-    # 書く前に、新しい設定を読めるか確かめる（同じフォルダの一時ファイルで。自分のモジュールと themes.toml も読む）
-    trial = path.with_name(f".{path.name}.trial")
-    trial.write_text(new_text, encoding="utf-8")
     try:
-        config = load_config(path=trial, env={**env, "KEI_AGENT_HOME": str(home)})
+        config = check_text(path, new_text, env, home)
     except ConfigError as e:
         print(f"❌ この変更では設定を読めなくなるので、書き換えなかった: {e}")
         return 1
-    finally:
-        trial.unlink(missing_ok=True)
     verb = "足す" if add else "外す"
     print(f"モジュール「{name}」（{spec.label}）を{verb}: modules = {new_names}")
     if dry_run:
