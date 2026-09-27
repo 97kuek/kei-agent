@@ -1,4 +1,4 @@
-"""モジュールがコアとやり取りする窓口（枠の版 1。docs/extensibility.md の「コアとモジュール」）。
+"""モジュールがコアとやり取りする窓口（枠の版 1。書き方は docs/modules.md の「module.py の書き方」）。
 
 モジュールの Python（modules/<名前>/module.py）が読み込んでよい Kei Agent の部品は、この kei_agent.api だけ
 （同じフォルダのファイルは `from . import texts` のように読める）。ここに無いものに頼ると、コアを直したときに
@@ -27,7 +27,7 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
 - `async prepare(kind, day) -> list[str]` … Daily（kind = "daily"）と振り返り（"review"）の前の取り込み。
   うまくいかなかったことの短い名前（例: "課題の取り込み"）を返すと、朝の一覧の「うまくいかなかったこと」に載る
 - `async on_event(kind, data)` … 本体やほかのモジュールが配った出来事（core.emit）。受け取ったら自分で扱う
-  （声なら喋る）。投げっぱなしなので、返事は要らない。出来事の種類は docs/extensibility.md の「出来事」
+  （声なら喋る）。投げっぱなしなので、返事は要らない。出来事の種類は docs/modules.md の「出来事」
 - `home() -> list[dict]` … App Home に出す、このモジュールの項目（Slack の blocks。見出しは本体が付ける）。
   押せるものの action_id は core.home_action_id(名前) で作る（チェックなら core.home_checkboxes）
 - `async on_home_action(name, action)` … App Home の、このモジュールの項目が押されたとき（name は

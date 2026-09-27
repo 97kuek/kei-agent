@@ -1,4 +1,4 @@
-"""モジュールの担当プロセスがコアとやり取りする窓口（枠の版 1。docs/extensibility.md の「コアとモジュール」）。
+"""モジュールの担当プロセスがコアとやり取りする窓口（枠の版 1。書き方は docs/modules.md の「agent.py の書き方」）。
 
 担当プロセスのコード（modules/<名前>/agent.py と、そこから読む同じフォルダのファイル）が読み込んでよい
 Kei Agent の部品は、この kei_agent_a2a.api だけ。本体側（module.py）の窓口は kei_agent.api。

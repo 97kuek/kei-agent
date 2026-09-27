@@ -1,4 +1,4 @@
-"""モジュール（機能のまとまり）の定義 `module.toml` を読む（docs/extensibility.md）。
+"""モジュール（機能のまとまり）の定義 `module.toml` を読む（書き方は docs/modules.md、設計は docs/extensibility.md）。
 
 組み込みのモジュールはリポジトリ直下の `modules/<名前>/`、利用者のモジュールは `~/.config/kei-agent/modules/<名前>/`。
 どちらも同じ形で読む。変わらない事実（module.toml）は設定を読むときに確かめ、動きは使うときに読み込む

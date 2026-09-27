@@ -30,19 +30,16 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の秘�
 - モデル名は `src/kei_agent/model_policy.py` にだけ書く。skill や prompt に埋め込まない
 - Slack の権限、sandbox、柵（`guard.py`、`config.example.toml`、`deploy/`）の大きな変更は、先に Issue で相談する
 
-## エージェントを増やすとき
+## モジュールを足すとき
 
-名前（`<agent>`）をすべての場所でそろえる。この手順は、モジュールの枠ができたら（`docs/extensibility.md` の段階2）、
-モジュールのフォルダ1つと設定1行に変わる。
+機能はどれもモジュール（`modules/<名前>/`）にする。`src/` と `pyproject.toml` には手を入れない。手順と書き方は [`docs/modules.md`](docs/modules.md)。
 
-1. `src/kei_agent_<agent>/` に `skills.py`（スキルの ID だけ。kebab-case の動詞-目的語、自由な質問は `ask`）、`card.py`（名刺）、`executor.py`、`app.py`（`kei_agent_a2a.server.serve` を呼ぶだけ）
-2. `pyproject.toml` に `kei-agent-<agent>` のコマンドと `[dependency-groups] <agent> = [{ include-group = "agents" }]`
-3. `config.example.toml`（と自分の `~/.config/kei-agent/config.toml`）の `[a2a.agents]` に `127.0.0.1` の次のポート、`[agents.<agent>]`、`[channels]`
-4. `deploy/run-agent.sh` と `deploy/install.sh` の `case`、`deploy/update.sh` の名前の一覧に足す（plist は共通の雛形 `deploy/com.kei-agent.plist.template` から作る）
-5. そのエージェントだけの秘密情報は、秘密情報の置き場所（既定は `~/.config/kei-agent/secrets/`）の `kei-agent-<agent>.zsh`（600。無くてもよい）に分ける
-6. 本体の取り次ぎ（`src/kei_agent/<agent>.py`）と、`model_policy.py` の用途と recipe
-7. skill を持たせるなら `plugin/<agent>/`（`kei-agent-<agent>` という名前の plugin、`skills/<skill>/SKILL.md`、`hooks/`）を作り、`AGENT_PLUGINS` に足す。スクリプトは標準ライブラリだけで書く
-8. テストは本物の A2A サーバーを立てて往復を見る（`tests/test_a2a.py` の型）。外部サービスとモデルは偽物にする
+1. `uv run kei-agent module new <名前> --builtin` でひな形を作る（AI の実行役は `--ai`、担当プロセスは `--process`）
+2. `module.toml`・`module.py`（と指示書・`agent.py`）を書く。読み込んでよい Kei Agent の部品は窓口（`module.py` は `kei_agent.api`、そのほかは `kei_agent_a2a.api`）だけ
+3. テストはモジュールの `tests/` に書き、`uv run --group agents kei-agent module test <名前>` で通す（`kei_agent.testing`。本物の Slack・AI・秘密情報には触れない）
+4. 要る秘密情報は `module.toml` の `[secrets]` に名前と説明だけを書く。値はどこにも書かない
+5. `config.example.toml` の `modules` に足し、設定（`[settings]`）を持つなら `[<名前>]` の例も書く。スラッシュコマンドを足したら、`slack/manifest.yaml` を `uv run kei-agent manifest` の出力で書き直す
+6. 使い方が変わるなら `docs/using.md`、仕組みが変わるなら `docs/architecture.md` も同じ変更で直す
 
 ## 書き方
 

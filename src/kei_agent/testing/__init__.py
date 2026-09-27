@@ -1,4 +1,4 @@
-"""モジュールを作る人のためのテストの道具（docs/extensibility.md の「作る人への支え」）。
+"""モジュールを作る人のためのテストの道具（docs/modules.md の「テストの書き方」）。
 
 - ModuleKit … モジュール1つを、本番と同じ読み方の設定と、偽物の Slack・AI・Notion・担当と一緒に本体の中で動かす。
   依頼者として頼む（message）、スラッシュコマンド（slash）、ボタン（action）、定期処理（schedule）、担当の仕事（skill）

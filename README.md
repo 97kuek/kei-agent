@@ -43,6 +43,7 @@ Kei Agent 本体（オーケストレーター, src/kei_agent/）   :8786  声�
 | Slack での使い方（チャンネル、合図、時間記録、App Home、声） | [`docs/using.md`](docs/using.md) |
 | いまの仕組み（プロセス、provider とモデル、出力、柵、Notion、定期実行、声） | [`docs/architecture.md`](docs/architecture.md) |
 | 入れ方と運用（Slack App、秘密情報、launchd、Notion の準備、困ったとき） | [`deploy/README.md`](deploy/README.md) |
+| 自分のモジュールを作る（作る → 試す → オンにする、module.toml・module.py・agent.py・テストの書き方） | [`docs/modules.md`](docs/modules.md) |
 | 自分用に作り替える設計（コアとモジュール、`~/.config/kei-agent/`、セットアップ、移行の段階） | [`docs/extensibility.md`](docs/extensibility.md) |
 | 開発の手順、テスト、書き方 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 

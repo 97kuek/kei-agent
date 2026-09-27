@@ -1,7 +1,8 @@
 import re
 from pathlib import Path
 
-DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/architecture.md")
+DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/architecture.md", "docs/modules.md",
+        "docs/extensibility.md")
 
 
 def test_architecture_documents_actor_scoped_read_only_execution_without_legacy_voice_codex():
