@@ -2326,7 +2326,7 @@ def test_router_can_choose_between_agents():
     assert router.parse('{"skill": "hr:fire-everyone"}', allowed).agent == ""
 
 
-# 声で知らせる（voice.py）
+# 声で知らせる（声のモジュール modules/voice/。出来事を core.emit で配り、声のモジュールが担当に渡す）
 
 class FakeVoiceAgent:
     base_url = "http://127.0.0.1:8790"
@@ -2345,13 +2345,11 @@ class FakeVoiceAgent:
 
 async def test_nothing_is_spoken_until_it_is_turned_on(env, store):
     """既定は切。机にロボットが無い状態で、急に喋り出さない。"""
-    from kei_agent import settings
-
     assistant, slack, claude, _ = env
     agent = FakeVoiceAgent()
     assistant.agents["voice"] = agent
 
-    assert settings.voice_enabled(store) is False
+    assert assistant.modules["voice"].is_on("notify") is False
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> やって"})
     await settle(assistant)
 
@@ -2360,12 +2358,10 @@ async def test_nothing_is_spoken_until_it_is_turned_on(env, store):
 
 async def test_events_are_sent_as_what_happened_not_as_words(env, store):
     """渡すのは出来事だけ。言い方も顔も、声のレイヤが決める。"""
-    from kei_agent import settings
-
     assistant, slack, claude, _ = env
     agent = FakeVoiceAgent()
     assistant.agents["voice"] = agent
-    settings.set_voice(store, True)
+    assistant.cores["voice"].records.put("switch", "notify", {"on": True})
 
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> やって"})
     await settle(assistant)
@@ -2380,10 +2376,10 @@ async def test_events_are_sent_as_what_happened_not_as_words(env, store):
 
 async def test_a_dead_voice_layer_does_not_break_slack(env, store):
     """声が出なくても、Slack の仕事は終わっている（知らせるだけのことなので、依頼者に見せない）。"""
-    from kei_agent import a2a, settings
+    from kei_agent import a2a
 
     assistant, slack, claude, _ = env
-    settings.set_voice(store, True)
+    assistant.cores["voice"].records.put("switch", "notify", {"on": True})
 
     class Dead:
         base_url = "http://127.0.0.1:8790"

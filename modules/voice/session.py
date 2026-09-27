@@ -19,10 +19,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from kei_agent.config import Config, load_config
-from kei_agent_voice import live
-from kei_agent_voice.face import Face
-from kei_agent_voice.tools import Tools
+from kei_agent_a2a.api import Config, load_config
+
+from . import live
+from .face import Face
+from .tools import Tools
 
 log = logging.getLogger(__name__)
 

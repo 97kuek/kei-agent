@@ -298,6 +298,7 @@ class Store:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
             self._move_reading_posts()
             self._move_course_notices()
+            self._move_voice_switches()
 
     def _move_reading_posts(self) -> None:
         """朝の読みものの控え（2026-09 の reading_posts）を、知識のモジュールの記録に写して、表を消す。"""
@@ -324,6 +325,20 @@ class Store:
         """
         self.conn.execute("UPDATE OR IGNORE notices SET key = 'module.course.' || key "
                           "WHERE key LIKE 'due:%' OR key LIKE 'early:%'")
+
+    def _move_voice_switches(self) -> None:
+        """App Home の声のチェック（2026-09 に本体の settings が持っていた voice.enabled / voice.listening）を、
+        声のモジュールの記録にする（声がモジュール modules/voice/ になり、チェックもモジュールが出すようになった）。
+        """
+        for setting, key in (("voice.enabled", "notify"), ("voice.listening", "listen")):
+            row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (setting,)).fetchone()
+            if row is None:
+                continue
+            self.conn.execute(
+                "INSERT OR IGNORE INTO module_records (module, kind, key, value, updated_at, expires_at) "
+                "VALUES ('voice', 'switch', ?, ?, ?, NULL)",
+                (key, json.dumps({"on": row["value"] == "1"}), time.time()))
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (setting,))
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。

@@ -1,5 +1,6 @@
 """モジュールの差し込み口と窓口（kei_agent.api）。利用者が作ったモジュールが、コアを直さずに動くこと。"""
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime
 
@@ -78,8 +79,10 @@ def env(config, store, tmp_path, monkeypatch):
 
 
 async def settle(assistant):
+    """裏で動かした仕事が全部終わるまで待つ（終わった仕事を1つずつ待つと、集合から外れる前に空回りすることがある）。"""
     while assistant.tasks:
-        await next(iter(assistant.tasks))
+        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
+        await asyncio.sleep(0)
 
 
 async def test_a_user_module_answers_in_its_channel_and_is_introduced(env, config):

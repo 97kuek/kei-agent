@@ -42,9 +42,9 @@ from contextlib import asynccontextmanager
 
 import aiohttp
 
-from kei_agent_voice import audio
-from kei_agent_voice.audio import Unavailable
-from kei_agent_voice.tools import DEFINITIONS, Tools
+from . import audio
+from .audio import Unavailable
+from .tools import DEFINITIONS, Tools
 
 log = logging.getLogger(__name__)
 

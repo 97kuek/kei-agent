@@ -34,7 +34,6 @@ from kei_agent import (
     settings,
     themes,
     version,
-    voice,
 )
 from kei_agent.auto_messages import (
     history_prompt,
@@ -166,7 +165,7 @@ def time_label(entry: TimeEntry) -> str:
     return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
+class Assistant(SettingsActions, SelfFix, Handoff):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -825,16 +824,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
         return False
 
     def emit(self, kind: str, **fields) -> None:
-        """出来事を配る（受け取るのは on_event を持つモジュール）。投げっぱなしで、届かなくても呼んだ側は気にしない。
-
-        空の中身（None と空文字）は外して渡す。声のレイヤがモジュールになるまでは、声にも同じものを送る。
+        """出来事を配る（受け取るのは on_event を持つモジュール。声なら喋る）。投げっぱなしで、届かなくても
+        呼んだ側は気にしない。空の中身（None と空文字）は外して渡す。
         """
         data = {key: value for key, value in fields.items() if value not in (None, "")}
         for name, module in self.modules.items():
             on_event = getattr(module, "on_event", None)
             if callable(on_event):
                 self.spawn(self._deliver_event(name, on_event, kind, dict(data)))
-        self.notify_voice(kind, **fields)
 
     @staticmethod
     async def _deliver_event(name: str, on_event, kind: str, data: dict) -> None:

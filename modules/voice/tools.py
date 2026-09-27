@@ -25,10 +25,10 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from kei_agent import ask as asks
-from kei_agent.config import Config
-from kei_agent_voice.executor import current
-from kei_agent_voice.handoff import Handoff
+from kei_agent_a2a.api import Config, put_request
+
+from .handoff import Handoff
+from .held import current
 
 log = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class Draft:
 
 
 class Tools:
-    """道具の中身。`held` は本体が押してきたもの（`executor.held`）。"""
+    """道具の中身。`held` は本体が押してきたもの（agent.py の `Executor.held`）。"""
 
     def __init__(self, held: dict, config: Config, handoff: Handoff | None = None):
         self.held = held
@@ -204,7 +204,7 @@ class Tools:
         draft, self.draft = self.draft, None
         if draft is None:
             return "渡すものが無い。先に propose_request を呼んで、読み上げて確認して。"
-        asks.write_ask(self.config, draft.theme, draft.text)
+        put_request(self.config, draft.theme, draft.text)
         log.info("声から依頼を渡しました: %s / %s", draft.theme, draft.text[:60])
         return f"{draft.theme} に渡した。終わったら知らせが来る。"
 

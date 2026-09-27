@@ -128,16 +128,27 @@ async def test_change_time_and_turn_schedules_on_and_off_from_home(env, config, 
 
 
 async def test_voice_checkboxes_open_and_close_the_microphone(env, store, monkeypatch):
+    """「知らせる」「聞く（マイク）」は声のモジュールの項目。聞くを変えたときだけ、担当にマイクの開け閉めを伝える。"""
     assistant, slack = env
-    heard = []
-    monkeypatch.setattr(assistant, "notify_listening", heard.append)
+    told = []
 
-    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=_checked("voice", "listen")))
-    assert settings.voice_enabled(store) and settings.listening_enabled(store) and heard == [True]
-    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=_checked("voice")))
-    assert settings.voice_enabled(store) and not settings.listening_enabled(store) and heard == [True, False]
-    await assistant.on_home_action(_action(home.VOICE_ACTION, selected_options=[]))
-    assert not settings.voice_enabled(store) and heard == [True, False]
+    async def tell_agent(skill, payload):
+        told.append((skill, payload))
+        return True
+
+    monkeypatch.setattr(assistant.cores["voice"], "tell_agent", tell_agent)
+    voice, switches = assistant.modules["voice"], "kei_agent_home_module:voice:switches"
+    await assistant.on_home_action(_action(switches, selected_options=_checked("notify", "listen")))
+    assert voice.is_on("notify") and voice.is_on("listen") and told == [("notify", {"kind": "listen", "on": True})]
+    await assistant.on_home_action(_action(switches, selected_options=_checked("notify")))
+    assert voice.is_on("notify") and not voice.is_on("listen") and told[-1][1] == {"kind": "listen", "on": False}
+    await assistant.on_home_action(_action(switches, selected_options=[]))
+    assert not voice.is_on("notify") and len(told) == 2
+    # チェックは「声」の見出しの下に、付いているものなしで出る
+    blocks = _published(slack)["view"]["blocks"]
+    title = next(n for n, block in enumerate(blocks) if (block.get("text") or {}).get("text") == "*声*")
+    boxes, = blocks[title + 1]["elements"]
+    assert boxes["action_id"] == switches and "initial_options" not in boxes
 
 
 async def test_home_provider_action_changes_the_next_agent_run(env, store):

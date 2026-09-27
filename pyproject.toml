@@ -9,6 +9,7 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
+    # 声のモジュール（modules/voice）は Realtime API の WebSocket を aiohttp で直に叩く
     "aiohttp>=3.14.3",
     # 研究ホームだけを操作できる Notion の MCP サーバー（src/kei_agent_notion_gateway）
     "mcp>=2,<3",
@@ -23,15 +24,14 @@ kei-agent-hub-setup = "kei_agent.notion_hub:main"
 kei-agent-notion-gateway = "kei_agent_notion_gateway.app:main"
 kei-agent-time-cards = "kei_agent.time_cards_setup:main"
 kei-agent-ask = "kei_agent.ask:main"
-kei-agent-voice = "kei_agent_voice.app:main"
 kei-agent-research = "kei_agent_research.app:main"
 # モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module knowledge
 kei-agent-module = "kei_agent_a2a.launch:main"
 
 [tool.uv.build-backend]
-# 机の上の音声対話（src/kei_agent_voice）と、A2A のエージェント（src/kei_agent_a2a、src/kei_agent_research）は、
-# Kei Agent 本体とは別のパッケージにしてある（依存をそれぞれに閉じる）。モジュールは modules/ に置き、ここには書かない
-module-name = ["kei_agent", "kei_agent_voice", "kei_agent_a2a", "kei_agent_research", "kei_agent_notion_gateway"]
+# A2A のエージェント（src/kei_agent_a2a、src/kei_agent_research）は、Kei Agent 本体とは別のパッケージにしてある
+# （依存をそれぞれに閉じる）。モジュールは modules/ に置き、ここには書かない
+module-name = ["kei_agent", "kei_agent_a2a", "kei_agent_research", "kei_agent_notion_gateway"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
@@ -44,8 +44,6 @@ agents = [
     "uvicorn>=0.53.0",
 ]
 research = [{ include-group = "agents" }]
-# 声のレイヤは Realtime API の WebSocket を aiohttp で直に叩く（aiohttp は本体の依存に入っている）
-voice = [{ include-group = "agents" }]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

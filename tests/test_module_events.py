@@ -228,8 +228,9 @@ def test_a_module_process_can_leave_a_request_for_the_orchestrator(config):
     api.put_request(config, "vlm", "図を直して")
     api.put_request(config, "vlm", "締切は金曜に決めた", note=True)
     claimed = ask.claim_asks(config)
-    assert [(item.payload["theme"], item.payload["text"], item.payload["kind"]) for item in claimed] == [
-        ("vlm", "図を直して", "request"), ("vlm", "締切は金曜に決めた", "note")]
+    # 同じミリ秒に置いたものは名前の順が決まらないので、順番は見ない
+    assert {(item.payload["theme"], item.payload["text"], item.payload["kind"]) for item in claimed} == {
+        ("vlm", "図を直して", "request"), ("vlm", "締切は金曜に決めた", "note")}
 
 
 def test_the_process_side_records_are_the_modules_own(config, store):

@@ -252,6 +252,20 @@ class Core:
         await self._assistant.note_limit(reply, self.name, provider)
         return reply
 
+    async def tell_agent(self, skill: str, payload: dict) -> bool:
+        """このモジュールの担当プロセスに、知らせだけを渡す（AI を動かさない、すぐ終わる仕事。声なら喋る）。
+
+        うまくいかなくても困りごととしては知らせず、ログに残すだけ（担当が止まっていても、本体の仕事は終わっている）。
+        住所が無ければ何もしない。届いたら True。
+        """
+        agent = self._assistant.agents.get(self.name)
+        if agent is None:
+            return False
+        reply = await agents.ask(agent, skill, text=json.dumps(payload, ensure_ascii=False))
+        if not reply.ok:
+            log.info("%sの担当に %s を渡せませんでした: %s", self.spec.label, skill, reply.text[:200])
+        return reply.ok
+
     async def skills(self) -> list[dict]:
         """この担当の名刺に載っている仕事（読めなければ空）。"""
         return await self._assistant.skills_of(self.name)

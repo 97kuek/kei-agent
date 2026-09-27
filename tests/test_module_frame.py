@@ -3,6 +3,7 @@
 連携の道具、用途の選び分け、skill とフックの置き場所、研究全体のチャンネルからの振り分け、予定（agenda）、声からの問い合わせ。
 """
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -146,8 +147,10 @@ def env(config, store, tmp_path, monkeypatch):
 
 
 async def settle(assistant):
+    """裏で動かした仕事が全部終わるまで待つ（終わった仕事を1つずつ待つと、集合から外れる前に空回りすることがある）。"""
     while assistant.tasks:
-        await next(iter(assistant.tasks))
+        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
+        await asyncio.sleep(0)
 
 
 # module.toml

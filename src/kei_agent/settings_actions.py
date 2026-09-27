@@ -139,13 +139,6 @@ class SettingsActions:
                 hhmm, enabled = settings.schedule_setting(self.config, self.store, schedule)
                 if (schedule in chosen) != enabled:
                     settings.set_schedule(self.store, schedule, hhmm, schedule in chosen)
-        elif kind == home.VOICE_ACTION:
-            chosen = {option.get("value") for option in action.get("selected_options") or []}
-            settings.set_voice(self.store, "voice" in chosen)
-            listen = "listen" in chosen
-            if listen != settings.listening_enabled(self.store):
-                settings.set_listening(self.store, listen)
-                self.notify_listening(listen)
         elif kind == home.MODULE_ACTION:
             module, _, item = name.partition(":")
             if not await self.module_home_action(module, item, action):

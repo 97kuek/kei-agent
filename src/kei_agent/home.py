@@ -1,7 +1,8 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
 見出しと操作だけの1画面にする（説明文は置かない。2026-09-26）。置くのは、動いているもの、担当ごとの AI、
-定期実行の時刻とオン・オフ、モジュールの項目（class Module の home）、声、テーマごとに許可した接続先だけ。
+定期実行の時刻とオン・オフ、モジュールの項目（class Module の home。声の「知らせる」「聞く」など）、
+テーマごとに許可した接続先だけ。
 基本の接続先など `config.toml` の柵は出さない。
 """
 
@@ -19,14 +20,12 @@ REFRESH_ACTION = "kei_agent_home_refresh"
 PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
 TIME_ACTION = "kei_agent_home_time"              # :<定期実行>
 SCHEDULES_ACTION = "kei_agent_home_schedules"
-VOICE_ACTION = "kei_agent_home_voice"
 MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
 CORE_AGENT_LABELS = {"research": "研究"}
 CROSS_AGENT_LABELS = {"router": "振り分け・Daily", "self_fix": "自己改善"}
-VOICE_OPTIONS = {"voice": "知らせる", "listen": "聞く（マイク）"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される
 TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",
                   "night": "夜間の Task", "handoff": "引き継ぎ", "daily": "Daily", "review": "振り返り"}
@@ -136,15 +135,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     for label, items in module_sections:
         blocks += [{"type": "divider"}, _mrkdwn(f"*{label}*"), *items]
 
-    voice = {name for name, on in (("voice", settings.voice_enabled(store)),
-                                   ("listen", settings.listening_enabled(store))) if on}
-    blocks += [
-        {"type": "divider"},
-        _mrkdwn("*声*"),
-        {"type": "actions", "elements": [checkboxes(VOICE_ACTION, VOICE_OPTIONS, voice)]},
-        {"type": "divider"},
-        _mrkdwn("*接続先*"),
-    ]
+    blocks += [{"type": "divider"}, _mrkdwn("*接続先*")]
     domains = settings.all_theme_domains(store)
     for theme in theme_names:
         allowed = domains.get(theme, [])

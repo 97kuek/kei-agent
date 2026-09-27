@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fakes import pending_asks
 
-from kei_agent_voice import events
+from kei_agent_modules.voice import events
 
 # 出来事 → 言い方と顔（events.py）
 
@@ -60,14 +60,18 @@ def test_an_unknown_event_is_ignored():
 
 
 async def test_voice_restores_listening_setting_on_start(config, store, monkeypatch):
-    from kei_agent import settings
-    from kei_agent_voice import app
-    from kei_agent_voice.executor import VoiceExecutor
+    """マイクを開けるかは、App Home で保存したもの（声のモジュールの記録）で始める。"""
+    from kei_agent_modules.voice import agent
 
-    settings.set_listening(store, True)
+    executor = agent.Executor(config, store)
+    executor.agent = "voice"
+    executor.records.put("switch", "listen", {"on": True})
     seen = []
 
     class FakeSession:
+        def __init__(self, held, config=None):
+            pass
+
         async def run(self, listening=False):
             seen.append(listening)
             await asyncio.Event().wait()
@@ -75,16 +79,20 @@ async def test_voice_restores_listening_setting_on_start(config, store, monkeypa
         def set_listening(self, on):
             pass
 
-    monkeypatch.setattr(app, "VoiceSession", lambda held, config=None, store=None: FakeSession())
-    async with app._ears(VoiceExecutor(), config=config, store=store)(None):
-        await asyncio.sleep(0)
-    assert seen == [True]
+    monkeypatch.setattr(agent, "VoiceSession", FakeSession)
+    task = asyncio.create_task(agent.background(executor))
+    await asyncio.sleep(0)
+    assert seen == [True] and executor.session is not None
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert executor.session is None
 
 
-# A2A の受け口（executor.py）
+# A2A の受け口（agent.py）
 
 def test_the_event_can_come_in_the_body_or_the_metadata():
-    from kei_agent_voice.executor import event_of
+    from kei_agent_modules.voice.agent import event_of
 
     assert event_of('{"kind": "done", "theme": "vlm"}', {}) == {"kind": "done", "theme": "vlm"}
     assert event_of("", {"skill": "notify", "kind": "failed"}) == {"kind": "failed"}
@@ -95,14 +103,14 @@ def test_the_event_can_come_in_the_body_or_the_metadata():
 # 音の出し入れ（audio.py）。GPT-Live は音をそのままやりとりする
 
 def test_the_length_of_a_chunk_is_counted_in_milliseconds():
-    from kei_agent_voice.audio import CHUNK_BYTES, CHUNK_MS, ms_of
+    from kei_agent_modules.voice.audio import CHUNK_BYTES, CHUNK_MS, ms_of
 
     assert ms_of(b"\x00" * CHUNK_BYTES) == CHUNK_MS
     assert ms_of(b"") == 0
 
 
 def test_the_microphone_can_be_pointed_at_another_device():
-    from kei_agent_voice.audio import DEFAULT_MIC, MIC_ENV, Microphone
+    from kei_agent_modules.voice.audio import DEFAULT_MIC, MIC_ENV, Microphone
 
     assert Microphone(env={}).device == DEFAULT_MIC
     assert Microphone(env={MIC_ENV: ":2"}).device == ":2"
@@ -110,7 +118,7 @@ def test_the_microphone_can_be_pointed_at_another_device():
 
 def test_a_missing_ffmpeg_is_reported_not_swallowed(monkeypatch):
     """`ffmpeg` が無い機械でも、理由が分かる形で止まる。"""
-    from kei_agent_voice import audio
+    from kei_agent_modules.voice import audio
 
     def missing(*a, **k):
         raise FileNotFoundError
@@ -123,7 +131,7 @@ def test_a_missing_ffmpeg_is_reported_not_swallowed(monkeypatch):
 def test_stopping_reports_how_much_was_actually_heard(monkeypatch):
     """割り込まれたとき、モデルに「ここまでしか聞かれていない」と伝えるのに使う。"""
 
-    from kei_agent_voice import audio
+    from kei_agent_modules.voice import audio
 
     class FakeProc:
         def __init__(self, *a, **k):
@@ -175,7 +183,7 @@ def _held():
 
 
 def _tools(config, handoff=None):
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.tools import Tools
     return Tools(_held(), config, handoff=handoff or _FakeHandoff())
 
 
@@ -216,7 +224,7 @@ def test_the_kind_can_be_narrowed(config):
 
 
 def test_the_status_comes_from_the_events_that_were_pushed(config):
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.tools import Tools
 
     assert "1件動いている" in Tools({"running": 1}, config).get_status()
     assert Tools({}, config).get_status() == "いまは何も動いていない。"
@@ -342,9 +350,9 @@ async def test_the_research_question_goes_to_the_selected_agent(config):
 
 def test_the_session_is_set_up_the_way_the_api_wants_it():
     """調べて分かった形をそのまま押さえる（間違えると黙って英語で喋り出す）。"""
-    from kei_agent_voice import audio
-    from kei_agent_voice.live import _session
-    from kei_agent_voice.tools import DEFINITIONS
+    from kei_agent_modules.voice import audio
+    from kei_agent_modules.voice.live import _session
+    from kei_agent_modules.voice.tools import DEFINITIONS
 
     sent = _session("cedar", DEFINITIONS)["session"]
 
@@ -363,7 +371,7 @@ def test_the_session_is_set_up_the_way_the_api_wants_it():
 
 
 def test_the_key_is_read_from_the_environment():
-    from kei_agent_voice.live import DEFAULT_MODEL, DEFAULT_VOICE, KEY_ENV, Live
+    from kei_agent_modules.voice.live import DEFAULT_MODEL, DEFAULT_VOICE, KEY_ENV, Live
 
     plain = Live(tools=None, env={})
     assert plain.key == "" and plain.model == DEFAULT_MODEL and plain.voice == DEFAULT_VOICE
@@ -375,7 +383,7 @@ def test_the_key_is_read_from_the_environment():
 
 
 async def test_without_a_key_it_says_so_instead_of_hanging():
-    from kei_agent_voice.live import KEY_ENV, Live, Unavailable
+    from kei_agent_modules.voice.live import KEY_ENV, Live, Unavailable
 
     with pytest.raises(Unavailable) as found:
         await Live(tools=None, env={}).run()
@@ -384,7 +392,7 @@ async def test_without_a_key_it_says_so_instead_of_hanging():
 
 async def test_being_interrupted_tells_the_model_how_much_was_heard():
     """伝えないと、モデルは全部聞かれたつもりで話を続ける。超えるとサーバーが断る。"""
-    from kei_agent_voice.live import TRUNCATE_MARGIN_MS, Live
+    from kei_agent_modules.voice.live import TRUNCATE_MARGIN_MS, Live
 
     class FakeWs:
         def __init__(self):
@@ -415,7 +423,7 @@ async def test_being_interrupted_tells_the_model_how_much_was_heard():
 
 async def test_a_tool_call_is_answered_and_the_model_is_told_to_continue():
     """`response.create` を送らないと、モデルは黙ったまま。"""
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     class FakeTools:
         async def call(self, name, arguments):
@@ -500,7 +508,7 @@ class _NoticeSpeaker:
 
 
 def _notice_connection(monkeypatch, socket, speaker):
-    from kei_agent_voice import live
+    from kei_agent_modules.voice import live
 
     class Http:
         closed = False
@@ -534,7 +542,7 @@ def _notice_connection(monkeypatch, socket, speaker):
 
 @pytest.mark.parametrize("done", ["response.output_audio.done", "response.done"])
 async def test_say_once_sends_one_notice_without_opening_microphone(monkeypatch, done):
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     socket = _NoticeSocket([
         {"type": "response.output_audio.delta", "delta": base64.b64encode(b"\0\0").decode()},
@@ -565,7 +573,7 @@ async def test_say_once_sends_one_notice_without_opening_microphone(monkeypatch,
 
 
 async def test_say_once_waits_for_playback_before_cleanup(monkeypatch):
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     socket = _NoticeSocket([{"type": "response.output_audio.done"}])
     speaker = _NoticeSpeaker()
@@ -585,7 +593,7 @@ async def test_say_once_waits_for_playback_before_cleanup(monkeypatch):
 
 
 async def test_say_once_cancellation_closes_all_resources(monkeypatch):
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     socket, speaker = _NoticeSocket(), _NoticeSpeaker()
     http = _notice_connection(monkeypatch, socket, speaker)
@@ -604,7 +612,7 @@ async def test_say_once_cancellation_closes_all_resources(monkeypatch):
     None,
 ])
 async def test_say_once_failure_closes_all_resources(monkeypatch, event):
-    from kei_agent_voice.live import Live, Unavailable
+    from kei_agent_modules.voice.live import Live, Unavailable
 
     socket, speaker = _NoticeSocket([event]), _NoticeSpeaker()
     http = _notice_connection(monkeypatch, socket, speaker)
@@ -615,7 +623,7 @@ async def test_say_once_failure_closes_all_resources(monkeypatch, event):
 
 
 async def test_say_once_requires_a_key():
-    from kei_agent_voice.live import Live, Unavailable
+    from kei_agent_modules.voice.live import Live, Unavailable
 
     with pytest.raises(Unavailable, match="OPENAI_API_KEY"):
         await Live(None, env={}).say_once("終わったよ")
@@ -673,7 +681,7 @@ class _FakeFace:
 
 
 def _session_for(config, brain=None, face=None):
-    from kei_agent_voice.session import VoiceSession
+    from kei_agent_modules.voice.session import VoiceSession
     return VoiceSession({}, config=config, brain=brain or _FakeBrain(),
                         face=face or _FakeFace())
 
@@ -734,7 +742,7 @@ async def test_notice_worker_is_cancelled_and_awaited_on_shutdown(config):
 
 @pytest.mark.parametrize("unavailable", [True, False])
 async def test_notice_worker_continues_after_failure(config, caplog, unavailable):
-    from kei_agent_voice.live import Unavailable
+    from kei_agent_modules.voice.live import Unavailable
 
     brain = _FakeBrain()
     brain.failure = Unavailable("繋がらない") if unavailable else RuntimeError("壊れた")
@@ -798,8 +806,8 @@ class _SentWs:
 
 async def test_ask_agent_runs_on_the_loop_with_the_lifespan_store(config, store):
     """sqlite はつないだスレッドでしか使えない。別スレッドで asyncio.run すると必ず落ちていた。"""
-    from kei_agent_voice.live import Live
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.live import Live
+    from kei_agent_modules.voice.tools import Tools
 
     class StoreHandoff:
         async def ask(self, actor, question, theme=""):
@@ -820,8 +828,8 @@ async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
     from dataclasses import replace
 
     from kei_agent import agents
-    from kei_agent_voice.handoff import Handoff
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.handoff import Handoff
+    from kei_agent_modules.voice.tools import Tools
 
     config = replace(config, a2a=replace(config.a2a, orchestrator="http://127.0.0.1:8786"))
     asked = []
@@ -840,17 +848,16 @@ async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
 async def test_voice_says_so_when_the_orchestrator_is_not_configured(config):
     from dataclasses import replace
 
-    from kei_agent_voice.handoff import NO_ORCHESTRATOR, Handoff
+    from kei_agent_modules.voice.handoff import Handoff
 
     local = replace(config, a2a=replace(config.a2a, orchestrator=""))
-    assert await Handoff(local).ask("work", "今日の会議は？") == NO_ORCHESTRATOR
+    answer = await Handoff(local).ask("work", "今日の会議は？")
+    assert answer.startswith("調べられなかった") and "[a2a] orchestrator" in answer
 
 
-async def test_voice_session_starts_with_the_saved_listening_setting(config, store, monkeypatch):
-    """マイクを開けるかは、本体が App Home から押して保存した設定で始める（既定は切）。"""
-    from kei_agent import settings
-    from kei_agent_voice import app
-    from kei_agent_voice.executor import VoiceExecutor
+async def test_voice_session_starts_closed_by_default(config, store, monkeypatch):
+    """App Home で「聞く」を入れたことがなければ、マイクは開けない（既定は切）。"""
+    from kei_agent_modules.voice import agent
 
     seen = []
 
@@ -862,16 +869,20 @@ async def test_voice_session_starts_with_the_saved_listening_setting(config, sto
             seen.append(listening)
             await asyncio.Event().wait()
 
-    monkeypatch.setattr(app, "VoiceSession", FakeSession)
-    settings.set_listening(store, True)
-    async with app._ears(VoiceExecutor(), config=config, store=store)(None):
-        await asyncio.sleep(0)
-    assert seen == [True]
+    monkeypatch.setattr(agent, "VoiceSession", FakeSession)
+    executor = agent.Executor(config, store)
+    executor.agent = "voice"
+    task = asyncio.create_task(agent.background(executor))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert seen == [False]
 
 
 async def test_answering_tools_does_not_block_receiving(monkeypatch):
     """ask_agent は数秒かかる。そのあいだも割り込みや音を受けられる。"""
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     release = asyncio.Event()
 
@@ -898,7 +909,7 @@ async def test_answering_tools_does_not_block_receiving(monkeypatch):
 
 
 def _fake_speaker_proc(monkeypatch):
-    from kei_agent_voice import audio
+    from kei_agent_modules.voice import audio
 
     class FakeProc:
         def __init__(self, *a, **k):
@@ -950,7 +961,7 @@ def test_a_new_item_is_measured_from_its_own_start(monkeypatch):
 
 
 async def test_the_receiver_starts_a_new_item_when_the_item_changes():
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     class ItemSpeaker(_NoticeSpeaker):
         def __init__(self):
@@ -974,14 +985,14 @@ async def test_the_receiver_starts_a_new_item_when_the_item_changes():
 
 
 def test_audio_and_live_share_one_unavailable():
-    from kei_agent_voice import audio, live
+    from kei_agent_modules.voice import audio, live
 
     assert live.Unavailable is audio.Unavailable
 
 
 async def test_a_dead_microphone_ends_the_session(monkeypatch):
     """マイクが死んだら、黙って聞いているふりを続けない。"""
-    from kei_agent_voice.live import Live, Unavailable
+    from kei_agent_modules.voice.live import Live, Unavailable
 
     socket, speaker = _NoticeSocket(), _NoticeSpeaker()
     _notice_connection(monkeypatch, socket, speaker)
@@ -1000,7 +1011,7 @@ async def test_a_dead_microphone_ends_the_session(monkeypatch):
 async def test_a_rejected_key_is_not_retried(monkeypatch, status):
     import aiohttp
 
-    from kei_agent_voice.live import Live, Unavailable
+    from kei_agent_modules.voice.live import Live, Unavailable
 
     brain = Live(None, key="test")
     tries = []
@@ -1018,7 +1029,7 @@ async def test_a_rejected_key_is_not_retried(monkeypatch, status):
 async def test_reconnecting_backs_off_on_every_exit(monkeypatch):
     import aiohttp
 
-    from kei_agent_voice import live
+    from kei_agent_modules.voice import live
 
     brain = live.Live(None, key="test")
     outcomes = [aiohttp.ClientError("切れた"), None, TimeoutError(), None, None, None, None, None]
@@ -1043,7 +1054,7 @@ async def test_reconnecting_backs_off_on_every_exit(monkeypatch):
 
 
 async def test_say_once_gives_up_after_a_while(monkeypatch):
-    from kei_agent_voice import live
+    from kei_agent_modules.voice import live
 
     socket, speaker = _NoticeSocket(), _NoticeSpeaker()
     _notice_connection(monkeypatch, socket, speaker)
@@ -1054,7 +1065,7 @@ async def test_say_once_gives_up_after_a_while(monkeypatch):
 
 
 def test_the_week_uses_the_given_day_for_undated_items(config):
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.tools import Tools
 
     held = {"schedule": {"items": [{"at": "09:00", "text": "朝の会"}]}}
     now = datetime(2026, 9, 21, 8, 0)
@@ -1062,8 +1073,8 @@ def test_the_week_uses_the_given_day_for_undated_items(config):
 
 
 def test_the_limit_is_forgotten_after_the_reset_time(config):
-    from kei_agent_voice.executor import current
-    from kei_agent_voice.tools import Tools
+    from kei_agent_modules.voice.held import current
+    from kei_agent_modules.voice.tools import Tools
 
     held = {"limited": True, "limited_until": "2026-09-21T23:30"}
     assert "上限" in Tools(held, config).get_status(datetime(2026, 9, 21, 23, 0))
@@ -1071,11 +1082,11 @@ def test_the_limit_is_forgotten_after_the_reset_time(config):
     assert "limited" not in current(held, datetime(2026, 9, 21, 23, 31))
 
 
-def test_the_counts_start_over_each_day(config):
-    from kei_agent_voice.executor import VoiceExecutor
-    from kei_agent_voice.tools import Tools
+def test_the_counts_start_over_each_day(config, store):
+    from kei_agent_modules.voice.agent import Executor
+    from kei_agent_modules.voice.tools import Tools
 
-    executor = VoiceExecutor()
+    executor = Executor(config, store)
     executor._hold({"kind": "working"}, datetime(2026, 9, 21, 10, 0))
     executor._hold({"kind": "done"}, datetime(2026, 9, 21, 11, 0))
     executor._hold({"kind": "failed"}, datetime(2026, 9, 21, 12, 0))
@@ -1087,7 +1098,7 @@ def test_the_counts_start_over_each_day(config):
 
 
 async def test_a_notice_waits_while_a_response_is_being_spoken():
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     brain = Live(None, env={})
     brain.speaker = _NoticeSpeaker()
@@ -1110,7 +1121,7 @@ async def test_a_notice_waits_while_a_response_is_being_spoken():
 
 
 def test_closing_drops_pending_notices():
-    from kei_agent_voice.live import Live
+    from kei_agent_modules.voice.live import Live
 
     brain = Live(None, env={})
     brain.announce("一件目")

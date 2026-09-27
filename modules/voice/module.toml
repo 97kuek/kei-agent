@@ -1,0 +1,10 @@
+# 声のモジュール（docs/architecture.md の「声のレイヤ」）。本体やモジュールの出来事を喋って知らせ、マイクで会話する
+api = 1
+name = "voice"
+label = "声"
+description = "本体やモジュールの出来事（依頼が終わった、締切が近い、など）を喋って知らせる。App Home で「聞く」を入れると、マイクで会話する"
+
+# 担当プロセス（A2A の受け口と、マイクの会話）。鍵は秘密情報の kei-agent-voice.zsh（OPENAI_API_KEY）。
+# 声の種類は KEI_AGENT_REALTIME_VOICE、マイクは KEI_AGENT_MIC、Stack-chan の住所は KEI_AGENT_STACKCHAN_URL
+[process]
+port = 8790

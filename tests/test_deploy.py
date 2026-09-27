@@ -16,8 +16,8 @@ from kei_agent.config import REPO_ROOT
 DEPLOY = REPO_ROOT / "deploy"
 # 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する。本体に組み込みの担当は kei-agent-<名前>、
 # 担当プロセスを持つモジュールは共通の kei-agent-module <名前> で動く
-CORE_AGENTS = ("research", "voice")
-MODULE_AGENTS = ("course", "knowledge", "work")
+CORE_AGENTS = ("research",)
+MODULE_AGENTS = ("course", "knowledge", "voice", "work")
 AGENTS = (*CORE_AGENTS, *MODULE_AGENTS)
 # install.sh で登録できるもの（名前なしは本体）
 INSTALLABLE = ("", *AGENTS, "notion-gateway")

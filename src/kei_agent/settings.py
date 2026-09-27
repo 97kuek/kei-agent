@@ -159,38 +159,6 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
     _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
 
 
-# 声で知らせるか（docs/architecture.md の「声のレイヤ」）
-
-VOICE_KEY = "voice.enabled"
-LISTEN_KEY = "voice.listening"
-
-
-def voice_enabled(store: Store) -> bool:
-    """声で知らせるか。既定は切（机にロボットが無い状態で急に喋り出さない）。
-
-    「Mac で鳴らすか Stack-chan で鳴らすか」は声のレイヤが決める（`/status` で分かる）。
-    本体が持つのは「知らせを送るかどうか」だけ。
-    """
-    return _get(store, VOICE_KEY) == "1"
-
-
-def set_voice(store: Store, enabled: bool) -> None:
-    _set(store, VOICE_KEY, "1" if enabled else "0")
-
-
-def listening_enabled(store: Store) -> bool:
-    """マイクで聞くか。**既定は切**。
-
-    常に録っているのは落ち着かないし、講義中に「経過」「計測」のような同音で反応しても困る。
-    聞きたいときだけ Slack から入れる（docs/architecture.md の「声のレイヤ」）。
-    """
-    return _get(store, LISTEN_KEY) == "1"
-
-
-def set_listening(store: Store, enabled: bool) -> None:
-    _set(store, LISTEN_KEY, "1" if enabled else "0")
-
-
 # actor ごとの provider。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
 _PROFILE_PROVIDERS = frozenset({"claude", "codex"})
 
