@@ -36,7 +36,7 @@ Kei Agent を、ほかの人が本体（コア）に触らずに、設定と自�
 - 使うモジュールは設定に並べて、はっきりオンにする（例: `modules = ["research", "knowledge", "my_weather"]`）
   - 組み込みのモジュールはリポジトリ直下の `modules/<名前>/`、自分のモジュールは自分のフォルダの `modules/<名前>/` に置き、どちらも同じ仕組みで読む（組み込みがそのまま作り方の見本になる）
 - Python は `module.py` の `class Module` に、使う差し込み口のメソッドだけを書く（チャンネルへの書き込み、リアクション、朝の一覧に出す行、定期処理ごとの関数、招かれたときの案内など）
-  - コアとのやり取りは、決めた範囲の窓口 `core` だけを通す（投稿する、担当に聞く、保存を読み書きする、Notion を読むなど）。`core` の範囲が、枠の版で約束する中身
+  - コアとのやり取りは、決めた範囲の窓口 `core`（`kei_agent.api.Core`）だけを通す（投稿する、担当に聞く、保存を読み書きする、Notion を読むなど）。`core` の範囲が、枠の版で約束する中身
 - 担当プロセス（A2A のサーバー）のコードもモジュールのフォルダに入れる（`modules/<名前>/agent.py`）。起動は共通の1つのコマンドが、モジュールの名前を受け取って行う（`src/` や `pyproject.toml` に手を入れずに担当を足せる）
 
 ### module.toml の書き方（枠の版 1）
@@ -82,6 +82,55 @@ default = "07:00"               # 空文字なら、既定では動かさない
 - 用途・定期処理・チャンネルの種類・番地は、モジュールどうしでぶつかってはいけない（ぶつかれば設定を読むときに断る）
 - 同じ時刻なら、夜間の Task → モジュールの定期処理（設定の modules の順）→ Daily → 振り返り → 保守の順に動く
 - 担当プロセスの名前（`deploy/install.sh <名前>` など）は、`[process]` を持つモジュールから起動スクリプトが見つける
+- `[channels]` か `[schedules]` を書いたら、同じフォルダに `module.py` が要る（無ければ設定を読むときに断る）
+
+### module.py の書き方（枠の版 1）
+
+`modules/knowledge/module.py` が見本。Kei Agent の部品で読み込んでよいのは窓口の `kei_agent.api` だけで、同じフォルダのファイルは `from . import texts` のように読める。本体が起動するときに読み込み（`modules.load_code`）、書いた差し込み口だけを呼ぶ。
+
+```python
+from kei_agent.api import Core, Request
+
+
+class Module:
+    default_question = "今日のメモを見せて"      # 本文の無いメンションのときに、担当に聞くこと
+
+    def __init__(self, core: Core):
+        self.core = core
+
+    def welcome(self) -> str:                    # チャンネルに招かれたときの案内
+        return "ここに書いたことをメモするよ。"
+
+    async def on_message(self, req: Request) -> None:          # [channels] があれば必須
+        ts = await self.core.post(req.channel, "📌 " + req.text)
+        self.core.records.put("memo", ts, {"text": req.text})
+        await self.core.reply(req, "メモしたよ")               # 👀 を ✅ に変える
+
+    async def run_schedule(self, name: str, day: str) -> dict:  # [schedules] があれば必須
+        return {"status": "done", "count": len(self.core.records.items("memo"))}
+
+    def morning_notes(self, day: str) -> list[str]:            # 朝の一覧に足す行
+        detail = self.core.schedule_detail("tidy", day)
+        return [f"メモ: {detail['count']}件"] if detail else []
+
+    async def on_reaction(self, event: dict, added: bool) -> bool:
+        return False                             # 自分の投稿へのものなら扱って True
+```
+
+| 差し込み口 | 呼ばれるとき |
+|---|---|
+| `on_message(req)` | モジュールのチャンネルと、`claim_thread` したスレッドへの依頼者の書き込み。答えは `core.reply` か `core.converse` で返す。例外を投げたら ⚠️ を付けて知らせる |
+| `run_schedule(name, day)` | `[schedules]` の時刻。返した辞書は記録に残り、`{"status": "error"}` なら朝の一覧の「うまくいかなかったこと」に載る |
+| `morning_notes(day)` | 朝の一覧（Daily の投稿）を作るとき |
+| `on_reaction(event, added)` | リアクションの付け外し。True を返したら、ほかのモジュールと 🌙 には回らない |
+| `welcome()` | モジュールのチャンネルに Kei Agent が招かれたとき |
+
+窓口 `core` でできること（`src/kei_agent/api.py`）:
+
+- Slack: `post`（ts を返す）、`reply`、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）
+- 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`converse(req)`（担当と会話として答える）
+- 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
+- そのほか: `notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
 
 ## 設定と置き場所
 
@@ -159,7 +208,7 @@ default = "07:00"               # 空文字なら、既定では動かさない
 | 段 | やること | 状態 |
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
-| 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | ①済み（2026-09-27）、②③はこれから |
+| 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | ①②済み（2026-09-27）、③はこれから |
 | 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善） | |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
