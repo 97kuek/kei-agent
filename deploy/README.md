@@ -1,186 +1,153 @@
 # 入れ方と運用
 
-使い方は [`docs/using.md`](../docs/using.md)、仕組みは [`docs/architecture.md`](../docs/architecture.md)。
+- はじめてなら `uv run kei-agent setup` の質問に答える。下は、setup がしていることと、手でするときの手順
+- 使い方は [docs/using.md](../docs/using.md)、仕組みは [docs/architecture.md](../docs/architecture.md)
 
-**はじめて入れるとき**は、リポジトリを `~/src` などに置き、`brew install pueue ffmpeg && brew services start pueue`・`uv sync --all-groups` のあと、`uv run kei-agent setup` の質問に答える。話し方 → 使うモジュール → Slack App → 秘密情報 → 常駐の登録の順に進み、最後に点検する（もうあるファイルは書き換えない。途中でやめても、もう一度動かすと残りから進む）。下の各節は、setup がしていることの中身と、手でやるときの手順。
+## 1. Slack App
 
-## 1. Slack
+1. 自分用のワークスペースに、チャンネルを作る（`#00_kei-agent`・`#01_overview`・`#10_<テーマ>`・`#20_course`・`#30_work`・`#40_knowledge`）
+2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** に、`uv run kei-agent manifest` の出力を貼る
+3. **Install App** で入れ、Bot User OAuth Token（`xoxb-`）を控える
+4. **Basic Information** → **App-Level Tokens** で、scope `connections:write` のトークン（`xapp-`）を作る
+5. **App icon** に `slack/icon.png` を上げ、**Agents** の **Agent experience** をオンにして入れ直す
+6. 自分のメンバー ID（`U…`）を控え、Kei Agent を各チャンネルに招く
 
-1. 個人用のワークスペースを作り、チャンネルを作る（`#00_kei-agent`、`#01_overview`、`#10_<テーマ>`、`#20_course`、`#30_work`、`#40_knowledge`）。番号を外した名前を `config.toml` の `[channels]` と合わせる
-2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** で、`uv run kei-agent manifest` の出力を貼る（オンにしたモジュールのスラッシュコマンドが入る。組み込みを全部使うなら `slack/manifest.yaml` と同じ）
-3. **Install App** で入れ、**Bot User OAuth Token**（`xoxb-`）を控える
-4. **Basic Information** → **App-Level Tokens** で scope `connections:write` のトークン（`xapp-`）を作る
-5. **Display Information** → **App icon** に `slack/icon.png` を上げる（アイコンは Git に入れていない）
-6. **Agents** の **Agent experience** をオンにして入れ直す（入力欄の下の経過表示と、流しながらの返事に使う）
-7. 自分のメンバー ID（`U…`）を控える
-8. Kei Agent を各チャンネルに招待する
+- モジュールを足し外ししたら、`kei-agent manifest` の出力を **App Manifest** に貼り直し、**Install App** で入れ直す
 
-モジュールを足したり外したり（`kei-agent module`。7. 日々の運用）したら、`uv run kei-agent manifest` の出力を **App Manifest** の画面に貼り直し、権限が変わったら **Install App** で入れ直す。スラッシュコマンド（`commands` の scope）を足したマニフェストにしたら、一度入れ直すまでそのコマンドは使えない。
-
-## 2. 設定と秘密情報
-
-自分の設定は、リポジトリの外の `~/.config/kei-agent/` に置く（場所は環境変数 `KEI_AGENT_HOME` で変えられる。docs/extensibility.md）。
+## 2. 設定
 
 ```zsh
 mkdir -p ~/.config/kei-agent/secrets && chmod 700 ~/.config/kei-agent/secrets
-cp config.example.toml ~/.config/kei-agent/config.toml     # チャンネル、Notion のページ ID などを書き換える
-cp profile.example.md ~/.config/kei-agent/profile.md       # 話し方、所属、興味。会話する担当の指示書に差し込まれる
+cp config.example.toml ~/.config/kei-agent/config.toml
+cp profile.example.md ~/.config/kei-agent/profile.md
 ```
 
-指示書を丸ごと変えたいときは、`~/.config/kei-agent/prompts/` に `prompts/` と同じ名前のファイルを置く（そちらが使われる）。
+| ファイル | 中身 |
+|---|---|
+| `config.toml` | 使うモジュール・チャンネル・Notion のホーム・時刻など。場所は `KEI_AGENT_HOME`・`KEI_AGENT_CONFIG` で変えられる |
+| `profile.md` | 話し方・所属・興味。会話する担当の指示書に足す |
+| `prompts/<名前>` | 指示書を丸ごと差し替えるとき |
 
-秘密情報は `~/.config/kei-agent/secrets/` に置き、`chmod 600` にする（Git に入れない）。値はここに書かない。置き場所は `config.toml` の `[paths] secrets` で変えられる（どこにしても、AI には読ませない）。要る鍵は、本体のものと、オンにしたモジュールの `module.toml` の `[secrets]` に書いてあるもの（`kei-agent setup` が聞き、`kei-agent doctor` が有無を確かめる）。
+## 3. 秘密情報
 
-**`kei-agent.zsh`（共通。全プロセスが読む）**
+- 置き場所は `~/.config/kei-agent/secrets/`（`[paths] secrets` で変えられる）。ファイルは `chmod 600`、Git に入れない
+- 要る鍵は、本体のものと、オンにしたモジュールの `module.toml` の `[secrets]`（setup が聞き、doctor が確かめる）
+
+`kei-agent.zsh`（どのプロセスも読む）:
 
 ```zsh
 export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
 export KEI_AGENT_ALLOWED_USER_ID="U..."
 export KEI_AGENT_A2A_TOKEN="..."              # openssl rand -hex 32 で一度だけ作って貼る
-export NOTION_TOKEN="ntn_..."                 # コネクト「Kei Agent」。読むのは Notion ゲートウェイだけ
+export NOTION_TOKEN="ntn_..."                 # コネクト「Kei Agent」。読むのはゲートウェイだけ
 export KEI_AGENT_NOTION_GATEWAY_TOKEN="..."   # ゲートウェイの親の合言葉。openssl rand -hex 32 で一度だけ作って貼る
 # 任意
 export TOGGL_API_TOKEN="toggl_sk_..."
-export TOGGL_ORGANIZATION_ID="..."
-export TOGGL_WORKSPACE_ID="..."             # Toggl が無ければ時間は Notion にだけ書く
-# export CLAUDE_CODE_OAUTH_TOKEN="..."        # 手元と別の Claude アカウントで動かすとき（claude setup-token）
+export TOGGL_ORGANIZATION_ID="..."            # focus.toggl.com/<組織>/workspaces/<ワークスペース>/ の URL から
+export TOGGL_WORKSPACE_ID="..."
 ```
 
-- `KEI_AGENT_A2A_TOKEN` と `KEI_AGENT_NOTION_GATEWAY_TOKEN` は、生成したコマンドではなく値をファイルに貼る。全プロセスが同じ値を読む必要があり、作り直すとつながらなくなる
-- Notion の鍵（`NOTION_TOKEN`）を持つのはゲートウェイだけ。ほかの起動スクリプトは読んだあとで消し、親の合言葉から作った client ごとの合言葉でゲートウェイを通す。LLM の子プロセスには親の合言葉も渡さない
-- Toggl の ID は `focus.toggl.com/<組織>/workspaces/<ワークスペース>/` の URL から写す
+- 合言葉2つは、作るコマンドではなく値を貼る。全プロセスが同じ値を読む（作り直すとつながらない）
+- `NOTION_TOKEN` を持つのはゲートウェイだけ。ほかの起動スクリプトは読んだあとで消す
 
-**エージェントごとのファイル `kei-agent-<名前>.zsh`**（どれも任意。書き方は共通のファイルと同じ）
+### 担当ごとの秘密情報
 
-研究・大学・仕事・知識はどれも `deploy/run-agent.sh <名前>` で起動し、共通のファイルのあとに自分の名前のファイルだけを読む（無ければ共通のものだけで動く。同じ変数は上書きされる）。そのエージェントだけが要るものはここに置く。アカウント連携を使うエージェントは、連携を付けたアカウントのプロファイルを `CLAUDE_CONFIG_DIR` で選び、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外す（`claude setup-token` のトークンでは連携は使えない）。
+- `kei-agent-<名前>.zsh` は、共通のファイルのあとに、その担当のプロセスだけが読む（無くてもよい）
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-research.zsh` | 研究のモジュールの担当（`deploy/run-agent.sh research`）。任意で `S2_API_KEY`（Semantic Scholar。共通のファイルに書いてもよい） |
-| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（個人アカウント。Box） |
-| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（会社アカウント。Microsoft 365） |
-| `kei-agent-knowledge.zsh` | なし（置かなくてよい。外の記事を読む担当なので、鍵は足さない） |
-| `kei-agent-voice.zsh` | 声のモジュールの担当（`deploy/run-agent.sh voice`）が同じ規則で読む。どれも任意: `OPENAI_API_KEY`（マイクでの会話。App Home の「聞く」に使う）、`KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`（例 `":1"`）、`KEI_AGENT_STACKCHAN_URL` |
+| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（Box をつないだ個人アカウント） |
+| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（Microsoft 365 をつないだ会社アカウント） |
+| `kei-agent-research.zsh` | 任意で `S2_API_KEY`（Semantic Scholar） |
+| `kei-agent-voice.zsh` | 任意で `OPENAI_API_KEY`（マイクの会話）、`KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`、`KEI_AGENT_STACKCHAN_URL` |
 
-プロファイルは一度作ってログインしておく。
+プロファイルは一度作ってログインしておく:
 
 ```zsh
 CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude   # /login → 個人アカウント。claude.ai で Box をつなぐ
 CLAUDE_CONFIG_DIR=$HOME/.claude-work claude       # /login → 会社アカウント。claude.ai で Microsoft 365 をつなぐ
 ```
 
-Codex のアカウント連携は、Codex の ChatGPT ログイン（`~/.codex`。どのエージェントも同じ1つ）に付いてくる。Codex を選ぶ担当があるなら、Codex アプリで Box、Microsoft Outlook Email、Microsoft Outlook Calendar をつないでおく（Codex の仕事は Outlook だけを読む。Teams・SharePoint を読むのは Claude のとき）。
-
-## 3. 手元で起動して確かめる
-
-```zsh
-brew install pueue ffmpeg && brew services start pueue
-uv sync --all-groups
-source ~/.config/kei-agent/secrets/kei-agent.zsh
-uv run kei-agent
-```
-
-- ログに `Kei Agent を起動しました` が出て、Slack でオンラインになる
-- App Home で各 actor の provider（Claude / Codex）を選ぶ。選ぶまでその actor は動かない
-- テーマのチャンネルで `@Kei Agent このディレクトリの中身を教えて` にスレッドで返事が来る
+- Codex の連携は、ChatGPT のログイン（`~/.codex`）の Codex アプリでつなぐ（Box、Outlook Email、Outlook Calendar）
 
 ## 4. 常駐（launchd）
 
-launchd のプロセスは `~/Documents`・`~/Desktop`・`~/Downloads` を読めないので、リポジトリはその外（例 `~/src/kei-agent`）に置く。
-
-**保護フォルダ**: 研究テーマに書類・デスクトップ・ダウンロードの中のフォルダを使いたいときは、`config.toml` に `allow_protected_folders = true` と書き、システム設定の「プライバシーとセキュリティ」→「フルディスクアクセス」で、仮想環境の Python（`.venv/bin/python3` の実体）を許可する。保護フォルダ全体が Kei Agent から読めるようになり、Python を更新するたびに許可し直しが要る。既定では選べない
+- リポジトリは保護フォルダ（書類・デスクトップ・ダウンロード）の外に置く（例 `~/src/kei-agent`）
+- 研究テーマに保護フォルダを使うなら、`allow_protected_folders = true` と、仮想環境の Python へのフルディスクアクセスの許可が要る
 
 ```zsh
-deploy/install.sh                  # 本体
-deploy/install.sh course           # 127.0.0.1:8787
-deploy/install.sh research         # 127.0.0.1:8788
-deploy/install.sh work             # 127.0.0.1:8789
-deploy/install.sh knowledge        # 127.0.0.1:8792（モジュールの担当。自分のモジュールも [process] があれば同じく名前で）
-deploy/install.sh voice            # 127.0.0.1:8790
-deploy/install.sh notion           # Notion のゲートウェイ 127.0.0.1:8791（Notion を使うものより先に。setup の CLI もここを通る）
-deploy/install.sh remove           # 本体の登録を外す（エージェントは deploy/install.sh course remove など）
+deploy/install.sh notion      # Notion のゲートウェイ（Notion を使うものより先に）
+deploy/install.sh course      # 担当はどれも名前で（research・work・knowledge・voice も同じ）
+deploy/install.sh             # 本体
+deploy/install.sh course remove    # 登録を外す（本体は deploy/install.sh remove）
+deploy/install.sh course print     # 登録する中身を見るだけ
 ```
 
 | もの | 場所 |
 |---|---|
-| 設定 | `~/.config/kei-agent/config.toml`（フォルダは `KEI_AGENT_HOME`、ファイルは `KEI_AGENT_CONFIG` で変えられる）。プロフィールは `profile.md`、指示書の差し替えは `prompts/` |
-| 状態 | `~/.local/state/kei-agent/`（`kei-agent.db`、`notion.json`、`notion-course.json`） |
-| ログ | `~/Library/Logs/kei-agent/kei-agent.log`（5MB × 5世代）、起動の失敗は `launchd.log`、エージェントは `<名前>-launchd.log` |
-| 声からの問い合わせ口 | 本体が `127.0.0.1:8786`（`config.toml` の `[a2a] orchestrator`）で待ち受ける。`curl -s http://127.0.0.1:8786/.well-known/agent-card.json` |
+| 状態 | `~/.local/state/kei-agent/`（`kei-agent.db`・`notion.json`・`notion-course.json`） |
+| ログ | `~/Library/Logs/kei-agent/kei-agent.log`（5MB × 5世代）、起動の失敗は `launchd.log`、担当は `<名前>-launchd.log` |
 | ジョブ | `pueue status --group kei-agent` |
 
-main に取り込んだら、`deploy/update.sh` で反映する（先に origin から取り込むときは `--pull`）。main で書きかけが無いときだけ動き、依存をそろえ、plist が変わったものだけ登録し直し、全部を起動し直して、7つのプロセスが新しい版で動いているか（担当と本体は名刺、ゲートウェイは `/health` の version）を確かめる。push はしない。
+| 反映のしかた | 中身 |
+|---|---|
+| `deploy/update.sh` | main で書きかけが無いときだけ動く。依存をそろえ、変わった plist だけ登録し直し、全部を起動し直して版を確かめる。`--pull` で先に origin から取り込む。push はしない |
+| `deploy/restart-all.sh` | 起動し直すだけ（ゲートウェイ → 担当 → 本体の順） |
 
-手で起動し直すだけなら `deploy/restart-all.sh`（ゲートウェイ → 担当 → 本体の順）。担当だけ古い版のまま残ると、古いコードが新しい設定を読めずに止まる。本体は起動したときに担当の版を見比べて、古い担当を起動し直し、それでも古ければ Slack で知らせる。取り込んだのに1時間たっても起動し直していなければ、それも知らせる。plist の雛形（`deploy/com.kei-agent.plist.template`。どのプロセスも同じ雛形から作る）が変わったら、`kickstart` では前の plist のまま動くので、`deploy/install.sh <名前>` で登録し直す。登録する中身は `deploy/install.sh <名前> print` で先に確かめられる。
+- 本体は起動したときに担当の版を見比べ、古い担当を起動し直す。取り込んだのに1時間たっても起動し直していなければ知らせる
 
 ## 5. Notion（最初の1回）
 
-Notion に届くのはゲートウェイだけなので、下の setup もゲートウェイが動いていないと使えない。
-
-1. Notion でコネクト「Kei Agent」（アクセストークン方式）を作り、トークンを `NOTION_TOKEN` に貼る
-2. 共通ホーム（`Keitaro Ueki`）、研究ホーム、授業ホームを、どれもこのコネクトに共有する
-3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home` / `research_home` / `course_home`）に書く。ゲートウェイはこの下だけを通す
-4. ゲートウェイを動かす（`deploy/install.sh notion`。手元なら別の端末で `uv run --group agents kei-agent-module notion`）
-
-**研究ホーム**: 作るもの・足すものを確かめてから反映する（何度実行しても重複しない）。ノートのテンプレートだけは Notion の画面で空の枠を作る
+1. Notion でコネクト「Kei Agent」を作り、トークンを `NOTION_TOKEN` に貼る
+2. 共通ホーム・研究ホーム・授業ホームを、どれもこのコネクトに共有する
+3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home`・`research_home`・`course_home`）に書く
+4. ゲートウェイを動かす（`deploy/install.sh notion`）
+5. DB を作る。どれも `--apply` を付けるまでは、作るものを並べるだけ
 
 ```zsh
-uv run kei-agent-notion-setup
-uv run kei-agent-notion-setup --apply
+uv run kei-agent-hub-setup --apply        # 共通ホーム
+uv run kei-agent-notion-setup --apply     # 研究ホーム（ノートのテンプレートだけは Notion の画面で作る）
+uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml   # 授業ホーム
 ```
 
-**共通ホーム**（`Keitaro Ueki`）: dry-run を確認してから反映する。
-
-```zsh
-uv run kei-agent-hub-setup
-uv run kei-agent-hub-setup --apply
-```
-
-**授業ホーム**: 5つの DB をそろえる。時限の時刻・学期・成績の読み方は `config.toml` の `[course]`（早稲田なら `school = "waseda"`）。`--seed <ファイル>` で履修科目を入れる（書き方は `modules/course/courses.example.toml`。自分のファイルは `~/.config/kei-agent/` に置く）
-
-```zsh
-source ~/.config/kei-agent/secrets/kei-agent.zsh          # ゲートウェイの親の合言葉
-source ~/.config/kei-agent/secrets/kei-agent-course.zsh   # MOODLE_ICS_URL
-uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml
-uv run kei-agent-module course sync            # 手で締切を取り込む（--all で履修外も）
-uv run kei-agent-module course inspect         # Moodle と「授業」を読むだけで照合する
-uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.html>   # 早稲田の部品は成績と単位の HTML
-uv run kei-agent-module course academic-import --apply <grades.html> <credits.html>     # --delete-inputs で入力を消す
-```
+- 授業ホームのほかのコマンドは [course-agent.md](../docs/agents/course-agent.md#コマンド)
 
 ## 6. そのほかの最初の1回
 
 ```zsh
-uv run kei-agent-module time cards                     # 10_/20_/30_ に時間記録カードを投稿する（先に kei-agent.zsh を source）。投稿後、Slack で各カードを手で固定する
-deploy/backup-init.sh                                  # ~/research を非公開リポジトリ research-data にして最初の push をする
-sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00       # 00:00 の夜間 Task のために毎晩 Mac を起こす（やめるときは sudo pmset repeat cancel）
-ffmpeg -f avfoundation -i ":default" -t 1 -f null -    # マイクの許可を先に手で通す（launchd からだと無音になることがある）
-gh auth status                                         # 要望を GitHub issue にするのに使う。ログインしていなければ gh auth login
+uv run kei-agent-module time cards                  # 10_/20_/30_ に時間記録カードを置く（そのあと Slack で固定する）
+deploy/backup-init.sh                               # ~/research を非公開リポジトリ research-data にする
+sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00    # 00:00 の夜間 Task のために毎晩 Mac を起こす
+ffmpeg -f avfoundation -i ":default" -t 1 -f null - # マイクの許可を先に手で通す
+gh auth status                                      # 要望を GitHub issue にするのに使う
 ```
 
 ## 7. 日々の運用
 
-- 困ったら、まず点検: `uv run kei-agent doctor`（読むだけ。設定・秘密情報の有無・担当ごとの AI・常駐と版・Notion のホーム・道具・最近のログを見て、直し方を並べる。鍵の中身は出さない。`--all` でうまくいっているものも並べる。問題があれば終了コード 1）
-- モジュールを足す・外す: `uv run kei-agent module add <名前>` / `remove <名前>`（`list` で一覧。`config.toml` の `modules` の行だけを書き換え、前のものを `config.toml.bak` に残す。書き換えると設定が読めなくなる変更（頼っているモジュールを外すなど）は断る。常駐を持つモジュールは launchd にも登録する・外す。そのあとにやること（起動し直す、manifest の貼り直し、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ）
-- モジュールを作る: `uv run kei-agent module new <名前>`（`--ai` で AI の実行役、`--process` で担当プロセスも。自分のフォルダの `modules/<名前>/` に作り、設定は変えない）。テストは `uv run kei-agent module test <名前>`（担当プロセスがあるなら `uv run --group agents …`）。書き方は [`docs/modules.md`](../docs/modules.md)
-- 定期処理を今すぐ1回: `uv run kei-agent-schedule <night|literature|daily|review|maintenance|toggl_import>`（`--record` を付けなければ今日の本番に影響しない）
-- 声を通さず依頼を渡す: `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ）
-- Toggl のアプリで直接測った記録は、22:00 の「Toggl の取り込み」（時間記録のモジュール）が「時間記録」に入れる
-- 22:00 の保守は、`~/research` の下のセッションの記録を90日で消し、使い終わった worktree を消してから、`~/research` → `research-data`、`~/kei-agent` → もう1つの非公開リポジトリに push する（`~/kei-agent` は自分で Git にして remote を付けておく。Git でなければ研究側だけ保存し、その旨を結果に出す）。50MB を超えるファイルはコミットから外す
-- 別の Mac に移すときは、`research-data` を `~/research` に clone し、`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql` で状態を戻す
+| したいこと | コマンド |
+|---|---|
+| 点検（読むだけ。`--all` で全部） | `uv run kei-agent doctor` |
+| モジュールの一覧・足す・外す | `uv run kei-agent module list` / `add <名前>` / `remove <名前>`（`--dry-run` で見るだけ） |
+| モジュールを作る・試す | `uv run kei-agent module new <名前>` / `test <名前>`（[docs/modules.md](../docs/modules.md)） |
+| 定期処理を今すぐ1回 | `uv run kei-agent-schedule <名前>`（`--record` を付けなければ記録に残らない） |
+| Slack の外から依頼を置く | `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ） |
+
+- `module add` / `remove` は `config.toml` の `modules` の行だけを書き換え、前のものを `config.toml.bak` に残す
+- 22:00 の保守: 研究のセッションの記録を90日で消し、使い終わった worktree を消し、`~/research` と `~/kei-agent` を非公開リポジトリに push する（50MB を超えるファイルは外す）
+- 別の Mac に移す: `research-data` を `~/research` に clone し、`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql`
 
 ## 8. 困ったとき
 
 | 症状 | 見るところ |
 |---|---|
-| 起動しない | `launchctl print gui/$(id -u)/com.kei-agent.assistant \| grep -E 'state\|last exit'`、`launchd.log`。秘密情報のファイルがないと起動スクリプトが止まる |
-| 返事が来ない | App Home で provider が選ばれているか。`kei-agent.log` |
-| 大学・研究・仕事だけ失敗する | `curl -s http://127.0.0.1:8787/.well-known/agent-card.json`（ポートを替えて）と `<名前>-launchd.log`。`KEI_AGENT_A2A_TOKEN` が全プロセスで同じか |
-| `<名前>-launchd.log` に `can't open input file` | 登録してある plist が、いまはない起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
-| Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全プロセスで同じか |
-| Notion で `can't reach` と断られる | そのホームの外を触ろうとしている。ホームがコネクト「Kei Agent」に共有されているか、`config.toml` の `[notion]` が合っているか |
-| 大学・仕事の連携が見えない | Claude なら、エージェントのファイルの `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR`、そのプロファイルでのログイン。Codex なら、ChatGPT のログインと Codex アプリの連携 |
-| 声が出ない・聞かない | `ffmpeg` があるか、マイクの許可、`OPENAI_API_KEY`、App Home のスイッチ、`voice-launchd.log` |
-| 上限に当たった | 何もしなくてよい。明ける時刻がスレッドに出て、明けてから自動でやり直す |
-| 自己改善のあと起動しない | 3回失敗すると `deploy/run.sh` が取り込んだ分を `git revert` して前の版で起動し、`update-rolled-back` を残して Slack で知らせる |
+| 起動しない | `launchctl print gui/$(id -u)/com.kei-agent.assistant`、`launchd.log`。秘密情報のファイルが無いと止まる |
+| 返事が来ない | App Home で AI が選ばれているか。`kei-agent.log` |
+| 担当だけ失敗する | `curl -s http://127.0.0.1:<番地>/.well-known/agent-card.json`、`<名前>-launchd.log`、`KEI_AGENT_A2A_TOKEN` が全部で同じか |
+| `can't open input file` | plist が古い起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
+| Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全部で同じか |
+| Notion で `can't reach` | ホームの外を触ろうとしている。ホームがコネクトに共有されているか、`[notion]` が合っているか |
+| 大学・仕事の連携が見えない | Claude は担当のファイルの `CLAUDE_CONFIG_DIR` とそのログイン、Codex は Codex アプリの連携 |
+| 声が出ない・聞かない | `ffmpeg`、マイクの許可、App Home のスイッチ、`voice-launchd.log` |
+| 上限に当たった | 何もしなくてよい。明けてから自動でやり直す |
+| 自己改善のあと起動しない | 3回失敗すると `deploy/run.sh` が `git revert` して前の版で起動し、Slack で知らせる |

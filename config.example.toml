@@ -8,7 +8,7 @@
 # （Slack でテーマのチャンネルに招いたときに「既存のフォルダを使う」を選ぶと、書き足される）
 research_root = "~/research"
 # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）をテーマの置き場所に選べるようにする。
-# フルディスクアクセスの許可も要る（deploy/README.md の「保護フォルダ」）
+# フルディスクアクセスの許可も要る（deploy/README.md の「4. 常駐（launchd）」）
 # allow_protected_folders = true
 # 授業の作業場（大学エージェントの claude が動くところ）。資料は Box に置いたまま読むので、ここには置かない
 course_root = "~/course"
