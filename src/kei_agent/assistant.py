@@ -32,6 +32,7 @@ from kei_agent import (
     runner,
     settings,
     themes,
+    updates,
     version,
 )
 from kei_agent.auto_messages import (
@@ -80,6 +81,7 @@ from kei_agent.slack_text import (
     format_duration,
     is_status_inquiry,
     split_text,
+    strip_lines,
 )
 from kei_agent.store import Store
 from kei_agent.theme_files import (
@@ -189,6 +191,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         self.idle.set()
         # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
         self.restart_requested = asyncio.Event()
+        # この起動が、入れ替えたあとのものなら、その結果（Slack につながったあとに take_update で読む）
+        self.last_update: updates.Update | None = None
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
         # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/architecture.md の「振り分けと A2A」）
         self.agents: dict[str, a2a.Agent] = agents.build(config)
@@ -204,6 +208,39 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         self.modules: dict[str, object] = {
             spec.name: cls(self.cores[spec.name])
             for spec in modules.enabled(config.modules) if (cls := modules.load_code(spec)) is not None}
+
+    def take_update(self) -> updates.Update | None:
+        """Slack につながったあとに呼ぶ。入れ替えたあとの起動なら、その結果を覚えて、印を消す（deploy/run.sh が戻さない）。"""
+        self.last_update = updates.take_update(self.config)
+        return self.last_update
+
+    def restart_for_update(self, previous: str, note: str = "") -> None:
+        """新しい版で起動し直す。起動できなければ deploy/run.sh が previous に戻す（updates.py）。"""
+        updates.mark_pending(self.config, previous, note)
+        self.request_restart()
+
+    def request_restart(self) -> None:
+        """動いている AI の作業がなくなったら終了する（launchd が新しい版で起動し直す）。"""
+        async def wait_then_restart() -> None:
+            await self.idle.wait()
+            # エージェントも同じリポジトリを読むので、一緒に入れ替える（本体だけだと古いまま動く）
+            await asyncio.to_thread(updates.restart_agents)
+            log.info("新しい版で起動し直すため、終了します")
+            self.restart_requested.set()
+
+        self.spawn(wait_then_restart())
+
+    async def modules_started(self) -> None:
+        """起動して Slack につながったあと（class Module の on_start）。1つが落ちても、ほかは続ける。"""
+        for name, module in self.modules.items():
+            on_start = getattr(module, "on_start", None)
+            if on_start is None:
+                continue
+            try:
+                await on_start()
+            except Exception:
+                log.exception("モジュール「%s」の起動のときの処理が落ちました", name)
+                await self.notify_trouble(f"モジュール「{name}」の起動のときの処理が落ちました")
 
     @contextmanager
     def claude_running(self):
@@ -395,7 +432,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
             return
         created = themes.ensure_workspace(ws)
         self.registered_themes.add(name)
-        if ws.kind is ChannelKind.IMPROVE:
+        if ws.kind is ChannelKind.IMPROVE and ws.module:
+            # Kei Agent のチャンネル。会話はモジュール（core_channels）が受け持つ
+            text = "Kei Agent です。このチャンネルには、Kei Agent で確認が必要なことが起きたときに知らせます。"
+            welcome = getattr(self.modules.get(ws.module), "welcome", None)
+            if welcome is not None:
+                text += "\n" + welcome()
+        elif ws.kind is ChannelKind.IMPROVE:
             text = ("Kei Agent です。このチャンネルでメンションされた要望は、要約して公開の GitHub issue にします"
                     "（Slack の文はそのまま載せません）。")
         elif ws.kind is ChannelKind.OVERVIEW:
@@ -462,7 +505,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
     async def _restart_stale_agents(self, names: list[str]) -> None:
         """古い版の担当を起動し直し、少し待って確かめる。それでも古ければ知らせる。"""
         for name in names:
-            await asyncio.to_thread(improve.restart_service, name)
+            await asyncio.to_thread(updates.restart_service, name)
         await asyncio.sleep(STALE_RECHECK_SECONDS)
         for name in names:
             try:
@@ -750,7 +793,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
 
         どちらで動かしても、同じ制限の表（agent_policy.py）と `config.toml` の柵で動く。
         """
-        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else themes.actor_of(ws)
+        actor = themes.actor_of(ws)
         agent = self.agents.get(actor) if actor != "self_fix" else None
         provider = provider or settings.selected_provider(self.config, self.store, actor)
         if provider not in PROVIDERS:
@@ -933,6 +976,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
             return None
         if await self.tell_if_waiting(req):
             return None
+        if ws.kind is ChannelKind.IMPROVE and ws.module:
+            # Kei Agent のチャンネルの会話を受け持つモジュール（core_channels）
+            await self._dispatch(req, ws.module, "")
+            return None
         if ws.kind is ChannelKind.IMPROVE:
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
@@ -973,23 +1020,33 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
                 # 途中で落ちても、このテーマを「重なって動いている」ままにしない（何度呼んでもよい）
                 self.theme_runs.end(req.channel_name, req.thread_ts)
 
-    async def work_in_workspace(self, req: Request, actor: str) -> runner.RunResult | None:
-        """チャンネルの作業場（研究テーマのフォルダ）で、その担当と会話して答える（api.Core.work）。
+    async def work_in_workspace(self, req: Request, actor: str, *, folder: Path | None = None,
+                                hide: tuple[str, ...] = ()) -> runner.RunResult | None:
+        """チャンネルの作業場で、その担当と会話して答える（api.Core.work）。
 
+        研究テーマのチャンネルは、テーマのフォルダ。folder を渡したとき（モジュールのフォルダの中）は、モジュールが
+        会話を受け持つチャンネル（モジュールのチャンネル、Kei Agent のチャンネル）で、そのフォルダを作業場にする。
+        hide に書いた頭で始まる行は、Slack に出さない（合図の行など）。
         添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。
         モジュールの on_message から呼ばれる（スレッドのロックと同時実行の上限は、取り次いだ _dispatch が持っている）。
         """
         ws = themes.resolve(self.config, req.channel_name)
-        if ws.kind is not ChannelKind.THEME or themes.actor_of(ws) != actor:
-            raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマのチャンネルではありません")
-        themes.ensure_workspace(ws)
-        ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
-        if ws.channel_name not in self.registered_themes:
-            # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
-            self.registered_themes.add(ws.channel_name)
-            await self.register_theme(req.channel, ws)
+        if folder is not None:
+            if ws.kind not in (ChannelKind.MODULE, ChannelKind.IMPROVE) or themes.actor_of(ws) != actor:
+                raise ValueError(f"#{req.channel_name} は、{actor} が会話を受け持つチャンネルではありません")
+            folder.mkdir(parents=True, exist_ok=True)
+            ws = replace(ws, cwd=folder)
+        else:
+            if ws.kind is not ChannelKind.THEME or themes.actor_of(ws) != actor:
+                raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマのチャンネルではありません")
+            themes.ensure_workspace(ws)
+            ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
+            if ws.channel_name not in self.registered_themes:
+                # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
+                self.registered_themes.add(ws.channel_name)
+                await self.register_theme(req.channel, ws)
         try:
-            result = await self.run(req, ws)
+            result = await self.run(req, ws, hide=hide)
             self._work_results[id(req)] = result
             return result
         except Exception:
@@ -1100,8 +1157,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
                          "終わったら知らせるね。")
         return "\n".join(lines)
 
-    async def run(self, req: Request, ws: Workspace) -> runner.RunResult:
-        """1回分の依頼を claude に渡し、結果をスレッドに返す。スレッドのロックを取ってから呼ぶ。"""
+    async def run(self, req: Request, ws: Workspace, hide: tuple[str, ...] = ()) -> runner.RunResult:
+        """1回分の依頼を claude に渡し、結果をスレッドに返す。スレッドのロックを取ってから呼ぶ。
+
+        hide に書いた頭で始まる行は、Slack に出さない（合図の行など。返す結果の本文には残す）。
+        """
         assert ws.cwd is not None
         saved = await download_files(req.files, ws.cwd, self.bot_token)
         prompt = req.text
@@ -1152,7 +1212,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         if awaiting:
             self.emit("awaiting", theme=req.channel_name)
         await self.sync_review_conclusion(req)
-        await self._reply(req, ws, ui, result, awaiting)
+        await self._reply(req, ws, ui, result, awaiting, hide)
         await self._attach_outputs(req, ws.cwd, before)
         await self.mark_answered(req, result.is_error)
         await self.ask_for_domains(req, ws, connect)
@@ -1334,13 +1394,15 @@ class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
         return result
 
     async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,
-                     awaiting: bool) -> None:
+                     awaiting: bool, hide: tuple[str, ...] = ()) -> None:
         """まとめをスレッドに返す。流して見せられなかったときだけ、まとめて投稿する。"""
         assert ws.cwd is not None
         shown, contract_failed = self.render_reply(result)
-        # 着手・取り込みの合図は、検出に使うだけで Slack には出さない（result.text は残す）
-        # 区切りの合図は、題をボタンに出すので本文からは消す
-        shown = improve.strip_markers(shown) if ws.kind is ChannelKind.IMPROVE else strip_handoff(shown)
+        # 合図の行（モジュールが hide で渡したもの。着手・取り込みなど）は、検出に使うだけで Slack には出さない
+        # （result.text は残す）。区切りの合図は、題をボタンに出すので本文からは消す
+        shown = strip_lines(shown, hide)
+        shown = (improve.strip_markers(shown) if ws.kind is ChannelKind.IMPROVE and not ws.module
+                 else strip_handoff(shown))
         streamed = await ui.finish(shown, awaiting and not result.is_error)
         if shown:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Kei Agent", shown)

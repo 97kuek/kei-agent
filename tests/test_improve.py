@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import guard, improve, issues, runner
+from kei_agent import guard, improve, issues, runner, updates
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
@@ -301,7 +301,7 @@ async def prepared(env, monkeypatch):
 
 async def test_merge_marker_merges_pushes_and_asks_for_a_restart(env, monkeypatch, no_real_restarts):
     assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    monkeypatch.setattr(improve, "installed_services", lambda home=None: ["notion", "course"])
+    monkeypatch.setattr(updates, "installed_services", lambda home=None: ["notion", "course"])
     await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
     await settle(assistant)
 
@@ -309,7 +309,7 @@ async def test_merge_marker_merges_pushes_and_asks_for_a_restart(env, monkeypatc
     assert row["status"] == "restarting" and row["issue_number"] == 1             # 要望の issue を覚えたまま
     assert (cfg.repo_root / "src" / "app.py").read_text() == "y = 2\n"           # main に入った
     assert git(cfg.repo_root, "rev-parse", "main") == git(cfg.repo_root, "rev-parse", "origin/main")  # push した
-    assert improve.read_pending(cfg) == (row["base_commit"], "20.1")             # 戻せるようにしてある
+    assert updates.pending_path(cfg).read_text().split() == [row["base_commit"], "0", "20.1"]  # 戻せるようにしてある
     await asyncio.wait_for(assistant.restart_requested.wait(), 1)                 # 作業がないので終了へ
     # 担当も一緒に入れ替える（テストでは本物の launchd には触らない）
     assert no_real_restarts == ["notion", "course"]
@@ -373,12 +373,13 @@ async def test_announce_after_a_successful_update(env, fake_github):
     assistant, slack, claude, cfg = env
     assistant.store.start_improvement("C9", "20.1", "経過を細かく", status="restarting", merge_commit="abcdef1234")
     assistant.store.update_improvement("C9", "20.1", status="restarting", merge_commit="abcdef1234")
-    improve.mark_pending(cfg, "0123456789", "20.1")
+    updates.mark_pending(cfg, "0123456789", "20.1")
 
+    assistant.take_update()
     await assistant.announce_update()
 
     assert assistant.store.improvement("C9", "20.1")["status"] == "done"
-    assert not improve.pending_path(cfg).exists()
+    assert not updates.pending_path(cfg).exists()
     assert "新しい版で起動したよ" in "\n".join(slack.texts())
     assert fake_github.calls == []                    # issue にしていない要望は何もしない
 
@@ -387,13 +388,14 @@ def merged_request(assistant, cfg, issue_number=7):
     """issue にした要望を取り込み、新しい版で起動する直前の状態にする。"""
     assistant.store.request_improvement("C9", "20.1", "経過を細かく", issue_number)
     assistant.store.start_improvement("C9", "20.1", "いいよ", status="restarting", merge_commit="abcdef1234")
-    improve.mark_pending(cfg, "0123456789", "20.1")
+    updates.mark_pending(cfg, "0123456789", "20.1")
 
 
 async def test_announce_closes_the_issue_of_the_merged_request(env, fake_github):
     assistant, slack, claude, cfg = env
     merged_request(assistant, cfg)
 
+    assistant.take_update()
     await assistant.announce_update()
 
     assert fake_github.closed() == [("7", "abcdef1 で取り込みました。")]
@@ -405,6 +407,7 @@ async def test_announce_goes_on_when_the_issue_cannot_be_closed(env, fake_github
     merged_request(assistant, cfg)
     fake_github.fail["issue close"] = issues.IssueError("gh が失敗しました", "HTTP 502")
 
+    assistant.take_update()
     await assistant.announce_update()
 
     assert assistant.store.improvement("C9", "20.1")["status"] == "done"
@@ -418,6 +421,7 @@ async def test_announce_survives_an_unexpected_error_while_closing(env, fake_git
     merged_request(assistant, cfg)
     fake_github.fail["issue close"] = RuntimeError("壊れた")
 
+    assistant.take_update()
     await assistant.announce_update()
 
     notice, = trouble_notices(slack)
@@ -429,12 +433,13 @@ async def test_announce_after_a_rollback(env, monkeypatch, fake_github):
     assistant.store.request_improvement("C9", "20.1", "経過を細かく", 7)
     assistant.store.start_improvement("C9", "20.1", "経過を細かく", status="restarting")
     monkeypatch.setattr(improve, "push_revert", lambda config: None)
-    improve.rolled_back_path(cfg).write_text("0123456789\n4\n20.1\n")
+    updates.rolled_back_path(cfg).write_text("0123456789\n4\n20.1\n")
 
+    assistant.take_update()
     await assistant.announce_update()
 
     assert assistant.store.improvement("C9", "20.1")["status"] == "failed"
-    assert not improve.rolled_back_path(cfg).exists()
+    assert not updates.rolled_back_path(cfg).exists()
     assert "起動できなかったので" in "\n".join(slack.texts())
     assert fake_github.closed() == []                 # 戻した要望の issue は開いたまま
 
@@ -503,6 +508,6 @@ async def test_push_failure_undoes_the_local_merge_and_keeps_review(env, monkeyp
 
     assert git(cfg.repo_root, "rev-parse", "main") == before                    # 手元の main は元のまま
     assert assistant.store.improvement("C9", "20.1")["status"] == "review"    # もう一度「いいよ」でやり直せる
-    assert not improve.pending_path(cfg).exists()
+    assert not updates.pending_path(cfg).exists()
     assert not assistant.restart_requested.is_set()
     assert "push できなかった" in "\n".join(slack.texts())

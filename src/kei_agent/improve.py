@@ -8,12 +8,11 @@ main に取り込んで push し、作業がなくなってから自分を再起
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import guard, modules
+from kei_agent import guard
 from kei_agent.config import Config
 
 log = logging.getLogger(__name__)
@@ -23,11 +22,6 @@ START_MARKER = "🛠 着手"
 # 直したあと、コミットの件名として書いてもらう行
 SUBJECT_MARKER = "📝 件名:"
 MERGE_MARKER = "📦 取り込み"
-
-# 取り込んだあとに残すファイル。新しい版が Slack につながったら消す
-PENDING_NAME = "update-pending"
-# deploy/run.sh が、起動できずに戻したときに残すファイル
-ROLLED_BACK_NAME = "update-rolled-back"
 
 # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回。これを数えてから着手する
 REPLIES_BEFORE_START = 2
@@ -136,38 +130,6 @@ def run_checks(worktree: Path) -> CommandResult:
     return CommandResult(True, "\n\n".join(outputs))
 
 
-def restart_service(name: str) -> bool:
-    """launchd の com.kei-agent.<name> を、新しい版で起動し直す。"""
-    label = f"com.kei-agent.{name}"
-    proc = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"],
-                          capture_output=True, text=True, timeout=60)
-    if proc.returncode != 0:
-        log.warning("%s を起動し直せません: %s", label, (proc.stderr or "").strip()[:200])
-    return proc.returncode == 0
-
-
-def installed_services(home: Path | None = None) -> list[str]:
-    """launchd に登録した Kei Agent のプロセス（本体を除く）。A2A ではない常駐のプロセス（Notion のゲートウェイ）を
-    先にする（ほかのプロセスが使う。deploy/restart-all.sh と同じ）。"""
-    agents_dir = (home or Path.home()) / "Library" / "LaunchAgents"
-    names = [path.name.removeprefix("com.kei-agent.").removesuffix(".plist")
-             for path in sorted(agents_dir.glob("com.kei-agent.*.plist"))]
-    services = {name for name, spec in modules.known().items() if spec.service}
-    return sorted((name for name in names if name != "assistant"), key=lambda name: name not in services)
-
-
-def restart_agents() -> list[str]:
-    """本体のほかのプロセス（ゲートウェイ・担当・声）を、新しい版で起動し直す。
-
-    本体は launchd が入れ替えるが、ほかは動き続けてしまう（古いコードのまま）。
-    取り込んだあと、本体が静かになってから呼ぶ。
-    """
-    done = [name for name in installed_services() if restart_service(name)]
-    if done:
-        log.info("起動し直しました: %s", "、".join(done))
-    return done
-
-
 class PushError(RuntimeError):
     """取り込んだが push できなかった。`undone` は手元の main を元に戻せたか。"""
 
@@ -213,35 +175,6 @@ def review_summary(config: Config, worktree: Path, base: str, summary: str, chec
         lines += ["", "*Claude が sandbox の中で回した確認*", checks.strip()]
     lines += ["", "取り込んでいい？（柵のファイルに触れていないことは確認済み。テストは取り込む前にもう一度回す）"]
     return "\n".join(lines)
-
-
-def pending_path(config: Config) -> Path:
-    return config.state_dir / PENDING_NAME
-
-
-def rolled_back_path(config: Config) -> Path:
-    return config.state_dir / ROLLED_BACK_NAME
-
-
-def mark_pending(config: Config, previous: str, thread_ts: str) -> None:
-    """再起動の前に残す。新しい版が Slack につながったら消す。残り続けたら run.sh が前の版に戻す。"""
-    pending_path(config).write_text(f"{previous}\n0\n{thread_ts}\n", encoding="utf-8")
-
-
-def _read_marker(path: Path) -> tuple[str, str] | None:
-    """update-pending / update-rolled-back の (前のコミット, スレッド)。3行目がスレッド。"""
-    if not path.exists():
-        return None
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return (lines[0] if lines else "", lines[2] if len(lines) > 2 else "")
-
-
-def read_pending(config: Config) -> tuple[str, str] | None:
-    return _read_marker(pending_path(config))
-
-
-def read_rolled_back(config: Config) -> tuple[str, str] | None:
-    return _read_marker(rolled_back_path(config))
 
 
 FIX_PROMPT = """\

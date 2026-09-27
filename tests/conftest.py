@@ -7,7 +7,7 @@ import pytest
 from fakes import FakeGitHub
 
 from kei_agent import config as config_module
-from kei_agent import improve, issues, model_classifier, modules
+from kei_agent import issues, model_classifier, modules, updates
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
 
@@ -35,7 +35,7 @@ def no_real_restarts(monkeypatch):
     （2026-09-26、テストを回すたびに本番の担当が起動し直されていた）。確かめたいテストは、自分で差し替える。
     """
     restarted: list[str] = []
-    monkeypatch.setattr(improve, "restart_service", lambda name: restarted.append(name) or True)
+    monkeypatch.setattr(updates, "restart_service", lambda name: restarted.append(name) or True)
     return restarted
 
 

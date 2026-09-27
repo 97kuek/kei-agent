@@ -6,7 +6,7 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
 from kei_agent import assistant as assistant_module
-from kei_agent import improve, runner, version
+from kei_agent import runner, updates, version
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 
@@ -46,7 +46,7 @@ def test_versions_differ_only_when_both_are_known():
 
 async def test_a_stale_agent_is_restarted_at_startup(assistant, monkeypatch):
     restarted = []
-    monkeypatch.setattr(improve, "restart_service", lambda name: restarted.append(name) or True)
+    monkeypatch.setattr(updates, "restart_service", lambda name: restarted.append(name) or True)
     assistant.agents = {"course": _Agent("old", "new"), "work": _Agent("new")}
 
     await assistant.check_agents()
@@ -59,7 +59,7 @@ async def test_a_stale_agent_is_restarted_at_startup(assistant, monkeypatch):
 
 
 async def test_an_agent_that_stays_old_is_reported(assistant, monkeypatch):
-    monkeypatch.setattr(improve, "restart_service", lambda name: True)
+    monkeypatch.setattr(updates, "restart_service", lambda name: True)
     assistant.agents = {"course": _Agent("old")}
 
     await assistant.check_agents()
@@ -77,4 +77,4 @@ def test_installed_services_restart_the_gateway_first_and_leave_the_main_process
     for name in ("assistant", "course", "notion", "research", "voice", "work"):
         (agents_dir / f"com.kei-agent.{name}.plist").touch()
 
-    assert improve.installed_services(tmp_path) == ["notion", "course", "research", "voice", "work"]
+    assert updates.installed_services(tmp_path) == ["notion", "course", "research", "voice", "work"]

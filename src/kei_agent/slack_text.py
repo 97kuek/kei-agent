@@ -90,3 +90,10 @@ def message_text(message: dict) -> str:
                 if item.get("type") == "text" and item.get("text"):
                     parts.append(item["text"])
     return "\n".join(parts)
+
+
+def strip_lines(text: str, heads: tuple[str, ...]) -> str:
+    """その頭で始まる行（合図の行など）を取り除く。heads が空なら、そのまま。"""
+    if not heads:
+        return text
+    return "\n".join(line for line in text.splitlines() if not line.strip().startswith(heads)).rstrip()

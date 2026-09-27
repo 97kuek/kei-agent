@@ -245,6 +245,10 @@ class Config:
         workspace = spec.actor.workspace if spec is not None and spec.actor is not None else ""
         return _expand(workspace) if workspace else self.state_dir / "agents" / name
 
+    def module_state(self, name: str) -> Path:
+        """モジュールが持つファイルの置き場（状態の置き場の modules/<名前>。作業用のフォルダなど）。"""
+        return self.state_dir / "modules" / name
+
     def prompt_file(self, name: str, module: str = "") -> Path:
         """指示書。利用者のフォルダの prompts/ に同じ名前のファイルがあれば、そちらを使う（丸ごと差し替え）。
 
@@ -413,6 +417,12 @@ def _enabled_modules(data: dict, home: Path) -> list[modules.ModuleSpec]:
         # ほかのどれにも当たらないチャンネル（研究テーマ）を受け持てるのは、オンのモジュールのうち1つだけ
         raise ConfigError(f"モジュール「{catch_all[0]}」と「{catch_all[1]}」が、どちらもほかのどれにも当たらないチャンネル（*）を"
                           "受け持とうとしています。config.toml の modules でどちらかを外してください")
+    for kind in modules.CORE_CHANNELS:
+        owners = [spec.name for spec in enabled if kind in spec.core_channels]
+        if len(owners) > 1:
+            # 本体のチャンネルの会話を受け持てるのも、オンのモジュールのうち1つだけ
+            raise ConfigError(f"モジュール「{owners[0]}」と「{owners[1]}」が、どちらも本体のチャンネル（{kind}）の会話を"
+                              "受け持とうとしています。config.toml の modules でどちらかを外してください")
     for spec in enabled:
         missing = [r for r in spec.requires if r not in names]
         if missing:

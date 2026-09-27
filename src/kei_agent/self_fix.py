@@ -14,7 +14,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from kei_agent import guard, improve, issues, runner
+from kei_agent import guard, improve, issues, runner, themes
 from kei_agent.auto_messages import history_prompt
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_selected
 from kei_agent.request import Request
@@ -60,6 +60,8 @@ class SelfFix:
 
         これをしないと working が残り続け、次の直しに着手できない。
         """
+        if themes.core_channel_owner(self.config, "improve"):
+            return 0
         rows = self.store.improvements_in("working")
         for row in rows:
             self.store.update_improvement(row["channel"], row["thread_ts"], status="failed", detail="中断")
@@ -209,29 +211,22 @@ class SelfFix:
         except RuntimeError as e:
             await self._fix_failed(req, str(e)[:500], f"main に取り込めなかったよ:\n```\n{str(e)[:1000]}\n```")
             return
-        improve.mark_pending(self.config, base, req.thread_ts)
         self.store.update_improvement(req.channel, req.thread_ts, status="restarting", merge_commit=merged)
         await asyncio.to_thread(improve.remove_worktree, self.config, worktree, branch)
         await self.post(req, f"📦 取り込んで GitHub に push したよ（`{merged[:7]}`）。"
                              "動いている作業が終わったら、新しい版で起動し直す。")
-        self.request_restart()
-
-    def request_restart(self) -> None:
-        """動いている claude の作業がなくなったら終了する（launchd が新しい版で起動し直す）。"""
-        async def wait_then_restart() -> None:
-            await self.idle.wait()
-            # エージェントも同じリポジトリを読むので、一緒に入れ替える（本体だけだと古いまま動く）
-            await asyncio.to_thread(improve.restart_agents)
-            log.info("新しい版で起動し直すため、終了します")
-            self.restart_requested.set()
-
-        self.spawn(wait_then_restart())
+        self.restart_for_update(base, req.thread_ts)
 
     async def announce_update(self) -> None:
-        """起動したときに、取り込みの結果をスレッドに知らせる。"""
-        rolled = improve.read_rolled_back(self.config)
-        if rolled is not None:
-            previous, thread_ts = rolled
+        """起動したときに、取り込みの結果をスレッドに知らせる（本体が Slack につながったあとに読んだ入れ替えの結果）。
+
+        Kei Agent のチャンネルの会話を受け持つモジュールがあれば、そちらが on_start で扱う。
+        """
+        update = self.last_update
+        if update is None or themes.core_channel_owner(self.config, "improve"):
+            return
+        previous, thread_ts = update.previous, update.note
+        if update.state == "rolled_back":
             row = self.store.improvement_by_thread(thread_ts) if thread_ts else None
             if row is not None:
                 req = Request(row["channel"], await self.channel_name(row["channel"]), thread_ts, None, "")
@@ -239,13 +234,7 @@ class SelfFix:
                                      "取り消しの内容は GitHub にも送った。ログを見て、直し方を考え直そう。")
                 self.store.update_improvement(row["channel"], thread_ts, status="failed", detail="起動できなかった")
             await asyncio.to_thread(improve.push_revert, self.config)
-            improve.rolled_back_path(self.config).unlink(missing_ok=True)
             return
-        pending = improve.read_pending(self.config)
-        if pending is None:
-            return
-        previous, thread_ts = pending
-        improve.pending_path(self.config).unlink(missing_ok=True)
         row = self.store.improvement_by_thread(thread_ts) if thread_ts else None
         if row is None:
             return

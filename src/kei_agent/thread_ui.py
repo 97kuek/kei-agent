@@ -45,6 +45,10 @@ class ThreadUI:
     async def start(self) -> None:
         await self._status("processing")
 
+    async def show(self, text: str) -> None:
+        """決まった文言（モジュールが決めた「取り込み中…」など）を、入力欄の下にそのまま出す。道具の詳細には使わない。"""
+        await self._thinking(text)
+
     async def activity(self, activity: str) -> None:
         """道具の詳細を出さず、固定の利用者向け進捗だけを見せる。"""
         lowered = activity.lower()

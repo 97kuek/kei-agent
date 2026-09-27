@@ -39,13 +39,12 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentSkill
 
-from kei_agent import a2a, agents, ask, modules, runner, themes, version
+from kei_agent import a2a, agents, ask, modules, themes, version
 from kei_agent.agent_policy import policy_of
 from kei_agent.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.jobs import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB, Pueue
 from kei_agent.model_json import json_list, json_object
-from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
 from kei_agent.notion import (
     GATEWAY_TOKEN_ENV,
     Notion,
@@ -57,6 +56,7 @@ from kei_agent.notion import (
     safe_to_resend,
 )
 from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
+from kei_agent.one_shot import AIError, run_once
 from kei_agent.records import Records
 from kei_agent.store import Store
 from kei_agent.themes import Workspace
@@ -77,14 +77,6 @@ __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV"
 RUNNING_VERSION = version.RUNNING
 # 本文の JSON の days で受け付ける上限（日）
 MAX_DAYS = 400
-
-
-class AIError(RuntimeError):
-    """AI を動かせなかった。limit_reset_at があれば、上限に当たった（本体が明けてからやり直す）。"""
-
-    def __init__(self, reason: str, limit_reset_at: float | None = None):
-        super().__init__(reason)
-        self.limit_reset_at = limit_reset_at
 
 
 def ai_runs_shell(actor: str) -> bool:
@@ -191,15 +183,5 @@ async def run_ai(config: Config, store, agent: str, use_case: str, prompt: str, 
     フォルダの中。利用者のフォルダの prompts/ に同じ名前があれば、そちら）に差し替える。profile を False に
     すると、依頼者のプロフィールを差し込まない（JSON だけを返す係など）。動かせなければ AIError。
     """
-    try:
-        recipe = (resolve(agent, provider, use_case) if provider
-                  else resolve_selected(config, store, agent, use_case))
-    except ModelPolicyError as e:
-        raise AIError(str(e)) from None
-    ws = themes.agent_workspace(config, agent)
-    ws = replace(ws, system_prompt=config.prompt_file(prompt_file, module=agent) if prompt_file else None,
-                 profile=profile)
-    result = await runner.run_model(config, runner.ExecutionRequest(ws, recipe, None, "", "", read_only=True), prompt)
-    if result.is_error:
-        raise AIError(result.failure_reason(), result.limit_reset_at)
-    return result.text
+    return await run_once(config, store, agent, use_case, prompt, provider=provider, prompt_file=prompt_file,
+                          profile=profile)

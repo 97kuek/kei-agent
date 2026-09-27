@@ -158,10 +158,14 @@ async def serve() -> None:
     try:
         # つながらないまま止まると、入れ替えに失敗しても誰も気づけない。時間を切って落ちる
         await asyncio.wait_for(handler.connect_async(), CONNECT_TIMEOUT_SECONDS)
-        # 自分を入れ替えたあとの起動なら、その結果をスレッドに知らせる（improve.py）
+        # 入れ替えたあとの起動なら、その結果を読んで印を消す（消さないと deploy/run.sh が前の版に戻す。updates.py）
+        assistant.take_update()
+        # 自分を入れ替えたあとの起動なら、その結果を取り込みのスレッドに知らせる（self_fix.py）
         await assistant.announce_update()
         # 再起動で途中になった自己改善を「中断」にして、次の着手を止めないようにする
         await assistant.recover_interrupted_fixes()
+        # モジュールの、起動したときの処理（class Module の on_start。入れ替えの結果は core.last_update で受け取る）
+        await assistant.modules_started()
         # 前の版で動いていて、入れ替えや強制終了で止まった依頼をやり直す
         await assistant.resume_interrupted()
         # Notion の項目がずれていると、Daily や夜間の Task が黙って止まるので、起動時に確かめる

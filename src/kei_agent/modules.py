@@ -22,6 +22,9 @@ from pathlib import Path
 
 # [channels] に書くと、ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ名前。受け持てるのは1つのモジュールだけ
 ALL_CHANNELS = "*"
+# 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は config.toml の [channels]）。
+# improve は Kei Agent のチャンネル（#00_kei-agent）。困りごとの知らせは、受け持つモジュールが無くても本体が出す
+CORE_CHANNELS = ("improve",)
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
 SPEC_FILE = "module.toml"
@@ -43,7 +46,7 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "schedules", "settings", "slash_commands"}
+             "core_channels", "schedules", "settings", "slash_commands"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
@@ -146,6 +149,8 @@ class ModuleSpec:
     settings: dict[str, object] = field(default_factory=dict)
     # Slack のスラッシュコマンド（/ を付けない名前 → 説明）。Slack の App にも同じ名前で足す
     slash_commands: dict[str, str] = field(default_factory=dict)
+    # 会話を受け持つ本体のチャンネル（CORE_CHANNELS の中から）
+    core_channels: tuple[str, ...] = ()
 
     @property
     def catch_all(self) -> bool:
@@ -323,22 +328,28 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         if ALL_CHANNELS in names and names != (ALL_CHANNELS,):
             raise ModuleError(f"{where} の [channels] {kind}: \"{ALL_CHANNELS}\"（ほかのどれにも当たらないチャンネル）は、"
                               "それだけを書いてください")
+    core_channels = _names(data.get("core_channels", []), f"{where} の core_channels")
+    unknown = sorted(set(core_channels) - set(CORE_CHANNELS))
+    if unknown:
+        raise ModuleError(f"{where} の core_channels に、受け持てない本体のチャンネルがあります: {', '.join(unknown)}"
+                          f"（受け持てるもの: {', '.join(CORE_CHANNELS)}）")
     schedules = _schedules(_table(data, "schedules", where), where)
     slash = _table(data, "slash_commands", where)
     for command, text in slash.items():
         if not _SLASH.match(command) or not isinstance(text, str):
             raise ModuleError(f"{where} の [slash_commands] {command}: 名前は英小文字・数字・_・-（/ は付けない）で、"
                               "値は説明の文字にしてください")
-    if (channels or schedules or slash) and not (directory / CODE_FILE).is_file():
-        raise ModuleError(f"{where}: [channels]・[schedules]・[slash_commands] を動かす {CODE_FILE}（class Module）が、"
-                          "同じフォルダにありません")
+    if (channels or core_channels or schedules or slash) and not (directory / CODE_FILE).is_file():
+        raise ModuleError(f"{where}: [channels]・core_channels・[schedules]・[slash_commands] を動かす {CODE_FILE}"
+                          "（class Module）が、同じフォルダにありません")
     return ModuleSpec(
         name=name, label=str(data.get("label") or name), description=str(data.get("description") or ""),
         path=directory, builtin=builtin,
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
-        settings=_settings(_table(data, "settings", where), where), slash_commands=dict(slash))
+        settings=_settings(_table(data, "settings", where), where), slash_commands=dict(slash),
+        core_channels=core_channels)
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:
@@ -467,7 +478,8 @@ def load_code(spec: ModuleSpec) -> type | None:
                               ("on_slash_command", (None, "", {}), "on_slash_command(self, name, body)"),
                               ("on_action", (None, "", {}), "on_action(self, name, body)"),
                               ("on_view", (None, "", {}), "on_view(self, name, body)"),
-                              ("material", (None, 0.0), "material(self, now)")):
+                              ("material", (None, 0.0), "material(self, now)"),
+                              ("on_start", (None,), "on_start(self)")):
         found = getattr(cls, hook, None)
         if found is None:
             continue
@@ -476,8 +488,9 @@ def load_code(spec: ModuleSpec) -> type | None:
         except (TypeError, ValueError):
             raise ModuleError(f"{where}: {hook} は {shape} の形にしてください") from None
     on_message = getattr(cls, "on_message", None)
-    if spec.channels and not callable(on_message):
-        raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req, skill, params) を書いてください")
+    if (spec.channels or spec.core_channels) and not callable(on_message):
+        raise ModuleError(f"{where}: [channels] か core_channels があるので、class Module に on_message(req, skill, params)"
+                          " を書いてください")
     if callable(on_message):
         try:
             inspect.signature(on_message).bind(None, None, skill="", params={})

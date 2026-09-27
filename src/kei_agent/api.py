@@ -6,10 +6,11 @@
 
 module.py には `class Module` を置き、`__init__(self, core)` で窓口（Core）を受け取る。使う差し込み口だけを書く。
 
-- `async on_message(req, skill="", params=None)` … モジュールのチャンネルと、claim_thread したスレッドへの
-  依頼者の書き込み。研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事が skill と params に入る
-  （空なら core.pick_skill で選べる）。答えは core.reply か core.converse で返す（どちらも依頼の 👀 を ✅ に
-  変える。例外を投げたら ⚠️ と知らせ）。[channels] があれば必須
+- `async on_message(req, skill="", params=None)` … モジュールのチャンネル・会話を受け持つ本体のチャンネル
+  （module.toml の core_channels。Kei Agent のチャンネルなど）と、claim_thread したスレッドへの依頼者の書き込み。
+  研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事が skill と params に入る（空なら
+  core.pick_skill で選べる）。答えは core.reply・core.converse・core.work で返す（どれも依頼の 👀 を ✅ に
+  変える。例外を投げたら ⚠️ と知らせ）。[channels] か core_channels があれば必須
 - `async on_reaction(event, added) -> bool` … リアクションの付け外し（Slack の reaction_added の中身）。
   自分の投稿へのものなら扱って True を返す（ほかのモジュールと 🌙 には回らない）
 - `async run_schedule(name, day) -> dict` … module.toml の [schedules] の処理（day は YYYY-MM-DD）。
@@ -37,7 +38,9 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
 - `async on_view(name, body) -> dict | None` … このモジュールの入力の画面（callback_id は core.view_id(名前)）が送られたとき。
   欄の下に出す理由を {block_id: 文} で返すと、画面を閉じない
 - `async material(now) -> list[str]` … Daily と振り返りの材料に足す行（今週の時間など）
-- `welcome() -> str` … モジュールのチャンネルに招かれたときの案内（できること）
+- `async on_start()` … 起動して Slack につながったあと（Kei Agent を入れ替えたあとの起動なら、その結果は
+  core.last_update() で受け取れる。途中で止まった作業の後始末など）
+- `welcome() -> str` … モジュールのチャンネル（と core_channels の本体のチャンネル）に招かれたときの案内（できること）
 - `default_question` … 本文の無いメンションのときに、担当に聞くこと
 
 依頼者だけが押せる・打てる（ボタン・画面・コマンドは、本体が依頼者か確かめてから渡す）。
@@ -48,30 +51,35 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date, datetime
 from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, dates, deadline, home, modules, router, settings, themes
+from kei_agent import agents, dates, deadline, guard, home, modules, one_shot, router, settings, themes
 from kei_agent.agents import Reply
+from kei_agent.auto_messages import history_prompt
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.notion import NotionError
+from kei_agent.one_shot import AIError
 from kei_agent.records import Records
 from kei_agent.request import Request
-from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
-from kei_agent.slack_text import escape, split_text
+from kei_agent.response_output import OutputError, finalize_conversation, safe_failure, validate_structured_response
+from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
+from kei_agent.updates import Update
 
 if TYPE_CHECKING:
     from kei_agent.assistant import Assistant
 
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "Toggl",
-           "TogglAmbiguousWrite", "TogglError", "checked_text", "day_label", "due_clock", "due_day", "escape",
-           "failure_text", "load_toggl", "parse_time", "selected_values", "theme_name", "weekday"]
+__all__ = ["API_VERSION", "ASK", "FAILED_PREFIX", "AIError", "Core", "NotionError", "Records", "Reply", "Request",
+           "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_text", "contains_secret",
+           "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "load_toggl", "parse_time",
+           "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
 MODULE_PREFIX = modules.ACTION_PREFIX
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
@@ -119,6 +127,19 @@ def selected_values(action: dict) -> set[str]:
     if action.get("selected_option"):
         chosen.add(str(action["selected_option"].get("value")))
     return chosen
+
+
+def final_answer(text: str) -> str:
+    """AI の答え（core.run_ai が返す本文）のうち、Slack に出す部分（最終回答の印の中）。形が合わなければ空文字。"""
+    try:
+        return finalize_conversation(text)
+    except OutputError:
+        return ""
+
+
+def contains_secret(text: str) -> bool:
+    """秘密情報らしい文字列（鍵やトークンの形）を含むか。公開の場所（GitHub など）に書く前に確かめる。"""
+    return any(pattern.search(text) for pattern in guard.SECRET_PATTERNS)
 
 
 def checked_text(text: str) -> str | None:
@@ -188,14 +209,43 @@ class Core:
         return self._assistant.config.module_channels.get(kind, ())
 
     async def post(self, channel: str, text: str, *, thread_ts: str | None = None,
-                   blocks: list[dict] | None = None) -> str:
-        """投稿する（リンクのプレビューは付けない）。blocks を渡すとボタンなども置ける。投稿の ts を返す。"""
-        where = {"thread_ts": thread_ts} if thread_ts else {}
+                   blocks: list[dict] | None = None, markdown: bool = False) -> str:
+        """投稿する（リンクのプレビューは付けない）。blocks を渡すとボタンなども置ける。markdown にすると、太字や
+        箇条書きを Markdown で書ける（blocks とはいっしょに使えない）。投稿の ts を返す。"""
+        where: dict = {"thread_ts": thread_ts} if thread_ts else {}
         if blocks is not None:
             where["blocks"] = blocks
-        posted = await self._assistant.slack.chat_postMessage(channel=channel, text=text, unfurl_links=False,
+        where["markdown_text" if markdown else "text"] = text
+        posted = await self._assistant.slack.chat_postMessage(channel=channel, unfurl_links=False,
                                                               unfurl_media=False, **where)
         return str(posted.get("ts") or "")
+
+    async def upload(self, channel: str, thread_ts: str, filename: str, content: str) -> None:
+        """スレッドにファイルを添付する（差分などの文を、そのままファイルにして）。"""
+        await self._assistant.slack.files_upload_v2(
+            channel=channel, thread_ts=thread_ts,
+            file_uploads=[{"filename": filename, "title": filename, "content": content}])
+
+    async def thread_messages(self, channel: str, thread_ts: str) -> list[dict]:
+        """スレッドの投稿（Slack の message。古い順。長いスレッドは、新しいほうから決まった件数まで）。"""
+        messages, _ = await self._assistant.thread_messages(channel, thread_ts)
+        return messages
+
+    async def thread_history(self, channel: str, thread_ts: str) -> str:
+        """スレッドのやりとりを、AI に渡す文にしたもの（依頼者と Kei Agent の発言を順に。省いた古い投稿も書き添える）。"""
+        messages, dropped = await self._assistant.thread_messages(channel, thread_ts)
+        return history_prompt(messages, self._assistant.bot_user_id, "", None, dropped=dropped)
+
+    @asynccontextmanager
+    async def progress(self, req: Request, text: str):
+        """その間、スレッドの入力欄の下に経過（text。「取り込み中…」など）を出す。"""
+        ui = self._assistant.thread_ui(req)
+        await ui.start()
+        await ui.show(text)
+        try:
+            yield
+        finally:
+            await ui.finish("")
 
     async def update(self, channel: str, ts: str, text: str, *, blocks: list[dict] | None = None) -> None:
         """自分の投稿を書き換える（消されていたら Slack の例外がそのまま上がる）。"""
@@ -346,14 +396,54 @@ class Core:
         choice = await router.pick(self._assistant.config, skills, req.text, store=self._assistant.store)
         return choice.skill or ASK, choice.params
 
-    async def work(self, req: Request) -> None:
-        """研究テーマのチャンネル（[channels] に "*" で受け持つもの）で、そのチャンネルの作業場を使って、
-        このモジュールの担当と会話して答える。
+    async def work(self, req: Request, *, folder: Path | None = None, hide: tuple[str, ...] = ()) -> str:
+        """チャンネルの作業場を使って、このモジュールの担当と会話して答える。
 
+        研究テーマのチャンネル（[channels] に "*" で受け持つもの）は、テーマのフォルダが作業場。folder（このモジュールの
+        フォルダ core.state_dir の中）を渡すと、会話を受け持つほかのチャンネル（モジュールのチャンネル、core_channels の
+        本体のチャンネル）で、そのフォルダを作業場にする。hide に書いた頭で始まる行は Slack に出さない（合図の行など）。
         添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。担当のプロセスには
-        ask の依頼に channel_name（作業場）と allowed_domains（許可済みの接続先）が添えて届く。
+        ask の依頼に channel_name（作業場）と allowed_domains（許可済みの接続先）が添えて届く（プロセスの無いモジュールは
+        本体の中で動かす）。返すのは AI の答えのうち Slack に出す部分（hide の行も含む。答えられなかったら空文字）。
         """
-        await self._assistant.work_in_workspace(req, self.name)
+        result = await self._assistant.work_in_workspace(
+            req, self.name, folder=self._inside(folder) if folder is not None else None, hide=tuple(hide))
+        return final_answer(result.text) if result is not None and not result.is_error else ""
+
+    async def run_ai(self, use_case: str, prompt: str, *, folder: Path | None = None, req: Request | None = None,
+                     status: str = "") -> str:
+        """このモジュールの実行役の用途で AI を1回動かし、答えの本文を返す（会話にはしない）。動かせなければ AIError。
+
+        folder を渡さなければ、作業場を読むだけで動かす（要約などの係）。folder（このモジュールのフォルダ core.state_dir の
+        中）を渡すと、そこで動かし、書き込みもそこだけ（書けるかどうかは [actor] の files が決める）。req を渡すと、その
+        スレッドに経過（最初は status）を出し、終わったら答えのうち Slack に出す部分（final_answer）を見せて、依頼者の
+        返事を待つ形にする。返すのは AI の答えの本文そのまま（JSON を読む係などのため。Slack に出す部分は final_answer）。
+        動いている間は、Kei Agent の入れ替え（再起動）を待たせる。
+        """
+        assistant = self._assistant
+        target = None
+        if folder is not None:
+            target = self._inside(folder)
+            target.mkdir(parents=True, exist_ok=True)
+        ui = assistant.thread_ui(req) if req is not None else None
+        if ui is not None:
+            await ui.start()
+            if status:
+                await ui.show(status)
+        try:
+            with assistant.claude_running():
+                text = await one_shot.run_once(
+                    assistant.config, assistant.store, self.name, use_case, prompt, folder=target,
+                    channel=req.channel if req is not None else "", thread_ts=req.thread_ts if req is not None else "",
+                    on_activity=ui.activity if ui is not None else None)
+        except Exception:
+            if ui is not None:
+                with suppress(Exception):
+                    await ui.finish("")
+            raise
+        if ui is not None:
+            await ui.finish(final_answer(text) or safe_failure("conversation"), awaiting=True)
+        return text
 
     async def converse(self, req: Request) -> None:
         """そのスレッドの会話として、このモジュールの担当（[actor] と [process]）に聞いて答える。
@@ -391,6 +481,56 @@ class Core:
             log.warning("%s を予定カレンダーに写せません: %s", source, e)
             return "error"
         return report.__dict__
+
+    # 自分のフォルダと、Kei Agent 自身
+
+    @property
+    def state_dir(self) -> Path:
+        """このモジュールが持つファイルの置き場（状態の置き場の modules/<名前>。無ければ作る）。"""
+        path = self._assistant.config.module_state(self.name)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _inside(self, folder: Path) -> Path:
+        """AI に使わせるフォルダが、このモジュールのフォルダの中か確かめる（外なら ValueError）。"""
+        resolved = Path(folder).expanduser().resolve()
+        if not resolved.is_relative_to(self.state_dir.resolve()):
+            raise ValueError(f"モジュール「{self.name}」のフォルダ（core.state_dir）の外では、AI を動かせません: {folder}")
+        return resolved
+
+    @property
+    def repo_root(self) -> Path:
+        """Kei Agent 自身のコードの置き場（Git のリポジトリ）。自分を直すモジュール（自己改善）が使う。"""
+        return self._assistant.config.repo_root
+
+    async def check_change(self, folder: Path, base: str) -> list[str]:
+        """Kei Agent 自身を直した差分（folder の Git の、base から HEAD まで）を、本体の柵で確かめる。
+
+        柵のファイル（guard.py・config.example.toml・deploy/）に触れていないか、秘密情報らしいものや大きすぎる差分が
+        無いか。問題の説明を返す（無ければ空。柵を変えたいときは人が直す）。
+        """
+        return await asyncio.to_thread(guard.check_change, Path(folder), base, "HEAD")
+
+    @contextmanager
+    def busy(self):
+        """その間は、Kei Agent の入れ替え（再起動）を待たせる（途中で止まると困る、外への書き込みなど）。"""
+        with self._assistant.claude_running():
+            yield
+
+    def restart_for_update(self, previous: str, note: str = "") -> None:
+        """Kei Agent を新しい版で起動し直す（動いている AI の作業が終わってから。ほかのプロセスも一緒に）。
+
+        previous は取り込む前のコミット。新しい版が Slack につながらないまま起動を繰り返したら、本体（deploy/run.sh）が
+        そこまで戻す。note（1行）は、次に起動したときに core.last_update() で受け取れる（どのスレッドの取り込みか、など）。
+        """
+        self._assistant.restart_for_update(previous, note)
+
+    def last_update(self) -> Update | None:
+        """この起動が、core.restart_for_update で入れ替えたあとのものなら、その結果（無ければ None）。
+
+        Update の state は done（新しい版で動いた）か rolled_back（起動できず、previous に戻した）。on_start で読む。
+        """
+        return self._assistant.last_update
 
     # 定期処理と研究テーマ
 

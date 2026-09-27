@@ -69,6 +69,9 @@ class ChannelKind(Enum):
     MODULE = "module"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
     SELF_FIX = "self_fix"
+    # モジュールが自分のフォルダ（状態の置き場の modules/<名前>/ の中）で AI を動かすとき（core.run_ai の folder）。
+    # 書き込めるのはその中だけ
+    FOLDER = "folder"
     # 振り分け・分類の係（router.py）。何も書かず、材料はプロンプトで渡す
     ROUTER = "router"
 
@@ -86,7 +89,7 @@ class Workspace:
     system_prompt: Path | None = None
     # claude 1回の上限時間（分）。既定は config.run_timeout_minutes
     timeout_minutes: int | None = None
-    # MODULE のときの、モジュールの名前
+    # MODULE・FOLDER のときの、モジュールの名前。研究テーマ・研究全体・Kei Agent のチャンネルでは、会話を受け持つモジュール
     module: str = ""
     # 指示書の最後に、依頼者のプロフィールを差し込むか（JSON だけを返す振り分け・分類・選別の係は差し込まない）
     profile: bool = True
@@ -117,7 +120,8 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     """
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
-        return Workspace(channel_name, ChannelKind.IMPROVE, None)
+        # Kei Agent のチャンネル。会話を受け持つモジュール（core_channels に improve）があれば、そのモジュールが答える
+        return Workspace(channel_name, ChannelKind.IMPROVE, None, module=core_channel_owner(config, "improve"))
     module = module_of_channel(config, channel_name)
     if module:
         return Workspace(channel_name, ChannelKind.MODULE, None, module=module)
@@ -140,6 +144,11 @@ def module_of_channel(config: Config, channel_name: str) -> str:
     return ""
 
 
+def core_channel_owner(config: Config, kind: str) -> str:
+    """本体のチャンネル（Kei Agent のチャンネルなど）の会話を受け持つ、オンのモジュールの名前。無ければ空文字。"""
+    return next((spec.name for spec in modules.enabled(config.modules) if kind in spec.core_channels), "")
+
+
 def catch_all_module(config: Config) -> str:
     """ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ、オンのモジュールの名前。無ければ空文字（本体の研究）。"""
     for spec in modules.enabled(config.modules):
@@ -154,10 +163,11 @@ _ACTORS = {ChannelKind.IMPROVE: "self_fix"}
 
 def actor_of(ws: Workspace) -> str:
     """そのチャンネルで会話を続ける担当。モジュールのチャンネルと、研究テーマ・研究全体は、そのモジュール
-    （研究テーマを受け持つモジュールが無ければ空文字。そのチャンネルでは答えない）。"""
-    if ws.kind in (ChannelKind.MODULE, ChannelKind.THEME, ChannelKind.OVERVIEW):
+    （研究テーマを受け持つモジュールが無ければ空文字。そのチャンネルでは答えない）。Kei Agent のチャンネルは、
+    会話を受け持つモジュールがあればそのモジュール、無ければ本体の自己改善。"""
+    if ws.kind in (ChannelKind.MODULE, ChannelKind.THEME, ChannelKind.OVERVIEW, ChannelKind.FOLDER):
         return ws.module
-    return _ACTORS.get(ws.kind, "")
+    return ws.module or _ACTORS.get(ws.kind, "")
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:
