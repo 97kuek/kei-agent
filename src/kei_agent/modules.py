@@ -150,8 +150,10 @@ class ModuleSpec:
     schedules: tuple[ScheduleSpec, ...] = ()
     # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）
     settings: dict[str, object] = field(default_factory=dict)
-    # Slack のスラッシュコマンド（/ を付けない名前 → 説明）。Slack の App にも同じ名前で足す
+    # Slack のスラッシュコマンド（/ を付けない名前 → 説明）。Slack の App にも同じ名前で足す（kei-agent manifest）
     slash_commands: dict[str, str] = field(default_factory=dict)
+    # そのうち、打ち方の例（usage_hint。manifest に載せる）があるもの
+    slash_hints: dict[str, str] = field(default_factory=dict)
     # 会話を受け持つ本体のチャンネル（CORE_CHANNELS の中から）
     core_channels: tuple[str, ...] = ()
     # 受け持つ本体の定期処理（CORE_SCHEDULES の中から）
@@ -344,11 +346,21 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         raise ModuleError(f"{where} の core_schedules に、受け持てない本体の定期処理があります: {', '.join(unknown)}"
                           f"（受け持てるもの: {', '.join(CORE_SCHEDULES)}）")
     schedules = _schedules(_table(data, "schedules", where), where)
-    slash = _table(data, "slash_commands", where)
-    for command, text in slash.items():
-        if not _SLASH.match(command) or not isinstance(text, str):
+    slash: dict[str, str] = {}
+    hints: dict[str, str] = {}
+    for command, value in _table(data, "slash_commands", where).items():
+        # 説明の文字だけか、{ description = "…", usage_hint = "[start|stop]" } の表
+        if isinstance(value, dict):
+            _check_keys(value, {"description", "usage_hint"}, f"{where} の [slash_commands] {command}")
+            text, hint = value.get("description"), value.get("usage_hint", "")
+        else:
+            text, hint = value, ""
+        if not _SLASH.match(command) or not isinstance(text, str) or not text or not isinstance(hint, str):
             raise ModuleError(f"{where} の [slash_commands] {command}: 名前は英小文字・数字・_・-（/ は付けない）で、"
-                              "値は説明の文字にしてください")
+                              "値は説明の文字か、{ description = \"…\", usage_hint = \"…\" } にしてください")
+        slash[command] = text
+        if hint:
+            hints[command] = hint
     if (channels or core_channels or core_schedules or schedules or slash) and not (directory / CODE_FILE).is_file():
         raise ModuleError(f"{where}: [channels]・core_channels・core_schedules・[schedules]・[slash_commands] を動かす "
                           f"{CODE_FILE}（class Module）が、同じフォルダにありません")
@@ -358,7 +370,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
-        settings=_settings(_table(data, "settings", where), where), slash_commands=dict(slash),
+        settings=_settings(_table(data, "settings", where), where), slash_commands=slash, slash_hints=hints,
         core_channels=core_channels, core_schedules=core_schedules)
 
 

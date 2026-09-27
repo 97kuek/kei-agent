@@ -2,6 +2,7 @@
 
 - `kei-agent` … Kei Agent（Slack の受け口と定期処理）を動かす
 - `kei-agent doctor` … 今の設定と動きを点検する（読むだけ）
+- `kei-agent manifest` … オンにしたモジュールに合わせた Slack App の manifest を出す
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ USAGE = """使い方: kei-agent [コマンド]
 
   （何も付けない）  Kei Agent を動かす（ふだんは launchd が起動する）
   doctor            今の設定と動きを点検する（読むだけ。--all でうまくいっているものも並べる）
+  manifest          オンにしたモジュールに合わせた Slack App の manifest を出す（Slack の App Manifest に貼る）
 """
 
 
@@ -27,6 +29,10 @@ def main(argv: list[str] | None = None) -> None:
         from kei_agent import doctor
 
         raise SystemExit(doctor.main(rest))
+    if command == "manifest":
+        from kei_agent import slack_manifest
+
+        raise SystemExit(slack_manifest.main(rest))
     if command in ("-h", "--help", "help"):
         print(USAGE)
         return

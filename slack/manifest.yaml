@@ -1,21 +1,19 @@
-# Slack App「Kei Agent」のマニフェスト。https://api.slack.com/apps → Create New App → From a manifest で貼り付ける
+# Slack App「Kei Agent」の manifest。kei-agent manifest が作る（組み込みのモジュールを全部オンにしたとき）。
+# https://api.slack.com/apps → Create New App → From a manifest で貼り付ける。
+# 自分の設定（オンにしたモジュール）に合わせたものは kei-agent manifest で出す。手で直さない
 display_information:
-  name: Kei Agent
-  description: 頼まれた用事を担当のエージェントに振り分けて進めるアシスタント。経過と結果をスレッドに返す
+  name: "Kei Agent"
+  description: "頼まれた用事を担当のエージェントに振り分けて進めるアシスタント。経過と結果をスレッドに返す"
   background_color: "#2c3e50"
 features:
   bot_user:
-    display_name: Kei Agent
+    display_name: "Kei Agent"
     always_online: true
-  # AI アプリとして扱う。作業中のステータス（agents.sessions.setStatus）と、
-  # 返事を流しながら見せる表示（chat.startStream）に必要
   agent_view:
-    agent_description: 研究・授業・仕事の用事を受け取り、担当のエージェントが進めて結果を返す
-  # 設定画面（テーマごとの接続先と、決まった時刻の処理）。docs/using.md
-  # 時間記録の開始・停止（時間記録のモジュール modules/time/。10_・20_・30_ のチャンネルで使う）
+    agent_description: "研究・授業・仕事の用事を受け取り、担当のエージェントが進めて結果を返す"
   slash_commands:
-    - command: /toggl
-      description: 時間記録を始める・止める
+    - command: "/toggl"
+      description: "時間記録を始める・止める"
       usage_hint: "[start|stop]"
       should_escape: false
   app_home:
@@ -25,33 +23,32 @@ features:
 oauth_config:
   scopes:
     bot:
-      - app_mentions:read
-      - channels:history
-      - channels:read
-      - groups:history
-      - groups:read
-      - chat:write
-      - files:read
-      - files:write
-      - reactions:read
-      - reactions:write
-      - assistant:write
-      - commands
+      - "app_mentions:read"
+      - "channels:history"
+      - "channels:read"
+      - "groups:history"
+      - "groups:read"
+      - "chat:write"
+      - "files:read"
+      - "files:write"
+      - "reactions:read"
+      - "reactions:write"
+      - "assistant:write"
+      - "commands"
 settings:
   event_subscriptions:
     bot_events:
-      - app_mention
-      - message.channels
-      - message.groups
-      - member_joined_channel
-      - channel_rename
-      - group_rename
-      - reaction_added
-      - reaction_removed
-      - channel_archive
-      - group_archive
-      - app_home_opened
-  # 接続先の申し出のボタンと、App Home の設定画面に使う
+      - "app_mention"
+      - "message.channels"
+      - "message.groups"
+      - "member_joined_channel"
+      - "channel_rename"
+      - "group_rename"
+      - "reaction_added"
+      - "reaction_removed"
+      - "channel_archive"
+      - "group_archive"
+      - "app_home_opened"
   interactivity:
     is_enabled: true
   org_deploy_enabled: false

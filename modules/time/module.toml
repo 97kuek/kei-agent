@@ -8,9 +8,9 @@ description = "Slack の /toggl と時間記録カードで時間を測り、Tog
 # あれば使う: 大学（科目を選んで測るときに、今学期の履修科目を聞く）
 optional = ["course"]
 
-# Slack のスラッシュコマンド（slack/manifest.yaml にも同じ名前を書く）
+# Slack のスラッシュコマンド（kei-agent manifest が Slack App の manifest に載せる）
 [slash_commands]
-toggl = "時間の計測を始める・止める（引数なしで切り替え、start / stop）"
+toggl = { description = "時間記録を始める・止める", usage_hint = "[start|stop]" }
 
 # 定期処理（設定の [schedule] と App Home で時刻を変えられる。空文字で止める）
 [schedules.toggl_import]
