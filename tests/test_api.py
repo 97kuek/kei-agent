@@ -1,13 +1,14 @@
 """モジュールの差し込み口と窓口（kei_agent.api）。利用者が作ったモジュールが、コアを直さずに動くこと。"""
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import datetime
 
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import modules, runner
+from kei_agent import a2a, modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, task_names
@@ -135,6 +136,23 @@ async def test_reactions_go_to_the_module_that_owns_the_post(env, store):
     assert assistant.modules["memo"].core.records.get("memo", memo_ts)["pinned"] is True
     await assistant.on_reaction_removed(event)
     assert assistant.modules["memo"].core.records.get("memo", memo_ts)["pinned"] is False
+
+
+async def test_a_module_without_an_ai_can_ask_its_process(env):
+    """AI の実行役（[actor]）を持たないモジュールも、担当プロセスに頼める（AI を選ばないので provider を渡さない）。"""
+    scheduler, assistant, slack = env
+    seen = []
+
+    class Agent:
+        base_url = "http://fake-agent/memo"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            seen.append((skill, params, json.loads(text)))
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps({"ok": True, "text": "はい", "data": {}}))
+
+    assistant.agents["memo"] = Agent()
+    reply = await assistant.cores["memo"].ask_agent("count", {"n": 1})
+    assert (reply.ok, reply.text, seen) == (True, "はい", [("count", {}, {"n": 1})])
 
 
 async def test_one_broken_reaction_hook_does_not_stop_the_others(env, monkeypatch):

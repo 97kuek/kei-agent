@@ -387,14 +387,16 @@ class Core:
         if agent is None:
             await self.notify_trouble(f"{self.spec.label}の担当の住所がありません（module.toml の [process]）")
             return Reply.broken(f"{self.spec.label}の担当の住所がないよ")
-        provider = settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
+        # AI の実行役（[actor]）を持たないモジュールの担当は、AI を選ばない（provider を渡さない）
+        provider = (settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
+                    if self.spec.actor is not None else "")
 
         async def keep_alive(_status: str) -> None:
             # AI を動かす仕事なので、経過を流しながら受け取る（途中で切られないように）
             return None
 
-        reply = await agents.ask(agent, skill, params={"provider": provider}, on_progress=keep_alive,
-                                 text=json.dumps(payload, ensure_ascii=False))
+        reply = await agents.ask(agent, skill, params={"provider": provider} if provider else {},
+                                 on_progress=keep_alive, text=json.dumps(payload, ensure_ascii=False))
         if not reply.ok:
             await self.notify_trouble(f"{self.spec.label}の担当（{agent.base_url}）の {skill} が返した理由: "
                                       f"{reply.text[:300]}")
