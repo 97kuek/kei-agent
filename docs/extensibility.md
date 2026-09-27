@@ -60,7 +60,19 @@ shell = false
 web = true
 notion = "none"                 # none / read / write（Notion ゲートウェイ）
 timeout_minutes = 10
-default_use_case = "knowledge_answer"   # 自由な質問の用途（分類器を動かさない）
+default_use_case = "knowledge_answer"   # 自由な質問の用途（classify を書かなければ、分類器を動かさずにこれ）
+# classify = "1件の要点は work_single_source、複数の状況要約は work_cross_source。"
+#                               # 自由な質問の用途を、軽いモデルで選び分けるときの見分け方（Web を使う用途が2つ以上）
+# plugin = true                 # skill と二の柵のフック（同じフォルダの plugin/。.claude-plugin/plugin.json が要る）
+
+# [[actor.connectors]]          # アカウントの連携。書いた道具だけを使える（読む道具だけを書く）
+# name = "outlook"
+# claude_server = "claude_ai_Microsoft_365"         # claude.ai のコネクタ（mcp__<server>__<道具>）
+# claude_tools = ["outlook_calendar_search", "outlook_email_search"]
+# [[actor.connectors.codex_apps]]                   # Codex の App（表示名と、道具の名前空間）
+# name = "Microsoft Outlook Calendar"
+# namespace = "microsoft_outlook_calendar"
+# tools = ["search_events", "list_events"]
 
 [use_cases.knowledge_pick]      # 用途ごとのモデル。コアのモデルの一覧の中からだけ選べる
 offline = true                  # Web を使わない回（外の文を材料として渡す回）
@@ -101,7 +113,7 @@ class Module:
     def welcome(self) -> str:                    # チャンネルに招かれたときの案内
         return "ここに書いたことをメモするよ。"
 
-    async def on_message(self, req: Request) -> None:          # [channels] があれば必須
+    async def on_message(self, req: Request, skill="", params=None) -> None:   # [channels] があれば必須
         ts = await self.core.post(req.channel, "📌 " + req.text)
         self.core.records.put("memo", ts, {"text": req.text})
         await self.core.reply(req, "メモしたよ")               # 👀 を ✅ に変える
@@ -119,16 +131,17 @@ class Module:
 
 | 差し込み口 | 呼ばれるとき |
 |---|---|
-| `on_message(req)` | モジュールのチャンネルと、`claim_thread` したスレッドへの依頼者の書き込み。答えは `core.reply` か `core.converse` で返す。例外を投げたら ⚠️ を付けて知らせる |
+| `on_message(req, skill, params)` | モジュールのチャンネルと、`claim_thread` したスレッドへの依頼者の書き込み。研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事が `skill` と `params` に入る（空なら `core.pick_skill(req)` で選べる）。答えは `core.reply` か `core.converse` で返す。例外を投げたら ⚠️ を付けて知らせる |
 | `run_schedule(name, day)` | `[schedules]` の時刻。返した辞書は記録に残り、`{"status": "error"}` なら朝の一覧の「うまくいかなかったこと」に載る |
 | `morning_notes(day)` | 朝の一覧（Daily の投稿）を作るとき |
+| `agenda(days)` | 朝の一覧・振り返りの材料を作るとき。これから `days` 日の、時刻のある予定を返す（`{"kind": "meeting", "subject", "start", "end", "location", "url", "id", "source"}` の一覧）。朝の一覧と声のレイヤに載り、共通ホームの予定カレンダーにも `source` を出典として書く。読めなかったら `None`（空の一覧と分けて、予定カレンダーの行を「要確認」にしない） |
 | `on_reaction(event, added)` | リアクションの付け外し。True を返したら、ほかのモジュールと 🌙 には回らない |
 | `welcome()` | モジュールのチャンネルに Kei Agent が招かれたとき |
 
 窓口 `core` でできること（`src/kei_agent/api.py`）:
 
-- Slack: `post`（ts を返す）、`reply`、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）
-- 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`converse(req)`（担当と会話として答える）
+- Slack: `post`（ts を返す）、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
+- 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
 - そのほか: `notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
 
@@ -238,7 +251,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善） | |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①済み（2026-09-27） |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 
