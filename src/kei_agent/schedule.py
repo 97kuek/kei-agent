@@ -28,7 +28,6 @@ from kei_agent import (
     morning,
     settings,
     themes,
-    timelog,
     version,
 )
 from kei_agent.assistant import Assistant
@@ -485,7 +484,6 @@ class Scheduler:
             time.time() - self.config.maintenance.session_retention_days * 86400)
         # モジュールの記録は、モジュールが決めた日数で忘れる（kei_agent.api.Records）
         detail["module_records"] = self.store.drop_expired_module_records(time.time())
-        detail["toggl"] = await self.import_toggl()
         if self.config.maintenance.backup:
             try:
                 detail["backup"] = await maintenance.backup(self.config, day, self.store)
@@ -494,26 +492,6 @@ class Scheduler:
                 await self.assistant.notify_trouble(f"研究データのバックアップに失敗しました: {e}")
                 detail = {**detail, "status": "error", "error": str(e)}
         return detail
-
-    async def import_toggl(self) -> dict:
-        """Toggl のアプリで直接測った記録を、共通ホームの時間記録に入れる。失敗しても保守は続ける。"""
-        hub = self.assistant.hub
-        if hub is None or not hub.has_time_db:
-            return {"status": "skipped", "reason": "no_hub"}
-        toggl = timelog.load_toggl()
-        if toggl is None:
-            return {"status": "skipped", "reason": "no_toggl"}
-        until = date.today()
-        since = until - timedelta(days=timelog.IMPORT_DAYS - 1)
-        # Slack で測った分（Toggl にも送ってある）。SQLite は別スレッドから触れないので、先に読む
-        rows = self.store.finished_time_entries(
-            datetime.combine(since, dtime(0, 0)).timestamp() - 86400, time.time() + 86400)
-        own = [(r["started_at"], r["ended_at"] - r["started_at"]) for r in rows]
-        try:
-            return await asyncio.to_thread(timelog.import_toggl, toggl, hub, own, since, until)
-        except Exception as e:
-            log.exception("Toggl の記録を時間記録に取り込めませんでした")
-            return {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
     async def _warn_unsaved(self, agent: dict) -> None:
         """Kei Agent 側（状態の書き出しなど）が保存できていないときに知らせる。"""

@@ -116,7 +116,8 @@ async def test_a_user_module_runs_its_schedule_in_order_and_adds_morning_notes(e
     await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> 牛乳を買う"})
     await settle(assistant)
 
-    assert task_names(assistant.config) == ("night", "literature", "reading", "tidy", "daily", "review", "maintenance")
+    assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily", "review",
+                                           "maintenance")
     assert await scheduler.run_task("tidy", "2026-09-27") == {"status": "done", "count": 1}
     assert "メモ: 1件" in scheduler.morning_notes(datetime(2026, 9, 27, 8, 0))
     assert not any(note.startswith("メモ") for note in scheduler.morning_notes(datetime(2026, 9, 28, 8, 0)))

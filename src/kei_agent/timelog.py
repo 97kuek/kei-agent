@@ -1,8 +1,8 @@
-"""Toggl と、時間の数え方。
+"""Toggl の API と、Kei Agent の稼働時間の数え方。
 
-人の時間は Slack の時間記録カードか Toggl（2.0）で測り、共通 Notion ホームの「時間記録」に1件ずつ入れる。
-週ごとの合計は Notion のグラフで見る。Kei Agent の稼働時間は `runs` テーブルから数える（手元の SQLite）。
-Toggl のアプリで直接測った記録は、毎晩の保守で「時間記録」に取り込む（`import_toggl`）。
+人の時間は、時間記録のモジュール（modules/time/）が Slack で測り、Toggl（2.0）と共通 Notion ホームの「時間記録」に
+1件ずつ入れる（Toggl のアプリで直接測った記録の取り込みも、そのモジュールの定期処理）。Toggl の API は大学の
+モジュールの実績の集計も使うので、ここに置いて窓口から渡す。Kei Agent の稼働時間は `runs` テーブルから数える（手元の SQLite）。
 
 Toggl の鍵（`toggl_sk_...`）は環境変数 `TOGGL_API_TOKEN` から、宛先の組織とワークスペースの ID は
 `TOGGL_ORGANIZATION_ID` と `TOGGL_WORKSPACE_ID` から読む。どれかがなければ Toggl には送らず、取り込みもしない。
@@ -29,14 +29,6 @@ TOGGL_API = "https://focus.toggl.com/api"
 PER_PAGE = 100
 # ページ送りが止まらなかったときの上限。1週間分でここまで行くことはない
 MAX_PAGES = 50
-# Toggl のプロジェクト名の先頭に付ける印。ここに挙げた領域だけを数え、印のないもの
-# （アルバイト、個人開発）は捨てる。科目やテーマが増えても、このコードは変えなくてよい
-DOMAINS = ("研究", "大学", "仕事")
-DOMAIN_SEP = "/"
-# Toggl のアプリで直接測った記録を、何日さかのぼって取り込むか（保守が何晩か止まっても埋まるように）
-IMPORT_DAYS = 7
-# Slack から送った記録と同じとみなす、開始と長さのずれ（秒）
-SAME_ENTRY_SECONDS = 60
 
 
 class TogglError(RuntimeError):
@@ -54,14 +46,6 @@ def week_start(day: date) -> date:
 
 def _day(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).date().isoformat()
-
-
-def split_project(name: str) -> tuple[str, str] | None:
-    """Toggl のプロジェクト名を（領域, 名前）に分ける。印が無ければ None（数えない）。"""
-    domain, sep, rest = (name or "").partition(DOMAIN_SEP)
-    if not sep or domain.strip() not in DOMAINS or not rest.strip():
-        return None
-    return domain.strip(), rest.strip()
 
 
 def assistant_seconds(store: Store, since: float, until: float) -> dict[tuple[str, str], float]:
@@ -186,39 +170,3 @@ def load_toggl(env: dict[str, str] | None = None) -> Toggl | None:
     except (KeyError, ValueError):
         log.warning("TOGGL_ORGANIZATION_ID と TOGGL_WORKSPACE_ID が数字で入っていないので、Toggl には送らない")
         return None
-
-
-def import_toggl(toggl: Toggl, hub, own: list[tuple[float, float]], since: date, until: date) -> dict:
-    """Toggl で直接測った記録を、共通ホームの「時間記録」に記録 ID「toggl:<id>」で入れる。
-
-    own は Slack で測った記録の（開始の時刻, 秒数）。開始と長さがどちらも SAME_ENTRY_SECONDS 以内で
-    重なる Toggl の記録は、Slack から送った同じものなので飛ばす。入れ済みの ID、計測中、休憩、
-    消した記録、印のないプロジェクトも飛ばす。
-    """
-    # Notion の日付の絞り込みは時差の分ずれることがあるので、1日広く取る
-    known = hub.time_ids_since(since - timedelta(days=1))
-    counts = {"imported": 0, "own": 0, "known": 0, "unmarked": 0}
-    for e in toggl.entries(since, until):
-        duration, start = e.get("duration"), e.get("start")
-        if (e.get("id") is None or not start or not isinstance(duration, int | float) or duration <= 0
-                or e.get("type") == "break" or e.get("deleted_at")):
-            continue
-        project = str((e.get("project") or {}).get("name") or "")
-        found = split_project(project)
-        if found is None:
-            counts["unmarked"] += 1
-            continue
-        started = datetime.fromisoformat(str(start).replace("Z", "+00:00")).astimezone()
-        if any(abs(started.timestamp() - at) <= SAME_ENTRY_SECONDS
-               and abs(duration - seconds) <= SAME_ENTRY_SECONDS for at, seconds in own):
-            counts["own"] += 1
-            continue
-        entry_id = f"toggl:{e['id']}"
-        if entry_id in known:
-            counts["known"] += 1
-            continue
-        description = str(e.get("description") or "").strip()
-        hub.record_time(entry_id, found[0], found[1], started.isoformat(), max(1, round(duration / 60)),
-                        "" if description == project.strip() else description, "", "Toggl")
-        counts["imported"] += 1
-    return {"status": "done", **counts}

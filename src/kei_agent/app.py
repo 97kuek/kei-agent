@@ -123,30 +123,6 @@ async def serve() -> None:
     for spec in modules.enabled(config.modules):
         for command in spec.slash_commands:
             app.command(f"/{command}")(_slash(assistant, command))
-    app.action(re.compile(r"^kei_agent_time_(start|stop)$"))(acked(assistant.on_time_action))
-    app.action(re.compile(r"^kei_agent_time_(memo|retry)$"))(acked(assistant.on_time_action))
-
-    @app.command("/toggl")
-    async def toggl_command(ack, body):
-        # ack の文は本人にだけ見える。Toggl や Notion への送信は、on_time_command が裏に回す
-        try:
-            text = await assistant.on_time_command(body)
-        except Exception:
-            log.exception("/toggl を処理できませんでした")
-            text = "⚠️ 時間記録を切り替えられなかったよ。もう一度試してね。"
-        await ack(text)
-
-    @app.view(re.compile(r"^kei_agent_time_(memo|course)_submit$"))
-    async def time_card_view(ack, body):
-        try:
-            errors = await assistant.on_time_view(body)
-        except Exception:
-            log.exception("時間記録の入力を処理できませんでした")
-            errors = {"memo": "保存できませんでした。もう一度試してね"}
-        if errors:
-            await ack(response_action="errors", errors=errors)
-        else:
-            await ack()
 
     @app.view(theme_invite.SUBMIT_CALLBACK)
     async def theme_place(ack, body):

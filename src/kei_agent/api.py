@@ -71,9 +71,9 @@ log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "Toggl",
            "TogglAmbiguousWrite", "TogglError", "checked_text", "day_label", "due_clock", "due_day", "escape",
-           "failure_text", "load_toggl", "parse_time", "selected_values", "weekday"]
+           "failure_text", "load_toggl", "parse_time", "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
-MODULE_PREFIX = "kei_agent_module:"
+MODULE_PREFIX = modules.ACTION_PREFIX
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
 
@@ -106,6 +106,11 @@ def due_day(at: datetime) -> date:
 def due_clock(at: datetime) -> str:
     """締切の時刻の書き方（0:00 ちょうどは前の日の 24:00）。"""
     return deadline.clock(at)
+
+
+def theme_name(channel_name: str) -> str:
+    """チャンネルの Slack での名前（`10_amr-query`）から、テーマの名前（並び順の番号を外した `amr-query`）。"""
+    return themes.theme_name(channel_name)
 
 
 def selected_values(action: dict) -> set[str]:
@@ -217,11 +222,11 @@ class Core:
 
     def action_id(self, name: str) -> str:
         """このモジュールの投稿に置くボタンなどの action_id（押されると on_action(name, body)）。"""
-        return f"{MODULE_PREFIX}{self.name}:{name}"
+        return modules.action_id(self.name, name)
 
     def view_id(self, name: str) -> str:
         """このモジュールの入力の画面の callback_id（送られると on_view(name, body)）。"""
-        return f"{MODULE_PREFIX}{self.name}:{name}"
+        return modules.action_id(self.name, name)
 
     def spawn(self, coro) -> None:
         """裏で動かす（Slack に3秒以内に返したあとに、Toggl や Notion に送るときなど）。落ちたらログに残る。"""

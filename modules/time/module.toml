@@ -1,0 +1,27 @@
+# 時間記録のモジュール（docs/extensibility.md）。Slack の /toggl と固定したカードで人の時間を測り、Toggl と共通ホームに送る
+api = 1
+name = "time"
+label = "時間記録"
+description = "Slack の /toggl と時間記録カードで時間を測り、Toggl と共通ホームの「時間記録」に送る。Toggl で直接測った記録も取り込む"
+
+[depends]
+# あれば使う: 大学（科目を選んで測るときに、今学期の履修科目を聞く）
+optional = ["course"]
+
+# Slack のスラッシュコマンド（slack/manifest.yaml にも同じ名前を書く）
+[slash_commands]
+toggl = "時間の計測を始める・止める（引数なしで切り替え、start / stop）"
+
+# 定期処理（設定の [schedule] と App Home で時刻を変えられる。空文字で止める）
+[schedules.toggl_import]
+label = "Toggl の取り込み"
+short = "Toggl"
+default = "22:00"
+
+# 設定（config.toml の [time] で変えられる）
+[settings]
+# 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域）。領域は research（研究）・course（大学）・work（仕事）で、
+# 共通ホームの「時間記録」の領域と、Toggl のプロジェクト名の頭（研究 / テーマ名）になる
+prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
+# 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
+pick_course = ["course"]

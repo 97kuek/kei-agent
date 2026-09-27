@@ -1,6 +1,7 @@
 """Daily と Retro & Planning の材料（digest）を作る。材料はファイルにせず、そのままプロンプトに入れる。
 
-モデルはこれと、ここに書いたスレッドのログを読んで書く。前日の振り返りと今週の時間は共通 Notion ホームから読む。
+モデルはこれと、ここに書いたスレッドのログを読んで書く。前日の振り返りは共通 Notion ホームから読む。
+モジュールの材料（時間記録のモジュールなら今週の人の時間）は、class Module の material が足す。
 """
 
 from __future__ import annotations
@@ -101,8 +102,8 @@ class DigestBuilder:
         lines += self._night(since)
         lines += self._stalled(now, active_channels)
         lines += self._waiting(active_channels)
-        lines += await self._time(now)
         lines += await self.assistant.module_material(now)
+        lines += self._agent_time(now)
         if domains:
             lines += await self._agenda(now)
         # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
@@ -187,32 +188,12 @@ class DigestBuilder:
         lines += [f"- #{r['channel_name']}（{_ts(r['awaiting_since'])} から）" for r in rows]
         return lines if rows else lines + ["- なし"]
 
-    async def _time(self, now: float) -> list[str]:
-        """今週の時間。人は共通ホームの「時間記録」から、Kei Agent の稼働は runs から数える。"""
-        today = datetime.fromtimestamp(now).date()
-        monday = timelog.week_start(today)
-        lines = ["", "## 時間（今週）", ""]
-        hub = self.assistant.hub
-        if hub is None:
-            lines.append("- 人: 共通 Notion ホームが使えないので分からない")
-        else:
-            try:
-                minutes = await asyncio.to_thread(hub.time_minutes_by_domain, monday)
-            except NotionError as e:
-                lines.append(f"- 人: 時間記録を読めなかった（{e}）")
-            else:
-                order = [*timelog.DOMAINS, *sorted(set(minutes) - set(timelog.DOMAINS))]
-                parts = "、".join(f"{d} {minutes[d] / 60:.1f} 時間" for d in order if minutes.get(d))
-                total = sum(minutes.values())
-                lines.append(f"- 人: 合計 {total / 60:.1f} 時間（{parts}）" if total else
-                             "- 人: 今週はまだ記録がない（Slack の /toggl か時間記録カードで測る。"
-                             f"Toggl で直接測るならプロジェクト名の先頭に `{'/`・`'.join(timelog.DOMAINS)}/`）")
+    def _agent_time(self, now: float) -> list[str]:
+        """今週の Kei Agent の稼働（runs から数える）。人の時間は、時間記録のモジュールが材料に足す。"""
+        monday = timelog.week_start(datetime.fromtimestamp(now).date())
         since = datetime.combine(monday, datetime.min.time()).timestamp()
         agent = sum(timelog.assistant_seconds(self.store, since, now).values())
-        lines.append(f"- Kei Agent の稼働: {agent / 3600:.1f} 時間")
-        if hub is not None and hub.time_url():
-            lines.append(f"- 時間記録（週ごとのグラフ）: {hub.time_url()}")
-        return lines
+        return ["", "## Kei Agent の稼働（今週）", "", f"- 合計 {agent / 3600:.1f} 時間"]
 
     async def _yesterday_review(self, now: float) -> list[str]:
         """前日のレトプラ（貼られた結論を含む）。共通ホームの日別記録から読む。"""

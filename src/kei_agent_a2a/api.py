@@ -17,7 +17,9 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
 - `DESCRIPTION`（任意）… 名刺の説明。無ければ module.toml の description
 
 手で動かすコマンド（setup など）は commands.py に `COMMANDS = {"名前": main(argv)}` を置く（`kei-agent-module
-<名前> <コマンド>`）。Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
+<名前> <コマンド>`）。コマンドからモジュールの記録を読み書きするのは `records(config, 名前)`、本体の代わりにボタンつきの
+投稿を置くなら、ボタンの名前は `action_id(名前, ボタン)`（押されると本体側の on_action）。
+Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
 モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
 本体の問い合わせ口に研究・大学・仕事の中身を聞くのは `ask_orchestrator`、Slack の外から依頼を置くのは `put_request`。
 
@@ -56,6 +58,7 @@ from kei_agent.notion import (
 )
 from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
 from kei_agent.records import Records
+from kei_agent.store import Store
 from kei_agent.themes import Workspace
 from kei_agent.timelog import Toggl, TogglError, load_toggl
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
@@ -65,11 +68,11 @@ API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV", "LIST_JOBS", "MAIN_CLIENT",
            "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
            "NotionError", "OrchestratorError", "Pueue", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl",
-           "TogglError", "Workspace", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
+           "TogglError", "Workspace", "action_id", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
            "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
-           "put_request", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings", "theme_folders",
-           "weekday", "workspace"]
+           "put_request", "records", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings",
+           "theme_folders", "weekday", "workspace"]
 # このプロセスが起動したときの版（commit）。常駐のプロセス（[process] kind = "service"）は /health で返す
 RUNNING_VERSION = version.RUNNING
 # 本文の JSON の days で受け付ける上限（日）
@@ -138,6 +141,19 @@ def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
 def settings(config: Config, module: str) -> dict:
     """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
     return config.settings(module)
+
+
+def records(config: Config, module: str) -> Records:
+    """そのモジュールだけの記録（本体側の core.records と同じもの）。担当プロセスの外（手で動かすコマンド）から使う。"""
+    return Records(Store(config.db_path), module)
+
+
+def action_id(module: str, name: str) -> str:
+    """モジュールの投稿に置くボタンの action_id（本体側の core.action_id と同じ。押されると本体側の on_action）。
+
+    手で動かすコマンドが、本体の代わりにボタンつきの投稿を置くときに使う（時間記録のカードなど）。
+    """
+    return modules.action_id(module, name)
 
 
 def theme_folders(config: Config) -> dict[str, Path]:

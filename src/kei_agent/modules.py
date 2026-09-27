@@ -31,6 +31,8 @@ AGENT_FILE = "agent.py"
 SERVICE_FILE = "service.py"
 # 手で動かすコマンド（setup など）。COMMANDS = {"名前": main(argv)} を置く
 COMMANDS_FILE = "commands.py"
+# モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
+ACTION_PREFIX = "kei_agent_module:"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
 PACKAGE = "kei_agent_modules"
 BUILTIN_DIR = Path(__file__).resolve().parents[2] / "modules"
@@ -395,6 +397,11 @@ def enabled(names) -> list[ModuleSpec]:
     """設定の modules の順に、知っているモジュールの定義を並べる（知らない名前は、設定を読むときに断ってある）。"""
     specs = known()
     return [specs[name] for name in names if name in specs]
+
+
+def action_id(module: str, name: str) -> str:
+    """モジュールの投稿のボタンや入力の画面の名前（本体が、押されたらそのモジュールの on_action / on_view に渡す）。"""
+    return f"{ACTION_PREFIX}{module}:{name}"
 
 
 def schedule_owner(names, schedule: str) -> ModuleSpec | None:

@@ -937,7 +937,7 @@ def test_the_voice_layer_gets_a_week_not_just_today():
 # 材料の中身（digest.py）
 
 async def test_digest_reads_yesterday_review_and_week_time_from_the_hub(env, config, store):
-    """前日の振り返りは日別記録から、今週の時間は時間記録と runs から読む（手元のファイルは見ない）。"""
+    """前日の振り返りは日別記録から、今週の時間は時間記録（時間記録のモジュール）と runs から読む（手元のファイルは見ない）。"""
     from kei_agent.digest import DigestBuilder
 
     _, assistant, *_ = env
@@ -959,10 +959,11 @@ async def test_digest_reads_yesterday_review_and_week_time_from_the_hub(env, con
     review = text.split("## 前日の振り返り")[1].split("\n## ")[0]
     assert "条件Bを回した" in review and "順番が効く" in review
     assert "前日の行の全文" not in text
+    # 人の時間は時間記録のモジュールが足し、Kei Agent の稼働は本体が数える
     week = text.split("## 時間（今週）")[1].split("\n## ")[0]
     assert "合計 2.0 時間（研究 1.5 時間、大学 0.5 時間）" in week
-    assert "Kei Agent の稼働: 0.5 時間" in week
     assert "https://www.notion.so/timedb" in week
+    assert "- 合計 0.5 時間" in text.split("## Kei Agent の稼働（今週）")[1].split("\n## ")[0]
 
 
 async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
@@ -984,62 +985,6 @@ async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
     assert len(text) <= digest.MAX_DIGEST_CHARS + 200
     assert "今日の締切の Task" in text
     assert digest.TRUNCATED in text
-
-
-async def test_maintenance_imports_toggl_only_entries(env, store, monkeypatch):
-    """Toggl のアプリで直接測った分は、毎晩の保守で時間記録に入れる。Slack から送った分は重ねない。"""
-    from kei_agent import maintenance, timelog
-
-    scheduler, assistant, *_ = env
-    started = time.time() - 3600
-    entry = store.start_time_entry("e1", "UME", "research", "C1", "vlm", "", "", "研究 / vlm", started, "done")[0]
-    store.finish_time_entry("UME", started + 1500)
-
-    class Toggl:
-        def entries(self, since, until):
-            iso = datetime.fromtimestamp(entry["started_at"]).astimezone().isoformat()
-            return [{"id": 1, "start": iso, "duration": 1500, "project": {"name": "研究 / vlm"}},
-                    {"id": 2, "start": "2026-09-17T10:00:00+09:00", "duration": 600,
-                     "project": {"name": "仕事/定例"}}]
-
-    monkeypatch.setattr(timelog, "load_toggl", lambda: Toggl())
-    monkeypatch.setattr(maintenance, "cleanup", lambda *a: {})
-    object.__setattr__(scheduler.config.maintenance, "backup", False)
-
-    detail = await scheduler.run_maintenance("2026-09-18")
-
-    assert assistant.hub.recorded == [("toggl:2", "仕事", "定例", 10, "Toggl")]
-    assert detail["toggl"]["imported"] == 1 and detail["toggl"]["own"] == 1
-
-
-async def test_toggl_import_failure_does_not_stop_maintenance(env, monkeypatch):
-    from kei_agent import maintenance, timelog
-
-    scheduler, assistant, *_ = env
-
-    class Broken:
-        def entries(self, since, until):
-            raise timelog.TogglError("GET /time-entries: 503")
-
-    monkeypatch.setattr(timelog, "load_toggl", lambda: Broken())
-    monkeypatch.setattr(maintenance, "cleanup", lambda *a: {})
-    object.__setattr__(scheduler.config.maintenance, "backup", False)
-
-    detail = await scheduler.run_maintenance("2026-09-18")
-
-    assert detail["status"] == "done"
-    assert detail["toggl"]["status"] == "error" and "503" in detail["toggl"]["error"]
-
-
-async def test_toggl_import_waits_for_the_time_db(env, monkeypatch):
-    from kei_agent import timelog
-
-    scheduler, assistant, *_ = env
-    monkeypatch.setattr(timelog, "load_toggl", lambda: pytest.fail("時間記録が無いのに Toggl を読んだ"))
-    assistant.hub.has_time_db = False
-    assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}
-    assistant.hub = None
-    assert await scheduler.import_toggl() == {"status": "skipped", "reason": "no_hub"}
 
 
 # Moodle の取り込みの知らせと、レトプラの締切

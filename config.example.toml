@@ -28,7 +28,7 @@ handoff_after_turns = 8
 
 # 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
 # ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）
-modules = ["course", "knowledge", "notion", "research", "voice", "work"]
+modules = ["course", "knowledge", "notion", "research", "time", "voice", "work"]
 
 # agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
 # model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
@@ -111,6 +111,13 @@ school = ""
 # "前期" = [4, 5, 6, 7, 8, 9]
 # "後期" = [10, 11, 12, 1, 2, 3]
 # "通年" = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]
+
+[time]
+# 時間記録のモジュールの設定（書けるものは modules/time/module.toml の [settings]）
+# 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域。領域は research・course・work）
+# prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
+# 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
+# pick_course = ["course"]
 
 [channels]
 # 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ

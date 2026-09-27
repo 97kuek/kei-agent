@@ -1,51 +1,47 @@
-"""Slack の固定時間記録カード。"""
+"""Slack の時間記録カードと、その画面（メモ・科目選び）。ボタンの名前は core.action_id / view_id で作る。"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 
-from kei_agent.time_tracking import TimeEntry
+from .entries import Entry
 
-START = "kei_agent_time_start"
-STOP = "kei_agent_time_stop"
-MEMO = "kei_agent_time_memo"
-RETRY = "kei_agent_time_retry"
-MEMO_CALLBACK = "kei_agent_time_memo_submit"
-COURSE_CALLBACK = "kei_agent_time_course_submit"
+START, STOP, MEMO, RETRY = "start", "stop", "memo", "retry"
+MEMO_VIEW, COURSE_VIEW = "memo", "course"
 
 
-def blocks(entry: TimeEntry | None = None) -> list[dict]:
+def blocks(ids: Callable[[str], str], entry: Entry | None = None) -> list[dict]:
     if entry is None:
-        text, action, style, value = "⏱️ 時間を記録する", START, "primary", "start"
-        label = "開始"
+        text, action, style, value, label = "⏱️ 時間を記録する", START, "primary", "start", "開始"
     else:
         started = datetime.fromtimestamp(entry.started_at).strftime("%H:%M")
         text, action, style, value = f"⏱️ 計測中 · {entry.description}\n開始: {started}", STOP, "danger", entry.id
         label = "停止"
-    elements = [{"type": "button", "action_id": action, "style": style,
+    elements = [{"type": "button", "action_id": ids(action), "style": style,
                  "text": {"type": "plain_text", "text": label}, "value": value}]
     if entry is not None:
-        elements.append({"type": "button", "action_id": MEMO,
+        elements.append({"type": "button", "action_id": ids(MEMO),
                          "text": {"type": "plain_text", "text": "メモを追加"}, "value": entry.id})
     return [{"type": "section", "text": {"type": "mrkdwn", "text": text}},
             {"type": "actions", "elements": elements}]
 
 
-def fallback_text(entry: TimeEntry | None = None) -> str:
+def fallback_text(entry: Entry | None = None) -> str:
     return "計測中" if entry is not None else "時間を記録する"
 
 
-def retry_blocks(entry: TimeEntry) -> list[dict]:
+def retry_blocks(ids: Callable[[str], str], entry: Entry) -> list[dict]:
     return [{"type": "section", "text": {"type": "mrkdwn",
              "text": "⚠️ Toggl への送信結果を確認できません。Toggl 側を確認してから必要なときだけ再送してね。"}},
-            {"type": "actions", "elements": [{"type": "button", "action_id": RETRY,
+            {"type": "actions", "elements": [{"type": "button", "action_id": ids(RETRY),
              "text": {"type": "plain_text", "text": "Togglへ再送"}, "value": entry.id}]}]
 
 
-def memo_view(entry: TimeEntry) -> dict:
+def memo_view(views: Callable[[str], str], entry: Entry) -> dict:
     return {
-        "type": "modal", "callback_id": MEMO_CALLBACK, "private_metadata": entry.id,
+        "type": "modal", "callback_id": views(MEMO_VIEW), "private_metadata": entry.id,
         "title": {"type": "plain_text", "text": "メモを追加"},
         "submit": {"type": "plain_text", "text": "保存"},
         "close": {"type": "plain_text", "text": "閉じる"},
@@ -56,8 +52,8 @@ def memo_view(entry: TimeEntry) -> dict:
     }
 
 
-def course_view(channel_id: str, courses: list[dict]) -> dict:
-    """今学期の科目だけを選ばせ、選択後に時間計測を始める。"""
+def course_view(views: Callable[[str], str], channel: str, courses: list[dict]) -> dict:
+    """今学期の科目だけを選ばせ、選んだら計測を始める。"""
     options = []
     for item in courses[:100]:
         name = str(item.get("subject") or item.get("name") or "科目名未設定").strip()
@@ -66,7 +62,7 @@ def course_view(channel_id: str, courses: list[dict]) -> dict:
             options.append({"text": {"type": "plain_text", "text": name[:75]},
                             "value": json.dumps({"id": page_id, "name": name}, ensure_ascii=False)})
     return {
-        "type": "modal", "callback_id": COURSE_CALLBACK, "private_metadata": channel_id,
+        "type": "modal", "callback_id": views(COURSE_VIEW), "private_metadata": channel,
         "title": {"type": "plain_text", "text": "科目を選ぶ"},
         "submit": {"type": "plain_text", "text": "開始"},
         "close": {"type": "plain_text", "text": "閉じる"},
@@ -76,10 +72,11 @@ def course_view(channel_id: str, courses: list[dict]) -> dict:
     }
 
 
-def course_loading_view(channel_id: str, text: str = "今学期の履修科目を読み込んでいるよ…") -> dict:
+def course_loading_view(views: Callable[[str], str], channel: str,
+                        text: str = "今学期の履修科目を読み込んでいるよ…") -> dict:
     """科目の一覧が届くまで出しておく画面。trigger_id は3秒で切れるので、先に開いて後から差し替える。"""
     return {
-        "type": "modal", "callback_id": COURSE_CALLBACK, "private_metadata": channel_id,
+        "type": "modal", "callback_id": views(COURSE_VIEW), "private_metadata": channel,
         "title": {"type": "plain_text", "text": "科目を選ぶ"},
         "close": {"type": "plain_text", "text": "閉じる"},
         "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": text}}],
