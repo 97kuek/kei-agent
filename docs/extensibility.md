@@ -80,6 +80,8 @@ default_use_case = "knowledge_answer"   # 自由な質問の用途（classify �
 offline = true                  # Web を使わない回（外の文を材料として渡す回）
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
+# manual = true                 # 依頼の頭に [[knowledge-pick]] と書いたときだけ使う用途（分類器は選ばない）。
+#                               # いちばん強いモデル（claude-fable-5・gpt-6-astra）は、この用途でしか書けない
 
 [process]                       # 常駐のプロセス（持つなら）
 port = 8792                     # 127.0.0.1 のこの番地。設定の [a2a.agents] に書かなければ、ここを使う
@@ -88,6 +90,7 @@ port = 8792                     # 127.0.0.1 のこの番地。設定の [a2a.age
 
 [channels]                      # チャンネルの種類 = 既定の名前（番号を外した名前。設定の [channels] で変えられる）
 knowledge = ["knowledge"]
+# theme = ["*"]                 # ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ。受け持てるのは1つのモジュールだけ
 
 [schedules.reading]             # 定期処理。時刻は設定の [schedule] と App Home で変えられる
 label = "読みもの"
@@ -165,7 +168,7 @@ class Module:
 窓口 `core` でできること（`src/kei_agent/api.py`）:
 
 - Slack: `post`（ts を返す）、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
-- 担当: `ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`tell_agent(skill, 材料)`（AI を動かさない知らせだけを渡す。届かなくても困りごととして知らせない）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
+- 担当: `work(req)`（研究テーマのチャンネルで、そのチャンネルの作業場を使って担当と会話して答える。添付・できたファイル・接続先の許可・引き継ぎ・ジョブは研究と同じ流れ）、`ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`tell_agent(skill, 材料)`（AI を動かさない知らせだけを渡す。届かなくても困りごととして知らせない）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
 - 設定: `settings`（module.toml の `[settings]` の既定に、config.toml の `[<名前>]` を重ねた写し）
 - 予定カレンダー: `sync_calendar(出典, 予定, day=, days=, complete=, expected_count=)`（出典と ID で照合し、手入力の行には触らない。見えなくなった行は消さずに「要確認」）
@@ -198,6 +201,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 窓口 `kei_agent_a2a.api` でできること（`src/kei_agent_a2a/api.py`）:
 
 - `SkillExecutor`（`handle` を書く。`done` / `fail` / `answer`。`self.records` はこのモジュールだけの記録で、本体側の `core.records` と同じもの）、`AgentSkill`、`ASK`、`progress(updater, {"activity": …})`（経過を本体に流す）
+- 研究テーマを受け持つ担当（`core.work`）には、`ask` の依頼に `channel_name`（作業場）と `allowed_domains`（許可済みの接続先）が添えて届く。作業場は `SkillExecutor.workspace(ask)` を書き換えて決める
 - `async background(executor)`（agent.py に書けば）: 担当と同じプロセスで動かし続ける仕事（声ならマイクの会話）。起動のときに始まり、止めるときに止まる
 - `ask_orchestrator(config, 担当, 質問, theme=…)`: 本体の問い合わせ口に、研究・大学・仕事の中身を聞く（担当を呼べるのは本体だけ。本体が読むだけで聞き、Slack と同じ出力の確認を通した答えを返す。聞けなければ `OrchestratorError`）。`put_request(config, テーマ, 文, note=…)`: Slack の外から依頼を置く（本体が拾ってテーマのチャンネルにスレッドを立てる）
 - `run_ai(config, store, 担当, 用途, 文, provider=…, prompt_file=…, profile=…)`: その担当の用途（`[use_cases]`）で AI を1回動かし、答えの本文を返す。作業場は読むだけ。上限に当たったら `AIError`（`limit_reset_at` つき）
@@ -288,7 +292,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①は済み（2026-09-27）、②は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所。①は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 

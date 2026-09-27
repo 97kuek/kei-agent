@@ -44,7 +44,8 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ## 3. Slack の受け口（本体）
 
 - Socket Mode。指示できるのは `KEI_AGENT_ALLOWED_USER_ID` の1人だけ
-- チャンネル名は先頭の番号（`00_` など）を外して `config.toml` の `[channels]` と照合する。`overview` / `improve` / `course` / `work` / `knowledge` に当たらないものは研究テーマ
+- チャンネル名は先頭の番号（`00_` など）を外して `config.toml` の `[channels]` と照合する。`overview` / `improve` / `course` / `work` / `knowledge` に当たらないものは研究テーマ（研究テーマを受け持つモジュール、`[channels]` に `"*"` があれば、そのモジュールが `core.work` で答える。無ければ本体の研究）
+- 依頼の頭に `[[用途の名前]]`（`_` は `-`）と書くと、その担当の用途を指定できる（`[[research-design]]`）。手動指定だけの用途（`manual`）も、この書き方でだけ選べる
 - 返事は `chat.startStream` で流し、経過は `assistant.threads.setStatus` の1行、スレッドの状態は `agents.sessions.setStatus` で出す
 - 違うスレッドは最大2件まで並行（`max_concurrent_runs`）、同じスレッドの中は順番
 - 1スレッド = 1会話。研究・大学・仕事・知識・自己改善のどれも同じ扱いで、provider と指示書・skill の版が一致する session ID だけで再開し、合わないか失われたら Slack の履歴から新しい会話を始める（`Assistant._converse`）。Kei Agent の投稿（朝の読みもの、論文の新着、朝の一覧など）から始まったスレッドへの最初の返信にも、元の投稿を渡す（「2番を詳しく」に答えるため）
