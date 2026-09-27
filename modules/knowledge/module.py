@@ -8,7 +8,7 @@
 - 知識のチャンネルと、論文の新着のスレッドの質問 … 担当に聞いて答える
 
 担当（同じフォルダの agent.py）は外の記事を読むので、Slack の鍵も Notion も持たない。材料は本体が読んで渡し、
-返ってきた記事・論文を本体が出す（docs/architecture.md の「知識」）。
+返ってきた記事・論文を本体が出す（docs/agents/knowledge-agent.md）。
 """
 
 from __future__ import annotations

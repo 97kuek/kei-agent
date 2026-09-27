@@ -1,4 +1,4 @@
-"""声で話す相手（OpenAI Realtime API）。音をそのままやりとりする（docs/architecture.md の「声のレイヤ」）。
+"""声で話す相手（OpenAI Realtime API）。音をそのままやりとりする（docs/architecture.md の「声」）。
 
 **`gpt-live-1` ではなく Realtime API を使う。** 名前は似ているが別物で、こちらが用途に合う。
 

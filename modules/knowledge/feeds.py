@@ -1,7 +1,7 @@
 """RSS・Atom・arXiv と、記事の本文を読む（AI は使わない）。
 
 どれも外から来た文なので、読む大きさと待つ時間に上限を置き、http(s) だけを読む。
-ここで読んだ文は、Web を使えない AI の回にだけ渡す（docs/architecture.md の「知識」）。
+ここで読んだ文は、Web を使えない AI の回にだけ渡す（docs/agents/knowledge-agent.md）。
 """
 
 from __future__ import annotations

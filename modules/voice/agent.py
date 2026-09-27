@@ -3,7 +3,7 @@
 本体から来た出来事を受け取って喋る。渡ってくるのは「何が起きたか」だけで、言い方と顔は `events.py` が決め、
 **喋るのは Realtime のセッション**（`session.py` → `live.py`）に頼む。
 
-本体は返事を待たない（投げっぱなし。docs/architecture.md の「声のレイヤ」）ので、ここは**すぐ返す**。
+本体は返事を待たない（投げっぱなし。docs/architecture.md の「声」）ので、ここは**すぐ返す**。
 喋り終わるまで返さないと、Slack の処理が机の上のロボットの再生時間に引きずられる。
 
 口（A2A）と耳（マイク）を同じプロセスで持つ（background）。**マイクは既定では開けない**。開け閉めは
@@ -79,7 +79,7 @@ class Executor(SkillExecutor):
         await self.done(updater, "受け取ったよ", {"spoke": found.speaks, "face": found.face})
 
     def _hold(self, event: dict, now: datetime | None = None) -> None:
-        """速い道で使えるように、押されてきたものを手元に置く（docs/architecture.md の「声のレイヤ」）。"""
+        """速い道で使えるように、押されてきたものを手元に置く（docs/architecture.md の「声」）。"""
         current(self.held, now)
         kind = str(event.get("kind") or "")
         if kind == "schedule":
@@ -93,7 +93,7 @@ class Executor(SkillExecutor):
             self.held["limited"] = True
             self.held["limited_until"] = str(event.get("reset_at") or "")
         elif kind == "listen" and self.session is not None:
-            # 常に録らない。Slack から入れたときだけ開ける（docs/architecture.md の「声のレイヤ」）
+            # 常に録らない。Slack から入れたときだけ開ける（docs/architecture.md の「声」）
             self.session.set_listening(bool(event.get("on")))
 
     def _react(self, found: events.Reaction) -> None:

@@ -1,4 +1,4 @@
-"""聞いて、答える。声のレイヤの本筋（docs/architecture.md の「声のレイヤ」）。
+"""聞いて、答える。声のレイヤの本筋（docs/architecture.md の「声」）。
 
 **考えるのは全部 Realtime API**（`live.py`）。ここがするのは、繋ぎ目の世話だけ。
 
@@ -10,7 +10,7 @@
 
 前は自分で文字起こしをして、言葉で道を振り分けて、音声合成していた。**全部やめた**。
 言葉で振り分けていたせいで、「明日の予定」にも「今週の予定」にも**今日の予定を答えていた**
-（docs/architecture.md の「声のレイヤ」）。いまは依頼者のことを**道具として渡す**（`tools.py`）ので、
+（docs/architecture.md の「声」）。いまは依頼者のことを**道具として渡す**（`tools.py`）ので、
 いつのことかはモデルが引数で渡してくる。
 """
 
@@ -61,7 +61,7 @@ class VoiceSession:
             log.info("マイクを閉じました")
 
     async def run(self, listening: bool = False) -> None:
-        """立ち上げ。**既定ではマイクを開けない**（docs/architecture.md の「声のレイヤ」）。"""
+        """立ち上げ。**既定ではマイクを開けない**（docs/architecture.md の「声」）。"""
         self._notice_worker = asyncio.create_task(self._speak_notices())
         if listening:
             self.set_listening(True)

@@ -1,4 +1,4 @@
-"""学校ごとの違い（docs/extensibility.md の「大学」）。時限の時刻・学期と、成績の取り込み方。
+"""学校ごとの違い（docs/agents/course-agent.md）。時限の時刻・学期と、成績の取り込み方。
 
 時限の時刻と学期は設定（config.toml の [course] の periods・terms）で決まり、書かなければ学校の部品の既定を使う。
 成績の取り込み方は学校の部品が持つ。部品は [course] school で選ぶ。同梱の部品は schools/<名前>.py（早稲田は

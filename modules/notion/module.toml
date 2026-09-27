@@ -1,4 +1,4 @@
-# Notion のモジュール（docs/architecture.md の「Notion ゲートウェイ」「Notion」）。Notion に届く唯一の口
+# Notion のモジュール（docs/architecture.md の「Notion」）。Notion に届く唯一の口
 api = 1
 name = "notion"
 label = "Notion"

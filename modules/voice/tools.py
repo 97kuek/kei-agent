@@ -1,4 +1,4 @@
-"""Realtime API に渡す道具（docs/architecture.md の「声のレイヤ」）。
+"""Realtime API に渡す道具（docs/architecture.md の「声」）。
 
 モデルは依頼者のことを何も知らない。予定・締切・研究テーマは**こちらから道具として渡す**。
 渡さないかぎり、何を聞かれても答えられない。

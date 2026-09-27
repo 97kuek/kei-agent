@@ -1,4 +1,4 @@
-"""声のレイヤ（docs/architecture.md の「声のレイヤ」）。
+"""声のレイヤ（docs/architecture.md の「声」）。
 
 机の上で声で話す。**考えるのは OpenAI Realtime API**（`live.py`）で、依頼者のことは
 道具として渡す（`tools.py`）。音の出し入れだけ手元でやる（`audio.py`）。

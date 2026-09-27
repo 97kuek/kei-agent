@@ -117,7 +117,7 @@ def is_offline(use_case: UseCase | str | None) -> bool:
     """Web を使わない用途か（module.toml の offline = true）。
 
     材料をプロンプトで渡す用途では、外の文（記事・論文の要旨）を読むが、外には出られない回にする
-    （外の文・個人の情報・外への出口の3つを1つの回に揃えない。docs/architecture.md の「知識」）。
+    （外の文・個人の情報・外への出口の3つを1つの回に揃えない。docs/agents/knowledge-agent.md）。
     """
     owner = modules.use_case_owner(str(use_case)) if use_case else None
     return bool(owner and owner.actor and any(u.name == use_case and u.offline for u in owner.actor.use_cases))

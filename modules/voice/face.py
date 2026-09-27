@@ -1,4 +1,4 @@
-"""机の上のロボットの顔（docs/architecture.md の「声のレイヤ」）。
+"""机の上のロボットの顔（docs/architecture.md の「声」）。
 
 **声はもうここを通らない。** Realtime API が音をそのまま返すので、合成した wav を投げる口
 （`POST /play_wav`）は使わない。残っているのは**顔**だけ。

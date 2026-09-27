@@ -20,7 +20,7 @@ from kei_agent.config import config_home
 # 利用者のモジュールの担当プロセスの番地は、ここから空いているものを使う（組み込みは 8786〜8792）
 FIRST_PORT = 8800
 
-MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/modules.md の「module.toml の書き方」）
+MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/modules.md の「module.toml」）
 api = 1
 name = "${name}"
 label = "${label}"
@@ -71,7 +71,7 @@ PROCESS = Template('''
 port = ${port}
 ''')
 
-MODULE_PY = Template('''"""${label}のモジュール（本体側）。kei-agent module new が作った。書き方は docs/modules.md の「module.py の書き方」。
+MODULE_PY = Template('''"""${label}のモジュール（本体側）。kei-agent module new が作った。書き方は docs/modules.md の「module.py」。
 
 コアとのやり取りは窓口 core（kei_agent.api.Core）だけを通す。
 """
@@ -106,7 +106,7 @@ BODIES = {
 ''',
 }
 
-AGENT_PY = Template('''"""${label}の担当プロセス。kei-agent module new が作った。書き方は docs/modules.md の「agent.py の書き方」。
+AGENT_PY = Template('''"""${label}の担当プロセス。kei-agent module new が作った。書き方は docs/modules.md の「agent.py」。
 
 読み込んでよい Kei Agent の部品は、窓口の kei_agent_a2a.api だけ。
 """

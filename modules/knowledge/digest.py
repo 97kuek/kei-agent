@@ -1,4 +1,4 @@
-"""朝の読みものと、テーマごとの論文の新着（docs/architecture.md の「知識」）。
+"""朝の読みものと、テーマごとの論文の新着（docs/agents/knowledge-agent.md）。
 
 集める・絞るのはプログラム（feeds.py）。選ぶ・要約するのは AI で、どちらも Web を使えない回
 （module.toml の offline = true）。外の文は材料としてプロンプトに入れるだけにする。

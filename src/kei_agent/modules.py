@@ -107,7 +107,7 @@ class ModuleError(ValueError):
 @dataclass(frozen=True)
 class UseCaseSpec:
     name: str
-    # Web を使わない回（外の文を材料として渡す回。docs/architecture.md の「知識」）
+    # Web を使わない回（外の文を材料として渡す回。docs/agents/knowledge-agent.md）
     offline: bool
     # provider → (model, effort)。model が使ってよいものかは、コアのモデルの一覧（model_policy）で確かめる
     recipes: dict[str, tuple[str, str]]

@@ -1,4 +1,4 @@
-# 声のモジュール（docs/architecture.md の「声のレイヤ」）。本体やモジュールの出来事を喋って知らせ、マイクで会話する
+# 声のモジュール（docs/architecture.md の「声」）。本体やモジュールの出来事を喋って知らせ、マイクで会話する
 api = 1
 name = "voice"
 label = "声"

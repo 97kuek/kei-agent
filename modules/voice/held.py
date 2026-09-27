@@ -1,6 +1,6 @@
 """本体が押してきたもの（朝の予定、動いている依頼の数、上限）を、手元に置いておく入れ物の世話。
 
-聞かれてから取りに行かず、押されてきたものを道具（tools.py）がすぐ読む（docs/architecture.md の「声のレイヤ」）。
+聞かれてから取りに行かず、押されてきたものを道具（tools.py）がすぐ読む（docs/architecture.md の「声」）。
 """
 
 from __future__ import annotations
