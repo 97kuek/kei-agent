@@ -282,6 +282,15 @@ class Core:
         choice = await router.pick(self._assistant.config, skills, req.text, store=self._assistant.store)
         return choice.skill or ASK, choice.params
 
+    async def work(self, req: Request) -> None:
+        """研究テーマのチャンネル（[channels] に "*" で受け持つもの）で、そのチャンネルの作業場を使って、
+        このモジュールの担当と会話して答える。
+
+        添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。担当のプロセスには
+        ask の依頼に channel_name（作業場）と allowed_domains（許可済みの接続先）が添えて届く。
+        """
+        await self._assistant.work_in_workspace(req, self.name)
+
     async def converse(self, req: Request) -> None:
         """そのスレッドの会話として、このモジュールの担当（[actor] と [process]）に聞いて答える。
 

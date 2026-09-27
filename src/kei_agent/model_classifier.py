@@ -45,7 +45,8 @@ async def classify_research(config: Config, store, prompt: str, *, provider: str
                            "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。", provider=provider)
 
 
-CLASSIFIERS = {"research": classify_research}
+# 本体の担当の分類器（関数の名前。呼ぶときに引くので、試験で差し替えられる）
+CLASSIFIERS = {"research": "classify_research"}
 
 
 async def classify(config: Config, store, actor: str, prompt: str, *,
@@ -53,7 +54,7 @@ async def classify(config: Config, store, actor: str, prompt: str, *,
     """担当の用途を分類する（どの担当も同じ呼び方）。モジュールの実行役は、module.toml に classify
     （見分け方）があれば Web を使う用途の中から選び、無ければ分類器を動かさずに default_use_case にする。"""
     if actor in CLASSIFIERS:
-        return await CLASSIFIERS[actor](config, store, prompt, provider=provider)
+        return await globals()[CLASSIFIERS[actor]](config, store, prompt, provider=provider)
     spec = modules.known().get(actor)
     if spec is None or spec.actor is None:
         raise KeyError(actor)
@@ -66,7 +67,8 @@ async def classify_module(config: Config, store, spec: modules.ModuleSpec, promp
     assert spec.actor is not None
     if not spec.actor.classify:
         return spec.actor.default_use_case
-    cases = [u.name for u in spec.actor.use_cases if not u.offline]
+    # 手動指定だけの用途（manual）は、分類器には選ばせない
+    cases = [u.name for u in spec.actor.use_cases if not u.offline and not u.manual]
     return str(await _classify(config, store, spec.name, prompt, frozenset(cases), spec.actor.default_use_case,
                                ", ".join(cases), spec.actor.classify, provider=provider))
 

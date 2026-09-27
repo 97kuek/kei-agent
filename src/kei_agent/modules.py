@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
+# [channels] に書くと、ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ名前。受け持てるのは1つのモジュールだけ
+ALL_CHANNELS = "*"
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
 SPEC_FILE = "module.toml"
@@ -49,7 +51,7 @@ _CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
 _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 # skill と二の柵のフック（Claude Code の plugin）の置き場所。モジュールのフォルダの中
 PLUGIN_DIR = "plugin"
-_USE_CASE_KEYS = {"offline", *PROVIDERS}
+_USE_CASE_KEYS = {"offline", "manual", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
 _PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
@@ -70,6 +72,8 @@ class UseCaseSpec:
     offline: bool
     # provider → (model, effort)。model が使ってよいものかは、コアのモデルの一覧（model_policy）で確かめる
     recipes: dict[str, tuple[str, str]]
+    # 依頼者が依頼の頭に [[名前]] と書いたときだけ使う用途（分類器は選ばない。いちばん強いモデルなど）
+    manual: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +141,11 @@ class ModuleSpec:
     # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）
     settings: dict[str, object] = field(default_factory=dict)
 
+    @property
+    def catch_all(self) -> bool:
+        """ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つか（[channels] に "*"）。"""
+        return any(names == (ALL_CHANNELS,) for names in self.channels.values())
+
 
 def _check_keys(data: dict, known: set[str], where: str) -> None:
     unknown = sorted(set(data) - known)
@@ -175,7 +184,7 @@ def _use_cases(data: dict, where: str) -> tuple[UseCaseSpec, ...]:
             recipes[provider] = (recipe["model"], str(recipe.get("effort", "")))
         if not recipes:
             raise ModuleError(f"{at}: claude か codex の、少なくとも片方のモデルを書いてください")
-        found.append(UseCaseSpec(name, bool(spec.get("offline", False)), recipes))
+        found.append(UseCaseSpec(name, bool(spec.get("offline", False)), recipes, bool(spec.get("manual", False))))
     return tuple(found)
 
 
@@ -218,9 +227,9 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
             raise ModuleError(f"{at} の {key} は {' / '.join(ACCESS)} のどれかにしてください")
     if not use_cases:
         raise ModuleError(f"{at}: 実行役には、少なくとも1つの [use_cases.<名前>] が要ります")
-    default = str(data.get("default_use_case") or use_cases[0].name)
-    if default not in {u.name for u in use_cases}:
-        raise ModuleError(f"{at} の default_use_case（{default}）が [use_cases] にありません")
+    default = str(data.get("default_use_case") or next((u.name for u in use_cases if not u.manual), ""))
+    if default not in {u.name for u in use_cases if not u.manual}:
+        raise ModuleError(f"{at} の default_use_case（{default}）が、[use_cases] の手動指定でない用途にありません")
     timeout = data.get("timeout_minutes")
     if timeout is not None and (not isinstance(timeout, int) or timeout <= 0):
         raise ModuleError(f"{at} の timeout_minutes は正の整数にしてください")
@@ -233,7 +242,7 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
     if plugin and not (Path(where).parent / PLUGIN_DIR / ".claude-plugin" / "plugin.json").is_file():
         raise ModuleError(f"{at} の plugin = true には、同じフォルダに {PLUGIN_DIR}/.claude-plugin/plugin.json が要ります")
     classify = str(data.get("classify") or "")
-    if classify and len([u for u in use_cases if not u.offline]) < 2:
+    if classify and len([u for u in use_cases if not u.offline and not u.manual]) < 2:
         raise ModuleError(f"{at} の classify は、Web を使う用途（offline でないもの）が2つ以上あるときに書いてください")
     return ActorSpec(prompt=prompt, plugin=plugin, files=data.get("files", "none"),
                      shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
@@ -304,6 +313,10 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
                           "同じフォルダにありません")
     channels = {kind: _names(names, f"{where} の [channels] {kind}")
                 for kind, names in _table(data, "channels", where).items()}
+    for kind, names in channels.items():
+        if ALL_CHANNELS in names and names != (ALL_CHANNELS,):
+            raise ModuleError(f"{where} の [channels] {kind}: \"{ALL_CHANNELS}\"（ほかのどれにも当たらないチャンネル）は、"
+                              "それだけを書いてください")
     schedules = _schedules(_table(data, "schedules", where), where)
     if (channels or schedules) and not (directory / CODE_FILE).is_file():
         raise ModuleError(f"{where}: [channels] と [schedules] を動かす {CODE_FILE}（class Module）が、同じフォルダにありません")
@@ -360,6 +373,7 @@ def _check_collisions(specs: dict[str, ModuleSpec]) -> None:
         keys = [f"用途「{u.name}」" for u in (spec.actor.use_cases if spec.actor else ())]
         keys += [f"定期処理「{s.name}」" for s in spec.schedules]
         keys += [f"チャンネルの種類「{kind}」" for kind in spec.channels]
+        keys += ["ほかのどれにも当たらないチャンネル（*）"] if spec.catch_all else []
         keys += [f"番地「{spec.port}」"] if spec.port else []
         for key in keys:
             if key in seen and seen[key] != spec.name:

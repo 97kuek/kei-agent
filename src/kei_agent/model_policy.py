@@ -7,6 +7,7 @@ provider の選択は agent ごとに保持する。ここは選択された pro
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -19,6 +20,10 @@ ALLOWED_MODELS = {
     "codex": frozenset({"gpt-6-luna", "gpt-6-sol", "gpt-6-astra"}),
     "claude": frozenset({"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5"}),
 }
+# 依頼者が明示したときだけ使うモデル（用途の manual = true でしか書けない）
+MANUAL_ONLY_MODELS = {"codex": frozenset({"gpt-6-astra"}), "claude": frozenset({"claude-fable-5"})}
+# 依頼の頭で用途を指定する書き方（[[research-design]]。名前の _ は - で書く）
+_EXPLICIT = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 
 
 class ModelPolicyError(ValueError):
@@ -136,10 +141,38 @@ def check_module_recipes(spec: modules.ModuleSpec) -> None:
             if not is_allowed_model(provider, model):
                 raise ConfigError(f"モジュール「{spec.name}」の用途 {use_case.name} の {provider} のモデル {model} は使えません"
                                   f"（使えるのは {', '.join(sorted(ALLOWED_MODELS[provider]))}）")
+            if model in MANUAL_ONLY_MODELS.get(provider, ()) and not use_case.manual:
+                raise ConfigError(f"モジュール「{spec.name}」の用途 {use_case.name} の {model} は、依頼者が明示したときだけの用途"
+                                  "（manual = true）でしか使えません")
 
 
 def is_allowed_model(provider: str, model: str) -> bool:
     return model in ALLOWED_MODELS.get(provider, ())
+
+
+def is_manual(use_case: UseCase | str) -> bool:
+    """依頼者が明示したときだけ使う用途か（コアの manual_*、モジュールの manual = true）。"""
+    if use_case in (UseCase.MANUAL_ASTRA, UseCase.MANUAL_FABLE):
+        return True
+    owner = modules.use_case_owner(str(use_case))
+    return bool(owner and owner.actor and any(u.name == use_case and u.manual for u in owner.actor.use_cases))
+
+
+def explicit_use_case(actor: str, text: str) -> tuple[UseCase | str | None, str]:
+    """依頼の頭の [[名前]] で指定された、その担当の用途と、指定を外した文。指定が無いか、知らない名前なら (None, text)。
+
+    名前の _ は - で書く（[[research-design]] は research_design）。手動指定だけの用途（manual）も選べる。
+    """
+    match = _EXPLICIT.match(text or "")
+    if not match:
+        return None, text
+    name = match.group(1).lower().replace("-", "_")
+    try:
+        case = use_case_of(name)
+        allowed = allowed_use_cases(actor)
+    except ModelPolicyError:
+        return None, text
+    return (case, text[match.end():].strip()) if case in allowed else (None, text)
 
 
 def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool = False) -> ResolvedModel:
@@ -164,6 +197,11 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
     model, effort = found
     if not is_allowed_model(provider, model):
         raise ModelPolicyError(f"許可されていない model です: {model}")
+    if is_manual(case):
+        # モジュールの手動指定だけの用途（manual = true）
+        if not manual:
+            raise ModelPolicyError(f"{case} は依頼者による手動指定だけで使えます")
+        return ResolvedModel(actor, case, provider, model, effort, manual_only=True)
     return ResolvedModel(actor, case, provider, model, effort)
 
 

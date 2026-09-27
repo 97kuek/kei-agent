@@ -47,7 +47,15 @@ from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.home import agent_labels
 from kei_agent.jobs import JobManager, missing_outputs
-from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
+from kei_agent.model_policy import (
+    PROVIDERS,
+    ModelPolicyError,
+    UseCase,
+    explicit_use_case,
+    is_manual,
+    resolve,
+    resolve_selected,
+)
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
 from kei_agent.notion_store import NotionStore
@@ -640,7 +648,12 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 f"Kei Agent です。このチャンネルのテーマ用に `{ws.cwd}` を{state}。"
                 "研究の前提を `CLAUDE.md` に書いておくと、依頼のたびに説明しなくて済みます。"
             )
-            await self.register_theme(channel, ws)
+            welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
+            if welcome is not None:
+                # テーマを受け持つモジュールの案内（そのモジュールが自分でテーマを登録する）
+                text += "\n" + welcome()
+            elif not ws.module:
+                await self.register_theme(channel, ws)
         await self.slack.chat_postMessage(channel=channel, text=text)
 
     async def on_channel_rename(self, event: dict) -> None:
@@ -914,15 +927,16 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                         on_activity=None, *, provider: str | None = None,
                         use_case: UseCase | None = None, request_text: str | None = None,
                         read_only: bool = False) -> runner.RunResult:
-        """研究・自己改善の AI を1回動かす。研究エージェント（A2A）が設定されていれば、そちらに頼む。
+        """作業場で AI を1回動かす（研究テーマ・研究全体・自己改善）。担当のプロセス（A2A）があれば、そちらに頼む。
 
+        担当は作業場で決まる（themes.actor_of。研究テーマを受け持つモジュールがあれば、そのモジュールの担当）。
         `use_case` を渡せば分類しない。`request_text` は分類に使う依頼者の文（引き継ぎメモや履歴の
         前置きを付ける前のもの）。渡さなければ prompt で分類する。
 
         どちらで動かしても、同じ制限の表（agent_policy.py）と `config.toml` の柵で動く。
         """
-        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else research.AGENT
-        agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
+        actor = "self_fix" if ws.kind is ChannelKind.IMPROVE else themes.actor_of(ws)
+        agent = self.agents.get(actor) if actor != "self_fix" else None
         provider = provider or settings.selected_provider(self.config, self.store, actor)
         if provider not in PROVIDERS:
             # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
@@ -930,23 +944,24 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         if actor == "self_fix":
             use_case = UseCase.SELF_FIX_DESIGN
         else:
-            if use_case is None and research.has_explicit_use_case(prompt):
-                use_case, prompt = research.use_case_for_prompt(prompt)
             if use_case is None:
-                from kei_agent.model_classifier import UsageLimited, classify_research
+                use_case, prompt = explicit_use_case(actor, prompt)
+            if use_case is None:
+                from kei_agent.model_classifier import UsageLimited, classify
                 try:
-                    use_case = await classify_research(self.config, self.store, request_text or prompt,
-                                                       provider=provider)
+                    use_case = await classify(self.config, self.store, actor, request_text or prompt,
+                                              provider=provider)
                 except UsageLimited as e:
                     return runner.RunResult(provider=provider, is_error=True, errors=[str(e)],
                                             limit_reset_at=e.reset_at)
         try:
-            recipe = resolve(actor, provider, use_case,
-                             manual=actor == research.AGENT and research.is_manual_use_case(use_case))
+            # 手動指定だけの用途は、依頼者の [[名前]] からしか来ない（分類器は選ばない）
+            recipe = resolve(actor, provider, use_case, manual=is_manual(use_case))
         except ModelPolicyError as e:
             return runner.RunResult(is_error=True, errors=[str(e)])
         with self.claude_running():
             if agent is not None:
+                # 担当のプロセスに、作業場（チャンネルの名前）と許可済みの接続先を添えて頼む
                 return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
                                           use_case, on_activity, provider=recipe.provider, read_only=read_only)
             return await runner.run_model(
@@ -1129,6 +1144,29 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             finally:
                 # 途中で落ちても、このテーマを「重なって動いている」ままにしない（何度呼んでもよい）
                 self.theme_runs.end(req.channel_name, req.thread_ts)
+
+    async def work_in_workspace(self, req: Request, actor: str) -> runner.RunResult | None:
+        """チャンネルの作業場（研究テーマのフォルダ）で、その担当と会話して答える（api.Core.work）。
+
+        添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。
+        モジュールの on_message から呼ばれる（スレッドのロックと同時実行の上限は、取り次いだ _dispatch が持っている）。
+        """
+        ws = themes.resolve(self.config, req.channel_name)
+        if ws.kind is not ChannelKind.THEME or themes.actor_of(ws) != actor:
+            raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマのチャンネルではありません")
+        themes.ensure_workspace(ws)
+        ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
+        try:
+            return await self.run(req, ws)
+        except Exception:
+            log.exception("依頼の処理に失敗しました")
+            await self.post(req, safe_failure("connection"))
+            await self.mark_answered(req, failed=True)
+            with suppress(Exception):
+                await self.thread_ui(req).finish("")
+            return None
+        finally:
+            self.theme_runs.end(req.channel_name, req.thread_ts)
 
     async def route_overview(self, req: Request) -> bool:
         """研究全体のチャンネルで、ほかのエージェントの用事なら、そちらに回す（回したら True）。
@@ -1314,12 +1352,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
         prior_provider = self.store.last_provider(req.channel, req.thread_ts, actor)
-        # [[research-design]] などの指定は依頼者の文の先頭にある。前置きを付ける前に読み取る
+        # [[research-design]] などの用途の指定は依頼者の文の先頭にある（どの担当でも同じ書き方）。前置きを付ける前に読み取る
+        use_case, prompt = explicit_use_case(actor, prompt)
         request_text = prompt
-        use_case = None
-        if actor == research.AGENT and research.has_explicit_use_case(prompt):
-            use_case, prompt = research.use_case_for_prompt(prompt)
-            request_text = prompt
         # 区切って立てたスレッドの最初の回には、前のスレッドの引き継ぎメモを渡す
         prompt = self.handoff_memo_for(row) + prompt
         stalled = row["stalled_request"] if row else None
@@ -1348,7 +1383,7 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             if ws is None:
                 # 作業場を本体に持たない担当（モジュール）
                 return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
-                                            on_activity, provider=provider)
+                                            on_activity, provider=provider, use_case=use_case)
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
                                         on_activity, provider=provider,
                                         use_case=use_case, request_text=request_text)

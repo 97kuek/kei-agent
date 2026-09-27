@@ -91,7 +91,11 @@ def theme_name(channel_name: str) -> str:
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・改善・モジュール以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・改善・モジュール以外は、すべて研究テーマとして扱う。
+
+    ほかのどれにも当たらないチャンネルを受け持つモジュール（[channels] に "*"）があれば、テーマはそのモジュールのもの
+    （Workspace.module）。無ければ本体の研究。
+    """
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
@@ -102,13 +106,23 @@ def resolve(config: Config, channel_name: str) -> Workspace:
         return Workspace(channel_name, ChannelKind.OVERVIEW, config.overview_dir)
     if not _SAFE_NAME.match(channel_name) or ".." in channel_name:
         raise ValueError(f"テーマ名に使えないチャンネル名です: {channel_name!r}")
-    return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name)
+    return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name,
+                     module=catch_all_module(config))
 
 
 def module_of_channel(config: Config, channel_name: str) -> str:
     """そのチャンネルを持つ、オンのモジュールの名前（設定の [channels] で変えた名前も見る）。無ければ空文字。"""
     for spec in modules.enabled(config.modules):
-        if any(channel_name in config.module_channels.get(kind, ()) for kind in spec.channels):
+        if any(channel_name in config.module_channels.get(kind, ()) and channel_name != modules.ALL_CHANNELS
+               for kind in spec.channels):
+            return spec.name
+    return ""
+
+
+def catch_all_module(config: Config) -> str:
+    """ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ、オンのモジュールの名前。無ければ空文字（本体の研究）。"""
+    for spec in modules.enabled(config.modules):
+        if any(config.module_channels.get(kind, ()) == (modules.ALL_CHANNELS,) for kind in spec.channels):
             return spec.name
     return ""
 
@@ -118,7 +132,10 @@ _ACTORS = {ChannelKind.IMPROVE: "self_fix"}
 
 
 def actor_of(ws: Workspace) -> str:
-    return ws.module if ws.kind is ChannelKind.MODULE else _ACTORS.get(ws.kind, "research")
+    """そのチャンネルで会話を続ける担当。モジュールのチャンネルと、モジュールが受け持つ研究テーマは、そのモジュール。"""
+    if ws.module and ws.kind in (ChannelKind.MODULE, ChannelKind.THEME):
+        return ws.module
+    return _ACTORS.get(ws.kind, "research")
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:
