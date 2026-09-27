@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+from kei_agent import modules
+
 DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/architecture.md", "docs/modules.md",
         "docs/extensibility.md")
 
@@ -31,3 +33,13 @@ def test_relative_links_in_docs_point_to_existing_files():
             if "://" in target or target.startswith("mailto:"):
                 continue
             assert (path.parent / target).exists(), f"{doc}: {target} がない"
+
+
+def test_the_readme_lists_every_builtin_module():
+    """README の組み込みのモジュールの表は、modules/ と同じ（足したり消したりしたら、表も直す）。"""
+    rows = re.findall(r"^\| ([^|]+?) \| `([a-z][a-z0-9-]*)` \| [^|]+ \|$", Path("README.md").read_text(encoding="utf-8"),
+                      re.MULTILINE)
+    listed = {name: label for label, name in rows}
+    assert len(rows) == len(listed), "README の表に同じモジュールが2回ある"
+    assert listed == {name: spec.label for name, spec in modules.builtin().items()}, \
+        "README の「何ができるか」の表を、modules/ のモジュール（名前と module.toml の label）に合わせてください"
