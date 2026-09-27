@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 from kei_agent import version
 from kei_agent.config import load_config
 from kei_agent.notion import Notion, NotionError
-from kei_agent_notion_gateway.clients import PROXY_CLIENTS, Tokens
+from kei_agent_notion_gateway.clients import Tokens
 from kei_agent_notion_gateway.config import GatewayConfig, load_gateway_config
 from kei_agent_notion_gateway.gateway import Gateway, error_body
 from kei_agent_notion_gateway.rules import Refused
@@ -44,7 +44,8 @@ PROXY_PATH = "/notion/v1"
 CLIENT_KEY = "kei_agent_notion_client"
 # Notion の失敗を LLM へ返すときの長さの上限
 ERROR_LIMIT = 300
-INSTRUCTIONS = """Kei Agent の Notion。呼び出し元に許されたホーム（研究は研究ホーム、大学は授業ホーム）の中だけを操作できる。
+INSTRUCTIONS = """Kei Agent の Notion。呼び出し元に許されたホーム（研究は研究ホーム、大学は授業ホーム、ほかのモジュールは
+そのモジュールのホーム）の中だけを操作できる。
 
 対象はページ・データベース・データソース・ブロックの ID か Notion の URL で指定する。ホームの外を指すと、
 どの操作も「届きません」で失敗する。別の経路を探さず、そのまま依頼者に伝えること。"""
@@ -159,10 +160,11 @@ class ClientAuth:
         await self.app(scope, receive, send)
 
 
-def proxy_endpoint(gateway: Gateway):
+def proxy_endpoint(gateway: Gateway, allowed: frozenset[str]):
+    """Notion の API をそのまま中継する口。使えるのは allowed の client だけ（シェルを持つ AI には渡さない）。"""
     async def proxy(request: Request) -> Response:
         client = request.scope.get(CLIENT_KEY, "")
-        if client not in PROXY_CLIENTS:
+        if client not in allowed:
             return _json_response(403, "restricted_resource",
                                   f"Kei Agent gateway: {client} can't use the Notion API proxy")
         raw = await request.body()
@@ -186,8 +188,9 @@ def build_app(settings: GatewayConfig, gateway: Gateway) -> Starlette:
         return JSONResponse({"ok": True, "version": version.RUNNING})
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, json_response=True, host=settings.host)
-    app.add_route(PROXY_PATH + "/{path:path}", proxy_endpoint(gateway), methods=["GET", "POST", "PATCH", "DELETE"])
-    app.add_middleware(ClientAuth, tokens=Tokens(settings.master))
+    app.add_route(PROXY_PATH + "/{path:path}", proxy_endpoint(gateway, settings.proxy),
+                  methods=["GET", "POST", "PATCH", "DELETE"])
+    app.add_middleware(ClientAuth, tokens=Tokens(settings.master, settings.roots))
     return app
 
 

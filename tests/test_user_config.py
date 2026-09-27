@@ -52,6 +52,19 @@ def test_secrets_folder_is_configurable_and_never_readable_by_the_ai(tmp_path):
         load_config(env={"KEI_AGENT_HOME": str(home_b)})
 
 
+def test_notion_homes_are_all_listed_in_the_notion_table(tmp_path):
+    """Notion のホームは [notion] にまとめる。研究と大学は今の書き方のまま、ほかのモジュールは [notion.homes]。"""
+    home = _home(tmp_path, '[notion]\ncourse_home = "AAAA-BBBB"\n\n[notion.homes]\nknowledge = "CCCC"\n')
+    config = load_config(env={"KEI_AGENT_HOME": str(home)})
+    assert config.notion.client_homes() == {"course": "aaaabbbb", "knowledge": "cccc"}
+    for text, message in (('[notion.homes]\nnothing = "x"\n', "知らないモジュール"),
+                          ('[notion]\ncourse_home = "a"\n\n[notion.homes]\ncourse = "b"\n', "2か所"),
+                          ('[notion.homes]\nknowledge = 1\n', "ページ ID")):
+        (home / "config.toml").write_text(text, encoding="utf-8")
+        with pytest.raises(ConfigError, match=message):
+            load_config(env={"KEI_AGENT_HOME": str(home)})
+
+
 def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_path):
     """話し方や所属はプロフィールから。振り分け・選別のように JSON だけを返す係には足さない。"""
     home = _home(tmp_path, profile="# プロフィール\n\n<!-- 書き方の説明 -->\n## 話し方\n\n- 一人称は「僕」\n")

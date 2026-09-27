@@ -118,6 +118,10 @@ def notion_id(value: str) -> str:
     return str(value or "").replace("-", "").strip().lower()
 
 
+# ゲートウェイの利用者のうち、本体（と手で動かす setup）。共通ホームと、書いてあるすべてのホームに届く
+MAIN_CLIENT = "kei-agent"
+
+
 @dataclass(frozen=True)
 class NotionConfig:
     """Notion のホームのページ ID（`[notion]`）。ゲートウェイはこの下だけを通す。"""
@@ -127,11 +131,33 @@ class NotionConfig:
     research_home: str = ""
     # 授業ホーム（kei-agent-module course setup の notion-course.json と同じ）
     course_home: str = ""
+    # そのほかのモジュールのホーム（[notion.homes] に「モジュールの名前 = ページ ID」）
+    homes: dict[str, str] = field(default_factory=dict)
+
+    def client_homes(self) -> dict[str, str]:
+        """ゲートウェイの利用者（本体のほか）と、それぞれが届くホーム。書いてあるものだけ。
+
+        利用者の名前は、モジュール（と研究）の名前。その担当の AI も Python も、この名前の合言葉で呼ぶ。
+        """
+        found = {"research": self.research_home, "course": self.course_home, **self.homes}
+        return {name: home for name, home in found.items() if home}
 
 
 def _notion(data: dict) -> NotionConfig:
     _check_keys(data, {f.name for f in fields(NotionConfig)}, "[notion]")
-    return NotionConfig(**{key: notion_id(str(value)) for key, value in data.items()})
+    homes = data.get("homes", {})
+    if not isinstance(homes, dict) or not all(isinstance(v, str) for v in homes.values()):
+        raise ConfigError('config.toml の [notion.homes] は「モジュールの名前 = "ページ ID"」の形で書いてください')
+    allowed = set(modules.known()) | {"research"}
+    unknown = sorted(set(homes) - allowed)
+    if unknown:
+        raise ConfigError(f"config.toml の [notion.homes] に知らないモジュールがあります: {', '.join(unknown)}"
+                          f"（書けるもの: {', '.join(sorted(allowed))}）")
+    for name, key in (("research", "research_home"), ("course", "course_home")):
+        if data.get(key) and homes.get(name):
+            raise ConfigError(f"config.toml の [notion] で、{name} のホームが {key} と [notion.homes] の2か所にあります")
+    values = {key: notion_id(str(value)) for key, value in data.items() if key != "homes"}
+    return NotionConfig(**values, homes={name: notion_id(home) for name, home in homes.items()})
 
 
 @dataclass(frozen=True)

@@ -83,6 +83,20 @@ def test_read_only_research_contract_does_not_request_write_and_reads_notion_onl
     assert contract.policy.notion == "read" and not contract.policy.shell
 
 
+def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
+    """config.toml の [notion] にホームが無い担当には、届かない Notion の道具（ゲートウェイの MCP）を渡さない。"""
+    from kei_agent.config import NotionConfig
+
+    request = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
+                                      resolve("course", "claude", "course_explain"), None, "C1", "1.1")
+    assert resolve_contract(config, request).policy.notion == "write"
+    contract = resolve_contract(replace(config, notion=NotionConfig(research_home="research-home")), request)
+    assert contract.policy.notion == "none" and "mcp.allowlist" not in contract.capabilities
+    # 合言葉も渡さない（届かない合言葉を AI の環境に置かない）
+    assert runner.GATEWAY_AUTH_ENV not in runner.build_env(
+        config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, "C1", "1.1", contract.policy)
+
+
 def test_research_skill_change_invalidates_the_session_version(config, tmp_path):
     repo = tmp_path / "repo"
     prompt = repo / "prompts" / "system.md"

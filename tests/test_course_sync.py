@@ -354,8 +354,12 @@ def test_course_reads_box_and_fully_manages_the_course_notion_through_the_gatewa
 
 def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):
     """授業の Notion は、ゲートウェイの course（授業ホームだけに届く）の合言葉で呼ぶ。"""
+    import os
+    from pathlib import Path
+
     from kei_agent.notion import gateway_client_token
 
+    (Path(os.environ["KEI_AGENT_HOME"]) / "config.toml").write_text('[notion]\ncourse_home = "abc"\n', encoding="utf-8")
     monkeypatch.setenv("KEI_AGENT_NOTION_GATEWAY_TOKEN", "master")
     client = notion_sync._client(STATE)
     assert client.notion.base_url.endswith("/notion/v1")

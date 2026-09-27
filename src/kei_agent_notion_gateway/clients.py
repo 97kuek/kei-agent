@@ -5,38 +5,47 @@
 
 | client | 届くホーム | 使える口 |
 |---|---|---|
-| kei-agent | 共通・研究・授業 | MCP と `/notion/v1` |
-| course | 授業 | MCP と `/notion/v1` |
-| research | 研究 | MCP だけ（研究の LLM は Bash を持つので、何でも送れる口は渡さない） |
+| kei-agent（本体と setup） | 共通ホームと、書いてあるすべてのホーム | MCP と `/notion/v1` |
+| モジュール・研究（名前が client） | config.toml の [notion] に書いた、そのホームだけ | MCP。シェルを持つ AI の実行役がいなければ `/notion/v1` も |
+
+研究（AI が Bash を持つ）のように、シェルを使える AI の実行役がいる client には、何でも送れる口（`/notion/v1`）を渡さない。
 """
 
 from __future__ import annotations
 
 from hmac import compare_digest
 
+from kei_agent import agent_policy
 from kei_agent.config import NotionConfig, notion_id
-from kei_agent.notion import GATEWAY_CLIENTS, gateway_client_token
-
-KEI_AGENT, RESEARCH, COURSE = GATEWAY_CLIENTS
-# Notion の API をそのまま中継する口（`/notion/v1`）を使える client。決まった処理（Python）だけ
-PROXY_CLIENTS = frozenset({KEI_AGENT, COURSE})
+from kei_agent.notion import KEI_AGENT, gateway_client_token
 
 
 def client_roots(notion: NotionConfig) -> dict[str, frozenset[str]]:
-    """client ごとの届くホーム（config.toml の `[notion]`）。空の設定は数えない。"""
-    homes = {
-        KEI_AGENT: (notion.hub_home, notion.research_home, notion.course_home),
-        RESEARCH: (notion.research_home,),
-        COURSE: (notion.course_home,),
-    }
-    return {client: frozenset(notion_id(home) for home in ids if home) for client, ids in homes.items()}
+    """client ごとの届くホーム（config.toml の [notion]）。空の設定は数えない。"""
+    homes = notion.client_homes()
+    roots = {KEI_AGENT: frozenset(notion_id(home) for home in (notion.hub_home, *homes.values()) if home)}
+    roots.update({client: frozenset({notion_id(home)}) for client, home in homes.items()})
+    return roots
+
+
+def _ai_has_shell(client: str) -> bool:
+    """その client の名前の AI の実行役が、シェル（コマンド）を使えるか。実行役がいなければ False。"""
+    try:
+        return agent_policy.policy_of(client).shell
+    except ValueError:
+        return False
+
+
+def proxy_clients(notion: NotionConfig) -> frozenset[str]:
+    """Notion の API をそのまま中継する口（`/notion/v1`）を使える client。決まった処理（Python）のためのもの。"""
+    return frozenset({KEI_AGENT} | {client for client in notion.client_homes() if not _ai_has_shell(client)})
 
 
 class Tokens:
     """Authorization ヘッダーから client を決める。"""
 
-    def __init__(self, master: str):
-        self._tokens = {client: gateway_client_token(master, client).encode() for client in GATEWAY_CLIENTS}
+    def __init__(self, master: str, clients):
+        self._tokens = {client: gateway_client_token(master, client).encode() for client in clients}
 
     def client(self, authorization: str) -> str | None:
         scheme, _, given = authorization.strip().partition(" ")

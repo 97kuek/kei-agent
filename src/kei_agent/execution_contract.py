@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,6 +96,9 @@ def prompt_version(config: Config, actor: str, workspace: Workspace | None = Non
 def resolve_contract(config: Config, request: ExecutionRequest) -> ExecutionContract:
     read_only = is_read_only(request)
     policy = policy_of(request.recipe.actor, request.recipe.use_case, read_only=read_only)
+    if policy.notion != "none" and policy.name not in config.notion.client_homes():
+        # Notion のホームを書いていない担当には、届かない Notion の道具を渡さない（config.toml の [notion]）
+        policy = replace(policy, notion="none")
     text = prompt_text(config, prompt_path(config, policy, request.workspace), request.workspace.profile)
     skills = skill_dir(config, policy)
     return ExecutionContract(

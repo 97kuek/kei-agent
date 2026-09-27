@@ -161,12 +161,17 @@ def test_a_lost_gateway_connection_says_where_to_look(monkeypatch):
 
 
 def test_gateway_notion_uses_the_client_token_never_the_master(config):
+    from dataclasses import replace
+
+    from kei_agent.config import NotionConfig
     from kei_agent.notion import gateway_client_token, gateway_notion
 
+    config = replace(config, notion=NotionConfig(course_home="abc"))
     notion = gateway_notion("course", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)
     assert notion.base_url == "http://127.0.0.1:8791/notion/v1"
     assert notion.token == gateway_client_token("master", "course") != "master"
     with pytest.raises(NotionError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
         gateway_notion("course", {}, config)
-    with pytest.raises(ValueError):
-        gateway_notion("someone", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)
+    # ホームを書いていない名前（研究のホームも空）は、ゲートウェイの利用者ではない
+    with pytest.raises(NotionError, match=r"\[notion\]"):
+        gateway_notion("research", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)

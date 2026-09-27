@@ -8,7 +8,7 @@ from fakes import FakeGitHub
 
 from kei_agent import config as config_module
 from kei_agent import improve, issues, model_classifier, modules, research
-from kei_agent.config import REPO_ROOT, AgentProfile, Config, model_actors
+from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
 
 # 組み込みのモジュールのフォルダを、パッケージとして読めるようにしておく（from kei_agent_modules.knowledge import digest）
@@ -89,6 +89,8 @@ def config(tmp_path: Path) -> Config:
         deny_read=(tmp_path / "secrets",),
         # 個別の unit test は既存経路の振る舞いを検証する。製品の config.toml は未選択で始まる。
         agent_profiles={name: AgentProfile(provider="claude") for name in model_actors()},
+        # 研究と大学は Notion のホームを持つ（作者の環境と同じ。ホームが無いときの試験は、ここを空にして行う）
+        notion=NotionConfig(research_home="research-home", course_home="course-home"),
     )
 
 

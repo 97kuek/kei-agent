@@ -98,7 +98,8 @@ def test_gateway_needs_the_master_and_the_notion_token(gw_config):
 
 def test_gateway_does_not_start_without_homes(config):
     with pytest.raises(RuntimeError, match=r"\[notion\]"):
-        load_gateway_config(config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER, "NOTION_TOKEN": "notion"})
+        load_gateway_config(replace(config, notion=NotionConfig()),
+                            {"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER, "NOTION_TOKEN": "notion"})
 
 
 def test_homes_come_from_config_toml_not_from_notion_json(settings, world, gw_config):
@@ -111,12 +112,48 @@ def test_homes_come_from_config_toml_not_from_notion_json(settings, world, gw_co
 
 def test_home_ids_are_compared_without_dashes_or_case():
     roots = client_roots(NotionConfig(research_home="3DE4FB5D-2D07-80B9-A193-F4604D5EA09C"))
-    assert roots == {"research": {"3de4fb5d2d0780b9a193f4604d5ea09c"}, "course": frozenset(),
+    assert roots == {"research": {"3de4fb5d2d0780b9a193f4604d5ea09c"},
                      "kei-agent": {"3de4fb5d2d0780b9a193f4604d5ea09c"}}
 
 
+def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_config):
+    """[notion.homes] にホームを書いたモジュールは、そのホームだけに届く client になる（利用者のモジュールも）。
+
+    シェルを使える AI の実行役がいなければ、Python から /notion/v1 も使える（研究は MCP だけ）。
+    """
+    from kei_agent import modules
+    from kei_agent_notion_gateway.clients import proxy_clients
+
+    for name, actor in (("weather", ""), ("diary", '[actor]\nprompt = "diary.md"\nshell = true\n'
+                                                   '[use_cases.diary_answer]\nclaude = { model = "claude-sonnet-5" }\n')):
+        folder = tmp_path / "modules" / name
+        folder.mkdir(parents=True)
+        (folder / "module.toml").write_text(f'api = 1\nname = "{name}"\n{actor}', encoding="utf-8")
+        (folder / f"{name}.md").write_text("#\n", encoding="utf-8")
+    modules.register_user_modules(tmp_path / "modules")
+    weather = api.add_page(None, "天気")
+    notion = replace(gw_config.notion, homes={"weather": notion_id(weather), "diary": notion_id(world.private.root)})
+
+    roots = client_roots(notion)
+    assert roots["weather"] == {notion_id(weather)} and notion_id(weather) in roots["kei-agent"]
+    assert proxy_clients(notion) == {"kei-agent", "course", "weather"}      # diary と研究は、AI がシェルを使える
+    tokens = Tokens(MASTER, roots)
+    assert tokens.client(f"Bearer {gateway_client_token(MASTER, 'weather')}") == "weather"
+    assert tokens.client(f"Bearer {gateway_client_token(MASTER, 'nobody')}") is None
+    gateway = Gateway(api, roots, logging.getLogger(LOGGER))
+    assert gateway.call("weather", "GET", f"/pages/{weather}")[0] == 200
+    assert gateway.call("weather", "GET", f"/pages/{world.course.page}")[0] == 403
+
+
+def test_a_module_without_a_home_is_told_where_to_write_it(config):
+    from kei_agent.notion import gateway_notion
+
+    with pytest.raises(NotionError, match=r"\[notion.homes\] に weather"):
+        gateway_notion("weather", env={"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER}, config=config)
+
+
 def test_only_client_tokens_are_accepted_never_the_master():
-    tokens = Tokens(MASTER)
+    tokens = Tokens(MASTER, ("kei-agent", "research", "course"))
     for client in ("kei-agent", "research", "course"):
         assert tokens.client(f"Bearer {gateway_client_token(MASTER, client)}") == client
     for header in (f"Bearer {MASTER}", "Bearer nope", "", f"Basic {gateway_client_token(MASTER, 'course')}",

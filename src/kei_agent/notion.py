@@ -28,14 +28,14 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from kei_agent.config import Config, load_config, notion_id
+from kei_agent.config import MAIN_CLIENT, Config, load_config, notion_id
 
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"
 # ゲートウェイの親の合言葉。これ自体は子プロセスに渡さず、名前ごとの合言葉を作るのにだけ使う
 GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
-# ゲートウェイの利用者。どのホームに届くかはゲートウェイ側（kei_agent_notion_gateway.clients）が決める
-GATEWAY_CLIENTS = ("kei-agent", "research", "course")
+# 本体（と手で動かす setup）の利用者の名前。そのほかの利用者は [notion] に書いたホームの持ち主（gateway_clients）
+KEI_AGENT = MAIN_CLIENT
 NO_GATEWAY = (f"{GATEWAY_TOKEN_ENV} がありません。Notion は Notion ゲートウェイ経由でだけ使えます"
               "（deploy/README.md の「秘密情報」）")
 # Notion の上限はおよそ 3 リクエスト/秒。少し余裕をみて間隔をあける
@@ -60,15 +60,21 @@ def gateway_client_token(master: str, client: str) -> str:
     return hmac.new(master.encode(), client.encode(), hashlib.sha256).hexdigest()
 
 
+def gateway_clients(config: Config) -> tuple[str, ...]:
+    """ゲートウェイの利用者（本体と、config.toml の [notion] にホームを書いたモジュール・研究）。"""
+    return (KEI_AGENT, *config.notion.client_homes())
+
+
 def gateway_notion(client: str, env: dict[str, str] | None = None, config: Config | None = None) -> Notion:
-    """ゲートウェイの `/notion/v1` を呼ぶ Notion。client の名前で届くホームが決まる。"""
-    if client not in GATEWAY_CLIENTS:
-        raise ValueError(f"未知のゲートウェイ利用者: {client}")
+    """ゲートウェイの `/notion/v1` を呼ぶ Notion。client の名前（モジュールの名前）で届くホームが決まる。"""
     env = dict(os.environ) if env is None else env
     master = env.get(GATEWAY_TOKEN_ENV, "").strip()
     if not master:
         raise NotionError(NO_GATEWAY)
     config = config or load_config()
+    if client not in gateway_clients(config):
+        raise NotionError(f"{client} の Notion ホームが config.toml の [notion] にありません"
+                          f"（[notion.homes] に {client} = \"ページ ID\" を書いてください）")
     return Notion(gateway_client_token(master, client), base_url=config.notion_gateway_api)
 
 
