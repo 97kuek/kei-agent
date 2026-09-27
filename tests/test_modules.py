@@ -65,7 +65,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
-    assert config.modules == ("knowledge", "work")     # 知っていても、設定に書くまではオンにしない（組み込みだけ）
+    assert config.modules == ("course", "knowledge", "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
     _module(home_dir / "modules", "knowledge", 'api = 1\nname = "knowledge"\n')
     with pytest.raises(ConfigError, match="組み込みのモジュール「knowledge」と同じ名前"):
@@ -260,3 +260,19 @@ def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch):
         launch.main(["weather", "nothing"])                 # 無いコマンド
     with pytest.raises(SystemExit):
         launch.main(["weather"])                            # 担当プロセスを持たない（コマンドだけのモジュール）
+
+
+def test_a_command_gets_its_own_help(tmp_path, monkeypatch, capsys):
+    """`kei-agent-module <名前> <コマンド> --help` は、共通のコマンドではなく、そのコマンドの説明を出す。"""
+    pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
+    from kei_agent_a2a import launch
+
+    home_dir = _config(tmp_path)
+    folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
+    (folder / "commands.py").write_text(
+        "import argparse\n\n\ndef forecast(argv):\n    argparse.ArgumentParser(prog='forecast', description='明日の天気')"
+        ".parse_args(argv)\n\n\nCOMMANDS = {\"forecast\": forecast}\n", encoding="utf-8")
+    monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
+    with pytest.raises(SystemExit):
+        launch.main(["weather", "forecast", "--help"])
+    assert "明日の天気" in capsys.readouterr().out

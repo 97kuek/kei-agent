@@ -7,7 +7,7 @@ from datetime import time as dtime
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 
-from kei_agent import agents, morning, runner, themes
+from kei_agent import morning, runner, themes
 from kei_agent import schedule as schedule_module
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import SyncReport
@@ -76,44 +76,40 @@ async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypa
 
 
 async def test_hub_calendar_copies_all_future_assignments_without_asking_work(env, monkeypatch):
-    """課題はこれからの全部を写す。会議は朝の Daily で書くので、ここでは仕事の担当（AI）に聞かない。"""
+    """課題はこれからの全部を写す（大学のモジュールの見回り）。会議は朝の Daily で書くので、仕事の担当には聞かない。"""
+    from kei_agent import api
+
     scheduler, assistant, *_ = env
-    asked, seen = [], []
+    seen = []
+    agent = FakeCourseAgent([], assignments=[{"id": "assignment-1", "title": "課題", "due": "2027-02-01",
+                                              "status": "未着手", "url": "https://notion.so/assignment-1"}])
+    assistant.agents["course"] = agent
 
-    async def ask_course(skill, **params):
-        asked.append((skill, params))
-        return agents.Reply(data={"complete": True, "items": [
-            {"id": "assignment-1", "title": "課題", "due": "2027-02-01",
-             "status": "未着手", "url": "https://notion.so/assignment-1"}]})
-
-    async def ask_work(skill, **params):
+    async def no_work(*args, **kwargs):
         raise AssertionError("予定カレンダーのために仕事の担当を動かさない")
 
     def record_sync(hub, snapshot, checked_at, days):
         seen.append((snapshot.source, [i.source_id for i in snapshot.items], days))
         return SyncReport(1, 0, 0)
 
-    monkeypatch.setattr(assistant, "ask_course", ask_course)
-    monkeypatch.setattr(assistant.modules["work"], "agenda", ask_work)
-    monkeypatch.setattr(schedule_module, "sync_calendar", record_sync)
+    monkeypatch.setattr(assistant.modules["work"], "agenda", no_work)
+    monkeypatch.setattr(api, "sync_calendar", record_sync)
 
-    result = await scheduler.sync_hub_calendar("2026-09-26")
+    await assistant.modules["course"].sync_calendar(datetime(2026, 9, 26, 8, 5))
 
-    assert result == {"course": "synced", "course_counts": {"created": 1, "updated": 0, "stale": 0}}
-    assert asked == [("list-calendar-assignments", {"days": schedule_module.COURSE_CALENDAR_DAYS})]
-    assert seen == [("課題", ["assignment-1"], schedule_module.COURSE_CALENDAR_DAYS)]
+    assert agent.asked == [("list-calendar-assignments", {"days": 400, "provider": "claude"})]
+    assert seen == [("課題", ["assignment-1"], 400)]
+    record = assistant.modules["course"].core.records.get("calendar", "synced")
+    assert record == {"day": "2026-09-26", "created": 1, "updated": 0, "stale": 0}
 
 
-async def test_hub_calendar_sync_without_hub_does_not_call_agents(env, monkeypatch):
+async def test_hub_calendar_sync_without_hub_does_not_call_agents(env):
     scheduler, assistant, *_ = env
     assistant.hub = None
-
-    async def unexpected(*args, **kwargs):
-        raise AssertionError("agent must not be called")
-
-    monkeypatch.setattr(assistant, "ask_course", unexpected)
-    monkeypatch.setattr(assistant.modules["work"], "agenda", unexpected)
-    assert await scheduler.sync_hub_calendar("2026-09-24") == {"course": "no_hub"}
+    agent = FakeCourseAgent([])
+    assistant.agents["course"] = agent
+    await assistant.modules["course"].sync_calendar(datetime(2026, 9, 24, 9, 0))
+    assert agent.asked == []
 
 
 async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
@@ -148,45 +144,26 @@ async def test_missing_time_db_is_reported_but_keeps_the_hub(env, monkeypatch):
     assert "時間記録" in notice_text and "kei-agent-hub-setup --apply" in notice_text
 
 
-async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env, monkeypatch):
+async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env):
+    """全部を読めなかった日は、1時間おきに写し直す（Daily が動いていなくても、見回りが写す）。"""
     scheduler, assistant, *_ = env
-    runs = []
-
-    async def fake_run(name, day, record=True):
-        runs.append((name, day))
-        return {"course": "error"}
-
-    async def noop(*args):
-        return None
-
-    monkeypatch.setattr(schedule_module.settings, "schedule_time", lambda *args: "")
-    monkeypatch.setattr(scheduler, "run_task", fake_run)
-    monkeypatch.setattr(scheduler, "notify_due_soon", noop)
-    monkeypatch.setattr(scheduler, "nudge_stale_threads", noop)
-    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:05"))
-    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:06"))
-    await scheduler.tick(datetime.fromisoformat("2026-09-18T09:06"))
-    assert runs == [("hub_calendar", "2026-09-18"), ("hub_calendar", "2026-09-18")]
+    agent = FakeCourseAgent([])
+    agent.incomplete = True
+    assistant.agents["course"] = agent
+    module = assistant.modules["course"]
+    for at in ("2026-09-18T08:05", "2026-09-18T08:06", "2026-09-18T09:06"):
+        await module.sync_calendar(datetime.fromisoformat(at))
+    assert [skill for skill, _ in agent.asked] == ["list-calendar-assignments", "list-calendar-assignments"]
 
 
-async def test_hub_calendar_is_done_for_the_day_once_assignments_are_copied(env, monkeypatch):
+async def test_hub_calendar_is_done_for_the_day_once_assignments_are_copied(env):
     scheduler, assistant, *_ = env
-    runs = []
-
-    async def fake_run(name, day, record=True):
-        runs.append((name, day))
-        return {"course": "synced"}
-
-    async def noop(*args):
-        return None
-
-    monkeypatch.setattr(schedule_module.settings, "schedule_time", lambda *args: "")
-    monkeypatch.setattr(scheduler, "run_task", fake_run)
-    monkeypatch.setattr(scheduler, "notify_due_soon", noop)
-    monkeypatch.setattr(scheduler, "nudge_stale_threads", noop)
-    await scheduler.tick(datetime.fromisoformat("2026-09-18T08:05"))
-    await scheduler.tick(datetime.fromisoformat("2026-09-18T10:06"))
-    assert runs == [("hub_calendar", "2026-09-18")]
+    agent = FakeCourseAgent([], assignments=[{"id": "a", "title": "課題", "due": "2026-10-01", "status": "未着手"}])
+    assistant.agents["course"] = agent
+    module = assistant.modules["course"]
+    await module.sync_calendar(datetime.fromisoformat("2026-09-18T08:05"))
+    await module.sync_calendar(datetime.fromisoformat("2026-09-18T10:06"))
+    assert [skill for skill, _ in agent.asked] == ["list-calendar-assignments"]
 
 
 # 時刻
@@ -225,7 +202,7 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
     # 01:30 の夜間、07:00 の先行研究と読みもの、08:00 の Daily が1回ずつ。21:00 はまだ
     assert ran == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("reading", "2026-09-18"),
-                   ("daily", "2026-09-18"), ("hub_calendar", "2026-09-18")]
+                   ("daily", "2026-09-18")]
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
@@ -760,18 +737,22 @@ class FakeCourseAgent:
         self.assignments = assignments or []
         self.asked = []
 
-    async def ask(self, skill, text="", params=None):
+    async def stream(self, skill, text="", params=None, on_progress=None):
         from kei_agent import a2a
+        from kei_agent.dates import weekday
+        params = {**(json.loads(text) if text.startswith("{") else {}), **(params or {})}
         self.asked.append((skill, params))
         data = {}
         if skill == "list-due":
-            data = {"days": (params or {}).get("days"), "items": self.items}
+            data = {"days": params.get("days"), "items": self.items}
         elif skill == "list-classes":
-            data = {"items": self.classes}
+            wanted = params.get("weekday")
+            data = {"items": [item for item in self.classes if not wanted or not item.get("start")
+                              or weekday(date.fromisoformat(item["start"][:10])) == wanted]}
         elif skill == "sync-assignments":
             data = dict(self.synced)
         elif skill == "list-calendar-assignments":
-            data = {"complete": True, "items": self.assignments}
+            data = {"complete": not getattr(self, "incomplete", False), "items": self.assignments}
         # 返事は全エージェント共通の封筒
         envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
                     "limit_reset_at": None, "cost_usd": None}
@@ -819,7 +800,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
     assert "空き:" not in text and "9時 " not in text
     # 読んだ会議は予定カレンダーにも書く（AI をもう一度動かさない）。仕事のモジュールの予定（agenda）から
-    assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1,
+    assert detail == {"classes": 1, "dues": 1, "events": 1,
                       "agenda": {"synced": {"Outlook": {"created": 1, "updated": 0, "stale": 0}}, "unread": []}}
     assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
     assert assistant.agents["work"].asked == [("list-events", {"days": schedule_module.VOICE_DAYS})]
@@ -848,10 +829,11 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
     assistant.agents["course"] = FakeCourseAgent([due_item(soon)])
 
     _, _, notices = await scheduler.morning_text(datetime.now())
+    assert notices and all(key.startswith("module.course.due:") for key in notices)
     for key in notices:
         scheduler.store.record_notice(key)
     before = len(slack.posted())
-    await scheduler.notify_due_soon(datetime.now())
+    await assistant.modules["course"].notify_due_soon(datetime.now())
 
     assert len(slack.posted()) == before
 
@@ -862,16 +844,17 @@ async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypa
     slack.channels["C7"] = "20_course"
     calls = 0
 
-    async def course_due(days, now):
+    async def dues(days):
         nonlocal calls
         calls += 1
         return None if calls == 1 else []
 
-    monkeypatch.setattr(assistant, "course_due", course_due)
+    module = assistant.modules["course"]
+    monkeypatch.setattr(module, "dues", dues)
     now = datetime.now()
 
-    await scheduler.notify_due_soon(now)
-    await scheduler.notify_due_soon(now)
+    await module.notify_due_soon(now)
+    await module.notify_due_soon(now)
 
     assert calls == 2
 
@@ -888,7 +871,7 @@ async def test_review_digest_gathers_all_three_domains(env, config, store):
     assistant.agents["course"] = FakeCourseAgent(
         [due_item(f"{today}T17:00:00", "履修申請フォーム", "プロジェクト研究B"),
          due_item(f"{tomorrow}T23:59:00", "第3回レポート", "データベース", "2@moodle")],
-        classes=[{"subject": "マルチメディア工学A", "start": "", "end": ""}])
+        classes=[{"subject": "マルチメディア工学A", "start": f"{tomorrow}T13:00", "end": f"{tomorrow}T14:40"}])
     assistant.agents["work"] = FakeWorkAgent(
         [{"subject": "定例MTG", "start": f"{today}T18:00", "end": f"{today}T19:00"},
          {"subject": "ゆうちょ様AML", "start": f"{tomorrow}T11:00", "end": f"{tomorrow}T13:00"}])
@@ -896,12 +879,14 @@ async def test_review_digest_gathers_all_three_domains(env, config, store):
     text = await DigestBuilder(config, store, assistant).build(
         now.timestamp() - 86400, now.timestamp(), "振り返りの材料", set(), domains=True)
 
-    assert "## 大学" in text and "## 仕事" in text
-    assert "今日が期限だったもの: プロジェクト研究B / 履修申請フォーム（17:00）" in text
-    assert "第3回レポート" in text.split("残っている締切:")[1].splitlines()[0]
-    assert "明日（" in text and "マルチメディア工学A" in text
-    assert "今日あった予定: 18:00–19:00 定例MTG" in text
-    assert "明日の予定: 11:00–13:00 ゆうちょ様AML" in text
+    # どちらもモジュールの予定（agenda）から。見出しはモジュールの表示名
+    university = text.split("## 大学")[1].split("## ")[0]
+    assert "今日が期限だったもの: プロジェクト研究B / 履修申請フォーム（17:00）" in university
+    assert "第3回レポート" in university.split("残っている締切:")[1].splitlines()[0]
+    assert "明日の予定: 13:00–14:40 マルチメディア工学A" in university
+    work = text.split("## 仕事")[1].split("## ")[0]
+    assert "今日あった予定: 18:00–19:00 定例MTG" in work
+    assert "明日の予定: 11:00–13:00 ゆうちょ様AML" in work
 
 
 async def test_daily_digest_does_not_ask_the_agents_again(env, config, store):
@@ -1059,7 +1044,7 @@ async def test_scheduled_sync_announces_new_and_changed_assignments(env):
     assistant.agents["course"] = FakeCourseAgent([], synced={
         "added": ["10/26 00:00 情報 / Assignment A"], "updated": ["11/02 00:00 情報 / Assignment B"]})
 
-    assert await scheduler.sync_assignments() is True
+    assert await assistant.modules["course"].sync_assignments() is True
 
     post = slack.posted()[-1]
     assert post["channel"] == "C7"
@@ -1073,7 +1058,7 @@ async def test_scheduled_sync_stays_quiet_without_changes(env):
     assistant.agents["course"] = FakeCourseAgent([])
     before = len(slack.posted())
 
-    assert await scheduler.sync_assignments() is True
+    assert await assistant.modules["course"].sync_assignments() is True
     assert len(slack.posted()) == before
 
 
@@ -1090,7 +1075,7 @@ async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
     result = await scheduler.run_review("2026-09-26")
 
     skills = [skill for skill, _ in agent.asked]
-    assert result["synced"] is True and skills.index("sync-assignments") < skills.index("list-due")
+    assert result["prepared"] == [] and skills.index("sync-assignments") < skills.index("list-due")
     post, = [p for p in slack.posted() if p.get("text", "").startswith("📌 明日・明後日の締切")]
     assert post.get("thread_ts") and "情報 レポート" in post["text"] and "期末" not in post["text"]
     note = assistant.hub.notes[-1]
@@ -1111,9 +1096,10 @@ async def test_unstarted_assignments_are_noticed_three_days_ahead_once(env):
         {"id": "c", "title": "まだ先", "due": "2026-10-30T12:00:00.000+09:00", "status": "未着手"},
     ])
 
-    await scheduler.notify_due_soon(now)
-    scheduler._due_checked = 0.0
-    await scheduler.notify_due_soon(now)
+    module = assistant.modules["course"]
+    await module.notify_due_soon(now)
+    module._due_checked = 0.0
+    await module.notify_due_soon(now)
 
     early = [p["text"] for p in slack.posted() if p.get("text", "").startswith("📚")]
     assert early == ["📚 あと 2 日で締切、まだ未着手: Assignment A\n10/25（日） 24:00 まで\nhttps://notion.so/a"]

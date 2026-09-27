@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
-from kei_agent.dates import WEEKDAYS
+from kei_agent_a2a.api import WEEKDAYS
 
 # 早稲田大学の標準の時間割（1時限 90 分）
 WASEDA = {

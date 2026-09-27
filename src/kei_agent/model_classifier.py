@@ -12,10 +12,6 @@ _RESEARCH_CASES = frozenset({
     UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
     UseCase.RESEARCH_EXECUTE, UseCase.RESEARCH_DESIGN,
 })
-_COURSE_CASES = frozenset({UseCase.COURSE_EXPLAIN, UseCase.COURSE_REQUIREMENTS,
-                           UseCase.COURSE_COMPARE, UseCase.COURSE_DEGREE_PLAN})
-
-
 class UsageLimited(RuntimeError):
     """分類に使った provider の quota が尽きた。別 recipe で再試行してはいけない。"""
 
@@ -49,14 +45,7 @@ async def classify_research(config: Config, store, prompt: str, *, provider: str
                            "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。", provider=provider)
 
 
-async def classify_course(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
-    return await _classify(config, store, "course", prompt, _COURSE_CASES, UseCase.COURSE_EXPLAIN,
-                           "course_explain, course_requirements, course_compare, course_degree_plan",
-                           "1資料の説明は explain、課題要件・評価基準の整理は requirements、複数資料や試験範囲の比較は compare、"
-                           "履修・卒業計画の選択肢提案は degree_plan。", provider=provider)
-
-
-CLASSIFIERS = {"research": classify_research, "course": classify_course}
+CLASSIFIERS = {"research": classify_research}
 
 
 async def classify(config: Config, store, actor: str, prompt: str, *,

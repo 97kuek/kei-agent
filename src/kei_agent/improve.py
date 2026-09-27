@@ -116,7 +116,7 @@ def catch_up_with_main(worktree: Path) -> CommandResult:
 
 
 # エージェントのテストを飛ばさないために、確認で入れる依存のグループ
-AGENT_GROUPS = ("--group", "course", "--group", "research", "--group", "agents")
+AGENT_GROUPS = ("--group", "research", "--group", "agents")
 
 
 def run_checks(worktree: Path) -> CommandResult:

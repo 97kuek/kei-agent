@@ -20,7 +20,6 @@ from pathlib import Path
 import aiohttp
 
 from kei_agent import (
-    course,
     dates,
     digest,
     maintenance,
@@ -35,7 +34,6 @@ from kei_agent import (
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import (
     JST,
-    CalendarItem,
     CalendarSnapshot,
     IncompleteSnapshot,
     outlook_items,
@@ -46,7 +44,7 @@ from kei_agent.model_policy import UseCase
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
-from kei_agent.slack_text import AWAITING_MARKER, clean_text, escape, format_duration
+from kei_agent.slack_text import AWAITING_MARKER, clean_text, format_duration
 from kei_agent.store import Store
 
 log = logging.getLogger(__name__)
@@ -60,18 +58,12 @@ def task_names(config: Config) -> tuple[str, ...]:
     return ("night", *(s.name for s in settings.module_schedules(config)), "daily", "review", "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
-# 締切が近いものを知らせるために、カレンダーを見に行く間隔（秒）
-DUE_CHECK_SECONDS = 3600
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
 VERSION_CHECK_SECONDS = 3600
 # 「一度だけ知らせた」目印を残す日数（学期の終わりまで持たなくてよい）
 NOTICE_RETENTION_DAYS = 60
 # 声のレイヤに渡す日数。「明日の予定」「今週の予定」に答えられるように1週間ぶん
 VOICE_DAYS = 7
-HUB_SYNC_HOUR = 8
-HUB_RETRY_SECONDS = 3600
-# 予定カレンダーに載せる課題の日数。課題 DB を読める上限で、これからの課題を全部載せる
-COURSE_CALENDAR_DAYS = 400
 # レトプラのスレッドに並べる締切（明日・明後日まで）
 REVIEW_DUE_DAYS = 2
 # Daily と Retro & Planning の材料は、ファイルにせずプロンプトのこの間に入れる
@@ -110,12 +102,9 @@ class Scheduler:
         self.config = config
         self.store = store
         self.assistant = assistant
-        # 締切が近いものを最後に見に行った時刻（起動直後に1回見る）
-        self._due_checked = 0.0
         # 取り込んだ新しい版と、それを最初に見つけた時刻
         self._version_checked = 0.0
         self._newer: tuple[str, float] | None = None
-        self._hub_calendar_checked = 0.0
         # ネットにつながらなくなった時刻（つながっている間は None）
         self._offline_since: float | None = None
 
@@ -163,15 +152,6 @@ class Scheduler:
             # 実行中に次の tick で二重に動かないよう、先に記録する
             self.store.record_schedule(name, day, {"status": "running"})
             await self.run_or_defer(name, day, now.timestamp())
-        hub_day = now.date().isoformat()
-        if (not self.store.pending_deferred("schedule")
-                and now.hour >= HUB_SYNC_HOUR and not self.store.schedule_ran("hub_calendar", hub_day)
-                and now.timestamp() - self._hub_calendar_checked >= HUB_RETRY_SECONDS):
-            self._hub_calendar_checked = now.timestamp()
-            detail = await self.run_task("hub_calendar", hub_day, record=False)
-            if isinstance(detail, dict) and detail.get("course") == "synced":
-                self.store.record_schedule("hub_calendar", hub_day, detail)
-        await self.notify_due_soon(now)
         await self.nudge_stale_threads()
         await self.notify_unrestarted(now)
         await self.module_ticks(now)
@@ -330,41 +310,6 @@ class Scheduler:
 
     # Daily と振り返り
 
-    async def run_hub_calendar(self, day: str) -> dict:
-        return await self.sync_hub_calendar(day)
-
-    async def sync_hub_calendar(self, day: str) -> dict:
-        """授業ホームの課題（これからの全部）を、共通ホームの予定カレンダーに写す。
-
-        会議は朝の Daily で読んだものを書く（sync_meetings）。ここでは AI を動かさない。
-        """
-        hub = self.assistant.hub
-        if hub is None:
-            return {"course": "no_hub"}
-        checked_at = datetime.combine(date.fromisoformat(day), dtime(9, 0), JST)
-        try:
-            reply = await self.assistant.ask_course(course.LIST_CALENDAR_ASSIGNMENTS, days=COURSE_CALENDAR_DAYS)
-            data = reply.data if reply.ok else {}
-            if data.get("complete") is not True or not isinstance(data.get("items"), list):
-                return {"course": "incomplete"}
-            items = tuple(
-                CalendarItem(source_id=str(item.get("id") or ""), title=str(item.get("title") or ""),
-                             start=str(item.get("due") or ""), end="", url=str(item.get("url") or ""),
-                             location="", status=str(item.get("status") or ""))
-                for item in data["items"] if isinstance(item, dict)
-            )
-            if len(items) != len(data["items"]):
-                raise IncompleteSnapshot("課題に不正な行があります")
-            snapshot = CalendarSnapshot("課題", True, items, data.get("source_count"))
-            report = await asyncio.to_thread(sync_calendar, hub, snapshot, checked_at, COURSE_CALENDAR_DAYS)
-        except (IncompleteSnapshot, NotionError, ValueError, TypeError) as e:
-            log.warning("課題を予定カレンダーに写せません: %s", e)
-            return {"course": "error"}
-        except Exception:
-            log.exception("課題を予定カレンダーに写せません")
-            return {"course": "error"}
-        return {"course": "synced", "course_counts": report.__dict__}
-
     async def sync_meetings(self, events: list[dict], now: datetime, source: str) -> dict | str:
         """朝に読んだ会議（7日ぶん）を、共通ホームの予定カレンダーに足す（出典は source）。
 
@@ -385,18 +330,6 @@ class Scheduler:
             log.exception("会議を予定カレンダーに書けません")
             return "error"
         return report.__dict__
-
-    async def sync_assignments(self) -> bool:
-        """Moodle の課題を授業ホームに取り込む。増えた課題と締切の変わった課題は #20_course に知らせる。"""
-        reply = await self.assistant.ask_course(course.SYNC_ASSIGNMENTS)
-        if not reply.ok:
-            return False
-        changes = ([f"• 新しい: {escape(str(title))}" for title in reply.data.get("added") or []]
-                   + [f"• 締切が変わった: {escape(str(title))}" for title in reply.data.get("updated") or []])
-        channel = await self.course_channel() if changes else None
-        if channel:
-            await self.assistant.slack.chat_postMessage(channel=channel, text="\n".join(["📚 Moodle の課題", *changes]))
-        return True
 
     async def _material(self, kind: str, day: str, since: float, ids: dict[str, str]) -> str:
         """プロンプトに入れる材料（上限の字数で切ったもの）。ファイルには残さない。"""
@@ -480,10 +413,8 @@ class Scheduler:
         if channel is None:
             return {"status": "no_channel"}
         now = datetime.now()
-        has_course = course.AGENT in self.assistant.agents
-        # 明日の計画に使うので、振り返りの前に Moodle の課題を取り込む（モジュールも取り込み直す）
-        synced = await self.sync_assignments() if has_course else False
-        await self.assistant.module_prepare("review", day)
+        # 明日の計画に使うので、振り返りの前にモジュールが取り込み直す（大学なら Moodle の課題）
+        prepared = await self.assistant.module_prepare("review", day)
         since = datetime.combine(date.fromisoformat(day), dtime(0, 0)).timestamp()
         material = await self._material("review", day, since, ids)
         ws = themes.resolve(self.config, self.overview_channel_name)
@@ -516,10 +447,9 @@ class Scheduler:
             channel, self.overview_channel_name, ws, f"🌙 Retro & Planning {label(day)}", result,
             output_kind="review",
         )
-        dues = await self.assistant.course_due(REVIEW_DUE_DAYS + 1, now) or [] if has_course else []
-        # モジュールの締切も並べる（締切だけを頼む。会議を AI でもう一度読まない）
+        # モジュールの締切を並べる（締切だけを頼む。会議を AI でもう一度読まない）
         agenda, _ = await self.assistant.module_agenda(REVIEW_DUE_DAYS + 1, frozenset({"due"}))
-        dues += [item for items in agenda.values() for item in items]
+        dues = [item for items in agenda.values() for item in items]
         deadlines = morning.soon_deadlines(dues, now, REVIEW_DUE_DAYS)
         if deadlines and thread_ts:
             await self.assistant.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, text=deadlines)
@@ -531,7 +461,7 @@ class Scheduler:
                 # このスレッドに貼られた結論を、同じ行のレトプラに足す（assistant.sync_review_conclusion）
                 self.store.link_notion(channel, thread_ts, note.id, "review")
         return {"status": "error" if result.is_error else "posted", "thread_ts": thread_ts,
-                "notion_url": note.url if note else None, "synced": synced}
+                "notion_url": note.url if note else None, "prepared": prepared}
 
     # 保守
 
@@ -596,24 +526,15 @@ class Scheduler:
 
     # 授業（大学エージェント）
 
-    async def course_channel(self) -> str | None:
-        """#20_course の ID。Kei Agent がいなければ None。"""
-        name = self.config.course_channels[0] if self.config.course_channels else ""
-        return (await self.assistant.channel_ids()).get(name) if name else None
-
     async def morning_text(self, now: datetime) -> tuple[str, dict, list[str]]:
         """朝のまとめ（今日の時系列）。集められなかったものは黙って飛ばす。"""
         detail: dict = {}
         classes: list[dict] = []
         dues: list[dict] = []
         events: list[dict] = []
-        if course.AGENT in self.assistant.agents:
-            detail["synced"] = await self.sync_assignments()
-            classes = (await self.assistant.ask_course(course.LIST_CLASSES)).data.get("items") or []
-            dues = await self.assistant.course_due(course.DIGEST_DAYS, now) or []
         # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
         # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
-        notices = [course.notice_key(item) for item in course.soon_items(dues, now)]
+        notices: list[str] = []
         # モジュールは、まず取り込み直す（大学なら Moodle の課題）
         prepared = await self.assistant.module_prepare("daily", now.date().isoformat())
         # モジュールの予定（agenda。仕事なら Outlook の会議、大学なら授業と締切）。声のレイヤが「今週の会議」に
@@ -641,10 +562,8 @@ class Scheduler:
             {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
              "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
             for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
-        failed_now = [label for label, failed in (
-            ("課題の取り込み", detail.get("synced") is False),
-            ("会議の書き込み", "error" in synced.values())) if failed]
-        failed_now += [f"{label}の予定の読み取り" for label in unread] + prepared
+        failed_now = ["会議の書き込み"] if "error" in synced.values() else []
+        failed_now += prepared + [f"{label}の予定の読み取り" for label in unread]
         return morning.text(classes, events, dues, now, self.morning_notes(now, failed_now)), detail, notices
 
     def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:
@@ -665,10 +584,6 @@ class Scheduler:
                 failed.append(label)
             elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):
                 failed.append(f"{label}（Notion に残せず）")
-        yesterday = (now.date() - timedelta(days=1)).isoformat()
-        if (self.assistant.hub is not None and course.AGENT in self.assistant.agents
-                and not self.store.schedule_ran("hub_calendar", yesterday)):
-            failed.append("予定カレンダーへの課題の書き込み")
         failed += failed_now or []
         return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
 
@@ -689,39 +604,6 @@ class Scheduler:
         if failure:
             notes.append(failure)
         return notes
-
-    async def notify_due_soon(self, now: datetime) -> None:
-        """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる。"""
-        if now.timestamp() - self._due_checked < DUE_CHECK_SECONDS:
-            return
-        channel = await self.course_channel()
-        if channel is None:
-            return
-        items = await self.assistant.course_due(2, now)
-        if items is None:
-            # 取れなかったときは時計を進めない（1時間待たずに、次の tick で取り直す）
-            return
-        self._due_checked = now.timestamp()
-        for item in course.soon_items(items, now):
-            key = course.notice_key(item)
-            if self.store.noticed(key):
-                continue
-            await self.assistant.slack.chat_postMessage(channel=channel, text=course.soon_text(item, now))
-            self.assistant.notify_voice("due", title=item.get("title"), at=item.get("at"))
-            self.store.record_notice(key)
-        await self.notify_unstarted(channel, now)
-
-    async def notify_unstarted(self, channel: str, now: datetime) -> None:
-        """締切まで3日を切っても「未着手」の課題を、1件ずつ1回だけ知らせる（Notion の課題の状態を見る）。"""
-        reply = await self.assistant.ask_course(course.LIST_CALENDAR_ASSIGNMENTS, days=course.EARLY_DAYS + 1)
-        if not reply.ok:
-            return
-        for item in course.unstarted_items(reply.data.get("items") or [], now):
-            key = course.early_notice_key(item)
-            if self.store.noticed(key):
-                continue
-            await self.assistant.slack.chat_postMessage(channel=channel, text=course.early_text(item, now))
-            self.store.record_notice(key)
 
     async def notify_unrestarted(self, now: datetime) -> None:
         """取り込んだ新しい版で、1時間たっても起動し直していなければ、一度だけ知らせる。"""

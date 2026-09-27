@@ -13,7 +13,7 @@ from kei_agent.agents import FIELDS
 from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import UseCase
 from kei_agent_a2a import envelope, run
-from kei_agent_course.executor import CourseExecutor
+from kei_agent_modules.course.agent import Executor as CourseExecutor
 from kei_agent_modules.work.agent import Executor as WorkExecutor
 from kei_agent_research.executor import ResearchExecutor
 
@@ -48,7 +48,10 @@ def _executor(kind, config, store):
         executor = WorkExecutor(config, store)
         executor.agent = "work"
         return executor
-    return CourseExecutor(config, store)
+    # 大学もモジュールの担当。名前は共通の起動コマンドが入れる（kei_agent_a2a.launch）
+    executor = CourseExecutor(config, store)
+    executor.agent = "course"
+    return executor
 
 
 @pytest.fixture
@@ -66,7 +69,7 @@ def ran(monkeypatch):
 
 
 @pytest.mark.parametrize(("kind", "use_case"), [
-    ("research", UseCase.RESEARCH_EXTRACT), ("course", UseCase.COURSE_EXPLAIN), ("work", "work_decide")])
+    ("research", UseCase.RESEARCH_EXTRACT), ("course", "course_explain"), ("work", "work_decide")])
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
            "use_case": str(use_case), "provider": "claude", "channel_name": "vlm"}
@@ -110,14 +113,14 @@ async def test_ask_without_a_use_case_is_classified_by_the_agents_classifier(con
 
     async def classify(_config, _store, actor, prompt, *, provider=None):
         asked.append((actor, prompt, provider))
-        return UseCase.COURSE_DEGREE_PLAN
+        return "course_degree_plan"
 
     monkeypatch.setattr(run, "classify", classify)
     await _executor("course", config, store).handle(
         _Updater(), {"skill": "ask"}, json.dumps({"prompt": "卒業まで何単位？", "provider": "claude"}))
 
     assert asked == [("course", "卒業まで何単位？", "claude")]
-    assert ran[0][0].recipe.use_case is UseCase.COURSE_DEGREE_PLAN
+    assert ran[0][0].recipe.use_case == "course_degree_plan"
 
 
 async def test_classifier_limit_comes_back_as_a_limited_failure(config, store, ran, monkeypatch):

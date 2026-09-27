@@ -1,0 +1,57 @@
+# 大学のモジュール（docs/extensibility.md）。Moodle の課題、Notion の授業と課題、Toggl の実績、Box の学部要項と過去問
+api = 1
+name = "course"
+label = "大学"
+description = "Moodle の課題を授業ホームに取り込み、締切を知らせる。授業と課題、Toggl の実績、Box の学部要項と過去問を読んで答える"
+
+# AI の実行役（provider は App Home で選ぶ）。個人のアカウントは kei-agent-course.zsh の CLAUDE_CONFIG_DIR / CODEX_HOME。
+# Notion はゲートウェイの course として、授業ホームの中だけに届く。手元のファイル・コマンド・Web は使わない
+[actor]
+prompt = "course.md"
+plugin = true
+files = "none"
+shell = false
+web = false
+notion = "write"
+timeout_minutes = 5
+# 作業場（前提のメモの CLAUDE.md を置く）。設定の course_root で変えられる
+workspace = "~/course"
+default_use_case = "course_explain"
+classify = "1資料の説明は course_explain、課題要件・評価基準の整理は course_requirements、複数資料や試験範囲の比較は course_compare、履修・卒業計画の選択肢提案は course_degree_plan。"
+
+# Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）。道具の名前は Claude と Codex で同じ
+[[actor.connectors]]
+name = "box"
+claude_server = "claude_ai_Box"
+claude_tools = ["search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
+                "get_file_details", "get_file_content", "get_file_preview", "get_preview_page"]
+
+[[actor.connectors.codex_apps]]
+name = "Box"
+namespace = "box"
+tools = ["search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
+         "get_file_details", "get_file_content", "get_file_preview", "get_preview_page"]
+
+[use_cases.course_explain]
+claude = { model = "claude-sonnet-5", effort = "medium" }
+codex = { model = "gpt-6-luna", effort = "medium" }
+
+[use_cases.course_requirements]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-luna", effort = "high" }
+
+[use_cases.course_compare]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+
+[use_cases.course_degree_plan]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "xhigh" }
+
+# 担当プロセス（A2A のサーバー）。秘密情報は kei-agent-course.zsh（個人のアカウントの場所、MOODLE_ICS_URL など）
+[process]
+port = 8787
+
+# チャンネル（番号を外した名前。設定の [channels] course で変えられる）
+[channels]
+course = ["course"]

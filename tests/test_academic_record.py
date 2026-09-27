@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from kei_agent_course.academic_record import parse_academic_record
+from kei_agent_modules.course.academic_record import parse_academic_record
 
 
 def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):

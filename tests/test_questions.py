@@ -13,7 +13,6 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent import runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
-from kei_agent.model_policy import UseCase
 
 
 @pytest.fixture
@@ -49,7 +48,7 @@ async def test_course_question_is_asked_read_only_and_finalized(assistant):
     answer = await assistant.answer_question("course", "今日の授業は？")
 
     asked, = agent.asked
-    assert asked["read_only"] is True and asked["use_case"] == UseCase.COURSE_EXPLAIN.value
+    assert asked["read_only"] is True and asked["use_case"] == "course_explain"
     assert asked["prompt"].endswith("今日の授業は？")
     assert answer == "今日は2コマだよ"                           # marker は外し、Slack と同じ確認を通す
 

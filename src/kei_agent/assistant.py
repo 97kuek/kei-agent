@@ -25,7 +25,6 @@ from kei_agent import (
     agents,
     api,
     ask,
-    course,
     guard,
     improve,
     modules,
@@ -45,7 +44,6 @@ from kei_agent.auto_messages import (
     today_line,
 )
 from kei_agent.config import Config
-from kei_agent.course import CourseChannel
 from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.home import agent_labels
@@ -153,10 +151,10 @@ class ThemeRuns:
 
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
-# 大学で、メンションだけで本文が無いときの質問（モジュールは class Module の default_question）
-AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて"}
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える。モジュールの担当は module.toml の default_use_case）
-VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT, "course": UseCase.COURSE_EXPLAIN}
+VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT}
+# 時間記録の科目選び（大学のチャンネルで /toggl）で、今学期の履修科目を聞くモジュールと仕事
+COURSE_MODULE, CURRENT_COURSES = "course", "list-current-courses"
 
 def time_domain(channel_name: str) -> str:
     """チャンネル名の番号から、時間記録の領域を決める。"""
@@ -168,7 +166,7 @@ def time_label(entry: TimeEntry) -> str:
     return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNotices):
+class Assistant(SettingsActions, SelfFix, Handoff, voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -215,9 +213,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         self.agent_skills: dict[str, list[dict]] = {}
         self.agent_skills_read_at: dict[str, float] = {}
         self.time_tracker = TimeTracker(store)
-        # モジュールの動き（modules/<名前>/module.py の class Module）。コアとは窓口（kei_agent.api.Core）でだけやり取りする
+        # モジュールの窓口（kei_agent.api.Core）と、動き（modules/<名前>/module.py の class Module）。
+        # コアとモジュールは窓口でだけやり取りする
+        self.cores = {spec.name: api.Core(self, spec) for spec in modules.enabled(config.modules)}
         self.modules: dict[str, object] = {
-            spec.name: cls(api.Core(self, spec))
+            spec.name: cls(self.cores[spec.name])
             for spec in modules.enabled(config.modules) if (cls := modules.load_code(spec)) is not None}
 
     async def on_time_action(self, body: dict) -> None:
@@ -340,8 +340,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         self.spawn(self._fill_course_picker(view_id, channel_id))
 
     async def _fill_course_picker(self, view_id: str, channel_id: str) -> None:
-        reply = await self.ask_course("list-current-courses")
-        items = reply.data.get("items") if reply.ok else None
+        # 時間記録がモジュールになるまでは、大学のモジュールの担当に、名前で聞く
+        core = self.cores.get(COURSE_MODULE)
+        reply = await core.ask_agent(CURRENT_COURSES, {}) if core is not None else None
+        items = reply.data.get("items") if reply is not None and reply.ok else None
         view = (course_view(channel_id, items) if items else course_loading_view(
             channel_id, "今学期の履修科目を読み出せなかったよ。Notion の「授業」を確認してね。"))
         await self.slack.views_update(view_id=view_id, view=view)
@@ -628,8 +630,6 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
                     "（Slack の文はそのまま載せません）。")
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
-        elif ws.kind is ChannelKind.COURSE:
-            text = "Kei Agent です。このチャンネルの用事は大学エージェントに取り次ぎます。\n" + course.CAN_DO
         elif ws.kind is ChannelKind.MODULE:
             text = f"Kei Agent です。このチャンネルの用事は{modules.known()[ws.module].label}エージェントに取り次ぎます。"
             welcome = getattr(self.modules.get(ws.module), "welcome", None)
@@ -913,7 +913,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
                         channel: str = "", thread_ts: str = "", on_activity=None, *,
                         provider: str | None = None, read_only: bool = False,
                         use_case: UseCase | str | None = None) -> runner.RunResult:
-        """大学・仕事のエージェントに自由な依頼（`ask`）を1回頼む。結果は研究の run_agent と同じ形。
+        """モジュールのエージェントに自由な依頼（`ask`）を1回頼む。結果は研究の run_agent と同じ形。
 
         用途を渡さなければ、エージェントがその担当の分類器で決める。
         """
@@ -1057,7 +1057,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
-        if ws.kind in (ChannelKind.COURSE, ChannelKind.MODULE):
+        if ws.kind is ChannelKind.MODULE:
             await self._dispatch(req, themes.actor_of(ws), "")
             return None
         if (ws.kind is ChannelKind.THEME and (owner := self.actor_for(req, ws)) in self.modules
@@ -1121,9 +1121,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         モジュールには class Module の on_message で渡す。skill と params は、研究全体のチャンネルで
         振り分け係が選んだ仕事（無ければ空。モジュールは core.pick_skill で自分で選べる）。
         """
-        handler = {course.AGENT: self.course}.get(agent)
-        on_message = None if handler else getattr(self.modules.get(agent), "on_message", None)
-        if handler is None and on_message is None:
+        on_message = getattr(self.modules.get(agent), "on_message", None)
+        if on_message is None:
             return False
         # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
         # 研究全体から回した続きも、毎回どこに聞くかを選び直してしまう
@@ -1131,10 +1130,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
         self.store.set_agent_session(req.channel, req.thread_ts, agent,
                                      self.store.agent_session(req.channel, req.thread_ts, agent) or "")
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
-            if handler is not None:
-                await handler(req, skill, params)
-            else:
-                await on_message(req, skill=skill, params=dict(params or {}))
+            await on_message(req, skill=skill, params=dict(params or {}))
         return True
 
     async def drop_deferred_for(self, req: Request) -> None:
@@ -1261,7 +1257,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
                         actor: str | None = None) -> runner.RunResult:
         """このスレッドの会話の続きとして担当の AI を動かす。会話が失われていたら、Slack の履歴から戻す。
 
-        研究・自己改善は run_agent、大学とモジュール（仕事・知識など）はそのエージェントの `ask` に頼む。会話の続け方
+        研究・自己改善は run_agent、モジュール（大学・仕事・知識など）はそのエージェントの `ask` に頼む。会話の続け方
         （session の版、履歴からの戻し、session が消えていたときのやり直し）はどの担当も同じ。
         ui がなければ、経過を Slack に見せずに動かす（引き継ぎメモを書かせるときなど）。
         """
@@ -1305,7 +1301,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
             # 今日の日付と曜日は、どの担当にも同じ形で先頭に付ける（「今日の授業は？」に答えられるように）
             prompt = today_line() + prompt
             if ws is None:
-                # 作業場を本体に持たない担当（大学とモジュール）
+                # 作業場を本体に持たない担当（モジュール）
                 return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
                                             on_activity, provider=provider)
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
@@ -1378,11 +1374,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, voice.VoiceNot
 
     def default_question(self, actor: str) -> str:
         """メンションだけで本文が無いときに、担当に聞くこと。"""
-        return (AGENT_DEFAULT_QUESTIONS.get(actor) or getattr(self.modules.get(actor), "default_question", "")
-                or "何ができるか教えて")
+        return getattr(self.modules.get(actor), "default_question", "") or "何ができるか教えて"
 
     async def converse_with_agent(self, req: Request, actor: str) -> runner.RunResult:
-        """大学とモジュールの自由な質問。研究と同じ流れ（会話の続き・経過・上限・出力の確認・再起動からのやり直し）。
+        """モジュールの自由な質問。研究と同じ流れ（会話の続き・経過・上限・出力の確認・再起動からのやり直し）。
 
         研究と違って本体に作業場を持たないので、添付の保存・スレッドのログ・出力の添付はない。
         スレッドのロックと同時実行の上限は、呼び出し側（_dispatch）が持つ。

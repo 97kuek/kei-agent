@@ -2,9 +2,9 @@ import copy
 
 import pytest
 
-from kei_agent_course import academic_sync
-from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
-from kei_agent_course.academic_sync import AcademicSync, grade_key
+from kei_agent_modules.course import academic_sync
+from kei_agent_modules.course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
+from kei_agent_modules.course.academic_sync import AcademicSync, grade_key
 
 
 def _property(property_id: str, kind: str = "rich_text") -> dict:
@@ -100,7 +100,7 @@ class ExistingCourseHomeNotion:
 
 
 def test_setup_uses_existing_grade_title_instead_of_adding_a_second_title(tmp_path):
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion()
     CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
@@ -114,7 +114,7 @@ def test_setup_uses_existing_grade_title_instead_of_adding_a_second_title(tmp_pa
 
 
 def test_setup_renames_existing_assignment_title_without_creating_another_title(tmp_path):
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion(assignment_title="タイトル")
     CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
@@ -124,7 +124,7 @@ def test_setup_renames_existing_assignment_title_without_creating_another_title(
 
 
 def test_setup_renames_grade_title_and_adds_group_without_losing_rows(tmp_path):
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion()
     CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
@@ -135,7 +135,7 @@ def test_setup_renames_grade_title_and_adds_group_without_losing_rows(tmp_path):
 
 
 def test_setup_keeps_course_group_and_requirement_selectors_available(tmp_path):
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion()
     CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
@@ -147,7 +147,7 @@ def test_setup_keeps_course_group_and_requirement_selectors_available(tmp_path):
 
 
 def test_setup_adds_only_missing_grade_relations(tmp_path):
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion()
     CourseSetup(notion, "home", tmp_path / "notion-course.json").run()
@@ -225,7 +225,7 @@ def test_academic_sync_keeps_separate_grade_category_and_chronological_gpa_label
 
 def test_setup_refuses_to_choose_between_duplicate_canonical_databases(tmp_path):
     from kei_agent.notion import NotionError
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     class Notion:
         def children(self, _page_id):
@@ -241,7 +241,7 @@ def test_setup_refuses_to_choose_between_duplicate_canonical_databases(tmp_path)
 
 def test_setup_checks_all_canonical_duplicates_before_any_write(tmp_path):
     from kei_agent.notion import NotionError
-    from kei_agent_course.notion_setup import CourseSetup
+    from kei_agent_modules.course.notion_setup import CourseSetup
 
     notion = ExistingCourseHomeNotion(duplicate_title="📊 成績履歴")
     setup = CourseSetup(notion, "home", tmp_path / "notion-course.json")

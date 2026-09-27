@@ -37,20 +37,6 @@ Slack の #{name} チャンネルに対応する作業用ディレクトリ。Ke
 - それより短い処理は、その場で実行してよい
 """
 
-COURSE_CLAUDE_MD = """# 授業（大学エージェントの作業場）
-
-大学エージェントの claude がここで動く。授業と課題の資料は Box に置いたまま読むので、
-このディレクトリには置かない（作った表やメモだけを置く）。
-
-## 履修している科目
-
-<!-- Notion の「授業」が正。ここには、学期ごとの補足（教室、担当、試験の形式など）を書く -->
-
-## 覚えておいてほしいこと
-
-<!-- 例: 「レポートは PDF で出す」「過去問は Box の Personal/過去問/ の下」 -->
-"""
-
 OVERVIEW_CLAUDE_MD = """# 研究全体・中長期の方針
 
 Slack の研究全体と中長期の方針のチャンネルに対応する作業用ディレクトリ。
@@ -62,8 +48,6 @@ class ChannelKind(Enum):
     THEME = "theme"
     OVERVIEW = "overview"
     IMPROVE = "improve"
-    # 大学（授業と課題）。ここでの依頼は大学エージェントに取り次ぐだけで、ファイルは持たない
-    COURSE = "course"
     # モジュールのチャンネル（module.toml の [channels]）。そのモジュールの module.py に取り次ぐだけで、ファイルは持たない
     MODULE = "module"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
@@ -107,13 +91,10 @@ def theme_name(channel_name: str) -> str:
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・改善・大学・モジュール以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・改善・モジュール以外は、すべて研究テーマとして扱う。"""
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
-    if channel_name in config.course_channels:
-        # 作業場は大学エージェントの claude が使う（本体はここで claude を動かさない）
-        return Workspace(channel_name, ChannelKind.COURSE, config.course_root)
     module = module_of_channel(config, channel_name)
     if module:
         return Workspace(channel_name, ChannelKind.MODULE, None, module=module)
@@ -133,7 +114,7 @@ def module_of_channel(config: Config, channel_name: str) -> str:
 
 
 # チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は研究の担当、モジュールはそのモジュール）
-_ACTORS = {ChannelKind.COURSE: "course", ChannelKind.IMPROVE: "self_fix"}
+_ACTORS = {ChannelKind.IMPROVE: "self_fix"}
 
 
 def actor_of(ws: Workspace) -> str:
@@ -141,16 +122,14 @@ def actor_of(ws: Workspace) -> str:
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:
-    """大学とモジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
+    """モジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
 
-    大学は `course_root`（前提のメモの CLAUDE.md を置く）、モジュール（仕事・知識など）は状態の置き場の下
+    module.toml の [actor] workspace（大学は ~/course。前提のメモの CLAUDE.md を置く）か、状態の置き場の下
     （`agents/<名前>`）。どれも手元のファイルは作業場を読むだけ（制限の表）。
     """
     spec = modules.known().get(agent)
-    if agent == "course":
-        ws = Workspace(agent, ChannelKind.COURSE, config.course_root)
-    elif spec is not None and spec.actor is not None:
-        ws = Workspace(agent, ChannelKind.MODULE, config.state_dir / "agents" / agent, module=agent)
+    if spec is not None and spec.actor is not None:
+        ws = Workspace(agent, ChannelKind.MODULE, config.module_workspace(agent), module=agent)
     else:
         raise ValueError(f"作業場を持たないエージェントです: {agent}")
     ensure_workspace(ws)
@@ -205,6 +184,9 @@ def ensure_workspace(ws: Workspace) -> bool:
         (ws.cwd / "outputs").mkdir(exist_ok=True)
         if not claude_md.exists():
             claude_md.write_text(OVERVIEW_CLAUDE_MD, encoding="utf-8")
-    elif ws.kind is ChannelKind.COURSE and not claude_md.exists():
-        claude_md.write_text(COURSE_CLAUDE_MD, encoding="utf-8")
+    elif ws.kind is ChannelKind.MODULE and ws.module and not claude_md.exists():
+        # モジュールの作業場のひな形（大学なら、履修の補足と覚えておいてほしいことを書く場所）
+        template = modules.known()[ws.module].path / modules.WORKSPACE_TEMPLATE
+        if template.is_file():
+            claude_md.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
     return created

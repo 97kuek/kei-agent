@@ -11,12 +11,13 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent.notion import Notion, NotionError, gateway_notion
-from kei_agent_course import periods
-from kei_agent_course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
-from kei_agent_course.course_identity import normalize_course_name
-from kei_agent_course.notion_props import number, plain, select, text, title
-from kei_agent_course.notion_sync import read_state
+from kei_agent_a2a.api import Notion, NotionError, gateway_notion
+
+from . import periods
+from .academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
+from .course_identity import normalize_course_name
+from .notion_props import number, plain, select, text, title
+from .notion_sync import read_state
 
 # 成績の学期 → GPA の期間。夏ク・秋ク・通年は公表値と照合済み。冬クはどちらに入るか確かめていないので結ばない
 _GPA_TERMS = {**periods.GRADE_TERMS, "夏ク": periods.SPRING, "秋ク": periods.AUTUMN,
@@ -289,7 +290,7 @@ def _missing_options(current: list[dict], wanted: list[dict]) -> list[dict] | No
 
 def reconcile_academic_history(notion: Notion, state: dict, apply: bool = False) -> dict[str, int]:
     """確定済みの成績から過去授業を作り、検証できる relation を接続する。"""
-    from kei_agent_course.notion_setup import COURSES
+    from .notion_setup import COURSES
 
     sources = {key: state["databases"][key]["data_source_id"] for key in ("courses", *_ACADEMIC_KEYS)}
     rows = {key: notion.paginate("POST", f"/data_sources/{source}/query", {"page_size": 100})
@@ -331,7 +332,7 @@ def reconcile_academic_history(notion: Notion, state: dict, apply: bool = False)
 
 def main(argv: list[str] | None = None) -> int:
     """成績 HTML の解析を dry-run し、明示時だけ Notion へ書き込む入口。"""
-    parser = argparse.ArgumentParser(prog="kei-agent-course-academic-import")
+    parser = argparse.ArgumentParser(prog="kei-agent-module course academic-import")
     parser.add_argument("grades_html", type=Path)
     parser.add_argument("credits_html", type=Path)
     mode = parser.add_mutually_exclusive_group()

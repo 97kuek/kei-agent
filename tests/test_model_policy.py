@@ -45,7 +45,7 @@ def test_unknown_actor_provider_or_use_case_is_rejected():
 
 @pytest.mark.parametrize(("actor", "case"), [
     ("router", UseCase.RESEARCH_EXECUTE),
-    ("work", UseCase.COURSE_REQUIREMENTS),
+    ("work", "course_requirements"),
     ("course", UseCase.MANUAL_ASTRA),
 ])
 def test_resolve_rejects_use_case_outside_actor_policy(actor, case):
@@ -107,12 +107,13 @@ def test_lightweight_classifier_requires_valid_high_confidence_json():
 
 
 def test_lightweight_classifier_restricts_each_actor_to_its_own_cases():
-    from kei_agent.model_classifier import _COURSE_CASES, parse
+    from kei_agent.model_classifier import parse
 
-    work = frozenset({"work_single_source", "work_cross_source", "work_decide"})    # 仕事のモジュールの用途
-    assert parse('{"use_case":"course_requirements","confidence":0.9}', _COURSE_CASES) \
-        is UseCase.COURSE_REQUIREMENTS
-    assert parse('{"use_case":"work_decide","confidence":0.9}', _COURSE_CASES) is None
+    # 大学と仕事のモジュールの用途（module.toml の [use_cases]）
+    course = frozenset({"course_explain", "course_requirements", "course_compare", "course_degree_plan"})
+    work = frozenset({"work_single_source", "work_cross_source", "work_decide"})
+    assert parse('{"use_case":"course_requirements","confidence":0.9}', course) == "course_requirements"
+    assert parse('{"use_case":"work_decide","confidence":0.9}', course) is None
     assert parse('{"use_case":"work_decide","confidence":0.9}', work) == "work_decide"
 
 
@@ -148,8 +149,8 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
     # conftest が差し替えた classify_research ではなく、本物の _classify を通す
     await model_classifier._classify(config, store, "research", "ログを見て", model_classifier._RESEARCH_CASES,
                                      UseCase.RESEARCH_EXECUTE, "", "")
-    await model_classifier._classify(config, store, "course", "課題の要件", model_classifier._COURSE_CASES,
-                                     UseCase.COURSE_EXPLAIN, "", "")
+    await model_classifier._classify(config, store, "course", "課題の要件", frozenset({"course_explain"}),
+                                     "course_explain", "", "")
 
     assert len(set(seen + [router.workspace(config).cwd])) == 3
 

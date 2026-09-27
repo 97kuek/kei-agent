@@ -48,11 +48,7 @@ class Connector:
         return tuple(f"mcp__{self.claude_server}__{tool}" for tool in self.claude_tools)
 
 
-# Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）。道具の名前は Claude と Codex で同じ
-_BOX_READS = ("search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
-              "get_file_details", "get_file_content", "get_file_preview", "get_preview_page")
-BOX = Connector("box", "claude_ai_Box", _BOX_READS, (CodexApp("Box", _codex_tools("box", _BOX_READS)),))
-# モジュールの連携（仕事の Microsoft 365 など）は、そのモジュールの module.toml の [[actor.connectors]]
+# モジュールの連携（大学の Box、仕事の Microsoft 365 など）は、そのモジュールの module.toml の [[actor.connectors]]
 
 
 @dataclass(frozen=True)
@@ -100,9 +96,6 @@ def _read(access: Access) -> Access:
 POLICIES: dict[str, AgentPolicy] = {
     "research": AgentPolicy("research", "system.md", plugin=True, files="write", shell=True, web=True,
                             notion="write"),
-    # Notion は授業ホームの中だけ（ゲートウェイが決める）。手元のファイル・コマンド・Web は使わない
-    "course": AgentPolicy("course", "course.md", plugin=True, files="none", shell=False, web=False,
-                          notion="write", connectors=(BOX,), timeout_minutes=5),
     # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),

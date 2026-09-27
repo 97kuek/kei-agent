@@ -41,12 +41,12 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, dates, modules, router, settings, themes
+from kei_agent import agents, dates, deadline, modules, router, settings, themes
 from kei_agent.agents import Reply
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.notion import NotionError
 from kei_agent.request import Request
-from kei_agent.response_output import safe_failure
+from kei_agent.response_output import OutputError, safe_failure, validate_structured_response
 from kei_agent.slack_text import escape, split_text
 
 if TYPE_CHECKING:
@@ -54,8 +54,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "day_label", "escape",
-           "failure_text", "parse_time"]
+__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "checked_text",
+           "day_label", "due_clock", "due_day", "escape", "failure_text", "parse_time", "weekday"]
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
 _KEEP = object()
@@ -74,6 +74,29 @@ def day_label(day: str | date) -> str:
 def parse_time(value: object) -> datetime | None:
     """予定・締切の時刻（ISO の文字列）を読む。読めなければ None。"""
     return dates.parse_time(value)
+
+
+def weekday(day: date) -> str:
+    """曜日の1文字（月〜日）。"""
+    return dates.weekday(day)
+
+
+def due_day(at: datetime) -> date:
+    """締切の日。0:00 ちょうどは前の日の終わり（Moodle の「24:00」）として扱う。"""
+    return deadline.day(at)
+
+
+def due_clock(at: datetime) -> str:
+    """締切の時刻の書き方（0:00 ちょうどは前の日の 24:00）。"""
+    return deadline.clock(at)
+
+
+def checked_text(text: str) -> str | None:
+    """担当が返した文を、Slack に出せる形か確かめる（手元のパスや作業の実況を出さない）。出せなければ None。"""
+    try:
+        return validate_structured_response(text)
+    except OutputError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -192,6 +215,17 @@ class Core:
         """困りごとを Kei Agent の改善のチャンネルに知らせる。"""
         await self._assistant.notify_trouble(text)
 
+    def noticed(self, key: str) -> bool:
+        """その目印で、もう知らせたか（知らせたあとに mark_noticed で残す。出す前に残すと、失敗したときに黙って消える）。"""
+        return self._assistant.store.noticed(f"module.{self.name}.{key}")
+
+    def mark_noticed(self, key: str) -> None:
+        self._assistant.store.record_notice(f"module.{self.name}.{key}")
+
+    def notify_voice(self, kind: str, **data) -> None:
+        """声のレイヤに出来事を知らせる（due・schedule など。言い方は声のレイヤが決める）。"""
+        self._assistant.notify_voice(kind, **data)
+
     def notice_once(self, key: str) -> bool:
         """その目印でまだ知らせていなければ True を返し、知らせたことにする（同じことを何度も知らせない）。
 
@@ -228,6 +262,10 @@ class Core:
                                       f"{reply.text[:300]}")
         await self._assistant.note_limit(reply, self.name, provider)
         return reply
+
+    async def skills(self) -> list[dict]:
+        """この担当の名刺に載っている仕事（読めなければ空）。"""
+        return await self._assistant.skills_of(self.name)
 
     async def pick_skill(self, req: Request) -> tuple[str, dict]:
         """言われたことが、この担当の名刺のどの仕事に当たるかを軽いモデルで選ぶ（選べなければ ASK）。

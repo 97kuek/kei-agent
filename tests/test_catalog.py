@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from kei_agent_course import notion_sync
-from kei_agent_course.catalog import compare_course_catalog
-from kei_agent_course.ics import Event
+from kei_agent_modules.course import notion_sync
+from kei_agent_modules.course.catalog import compare_course_catalog
+from kei_agent_modules.course.ics import Event
 
 
 def _title(text: str) -> dict:
@@ -47,7 +47,7 @@ def test_catalog_inspection_never_calls_notion_request_with_write_method():
 def test_catalog_cli_needs_the_gateway_before_reading_moodle(monkeypatch):
     import pytest
 
-    from kei_agent_course import catalog, moodle
+    from kei_agent_modules.course import catalog, moodle
 
     monkeypatch.setenv("MOODLE_ICS_URL", "https://example.invalid/calendar.ics")
     monkeypatch.setattr(moodle, "events", lambda url: (_ for _ in ()).throw(AssertionError("moodle")))

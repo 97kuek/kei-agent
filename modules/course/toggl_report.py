@@ -12,8 +12,9 @@ from collections import defaultdict
 from collections.abc import Iterable
 from datetime import date, timedelta
 
-from kei_agent.timelog import Toggl, TogglError, load_toggl
-from kei_agent_course.course_identity import normalize_course_name
+from kei_agent_a2a.api import Toggl, TogglError, load_toggl
+
+from .course_identity import normalize_course_name
 
 log = logging.getLogger(__name__)
 

@@ -687,10 +687,6 @@ agents = [
     { name = "a2a-sdk", extra = ["http-server"] },
     { name = "uvicorn" },
 ]
-course = [
-    { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "uvicorn" },
-]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -713,10 +709,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 agents = [
-    { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
-    { name = "uvicorn", specifier = ">=0.53.0" },
-]
-course = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]

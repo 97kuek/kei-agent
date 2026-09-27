@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
-from kei_agent_course import ics
+from kei_agent_modules.course import ics
 
 SAMPLE = """BEGIN:VCALENDAR
 VERSION:2.0
@@ -101,7 +101,7 @@ def test_due_events_respects_the_window():
 
 
 def test_fetch_rejects_a_page_that_is_not_a_calendar(monkeypatch):
-    from kei_agent_course import moodle
+    from kei_agent_modules.course import moodle
 
     class _Resp:
         def read(self):
@@ -119,7 +119,7 @@ def test_fetch_rejects_a_page_that_is_not_a_calendar(monkeypatch):
 
 
 def test_due_reads_the_calendar(monkeypatch):
-    from kei_agent_course import moodle
+    from kei_agent_modules.course import moodle
 
     monkeypatch.setattr(moodle, "fetch", lambda url, timeout=30: SAMPLE)
     found = moodle.due("https://example.invalid/calendar.ics", since=date(2026, 9, 20))
@@ -131,7 +131,7 @@ def test_due_reads_the_calendar(monkeypatch):
 
 def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
     """授業ホームの正本6 DBを作り、科目・成績を中心に relation を張る。"""
-    from kei_agent_course import notion_setup
+    from kei_agent_modules.course import notion_setup
 
     calls = []
 
@@ -221,7 +221,7 @@ def test_due_events_without_since_starts_from_now(monkeypatch):
 
 def test_fetch_unfolds_before_decoding_so_a_split_character_survives(monkeypatch):
     """折り返しは75バイトごと。日本語の1文字の途中で折り返されても、文字化けさせない。"""
-    from kei_agent_course import moodle
+    from kei_agent_modules.course import moodle
 
     word = "課題".encode()
     body = (b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:1\r\nSUMMARY:" + word[:2] + b"\r\n " + word[2:]
@@ -243,7 +243,7 @@ def test_fetch_unfolds_before_decoding_so_a_split_character_survives(monkeypatch
 
 def test_add_course_writes_the_academic_year_and_seed_takes_a_year(tmp_path, monkeypatch):
     """年度が無いと、次の年も「履修中」の科目として出てしまう。"""
-    from kei_agent_course import notion_setup
+    from kei_agent_modules.course import notion_setup
 
     posts = []
 
@@ -277,7 +277,7 @@ def test_add_course_writes_the_academic_year_and_seed_takes_a_year(tmp_path, mon
 
 
 def test_course_setup_without_the_gateway_password_says_so(tmp_path, monkeypatch, config):
-    from kei_agent_course import notion_setup
+    from kei_agent_modules.course import notion_setup
 
     monkeypatch.setattr(notion_setup, "load_config", lambda: config)
     with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):

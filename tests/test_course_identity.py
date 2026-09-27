@@ -1,9 +1,9 @@
 import pytest
 
-from kei_agent_course.catalog import compare_course_catalog
-from kei_agent_course.course_identity import normalize_course_name
-from kei_agent_course.notion_setup import CourseSetup
-from kei_agent_course.notion_sync import CourseNotion, SyncError
+from kei_agent_modules.course.catalog import compare_course_catalog
+from kei_agent_modules.course.course_identity import normalize_course_name
+from kei_agent_modules.course.notion_setup import CourseSetup
+from kei_agent_modules.course.notion_sync import CourseNotion, SyncError
 
 
 def test_fullwidth_and_ascii_course_suffixes_have_one_identity():

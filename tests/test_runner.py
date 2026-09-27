@@ -90,7 +90,7 @@ def test_codex_command_uses_scoped_profile_instead_of_coarse_sandbox(config):
 
 def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skills(config, tmp_path):
     research = resolve_contract(config, request(config, provider="codex"))
-    course_request = request(config, actor="course", provider="codex", use_case=UseCase.COURSE_EXPLAIN)
+    course_request = request(config, actor="course", provider="codex", use_case="course_explain")
     course = resolve_contract(config, course_request)
     target = tmp_path / ".agents" / "skills"
     target.mkdir(parents=True)
@@ -246,10 +246,11 @@ def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(
 
 def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
     """Codex App は、表に書いた App の読む道具だけ。アップロードや共有の道具はモデルに見せない。"""
-    from kei_agent.agent_policy import BOX
+    from kei_agent.agent_policy import policy_of
 
+    box = next(app for app in policy_of("course").codex_apps if app.name == "Box")
     execution = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
-                                        resolve("course", "codex", UseCase.COURSE_EXPLAIN), None, "C1", "1.1")
+                                        resolve("course", "codex", "course_explain"), None, "C1", "1.1")
     command = runner.build_command(config, execution, apps={"Box": "asdk_app_1"})
     configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
 
@@ -258,7 +259,7 @@ def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
     assert 'apps.asdk_app_1.default_tools_approval_mode="approve"' in configs
     tools = tomllib.loads("tools=" + next(item.split("=", 1)[1] for item in configs
                                           if item.startswith("apps.asdk_app_1.tools=")))["tools"]
-    assert set(tools) == set(BOX.codex_apps[0].tools) and "box.upload_file" not in tools
+    assert set(tools) == set(box.tools) and "box.upload_file" not in tools
     assert all(value == {"enabled": True} for value in tools.values())
 
 
@@ -269,7 +270,7 @@ def test_codex_turns_off_tools_that_claude_agents_do_not_have(config):
 
     research = runner.build_command(config, request(config, provider="codex"))
     course = runner.build_command(config, runner.ExecutionRequest(
-        themes.agent_workspace(config, "course"), resolve("course", "codex", UseCase.COURSE_EXPLAIN), None, "", ""))
+        themes.agent_workspace(config, "course"), resolve("course", "codex", "course_explain"), None, "", ""))
 
     assert set(runner.CODEX_OFF_FEATURES) <= disabled(research) and "view_image" not in disabled(research)
     assert set(runner.CODEX_OFF_FEATURES) | {"view_image"} <= disabled(course)
@@ -712,7 +713,8 @@ def test_research_runner_loads_only_the_research_plugin(config):
 
 
 def test_agent_plugin_dir_refuses_an_unknown_agent(config):
-    assert config.agent_plugin_dir("course").name == "course"
+    # 大学はモジュール。skill とフックは modules/course/plugin
+    assert config.agent_plugin_dir("course") == config.repo_root / "modules" / "course" / "plugin"
     with pytest.raises(ValueError, match="未知のagent"):
         config.agent_plugin_dir("voice")
 

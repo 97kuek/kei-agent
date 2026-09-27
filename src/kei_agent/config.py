@@ -28,7 +28,7 @@ EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
-AGENT_PLUGINS = frozenset({"research", "course"})
+AGENT_PLUGINS = frozenset({"research"})
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
 CORE_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
 
@@ -165,7 +165,6 @@ class Config:
     # `#00_kei-agent`。先頭の番号は外して照合する（themes.theme_name）
     improve_channels: tuple[str, ...] = ("kei-agent",)
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
-    course_channels: tuple[str, ...] = ("course",)
     # 仕事エージェントに取り次ぐチャンネル
     # 使うモジュール（設定の modules）と、そのチャンネル（種類 → 番号を外した名前）
     modules: tuple[str, ...] = field(default_factory=_default_modules)
@@ -193,6 +192,17 @@ class Config:
     user_dir: Path | None = None
     # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
     secrets_dir: Path | None = None
+
+    def module_workspace(self, name: str) -> Path:
+        """モジュールの実行役の作業場。module.toml の [actor] workspace（無ければ状態の置き場の agents/<名前>）。
+
+        大学の作業場は、以前からの書き方の course_root でも変えられる（書かなければ ~/course）。
+        """
+        if name == "course":
+            return self.course_root
+        spec = modules.known().get(name)
+        workspace = spec.actor.workspace if spec is not None and spec.actor is not None else ""
+        return _expand(workspace) if workspace else self.state_dir / "agents" / name
 
     def prompt_file(self, name: str, module: str = "") -> Path:
         """指示書。利用者のフォルダの prompts/ に同じ名前のファイルがあれば、そちらを使う（丸ごと差し替え）。
@@ -280,7 +290,7 @@ AGENT_PROFILE_KEYS = {"provider"}
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
 # 本体が持つチャンネルの種類（モジュールの種類は module.toml の [channels] から足す）
-CHANNELS_KEYS = {"overview", "improve", "course"}
+CHANNELS_KEYS = {"overview", "improve"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
 SCHEDULE_TIME_KEYS = ("daily", "review", "night")
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
@@ -434,7 +444,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
-        course_channels=tuple(channels.get("course", Config.course_channels)),
         modules=tuple(spec.name for spec in enabled),
         module_channels={kind: tuple(channels.get(kind, names)) for spec in enabled
                          for kind, names in spec.channels.items()},

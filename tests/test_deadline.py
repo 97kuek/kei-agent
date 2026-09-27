@@ -2,7 +2,8 @@
 
 from datetime import date, datetime
 
-from kei_agent import course, deadline, morning
+from kei_agent import deadline, morning
+from kei_agent_modules.course import module as course
 
 
 def test_midnight_is_the_end_of_the_previous_day():

@@ -6,10 +6,11 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from kei_agent.notion import NotionError, gateway_notion
-from kei_agent_course import moodle, notion_sync
-from kei_agent_course.course_identity import normalize_course_name
-from kei_agent_course.ics import Event
+from kei_agent_a2a.api import NotionError, gateway_notion
+
+from . import moodle, notion_sync
+from .course_identity import normalize_course_name
+from .ics import Event
 
 
 @dataclass(frozen=True)

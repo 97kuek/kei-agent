@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
-from kei_agent_course.periods import GRADE_TERM_NAMES
+from .periods import GRADE_TERM_NAMES
 
 
 @dataclass(frozen=True)

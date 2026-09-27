@@ -40,7 +40,9 @@ _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cas
              "schedules"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
-               "classify", "connectors"}
+               "classify", "connectors", "workspace"}
+# 実行役の作業場に最初に置く CLAUDE.md のひな形（モジュールのフォルダにあれば使う）
+WORKSPACE_TEMPLATE = "CLAUDE.template.md"
 _CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
 _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 # skill と二の柵のフック（Claude Code の plugin）の置き場所。モジュールのフォルダの中
@@ -97,6 +99,8 @@ class ActorSpec:
     # 自由な質問の用途を、軽いモデルで選び分けるときの見分け方（Web を使う用途の中から。迷えば default_use_case）
     classify: str = ""
     connectors: tuple[ConnectorSpec, ...] = ()
+    # 作業場（~ から書ける）。無ければ状態の置き場の agents/<名前>
+    workspace: str = ""
 
 
 @dataclass(frozen=True)
@@ -225,7 +229,8 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
                      shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
                      notion=data.get("notion", "none"), timeout_minutes=timeout, default_use_case=default,
                      use_cases=use_cases, classify=classify,
-                     connectors=_connectors(data.get("connectors", []), at))
+                     connectors=_connectors(data.get("connectors", []), at),
+                     workspace=str(data.get("workspace") or ""))
 
 
 def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:

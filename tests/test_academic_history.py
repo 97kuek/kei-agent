@@ -2,7 +2,7 @@
 
 import pytest
 
-from kei_agent_course.academic_sync import academic_relation_changes, historical_course_changes
+from kei_agent_modules.course.academic_sync import academic_relation_changes, historical_course_changes
 
 
 def test_only_exact_grade_requirement_and_term_gpa_relations_are_added():

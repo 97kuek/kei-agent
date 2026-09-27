@@ -32,10 +32,6 @@ class UseCase(StrEnum):
     RESEARCH_COMPARE = "research_compare"
     RESEARCH_EXECUTE = "research_execute"
     RESEARCH_DESIGN = "research_design"
-    COURSE_EXPLAIN = "course_explain"
-    COURSE_REQUIREMENTS = "course_requirements"
-    COURSE_COMPARE = "course_compare"
-    COURSE_DEGREE_PLAN = "course_degree_plan"
     OVERVIEW_DAILY = "overview_daily"
     OVERVIEW_PLAN = "overview_plan"
     SELF_FIX_DESIGN = "self_fix_design"
@@ -70,14 +66,6 @@ _RECIPES: dict[tuple[str, UseCase], tuple[str, str]] = {
     ("claude", UseCase.RESEARCH_EXECUTE): ("claude-sonnet-5", "high"),
     ("codex", UseCase.RESEARCH_DESIGN): ("gpt-6-sol", "xhigh"),
     ("claude", UseCase.RESEARCH_DESIGN): ("claude-opus-5", "high"),
-    ("codex", UseCase.COURSE_EXPLAIN): ("gpt-6-luna", "medium"),
-    ("claude", UseCase.COURSE_EXPLAIN): ("claude-sonnet-5", "medium"),
-    ("codex", UseCase.COURSE_REQUIREMENTS): ("gpt-6-luna", "high"),
-    ("claude", UseCase.COURSE_REQUIREMENTS): ("claude-sonnet-5", "high"),
-    ("codex", UseCase.COURSE_COMPARE): ("gpt-6-sol", "medium"),
-    ("claude", UseCase.COURSE_COMPARE): ("claude-sonnet-5", "high"),
-    ("codex", UseCase.COURSE_DEGREE_PLAN): ("gpt-6-sol", "xhigh"),
-    ("claude", UseCase.COURSE_DEGREE_PLAN): ("claude-opus-5", "high"),
     ("codex", UseCase.OVERVIEW_DAILY): ("gpt-6-luna", "medium"),
     ("claude", UseCase.OVERVIEW_DAILY): ("claude-sonnet-5", "medium"),
     ("codex", UseCase.OVERVIEW_PLAN): ("gpt-6-sol", "high"),
@@ -100,10 +88,6 @@ _ACTOR_USE_CASES = {
         UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
         UseCase.RESEARCH_EXECUTE, UseCase.RESEARCH_DESIGN, UseCase.MANUAL_ASTRA,
         UseCase.MANUAL_FABLE,
-    }),
-    "course": frozenset({
-        UseCase.COURSE_EXPLAIN, UseCase.COURSE_REQUIREMENTS, UseCase.COURSE_COMPARE,
-        UseCase.COURSE_DEGREE_PLAN,
     }),
     "router": frozenset({UseCase.ROUTING, UseCase.OVERVIEW_DAILY, UseCase.OVERVIEW_PLAN}),
     "self_fix": frozenset({

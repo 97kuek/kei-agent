@@ -160,7 +160,7 @@ def test_course_policy_reads_box_and_uses_notion_only_through_the_gateway():
 def test_agent_workspaces_are_stable_places_for_sessions(config):
     course = themes.agent_workspace(config, "course")
     work = themes.agent_workspace(config, "work")
-    assert (course.kind, course.cwd) == (ChannelKind.COURSE, config.course_root)
+    assert (course.kind, course.module, course.cwd) == (ChannelKind.MODULE, "course", config.course_root)
     # 仕事はモジュール。作業場は前と同じ場所（会話の続きが切れない）
     assert (work.kind, work.module) == (ChannelKind.MODULE, "work") and work.cwd == config.state_dir / "agents" / "work"
     assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
@@ -186,11 +186,13 @@ def test_numbered_channel_uses_the_same_directory(config):
 
 
 def test_course_channel_points_at_the_course_workspace(config):
-    """大学のチャンネルの作業場は ~/course（本体はここで claude を動かさず、大学エージェントが使う）。"""
+    """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
+    はじめて使うときに、モジュールのフォルダのひな形（CLAUDE.template.md）から CLAUDE.md を作る。"""
     ws = themes.resolve(config, "20_course")
-    assert ws.kind is themes.ChannelKind.COURSE and ws.cwd == config.course_root
-    assert themes.ensure_workspace(ws) is True
-    assert "授業と課題の資料は Box" in (ws.cwd / "CLAUDE.md").read_text()
+    assert (ws.kind, ws.module, ws.cwd) == (themes.ChannelKind.MODULE, "course", None)
+    agent = themes.agent_workspace(config, "course")
+    assert agent.cwd == config.course_root
+    assert "授業と課題の資料は Box" in (agent.cwd / "CLAUDE.md").read_text()
 
 
 def test_module_channel_belongs_to_its_module(config):

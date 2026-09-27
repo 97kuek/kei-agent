@@ -8,8 +8,8 @@ import pytest
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
 from kei_agent.dates import weekday
-from kei_agent_course import notion_sync
-from kei_agent_course.ics import Event
+from kei_agent_modules.course import notion_sync
+from kei_agent_modules.course.ics import Event
 
 STATE = {"home_page_id": "course-home", "databases": {
     "courses": {"data_source_id": "ds-courses"},
@@ -189,7 +189,7 @@ def test_it_stops_before_writing_too_many_rows(monkeypatch):
 
 
 def test_state_file_missing_says_what_to_run(tmp_path):
-    with pytest.raises(notion_sync.SyncError, match="kei-agent-course-setup"):
+    with pytest.raises(notion_sync.SyncError, match="kei-agent-module course setup"):
         notion_sync.read_state(tmp_path / "notion-course.json")
 
 
@@ -198,7 +198,7 @@ def test_read_state_rejects_legacy_three_database_state(tmp_path):
     path = tmp_path / "notion-course.json"
     path.write_text(json.dumps(state))
 
-    with pytest.raises(notion_sync.SyncError, match="kei-agent-course-setup"):
+    with pytest.raises(notion_sync.SyncError, match="kei-agent-module course setup"):
         notion_sync.read_state(path)
 
 
@@ -282,7 +282,7 @@ def test_last_years_course_left_as_enrolled_does_not_come_back():
 def test_quarters_follow_their_semester(term, spring, autumn):
     from datetime import date
 
-    from kei_agent_course import periods
+    from kei_agent_modules.course import periods
 
     assert periods.in_term(term, date(2026, 5, 11)) is spring
     assert periods.in_term(term, date(2026, 11, 9)) is autumn
@@ -291,7 +291,7 @@ def test_quarters_follow_their_semester(term, spring, autumn):
 def test_academic_year_starts_in_april():
     from datetime import date
 
-    from kei_agent_course import periods
+    from kei_agent_modules.course import periods
 
     assert periods.academic_year(date(2027, 3, 31)) == 2026
     assert periods.academic_year(date(2027, 4, 1)) == 2027
@@ -300,7 +300,7 @@ def test_academic_year_starts_in_april():
 def test_next_weekday_is_today_or_later():
     from datetime import date
 
-    from kei_agent_course import periods
+    from kei_agent_modules.course import periods
 
     friday = date(2026, 9, 25)
     assert periods.next_weekday("金", friday) == friday
@@ -311,7 +311,7 @@ def test_next_weekday_is_today_or_later():
 def test_waseda_periods_turn_into_times():
     from datetime import date
 
-    from kei_agent_course import periods
+    from kei_agent_modules.course import periods
 
     assert weekday(date(2026, 9, 21)) == "月"
     start, end = periods.at(date(2026, 9, 21), 2)

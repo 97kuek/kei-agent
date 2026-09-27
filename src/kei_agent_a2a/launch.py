@@ -9,6 +9,7 @@ commands.py の COMMANDS から動かす（例: `kei-agent-module course setup -
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Callable
 
 from a2a.server.agent_execution import AgentExecutor
@@ -58,22 +59,28 @@ def main(argv: list[str] | None = None) -> None:
                                      description="モジュールの担当プロセスを起動する。コマンドを書けば、そのコマンドを動かす")
     parser.add_argument("name", help="モジュールの名前")
     parser.add_argument("command", nargs="?", help="モジュールのコマンド（例: setup）。書かなければ担当プロセスを起動する")
-    args, rest = parser.parse_known_args(argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if len(argv) >= 2 and not argv[0].startswith("-") and not argv[1].startswith("-"):
+        # コマンドのあとの引数（--help も）は、そのコマンドにそのまま渡す
+        name, command, rest = argv[0], argv[1], argv[2:]
+    else:
+        args = parser.parse_args(argv)
+        name, command, rest = args.name, args.command, []
     config = load_config()
-    spec = modules.known().get(args.name)
+    spec = modules.known().get(name)
     if spec is None:
-        parser.error(f"知らないモジュールです: {args.name}")
-    if args.command:
+        parser.error(f"知らないモジュールです: {name}")
+    if command:
         commands = modules.load_commands(spec)
-        if args.command not in commands:
-            parser.error(f"モジュール「{spec.name}」に {args.command} というコマンドはありません"
+        if command not in commands:
+            parser.error(f"モジュール「{spec.name}」に {command} というコマンドはありません"
                          f"（あるもの: {', '.join(sorted(commands)) or 'なし'}）")
-        commands[args.command](rest)
+        result = commands[command](rest)
+        if isinstance(result, int) and result:
+            raise SystemExit(result)
         return
-    if rest:
-        parser.error(f"知らない引数です: {' '.join(rest)}")
     if spec.port is None or spec.name not in config.modules:
-        parser.error(f"担当プロセスを持つ、オンのモジュールではありません: {args.name}")
+        parser.error(f"担当プロセスを持つ、オンのモジュールではありません: {name}")
     build_card, build_executor = parts(spec)
     server.serve(f"{spec.label}エージェント", build_card, build_executor, RPC_PATH, spec.port, env_prefix(spec))
 

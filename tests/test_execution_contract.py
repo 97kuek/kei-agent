@@ -5,7 +5,6 @@ import pytest
 from kei_agent import router, runner, themes
 from kei_agent.execution_contract import prompt_version, resolve_contract
 from kei_agent.model_policy import UseCase, resolve
-from kei_agent.themes import ChannelKind, Workspace
 
 ROUTER = {"filesystem.deny_read", "filesystem.read"}
 RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.domain_allowlist",
@@ -19,8 +18,8 @@ WORK = {"filesystem.deny_read", "app.allowlist"}
     ("router", UseCase.ROUTING, "claude", "claude-haiku-4-5", "", "router.md", False, ROUTER),
     ("research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-sol", "high", "system.md", True, RESEARCH),
     ("research", UseCase.RESEARCH_EXECUTE, "claude", "claude-sonnet-5", "high", "system.md", True, RESEARCH),
-    ("course", UseCase.COURSE_EXPLAIN, "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
-    ("course", UseCase.COURSE_EXPLAIN, "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
+    ("course", "course_explain", "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
+    ("course", "course_explain", "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
     ("work", "work_single_source", "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
     ("work", "work_single_source", "claude", "claude-sonnet-5", "medium", "work.md", True, WORK),
 ])
@@ -29,14 +28,13 @@ def test_agent_provider_contract_matrix(config, actor, case, provider, model, ef
     """Claude と Codex で、同じ担当は同じ指示書・skill・制限になる。"""
     workspace = (router.workspace(config) if actor == "router" else
                  themes.resolve(config, "vlm") if actor == "research" else
-                 Workspace(actor, ChannelKind.COURSE, config.course_root) if actor == "course" else
                  themes.agent_workspace(config, actor))
     contract = resolve_contract(config, runner.ExecutionRequest(
         workspace, resolve(actor, provider, case), None, "C1", "1.1"))
 
     assert (contract.recipe.model, contract.recipe.reasoning_effort) == (model, effort)
-    # 仕事の指示書はモジュールのフォルダ（modules/work/）、本体の担当はリポジトリの prompts/
-    folder = config.repo_root / ("modules/work" if actor == "work" else "prompts")
+    # 大学・仕事の指示書はモジュールのフォルダ（modules/<名前>/）、本体の担当はリポジトリの prompts/
+    folder = config.repo_root / (f"modules/{actor}" if actor in ("course", "work") else "prompts")
     assert contract.prompt_text == (folder / prompt_name).read_text(encoding="utf-8")
     assert len(contract.prompt_version) == 12
     assert (contract.skill_dir is not None) is has_skills

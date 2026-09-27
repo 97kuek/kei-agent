@@ -1,6 +1,6 @@
 """Moodle の締切を、Notion の「課題」に書き込む。
 
-`kei-agent-course-setup` で作った授業用の Notion に、ics から読んだ締切を1行ずつ入れる。
+`kei-agent-module course setup` で作った授業用の Notion に、ics から読んだ締切を1行ずつ入れる。
 同じ課題を二重に作らないよう、Moodle のイベント ID（ics の UID）を目印にする。
 依頼者が手で直した「状態」「見積時間」「実績時間」には触らない。
 取り込むのは「授業」に入れた履修科目の締切だけにする（Moodle のカレンダーには、
@@ -10,7 +10,7 @@ Notion はゲートウェイ経由（client は course）で、授業ホーム�
 
 使い方（手で動かすとき。Notion ゲートウェイが動いていること）:
     source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
-    uv run --group course kei-agent-course-sync
+    kei-agent-module course sync
 """
 
 from __future__ import annotations
@@ -22,17 +22,17 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from kei_agent.config import load_config
-from kei_agent.notion import Notion, NotionError, gateway_notion
-from kei_agent_course import periods
-from kei_agent_course.course_identity import normalize_course_name
-from kei_agent_course.ics import Event
-from kei_agent_course.notion_props import number, plain, select
+from kei_agent_a2a.api import Notion, NotionError, gateway_notion, load_config
+
+from . import periods
+from .course_identity import normalize_course_name
+from .ics import Event
+from .notion_props import number, plain, select
 
 log = logging.getLogger(__name__)
 
 STATE_NAME = "notion-course.json"
-NO_STATE = "授業用の Notion がまだありません（kei-agent-course-setup を実行してください）"
+NO_STATE = "授業用の Notion がまだありません（kei-agent-module course setup を実行してください）"
 # 1回の取り込みで書き込む上限。ics を読み違えたときに、大量の行を作ってしまわないようにする
 MAX_WRITES = 50
 TITLE_LIMIT = 200
@@ -339,9 +339,9 @@ def main(argv: list[str] | None = None) -> None:
     import argparse
     import sys
 
-    from kei_agent_course import moodle
+    from . import moodle
 
-    parser = argparse.ArgumentParser(prog="kei-agent-course-sync",
+    parser = argparse.ArgumentParser(prog="kei-agent-module course sync",
                                      description="Moodle の締切を Notion の「課題」に取り込む")
     parser.add_argument("--days", type=int, default=moodle.WINDOW_DAYS, help="何日先まで取り込むか")
     parser.add_argument("--all", action="store_true",

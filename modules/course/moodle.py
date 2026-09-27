@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from kei_agent_course.ics import Event, due_events, parse, unfold_bytes
+from .ics import Event, due_events, parse, unfold_bytes
 
 log = logging.getLogger(__name__)
 

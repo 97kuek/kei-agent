@@ -1,6 +1,6 @@
 #!/bin/zsh
 # launchd から担当（A2A サーバー）を起動する。127.0.0.1 でだけ待ち受ける。
-# 使い方: deploy/run-agent.sh <名前>。名前は本体に組み込みの担当（research / course / voice）か、
+# 使い方: deploy/run-agent.sh <名前>。名前は本体に組み込みの担当（research / voice）か、
 # 担当プロセスを持つモジュール（module.toml に [process] がある）。どれも同じ形で、違うのは名前だけ。
 # モジュールの担当は、共通の起動コマンド（kei-agent-module <名前>）が modules/<名前>/agent.py を動かす。
 # 声のレイヤ（voice）は、口（A2A）と耳（マイク）を同じプロセスで持つ。マイクは既定では開けない（App Home から入れる）

@@ -9,10 +9,10 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, deadline, modules, themes, timelog
+from kei_agent import deadline, modules, themes, timelog
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
-from kei_agent.dates import parse_time, weekday
+from kei_agent.dates import parse_time
 from kei_agent.notion import NotionError
 from kei_agent.slack_text import format_duration
 from kei_agent.store import Store
@@ -103,7 +103,6 @@ class DigestBuilder:
         lines += self._waiting(active_channels)
         lines += await self._time(now)
         if domains:
-            lines += await self._course(now)
             lines += await self._agenda(now)
         # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
         tasks, notes = await self._notion(since, now)
@@ -111,25 +110,6 @@ class DigestBuilder:
         lines += await self._yesterday_review(now)
         lines += ["", *notes]
         return cap("\n".join(lines) + "\n")
-
-    async def _course(self, now: float) -> list[str]:
-        """大学（今日が期限だったもの、残っている締切、明日の授業）。"""
-        if course.AGENT not in self.assistant.agents:
-            return []
-        at = datetime.fromtimestamp(now)
-        tomorrow = at + timedelta(days=1)
-        lines = ["", "## 大学", ""]
-        items = await self.assistant.course_due(course.DIGEST_DAYS, at)
-        if items is None:
-            return [*lines, "- 大学エージェントにつながらなかった", ""]
-        today = [i for i in items if _due_day(i) == at.date()]
-        rest = [i for i in items if _due_day(i) and _due_day(i) > at.date()]
-        lines.append(f"- 今日が期限だったもの: {_dues(today) or 'なし'}")
-        lines.append(f"- 残っている締切: {_dues(rest, with_day=True) or 'なし'}")
-        classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=weekday(tomorrow))
-        names = [str(c.get("subject") or "") for c in (classes.data.get("items") or [])] if classes.ok else []
-        lines.append(f"- 明日（{weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
-        return [*lines, ""]
 
     async def _agenda(self, now: float) -> list[str]:
         """モジュールの予定（今日あったもの、明日のもの、締切）。材料なので、件名と時刻だけ。"""

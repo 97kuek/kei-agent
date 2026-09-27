@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
-from kei_agent_course import toggl_report
+from kei_agent_modules.course import toggl_report
 
 
 def entry(project, description, hours, **extra):

@@ -297,6 +297,7 @@ class Store:
                     if name not in have:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
             self._move_reading_posts()
+            self._move_course_notices()
 
     def _move_reading_posts(self) -> None:
         """朝の読みものの控え（2026-09 の reading_posts）を、知識のモジュールの記録に写して、表を消す。"""
@@ -314,6 +315,15 @@ class Store:
                 "VALUES ('knowledge', 'post', ?, ?, ?, ?)",
                 (f"{row['channel']}:{row['ts']}", json.dumps(value, ensure_ascii=False), row["posted_at"], expires))
         self.conn.execute("DROP TABLE IF EXISTS reading_posts")
+
+    def _move_course_notices(self) -> None:
+        """締切と未着手の知らせの目印（2026-09 に本体が持っていた due: / early:）を、大学のモジュールの目印にする。
+
+        大学がモジュール（modules/course/）になって、目印に module.course. が付くようになった。移さないと、
+        知らせ済みの締切をもう一度知らせてしまう。
+        """
+        self.conn.execute("UPDATE OR IGNORE notices SET key = 'module.course.' || key "
+                          "WHERE key LIKE 'due:%' OR key LIKE 'early:%'")
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。

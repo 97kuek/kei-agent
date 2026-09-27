@@ -249,7 +249,7 @@ def test_rules_refuse_the_workspace_and_missing_parents():
         plan("PATCH", "/databases/" + "a" * 32, body={"parent": {"type": "workspace", "workspace": True}})
 
 
-# 中継の口: 決まった処理（src/kei_agent・src/kei_agent_course）と MCP の道具が使う形
+# 中継の口: 決まった処理（src/kei_agent・src/kei_agent_modules.course）と MCP の道具が使う形
 
 TITLE = {"title": [{"type": "text", "text": {"content": "x"}}]}
 HEADING = {"type": "heading_2", "heading_2": {"rich_text": [{"type": "text", "text": {"content": "見出し"}}]}}
@@ -517,8 +517,8 @@ def via(served, monkeypatch):
 
 
 def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
-    from kei_agent_course import notion_setup, notion_sync
-    from kei_agent_course.ics import Event
+    from kei_agent_modules.course import notion_setup, notion_sync
+    from kei_agent_modules.course.ics import Event
 
     course = via("course")
     setup = notion_setup.CourseSetup(course, world.course.root, tmp_path / "notion-course.json")

@@ -22,7 +22,7 @@ VOICE_ACTION = "kei_agent_home_voice"
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
-CORE_AGENT_LABELS = {"research": "研究", "course": "大学"}
+CORE_AGENT_LABELS = {"research": "研究"}
 CROSS_AGENT_LABELS = {"router": "振り分け・Daily", "self_fix": "自己改善"}
 VOICE_OPTIONS = {"voice": "知らせる", "listen": "聞く（マイク）"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される

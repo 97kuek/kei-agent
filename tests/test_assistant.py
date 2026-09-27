@@ -17,6 +17,22 @@ from kei_agent.slack_text import split_text
 from kei_agent.thread_ui import ThreadUI
 
 
+def _streaming(agent_cls):
+    """ask だけの偽の担当を、モジュールの窓口（core.ask_agent）の頼み方でも受けられるようにする。
+
+    窓口は経過を流しながら（stream）頼み、日数などの指定は本文の JSON で渡す。偽物の ask には、
+    今までどおり指定を params に入れて渡す（何を頼んだかを、同じ形で確かめられるように）。
+    """
+    async def stream(self, skill, text="", params=None, on_progress=None):
+        import json as _json
+
+        extra = _json.loads(text) if text.startswith("{") else {}
+        return await self.ask(skill, text, {**extra, **(params or {})})
+
+    agent_cls.stream = stream
+    return agent_cls
+
+
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C9": "00_kei-agent", "C5": "research-overview"})
@@ -1455,6 +1471,7 @@ async def test_course_channel_asks_the_university_agent(env):
     slack.channels["C7"] = "20_course"
     asked = []
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1480,6 +1497,7 @@ async def test_course_channel_hides_a2a_failure_details(env):
     assistant, slack, _, _ = env
     slack.channels["C7"] = "20_course"
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1502,6 +1520,7 @@ async def test_course_channel_hides_invalid_a2a_success_text(env):
 
     assistant, slack, _, _ = env
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1509,7 +1528,8 @@ async def test_course_channel_hides_invalid_a2a_success_text(env):
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="RuntimeError: /private/secret")
 
     assistant.agents["course"] = _Agent()
-    await assistant.course(Request("C7", "20_course", "11.1", "11.1", "取り込んで"), skill="sync-assignments")
+    await assistant.modules["course"].on_message(Request("C7", "20_course", "11.1", "11.1", "取り込んで"),
+                                                 skill="sync-assignments", params={})
 
     shown = "\n".join(slack.texts())
     assert "返答を利用者向けの形に整えられなかったよ" in shown
@@ -1730,6 +1750,7 @@ async def test_course_thread_takes_replies_without_a_mention(env, store):
     slack.channels["C7"] = "20_course"
     asked = []
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1804,6 +1825,7 @@ async def test_course_channel_formats_the_deadlines(env):
     slack.channels["C7"] = "20_course"
     asked = []
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1826,6 +1848,7 @@ async def test_course_channel_formats_the_deadlines(env):
     assert "（ほかに 2 件）" in reply
 
 
+@_streaming
 class _DueAgent:
     """締切の一覧（list-due）を返す大学エージェントの偽物。days ごとに、決めておいた締切を返す。"""
     base_url = "http://127.0.0.1:8787"
@@ -1903,7 +1926,7 @@ async def test_course_channel_answers_the_nearest_deadline_alone(env, monkeypatc
 
 
 def test_first_items_keep_deadlines_at_the_same_time():
-    from kei_agent import course
+    from kei_agent_modules.course import module as course
 
     assert [item["id"] for item in course.first_items(DUES, 3)] == ["a@moodle", "b@moodle", "c@moodle", "d@moodle"]
     assert [item["id"] for item in course.first_items(DUES, 1)] == ["a@moodle"]
@@ -1936,6 +1959,7 @@ async def test_course_channel_tells_when_the_agent_is_down(env):
     assistant, slack, _, _ = env
     slack.channels["C7"] = "20_course"
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -1963,6 +1987,7 @@ async def test_course_channel_waits_out_a_restart_instead_of_failing(env, monkey
     monkeypatch.setattr(agents, "RETRY_WAIT", 0)
     tries = []
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -2060,6 +2085,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
     slack.channels["C7"] = "20_course"
     asked = []
 
+    @_streaming
     class _Agent:
         base_url = "http://127.0.0.1:8787"
 
@@ -2187,6 +2213,7 @@ async def test_overview_channel_routes_to_the_right_agent(env, monkeypatch):
     assistant, slack, claude, _ = env
     asked = []
 
+    @_streaming
     class _Course:
         base_url = "http://127.0.0.1:8787"
 
@@ -2225,6 +2252,7 @@ async def test_overview_agent_requests_use_the_same_thread_lock(env, monkeypatch
     gate = asyncio.Event()
     calls = 0
 
+    @_streaming
     class _Course:
         base_url = "http://127.0.0.1:8787"
 
@@ -2474,12 +2502,14 @@ async def test_toggl_command_opens_a_course_picker_in_the_course_channel(env, mo
         updated.append(kw)
         return {}
 
-    async def ask_course(skill, **params):
+    async def ask_agent(skill, payload):
         from kei_agent.agents import Reply
+        assert skill == "list-current-courses"
         return Reply(ok=True, data={"items": [{"id": "P1", "subject": "信号処理"}]})
 
     slack.views_open, slack.views_update = views_open, views_update
-    monkeypatch.setattr(assistant, "ask_course", ask_course)
+    # 科目は、大学のモジュールの担当に聞く（時間記録がモジュールになるまでは、名前で）
+    monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
 
     reply = await assistant.on_time_command(_toggl(channel="C2", name="20_course"))
     await settle(assistant)

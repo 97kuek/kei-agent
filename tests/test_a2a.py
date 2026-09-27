@@ -11,22 +11,26 @@ import pytest
 
 from kei_agent.a2a import A2AError, Agent
 
-pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
+pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 pytest.importorskip("uvicorn")
 
 TOKEN = "test-token"
 
 
-def test_a2a_app_refuses_to_start_without_a_password():
-    from kei_agent_course.app import build_app
+def build_app(base_url: str, token: str):
+    """大学のモジュールの担当（共通の起動コマンドが作るのと同じアプリ）。"""
+    from kei_agent import modules
+    from kei_agent_a2a import launch
 
+    return launch.build_app(modules.builtin()["course"], base_url, token)
+
+
+def test_a2a_app_refuses_to_start_without_a_password():
     with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
         build_app("http://127.0.0.1:8787", "")
 
 
 def test_a2a_app_refuses_a_blank_password():
-    from kei_agent_course.app import build_app
-
     with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
         build_app("http://127.0.0.1:8787", "   ")
 
@@ -41,8 +45,6 @@ def _free_port() -> int:
 async def server():
     """大学エージェントを立てて、住所を返す。"""
     import uvicorn
-
-    from kei_agent_course.app import build_app
 
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
@@ -121,14 +123,15 @@ async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
     """締切の一覧が JSON で返る（見せ方はオーケストレーターが決める）。"""
     from datetime import datetime
 
-    from kei_agent_course import ics, moodle
+    from kei_agent_modules.course import ics, moodle
 
     monkeypatch.setenv("MOODLE_ICS_URL", "https://example.invalid/calendar.ics")
     monkeypatch.setattr(moodle, "due", lambda url, since=None, days=90: [
         ics.Event(uid="1@moodle", summary="第3回レポート の 提出期限",
                   starts_at=datetime(2026, 9, 25, 23, 59), course="データベース(2019ZZ)")])
 
-    result = await Agent(server, TOKEN).ask("list-due", params={"days": 30})
+    # 日数などの指定は、本体（module.py）が本文の JSON で渡す
+    result = await Agent(server, TOKEN).ask("list-due", json.dumps({"days": 30}))
     assert result.ok and result.task_id
     # 返事は全エージェント共通の封筒。中身は data に入る
     envelope = json.loads(result.answer)
@@ -154,13 +157,13 @@ async def test_list_due_says_what_is_missing_without_the_calendar_url(server, mo
 
 async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, monkeypatch):
     from kei_agent.notion import NotionError
-    from kei_agent_course import notion_sync
+    from kei_agent_modules.course import notion_sync
 
     def broken_snapshot(days, today):
         raise NotionError("課題 DB の次ページを読めません")
 
     monkeypatch.setattr(notion_sync, "list_calendar_assignments", broken_snapshot)
-    result = await Agent(server, TOKEN).ask("list-calendar-assignments", params={"days": 30})
+    result = await Agent(server, TOKEN).ask("list-calendar-assignments", json.dumps({"days": 30}))
 
     assert not result.ok
     assert "次ページ" in json.loads(result.answer)["text"]
@@ -199,7 +202,7 @@ async def test_list_classes_for_another_weekday_uses_that_days_date(server, monk
     """曜日を指定されたら、今日ではなく、次のその曜日の日付で学期と時刻を決める。"""
     from datetime import date
 
-    from kei_agent_course import executor, notion_sync
+    from kei_agent_modules.course import agent, notion_sync
 
     class _Today(date):
         @classmethod
@@ -212,9 +215,9 @@ async def test_list_classes_for_another_weekday_uses_that_days_date(server, monk
         seen.append((weekday, day))
         return [{"id": "p1", "subject": "データベース", "weekday": weekday, "term": "秋学期", "period": 2, "url": ""}]
 
-    monkeypatch.setattr(executor, "date", _Today)
+    monkeypatch.setattr(agent, "date", _Today)
     monkeypatch.setattr(notion_sync, "courses_on", courses_on)
-    result = await Agent(server, TOKEN).ask("list-classes", params={"weekday": "月"})
+    result = await Agent(server, TOKEN).ask("list-classes", json.dumps({"weekday": "月"}, ensure_ascii=False))
 
     assert seen == [("月", date(2026, 9, 28))]
     item, = json.loads(result.answer)["data"]["items"]

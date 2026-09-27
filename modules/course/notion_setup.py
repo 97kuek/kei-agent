@@ -5,7 +5,7 @@ Notion はゲートウェイ経由（client は course）で、授業ホーム�
 
 使い方（Notion ゲートウェイが動いていること）:
     source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
-    uv run --group course kei-agent-course-setup [<授業ホームのページID>]
+    kei-agent-module course setup [<授業ホームのページID>]
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from kei_agent.config import load_config
-from kei_agent.notion import NotionError, Setup, gateway_notion
-from kei_agent_course import notion_props, periods
-from kei_agent_course.course_identity import normalize_course_name
+from kei_agent_a2a.api import NotionError, Setup, gateway_notion, load_config
+
+from . import notion_props, periods
+from .course_identity import normalize_course_name
 
 # 科目の台帳。学期のあいだ変わらないもの
 COURSES = {
@@ -218,7 +218,7 @@ class CourseSetup(Setup):
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="kei-agent-course-setup")
+    parser = argparse.ArgumentParser(prog="kei-agent-module course setup")
     parser.add_argument("home_page_id", nargs="?", default="",
                         help="授業ホームのページID（省くと config.toml の [notion] course_home）")
     parser.add_argument("--seed", type=int, metavar="年度",
