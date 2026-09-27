@@ -543,7 +543,9 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     # モジュールの設定は、そのモジュールの名前の表（[course] など）に書く
     module_settings = _module_settings(data)
     _check_keys(data, TOP_LEVEL_KEYS | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
-    _check_keys(channels, CHANNELS_KEYS | {kind for spec in enabled for kind in spec.channels}, "[channels]")
+    # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
+    _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
+                "[channels]")
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     paths = data.get("paths", {})
     _check_keys(paths, PATHS_KEYS, "[paths]")

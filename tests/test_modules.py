@@ -145,10 +145,14 @@ def test_module_settings_in_the_config_must_match_the_definition(tmp_path, text,
 
 
 def test_settings_stay_when_the_module_is_turned_off(tmp_path):
-    home_dir = _config(tmp_path, 'modules = []\n\n[weather]\nplace = "早稲田"\n')
+    home_dir = _config(tmp_path, 'modules = []\n\n[weather]\nplace = "早稲田"\n\n[channels]\nwork = ["office"]\n')
     _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == () and config.settings("weather")["place"] == "早稲田"
+    # オフのモジュールのチャンネルの名前も、書いたまま残せる（使うのはオンのものだけ）
+    assert config.module_channels == {}
+    with pytest.raises(ConfigError, match="知らないキー"):
+        load_config(env={"KEI_AGENT_HOME": str(_config(tmp_path, '[channels]\nlab = ["x"]\n'))})
 
 
 def test_a_module_with_settings_cannot_take_the_name_of_a_core_table(tmp_path):
