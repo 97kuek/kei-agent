@@ -107,7 +107,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 5. provider とモデル
 
-- 各 actor（`research` / `course` / `work` / `knowledge` / `router` / `improve`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
+- 各 actor（`research` / `course` / `work` / `knowledge` / `router` / `daily` / `improve`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
 - model と effort は actor・用途（use case）・provider から決める。本体の用途は `src/kei_agent/model_policy.py`、モジュールの用途は `module.toml` の `[use_cases]`（知識は `modules/knowledge/module.toml`）。使ってよいモデルの一覧は `model_policy.py` にだけ置き、モジュールはその中からしか選べない
 - 許可する model は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` だけ
 - 別 provider や上位 model への自動の切り替えはしない。provider 未選択、連携が使えない、上限到達のときは理由を出して止まる
@@ -122,7 +122,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 大学: 説明 / 要件 / 比較 / 履修計画 | luna medium / luna high / sol medium / sol xhigh | sonnet-5 medium / high / high / opus-5 high |
 | 仕事: 1つの出典 / 横断 / 判断 | luna medium / sol medium / sol high | sonnet-5 medium / high / opus-5 high |
 | 知識: 選ぶ / 要約 / 質問 | luna low / luna medium / luna medium | haiku-4-5 / sonnet-5 medium / sonnet-5 medium |
-| Daily / Retro & Planning | luna medium / sol high | sonnet-5 medium / opus-5 high |
+| Daily / Retro & Planning（`daily`） | luna medium / sol high | sonnet-5 medium / opus-5 high |
 | 自己改善: 案 / 実装 / issue の要約 | sol xhigh / sol high / luna low | opus-5 high / sonnet-5 high / haiku-4-5 |
 | 明示指定だけ | `[[manual-astra]]` → astra / xhigh | `[[manual-fable]]` → fable-5 / high |
 
@@ -132,7 +132,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ### 実行のしかた
 
-AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研究・大学・仕事・知識・振り分け・Daily/レトプラ・自己改善、Claude も Codex も）。1回の実行条件は `ExecutionRequest` と `ExecutionContract`（`execution_contract.py`）にまとめ、どこまで触れるかは制限の表（`agent_policy.py`）が決める。Claude の設定も Codex の設定も、この表から作る。
+AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研究・大学・仕事・知識・振り分け・Daily と振り返り・自己改善、Claude も Codex も）。1回の実行条件は `ExecutionRequest` と `ExecutionContract`（`execution_contract.py`）にまとめ、どこまで触れるかは制限の表（`agent_policy.py`）が決める。Claude の設定も Codex の設定も、この表から作る。
 
 | 担当 | ファイル | コマンド | Web | Notion（ゲートウェイ） | アカウントの連携 |
 |---|---|---|---|---|---|
@@ -140,7 +140,8 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 | 大学 | 作業場を読むだけ | × | × | 授業ホームを読み書き | Box（読む道具だけ） |
 | 仕事 | 作業場を読むだけ | × | × | なし | Microsoft 365（Outlook・Teams・SharePoint を読む道具だけ。Codex は Outlook だけ） |
 | 知識 | 作業場を読むだけ | × | 質問に答えるときだけ | なし | なし |
-| 振り分け・分類・Daily/レトプラ | 読むだけ | × | × | なし | なし |
+| 振り分け・分類 | 読むだけ | × | × | なし | なし |
+| Daily・振り返り | 研究全体を読むだけ | × | × | なし | なし |
 | 自己改善 | 作業場を読み書き | ○ | ○ | なし | なし |
 
 - 読むだけの実行（声からの問い合わせ、分類など）は、書く・動かす手段を外す。ゲートウェイは読む道具（`read` `search` `query`）だけ
@@ -204,19 +205,20 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 8. 定期実行
 
-本体のスケジューラが毎分動く（`src/kei_agent/schedule.py`）。時刻は `config.toml` の `[schedule]` が既定で、App Home で変えたものは SQLite から毎分読み直す。モジュールの定期処理（知識の `literature` と `reading`、時間記録の `toggl_import`）は、同じ順番の中でそのモジュールの `run_schedule` を呼ぶ。
+本体のスケジューラが毎分動く（`src/kei_agent/schedule.py`）。時刻は `config.toml` の `[schedule]` が既定で、App Home で変えたものは SQLite から毎分読み直す。モジュールの定期処理（知識の `literature` と `reading`、時間記録の `toggl_import`）と、モジュールが受け持つ本体の定期処理（Daily・振り返りのモジュールの `daily` と `review`。`core_schedules`）は、同じ順番の中でそのモジュールの `run_schedule` を呼ぶ。
 
 | 名前 | 既定 | 中身 |
 |---|---|---|
 | `literature` | 07:00 | テーマの `CLAUDE.md` の検索キーワードと前提を知識エージェントに渡し、arXiv の新着から関係のあるものを最大5本、研究ホームの先行研究 DB（「未読」）とテーマのチャンネルに出す。そのスレッドの続きは知識エージェントが答える |
 | `reading` | 07:00 | 共通ホームの「収集」ページの興味と情報源、最近60日に 👍 した記事（最大20件）を知識エージェントに渡し、興味ごとに偏らない5件を要約つきで `#40_knowledge` に1記事ずつ出す（記事は知識のモジュールの記録に控え、👍 しなかったものは30日で忘れる）。新着がなければ出さない |
-| `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily |
-| `review` | 21:00 | Retro & Planning。Slack には成果と未完了だけ。直前に Moodle の課題を取り込み、スレッドに明日・明後日の締切を並べる |
+| `daily` | 08:00 | 今日の予定を時刻順に1通で出し、そのスレッドに Daily（Daily・振り返りのモジュール `modules/daily/`。オフなら動かない） |
+| `review` | 21:00 | Retro & Planning。Slack には成果と未完了だけ。直前に Moodle の課題を取り込み、スレッドに明日・明後日の締切を並べる（同じモジュール） |
 | `toggl_import` | 22:00 | Toggl のアプリで直接測った時間を「時間記録」に取り込む（時間記録のモジュール。11章） |
 | `maintenance` | 22:00 | 古いファイルの整理、バックアップ（`[maintenance]`） |
 | `night` | 00:00 | Notion の「今夜やる」Task を1件ずつ、一晩5件まで。テーマのない Task は「確認待ち」にする |
 
-- Daily と Retro & Planning は actor `router` で動く。材料（`digest.py`）はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りは共通ホームから読み、今週の人の時間は時間記録のモジュールが材料に足す（`material`）
+- Daily と Retro & Planning は、Daily・振り返りのモジュール（`modules/daily/`）の actor `daily` が、研究全体の作業場を読むだけで書く（`core.run_ai` の `overview`）。朝の一覧（`briefing.py`、`core.morning`）と材料（`digest.py`、`core.digest`）を集めるのは本体の枠。材料はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りは共通ホームから読み、今週の人の時間は時間記録のモジュールが材料に足す（`material`）
+- 答えが決まった見出しでなければ（`core.checked_sections`）、Slack にも日別記録にも出さず、決まった文で知らせる
 - 返事はそのまま共通ホームの「日別記録」に1日1行で保存し、手元には残さない。保存できなければ改善チャンネルに知らせる（Slack には出ている）。Retro のスレッドに貼った結論は同じ行のレトプラに足す
 - Moodle の課題は Daily と Retro の前に授業ホームへ取り込み、新しい課題と締切の変わった課題を `#20_course` に知らせる（大学のモジュールの `prepare`）
 - 08:00 以降に1回、授業ホームの課題（これからの全部）を共通ホームの予定カレンダーに写す（大学のモジュールの見回り `tick`。写せなければ1時間おき。AI は動かさない）
