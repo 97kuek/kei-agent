@@ -139,11 +139,11 @@ uv run kei-agent-hub-setup --apply
 ```zsh
 source ~/.config/kei-agent/secrets/kei-agent.zsh          # ゲートウェイの親の合言葉
 source ~/.config/kei-agent/secrets/kei-agent-course.zsh   # MOODLE_ICS_URL
-uv run --group course kei-agent-course-setup --seed 2026
-uv run --group course kei-agent-course-sync            # 手で締切を取り込む（--all で履修外も）
-uv run --group course kei-agent-course-inspect         # Moodle と「授業」を読むだけで照合する
-uv run --group course kei-agent-course-academic-import --dry-run <grades.html> <credits.html>
-uv run --group course kei-agent-course-academic-import --apply <grades.html> <credits.html>   # --delete-inputs で入力を消す
+uv run kei-agent-module course setup --seed 2026
+uv run kei-agent-module course sync            # 手で締切を取り込む（--all で履修外も）
+uv run kei-agent-module course inspect         # Moodle と「授業」を読むだけで照合する
+uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.html>
+uv run kei-agent-module course academic-import --apply <grades.html> <credits.html>   # --delete-inputs で入力を消す
 ```
 
 ## 6. そのほかの最初の1回

@@ -26,7 +26,7 @@ Slack や Notion につないで動かすときは、`deploy/README.md` の秘�
 
 - 仕組みを変えたら `docs/architecture.md` の該当する節も同じ変更で直す。使い方が変わるなら `docs/using.md`、入れ方なら `deploy/README.md`
 - ドキュメントには「いまどうなっているか」だけを書く。経緯は Git の履歴に残す
-- Notion の DB やプロパティの名前を変えたら、`src/kei_agent/notion.py`・`notion_store.py`・`notion_hub.py`（大学は `src/kei_agent_course/notion_setup.py`）も合わせる
+- Notion の DB やプロパティの名前を変えたら、`src/kei_agent/notion.py`・`notion_store.py`・`notion_hub.py`（大学は `modules/course/notion_setup.py`）も合わせる
 - モデル名は `src/kei_agent/model_policy.py` にだけ書く。skill や prompt に埋め込まない
 - Slack の権限、sandbox、柵（`guard.py`、`config.example.toml`、`deploy/`）の大きな変更は、先に Issue で相談する
 

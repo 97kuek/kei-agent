@@ -9,7 +9,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | プロセス | コマンド | ポート | パッケージ | 役目 |
 |---|---|---|---|---|
 | 本体（オーケストレーター） | `kei-agent` | 8786 | `src/kei_agent/` | Slack の受け口、振り分け、柵、Notion、定期実行、自己改善。8786 は声からの問い合わせ口（12章） |
-| 大学エージェント | `kei-agent-course` | 8787 | `src/kei_agent_course/` | Moodle・Box・授業ホーム・Toggl |
+| 大学エージェント | `kei-agent-module course` | 8787 | `modules/course/` | Moodle・Box・授業ホーム・Toggl。モジュールの担当プロセス（`agent.py`） |
 | 研究エージェント | `kei-agent-research` | 8788 | `src/kei_agent_research/` | 作業場での CLI 実行と pueue ジョブ |
 | 仕事エージェント | `kei-agent-module work` | 8789 | `modules/work/` | Microsoft 365 を読む。モジュールの担当プロセス（`agent.py`） |
 | 知識エージェント | `kei-agent-module knowledge` | 8792 | `modules/knowledge/` | 読みもの・論文の新着を集めて絞り、要約する。記事や論文の質問に答える（Notion・Slack は持たない）。モジュールの担当プロセス（`agent.py`） |
@@ -98,7 +98,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ### エージェントごとの中身
 
 - **研究** … テーマの作業場で provider を1回動かして最終結果を返す。長い処理は pueue（グループ `kei-agent`）に入れ、本体が毎分状態を見て、終わったらその会話を再開する。ジョブは作業場の中のスクリプトだけで、`--expect` で宣言したファイルができたかを確かめる。Notion はゲートウェイ経由、W&B は `managing-wandb` skill
-- **大学** … Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。締切の一覧（`list-due`）への返事は本体が組み立て、「一番近い」のように件数を言われたら、その件数だけ（振り分け係が `limit` を拾う）、見た期間に締切が無ければ、その先のいちばん近いものを添える（`course.due_answer`）。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
+- **大学** … 大学はモジュール（`modules/course/`）で、Box の読む道具は `module.toml` の `[[actor.connectors]]`、skill と二の柵は `modules/course/plugin/`、setup などのコマンドは `kei-agent-module course <コマンド>`（`commands.py`）。作業場は `~/course`（設定の `course_root`）。Moodle はカレンダーの ics（`MOODLE_ICS_URL`）を読み、「授業」に入れた履修科目の締切だけを「課題」に入れる。締切の一覧（`list-due`）への返事は本体が組み立て、「一番近い」のように件数を言われたら、その件数だけ（振り分け係が `limit` を拾う）、見た期間に締切が無ければ、その先のいちばん近いものを添える（`course.due_answer`）。Notion への定型の書き込みは Python（ゲートウェイの `course` として）。自由な質問（`ask`）は `course_root` の作業場で動かし、Box は読む道具だけ、Notion はゲートウェイの `course` として授業ホームの中だけを触る。Toggl は読むだけで、プロジェクト＝科目で突き合わせる。提出の代行はしない
 - **知識** … 朝の読みもの（`reading-digest`）と、テーマごとの論文の新着（`paper-digest`）を作る。材料（「収集」ページの興味と情報源、テーマの `CLAUDE.md` の検索キーワードと前提、先行研究 DB にある ID）は本体側（`modules/knowledge/module.py`。コアとは窓口 `kei_agent.api` でだけやり取りする）が本文の JSON で渡し、結果も本体側が Slack と Notion に出す。RSS・arXiv・記事の本文はプログラムが読み（`modules/knowledge/feeds.py`。arXiv は混んでいると 406 などでしばらく断るので、30秒・90秒・3分あけてやり直す）、一度候補にしたものは作業場の `seen.json` に90日覚える。読みものには、本体が覚えている最近の 👍（題名・出どころ・興味）も渡り、同じ出どころ・興味の候補に少し点を足し（`LIKE_BOOST`）、選ぶ回に好みの例として見せる。選ぶ・要約するのは Web を使えない回（`module.toml` の `offline = true`）、質問に答える `ask` だけが Web を読む
 - **仕事** … 会社アカウントに付いた Microsoft 365 の連携（Outlook の予定・メール・人・空き時間、Teams、SharePoint）を、読む道具だけで使う。送信・投稿・予定の作成・変更・削除はしない。Codex では Outlook（メールと予定の App）だけを読む（Teams・SharePoint の App は、道具の名前を確かめてから表に足す）。予定の一覧（`list-events`）も共通の起動口で、読むだけの1回として動かす。仕事はモジュール（`modules/work/`）で、読む道具の一覧は `module.toml` の `[[actor.connectors]]`、skill と二の柵は `modules/work/plugin/`、指示書は `modules/work/work.md`。会議は予定の口（`agenda`）から、朝の一覧・声・予定カレンダー（出典 Outlook）・振り返りの材料に載る
 
@@ -151,7 +151,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 6. Slack に出す文（出力契約）
 
-モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`prompts/system.md`、`course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
+モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`prompts/system.md`、`modules/course/course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
 
 | 種類 | 扱い |
 |---|---|
@@ -211,10 +211,10 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 - Daily と Retro & Planning は actor `router` で動く。材料（`digest.py`）はファイルにせずプロンプトに入れ、3万字を超えたら後ろのノートから削る。前日の振り返りと今週の時間は共通ホームから読む
 - 返事はそのまま共通ホームの「日別記録」に1日1行で保存し、手元には残さない。保存できなければ改善チャンネルに知らせる（Slack には出ている）。Retro のスレッドに貼った結論は同じ行のレトプラに足す
-- Moodle の課題は Daily と Retro の前に授業ホームへ取り込み、新しい課題と締切の変わった課題を `#20_course` に知らせる
-- 08:00 以降に1回、授業ホームの課題（これからの全部）を共通ホームの予定カレンダーに写す（AI は動かさない）
+- Moodle の課題は Daily と Retro の前に授業ホームへ取り込み、新しい課題と締切の変わった課題を `#20_course` に知らせる（大学のモジュールの `prepare`）
+- 08:00 以降に1回、授業ホームの課題（これからの全部）を共通ホームの予定カレンダーに写す（大学のモジュールの見回り `tick`。写せなければ1時間おき。AI は動かさない）
 - 会議は、Daily のために読んだ7日ぶんを予定カレンダーに足す。AI が読んだ一覧は全部とは言い切れないので、見つからなくなった会議は消さずに「要確認」にする（0件のときは印も付けない）
-- 毎分、締切24時間前の知らせを出し、24時間放置された失敗ジョブや確認待ちに一度だけ声をかける。締切まで3日を切っても「未着手」の課題（授業ホームの状態）は、1時間おきに見て一度だけ知らせる
+- 毎分、24時間放置された失敗ジョブや確認待ちに一度だけ声をかける。締切24時間前の知らせと、締切まで3日を切っても「未着手」の課題（授業ホームの状態）は、大学のモジュールの見回りが1時間おきに見て一度だけ知らせる（朝の一覧に出した締切は繰り返さない）
 - 締切の「0:00」ちょうどは、前の日の「24:00」として表示し、日付もその日に振り分ける（`deadline.py`。締切の時刻そのものは変えない）
 - 朝の予定には、前回の Daily から失敗した定期処理（Notion に残せなかった Daily・Retro を含む）と、前の日に予定カレンダーへ課題を写せなかったことを1行で添える
 - スリープで逃した処理は3時間以内（`night` は12時間以内）なら起きたときに動かす。上限中は始めず、明けてから動かす
@@ -239,7 +239,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 本体・大学エージェントの決まった処理と LLM・setup の CLI・研究の LLM は、どれも client ごとの合言葉でゲートウェイを通す。アカウントに付いた Notion 連携（claude.ai・Codex App）は、どの担当にも使わせない。ホームのページ ID は `config.toml` の `[notion]`。
 
-データベースとプロパティは名前で読むので、Notion の画面で名前や選択肢を変えない（変えるなら `src/kei_agent/notion.py`、`notion_store.py`、`notion_hub.py`、`src/kei_agent_course/notion_setup.py` も直す）。Kei Agent は自分が作ったページと決めたプロパティだけを書き、人が書いた本文は書き換えない。
+データベースとプロパティは名前で読むので、Notion の画面で名前や選択肢を変えない（変えるなら `src/kei_agent/notion.py`、`notion_store.py`、`notion_hub.py`、`modules/course/notion_setup.py` も直す）。Kei Agent は自分が作ったページと決めたプロパティだけを書き、人が書いた本文は書き換えない。
 
 ### 共通ホーム（`Keitaro Ueki`）
 
@@ -270,7 +270,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 
 ### 授業ホーム
 
-`kei-agent-course-setup` が5つの DB をそろえる（DB の ID は `notion-course.json`）。
+`kei-agent-module course setup` が5つの DB をそろえる（DB の ID は `notion-course.json`）。
 
 | DB | 中身 |
 |---|---|
@@ -280,7 +280,7 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | 🎓 単位要件 | 大区分、要件名、所定・既得・算入・残り単位。`総合計` の行が卒業要件の全体 |
 | 📈 GPA推移 | 春学期・秋学期・通算の GPA |
 
-`授業` ← `課題` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は大学の成績 HTML をローカルで読んで入れ（`kei-agent-course-academic-import`）、HTML 自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
+`授業` ← `課題` / `📊 成績履歴`、`📊 成績履歴` ← `🎓 単位要件` / `📈 GPA推移` の relation でつなぐ。成績と単位は大学の成績 HTML をローカルで読んで入れ（`kei-agent-module course academic-import`）、HTML 自体は Notion に置かない。名前が一致しない DB（`Untitled` など）は触らない。
 
 ## 11. 時間の記録
 
@@ -321,7 +321,6 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `guard.py` | 柵（Kei Agent 自身に直させない） |
 | `store.py` | SQLite（スレッド、session、ジョブ、定期処理、実行時間、接続先、時間記録、モジュールの記録） |
 | `schedule.py` / `morning.py` / `digest.py` / `deadline.py` | 定期実行、朝の予定、材料集め、締切の読み方 |
-| `course.py` | 大学のチャンネルと、そのエージェントに頼む口（仕事と知識はモジュール: `modules/work/`・`modules/knowledge/`） |
 | `modules.py` / `api.py` | モジュールの定義（`module.toml`）と動き（`module.py`）の読み込み、モジュールの窓口（`Core`・`Records`）。知識の本体側は `modules/knowledge/module.py`（[extensibility.md](extensibility.md)） |
 | `version.py` | 動いている版（担当の版ずれを見つける） |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
