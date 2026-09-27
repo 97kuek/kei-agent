@@ -7,7 +7,7 @@ import pytest
 from fakes import FakeGitHub
 
 from kei_agent import config as config_module
-from kei_agent import improve, issues, model_classifier, modules, research
+from kei_agent import improve, issues, model_classifier, modules
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
 
@@ -99,16 +99,28 @@ def store(config: Config) -> Store:
     return Store(config.db_path)
 
 
+# 研究の用途の見分け方の代わり（本物は軽いモデルが module.toml の classify で選ぶ）。言葉で当てる
+_RESEARCH_WORDS = (
+    (("研究設計", "仮説", "実験計画", "手法選択", "比較設計", "厳密なレビュー"), "research_design"),
+    (("比較", "結果", "考察", "差分", "レビュー"), "research_compare"),
+    (("notion", "w&b", "wandb", "run", "metric", "artifact", "記録", "ログ", "一覧", "確認"), "research_extract"),
+)
+
+
+def research_use_case(prompt: str) -> str:
+    text = prompt.strip()
+    for words, use_case in _RESEARCH_WORDS:
+        if any(word in text or word in text.lower() for word in words):
+            return use_case
+    return "research_execute"
+
+
 @pytest.fixture(autouse=True)
 def fake_model_classifier(monkeypatch):
     """通常の unit test は本物の CLI を起動せず、既存の用途判定だけを再現する。"""
-    async def classify(_config, _store, prompt: str, **_kwargs):
-        return research.use_case_for_prompt(prompt)[0]
-
-    monkeypatch.setattr(model_classifier, "classify_research", classify)
-
-    async def module(_config, _store, spec, _prompt: str, *, provider=None):
-        return spec.actor.default_use_case
+    async def module(_config, _store, spec, prompt: str, *, provider=None):
+        # 研究は言葉で当てる（以前の研究の分類器の代わり）。ほかのモジュールは default_use_case
+        return research_use_case(prompt) if spec.name == "research" else spec.actor.default_use_case
 
     real_module = model_classifier.classify_module
     # モジュールの実行役（大学・仕事など）は、分類器を動かさずに default_use_case。確かめたいテストは戻り値で本物に戻す

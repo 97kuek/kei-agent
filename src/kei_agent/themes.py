@@ -103,7 +103,8 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     if module:
         return Workspace(channel_name, ChannelKind.MODULE, None, module=module)
     if channel_name in config.overview_channels:
-        return Workspace(channel_name, ChannelKind.OVERVIEW, config.overview_dir)
+        # 研究全体の相談は、研究テーマを受け持つモジュールの担当が、すべてのテーマを読んで答える
+        return Workspace(channel_name, ChannelKind.OVERVIEW, config.overview_dir, module=catch_all_module(config))
     if not _SAFE_NAME.match(channel_name) or ".." in channel_name:
         raise ValueError(f"テーマ名に使えないチャンネル名です: {channel_name!r}")
     return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name,
@@ -127,15 +128,16 @@ def catch_all_module(config: Config) -> str:
     return ""
 
 
-# チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は研究の担当、モジュールはそのモジュール）
+# チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は、研究テーマを受け持つモジュール。モジュールはそのモジュール）
 _ACTORS = {ChannelKind.IMPROVE: "self_fix"}
 
 
 def actor_of(ws: Workspace) -> str:
-    """そのチャンネルで会話を続ける担当。モジュールのチャンネルと、モジュールが受け持つ研究テーマは、そのモジュール。"""
-    if ws.module and ws.kind in (ChannelKind.MODULE, ChannelKind.THEME):
+    """そのチャンネルで会話を続ける担当。モジュールのチャンネルと、研究テーマ・研究全体は、そのモジュール
+    （研究テーマを受け持つモジュールが無ければ空文字。そのチャンネルでは答えない）。"""
+    if ws.kind in (ChannelKind.MODULE, ChannelKind.THEME, ChannelKind.OVERVIEW):
         return ws.module
-    return _ACTORS.get(ws.kind, "research")
+    return _ACTORS.get(ws.kind, "")
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:

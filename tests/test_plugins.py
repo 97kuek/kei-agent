@@ -14,7 +14,7 @@ from kei_agent.config import REPO_ROOT
 
 PLUGIN = REPO_ROOT / "plugin"
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
-PLUGINS = {"research": PLUGIN / "research", "course": REPO_ROOT / "modules" / "course" / "plugin",
+PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin", "course": REPO_ROOT / "modules" / "course" / "plugin",
            "work": REPO_ROOT / "modules" / "work" / "plugin"}
 AGENTS = ("research", "course", "work")
 # SKILL.md の本文の長さの上限（語数）。長いものは references/ に分ける

@@ -11,11 +11,10 @@ pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っ�
 from kei_agent import runner
 from kei_agent.agents import FIELDS
 from kei_agent.model_classifier import UsageLimited
-from kei_agent.model_policy import UseCase
 from kei_agent_a2a import envelope, run
 from kei_agent_modules.course.agent import Executor as CourseExecutor
+from kei_agent_modules.research.agent import Executor as ResearchExecutor
 from kei_agent_modules.work.agent import Executor as WorkExecutor
-from kei_agent_research.executor import ResearchExecutor
 
 
 class _Updater:
@@ -42,7 +41,7 @@ class _Updater:
 
 def _executor(kind, config, store):
     if kind == "research":
-        return ResearchExecutor(config, pueue=object(), store=store)
+        return ResearchExecutor(config, store, pueue=object())
     if kind == "work":
         # 仕事はモジュールの担当。名前は共通の起動コマンドが入れる（kei_agent_a2a.launch）
         executor = WorkExecutor(config, store)
@@ -69,7 +68,7 @@ def ran(monkeypatch):
 
 
 @pytest.mark.parametrize(("kind", "use_case"), [
-    ("research", UseCase.RESEARCH_EXTRACT), ("course", "course_explain"), ("work", "work_decide")])
+    ("research", "research_extract"), ("course", "course_explain"), ("work", "work_decide")])
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
            "use_case": str(use_case), "provider": "claude", "channel_name": "vlm"}

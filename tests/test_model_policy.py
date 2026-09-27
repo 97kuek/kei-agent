@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve
+from kei_agent.model_policy import ModelPolicyError, UseCase, explicit_use_case, is_manual, resolve
 
 
 def test_research_execution_uses_provider_specific_recipes():
-    codex = resolve("research", "codex", UseCase.RESEARCH_EXECUTE)
-    claude = resolve("research", "claude", UseCase.RESEARCH_EXECUTE)
+    # 研究の用途は、研究のモジュールの module.toml の [use_cases]
+    codex = resolve("research", "codex", "research_execute")
+    claude = resolve("research", "claude", "research_execute")
 
     assert (codex.model, codex.reasoning_effort) == ("gpt-6-sol", "high")
     assert (claude.model, claude.reasoning_effort) == ("claude-sonnet-5", "high")
@@ -21,32 +22,32 @@ def test_router_uses_lightweight_recipe_without_claude_thinking():
 
 def test_normal_use_cases_cannot_select_manual_top_model():
     with pytest.raises(ModelPolicyError, match="手動指定"):
-        resolve("research", "codex", UseCase.MANUAL_ASTRA)
+        resolve("research", "codex", "manual_astra")
 
 
 def test_owner_explicit_manual_label_can_select_the_exception(config, store):
-    from kei_agent import research, settings
+    from kei_agent import settings
     from kei_agent.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
-    use_case, prompt = research.use_case_for_prompt("[[manual-astra]] 厳密な反証レビューをして")
+    use_case, prompt = explicit_use_case("research", "[[manual-astra]] 厳密な反証レビューをして")
 
-    recipe = resolve_selected(config, store, "research", use_case, manual=research.is_manual_use_case(use_case))
+    recipe = resolve_selected(config, store, "research", use_case, manual=is_manual(use_case))
     assert prompt == "厳密な反証レビューをして"
     assert (recipe.model, recipe.reasoning_effort, recipe.manual_only) == ("gpt-6-astra", "xhigh", True)
 
 
 def test_unknown_actor_provider_or_use_case_is_rejected():
     with pytest.raises(ModelPolicyError, match="provider"):
-        resolve("research", "", UseCase.RESEARCH_EXECUTE)
+        resolve("research", "", "research_execute")
     with pytest.raises(ModelPolicyError, match="actor"):
-        resolve("unknown", "codex", UseCase.RESEARCH_EXECUTE)
+        resolve("unknown", "codex", "research_execute")
 
 
 @pytest.mark.parametrize(("actor", "case"), [
-    ("router", UseCase.RESEARCH_EXECUTE),
+    ("router", "research_execute"),
     ("work", "course_requirements"),
-    ("course", UseCase.MANUAL_ASTRA),
+    ("course", "manual_astra"),
 ])
 def test_resolve_rejects_use_case_outside_actor_policy(actor, case):
     with pytest.raises(ModelPolicyError):
@@ -55,7 +56,7 @@ def test_resolve_rejects_use_case_outside_actor_policy(actor, case):
 
 def test_manual_fable_requires_research_and_claude():
     with pytest.raises(ModelPolicyError):
-        resolve("research", "codex", UseCase.MANUAL_FABLE, manual=True)
+        resolve("research", "codex", "manual_fable", manual=True)
 
 
 @pytest.mark.parametrize("provider, model", [
@@ -93,7 +94,7 @@ def test_selected_provider_resolves_its_fixed_recipe(config, store):
     from kei_agent.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
-    recipe = resolve_selected(config, store, "research", UseCase.RESEARCH_EXECUTE)
+    recipe = resolve_selected(config, store, "research", "research_execute")
 
     assert (recipe.provider, recipe.model, recipe.reasoning_effort) == ("codex", "gpt-6-sol", "high")
 
@@ -101,9 +102,10 @@ def test_selected_provider_resolves_its_fixed_recipe(config, store):
 def test_lightweight_classifier_requires_valid_high_confidence_json():
     from kei_agent.model_classifier import parse
 
-    assert parse('{"use_case":"research_extract","confidence":0.9}') is UseCase.RESEARCH_EXTRACT
-    assert parse('{"use_case":"research_design","confidence":0.7}') is None
-    assert parse('{"use_case":"unknown","confidence":1}') is None
+    research = frozenset({"research_extract", "research_design"})
+    assert parse('{"use_case":"research_extract","confidence":0.9}', research) == "research_extract"
+    assert parse('{"use_case":"research_design","confidence":0.7}', research) is None
+    assert parse('{"use_case":"unknown","confidence":1}', research) is None
 
 
 def test_lightweight_classifier_restricts_each_actor_to_its_own_cases():
@@ -128,8 +130,8 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
     monkeypatch.setattr(runner, "run_model", limited)
     with pytest.raises(model_classifier.UsageLimited) as raised:
         await model_classifier._classify(
-            config, store, "research", "実験ログを見て", model_classifier._RESEARCH_CASES,
-            UseCase.RESEARCH_EXECUTE, "research_extract", "抽出は extract。")
+            config, store, "research", "実験ログを見て", frozenset({"research_extract", "research_execute"}),
+            "research_execute", "research_extract", "抽出は research_extract。")
     assert raised.value.reset_at == 123.0
 
 
@@ -146,9 +148,9 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
     monkeypatch.setattr(runner, "run_model", record)
     for actor in ("research", "course"):
         settings.set_agent_provider(store, actor, "codex")
-    # conftest が差し替えた classify_research ではなく、本物の _classify を通す
-    await model_classifier._classify(config, store, "research", "ログを見て", model_classifier._RESEARCH_CASES,
-                                     UseCase.RESEARCH_EXECUTE, "", "")
+    # conftest が差し替えた classify_module ではなく、本物の _classify を通す
+    await model_classifier._classify(config, store, "research", "ログを見て", frozenset({"research_extract"}),
+                                     "research_execute", "", "")
     await model_classifier._classify(config, store, "course", "課題の要件", frozenset({"course_explain"}),
                                      "course_explain", "", "")
 
@@ -159,11 +161,10 @@ def test_every_actor_use_case_has_a_recipe_on_both_providers():
     """Claude でも Codex でも同じ担当が動く（知識の担当を足したときに、片方だけ忘れないように）。"""
     from kei_agent.config import model_actors
     from kei_agent.model_policy import allowed_use_cases
-    from kei_agent.research import is_manual_use_case
 
     for actor in model_actors():
         for use_case in allowed_use_cases(actor):
-            if is_manual_use_case(use_case):
+            if is_manual(use_case):
                 continue
             for provider in ("claude", "codex"):
                 assert resolve(actor, provider, use_case).provider == provider

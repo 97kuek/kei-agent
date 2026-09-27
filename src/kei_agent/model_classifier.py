@@ -8,10 +8,7 @@ from kei_agent.model_json import json_object
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier, use_case_of
 from kei_agent.router import workspace
 
-_RESEARCH_CASES = frozenset({
-    UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
-    UseCase.RESEARCH_EXECUTE, UseCase.RESEARCH_DESIGN,
-})
+
 class UsageLimited(RuntimeError):
     """分類に使った provider の quota が尽きた。別 recipe で再試行してはいけない。"""
 
@@ -20,7 +17,7 @@ class UsageLimited(RuntimeError):
         super().__init__("軽量分類器の利用上限に達しました")
 
 
-def parse(text: str, allowed: frozenset[UseCase | str] = _RESEARCH_CASES) -> UseCase | str | None:
+def parse(text: str, allowed: frozenset[UseCase | str]) -> UseCase | str | None:
     """形式不正・低信頼は None。呼び出し側が通常 recipe へ安全に戻す。"""
     try:
         data = json_object(text, "use_case")
@@ -34,27 +31,10 @@ def parse(text: str, allowed: frozenset[UseCase | str] = _RESEARCH_CASES) -> Use
     return use_case if confidence >= 0.8 and use_case in allowed else None
 
 
-async def classify_research(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
-    """研究 provider の Luna/Haiku recipe で一度だけ分類する。
-
-    分類用の workspace は connector なし・read-only。失敗時に別 provider/上位 model では再試行しない。
-    """
-    return await _classify(config, store, "research", prompt, _RESEARCH_CASES, UseCase.RESEARCH_EXECUTE,
-                           "research_extract, research_screen, research_compare, research_execute, research_design",
-                           "書誌・固定項目・ログの抽出は extract、明確な基準の候補仕分けは screen、比較・結果分析は compare、"
-                           "実験コード・データ処理・通常調査は execute、仮説・実験計画・手法選択・厳密レビューは design。", provider=provider)
-
-
-# 本体の担当の分類器（関数の名前。呼ぶときに引くので、試験で差し替えられる）
-CLASSIFIERS = {"research": "classify_research"}
-
-
 async def classify(config: Config, store, actor: str, prompt: str, *,
                    provider: str | None = None) -> UseCase | str:
     """担当の用途を分類する（どの担当も同じ呼び方）。モジュールの実行役は、module.toml に classify
     （見分け方）があれば Web を使う用途の中から選び、無ければ分類器を動かさずに default_use_case にする。"""
-    if actor in CLASSIFIERS:
-        return await globals()[CLASSIFIERS[actor]](config, store, prompt, provider=provider)
     spec = modules.known().get(actor)
     if spec is None or spec.actor is None:
         raise KeyError(actor)

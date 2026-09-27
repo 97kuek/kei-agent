@@ -1,4 +1,4 @@
-"""オーケストレーター（Kei Agent 本体）と、研究エージェント（A2A サーバー）の往復。
+"""オーケストレーター（Kei Agent 本体）と、研究の担当プロセス（研究のモジュールの agent.py。A2A サーバー）の往復。
 
 本物のサーバーを 127.0.0.1 に立てて、claude の1回分を頼み、経過が流れてきて、結果が返るところまでを見る。
 claude そのものは動かさず、偽の runner に差し替える。
@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import agents, research, runner
+from kei_agent import agents, jobs, modules, runner
 from kei_agent.a2a import Agent
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
@@ -21,21 +21,16 @@ TOKEN = "test-token"
 
 
 def test_research_use_case_label_wins_and_is_removed_from_prompt():
-    from kei_agent.model_policy import UseCase
+    from kei_agent.model_policy import explicit_use_case
 
-    use_case, prompt = research.use_case_for_prompt("[[research-design]] 仮説の検証計画を作って")
-
-    assert use_case is UseCase.RESEARCH_DESIGN
-    assert prompt == "仮説の検証計画を作って"
+    assert explicit_use_case("research", "[[research-design]] 仮説の検証計画を作って") == (
+        "research_design", "仮説の検証計画を作って")
 
 
-def test_research_unknown_label_uses_safe_execute_recipe():
-    from kei_agent.model_policy import UseCase
+def test_research_unknown_label_is_left_for_the_classifier():
+    from kei_agent.model_policy import explicit_use_case
 
-    use_case, prompt = research.use_case_for_prompt("[[not-a-case]] 実験を回して")
-
-    assert use_case is UseCase.RESEARCH_EXECUTE
-    assert prompt == "[[not-a-case]] 実験を回して"
+    assert explicit_use_case("research", "[[not-a-case]] 実験を回して") == (None, "[[not-a-case]] 実験を回して")
 
 
 def _free_port() -> int:
@@ -66,8 +61,8 @@ async def server(config, monkeypatch):
     """研究エージェントを立てて、(住所, 偽の claude) を返す。"""
     import uvicorn
 
-    from kei_agent_research.app import build_app
-    from kei_agent_research.executor import ResearchExecutor
+    from kei_agent_a2a import launch
+    from kei_agent_modules.research.agent import Executor
 
     claude = FakeClaude(runner.RunResult(
         session_id="sess-9", text="できたよ", cost_usd=0.12,
@@ -76,7 +71,7 @@ async def server(config, monkeypatch):
 
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    app = build_app(base, TOKEN, executor=ResearchExecutor(config))
+    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=Executor(config))
     uv_config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(uv_config)
     task = asyncio.create_task(server.serve())
@@ -105,8 +100,8 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("example.com",))
     activities = []
 
-    result = await research.run(
-        Agent(base, TOKEN, timeout=30), ws, "図を作って", "sess-1", "C1", "10.1",
+    result = await agents.run_in_workspace(
+        Agent(base, TOKEN, timeout=30), ws, "図を作って", "sess-1", "C1", "10.1", "research_execute",
         on_activity=_collect(activities))
 
     assert result.text == "できたよ" and result.session_id == "sess-9" and not result.is_error
@@ -124,12 +119,11 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
 
 async def test_remote_research_honors_an_explicit_manual_recipe(server, config):
     from kei_agent import themes
-    from kei_agent.model_policy import UseCase
 
     base, claude = server
-    await research.run(
+    await agents.run_in_workspace(
         Agent(base, TOKEN, timeout=30), themes.resolve(config, "vlm"), "難問を設計して", None, "", "",
-        UseCase.MANUAL_FABLE,
+        "manual_fable",
     )
 
     assert claude.calls[-1]["recipe"].model == "claude-fable-5"
@@ -163,7 +157,8 @@ async def test_a_dead_agent_becomes_an_error_result(config):
     from kei_agent.a2a import Agent as Client
 
     ws = themes.resolve(config, "vlm")
-    result = await research.run(Client("http://127.0.0.1:1", timeout=3), ws, "やって", None, "", "")
+    result = await agents.run_in_workspace(Client("http://127.0.0.1:1", timeout=3), ws, "やって", None, "", "",
+                                           "research_execute")
     assert result.is_error and result.errors
 
 
@@ -205,13 +200,13 @@ async def job_server(config, monkeypatch):
     """ジョブを受け取る研究エージェント（pueue は偽物）。"""
     import uvicorn
 
-    from kei_agent_research.app import build_app
-    from kei_agent_research.executor import ResearchExecutor
+    from kei_agent_a2a import launch
+    from kei_agent_modules.research.agent import Executor
 
     pueue = FakePueue()
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    app = build_app(base, TOKEN, executor=ResearchExecutor(config, pueue=pueue))
+    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=Executor(config, pueue=pueue))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     for _ in range(100):
@@ -225,7 +220,7 @@ async def job_server(config, monkeypatch):
 
 async def test_jobs_go_through_the_agent(job_server, config):
     """本体は RemotePueue を、いままでの pueue と同じように使える。"""
-    from kei_agent.research import RemotePueue
+    RemotePueue = jobs.RemotePueue
 
     base, pueue = job_server
     cwd = config.research_root / "vlm"
@@ -245,7 +240,7 @@ async def test_jobs_go_through_the_agent(job_server, config):
 
 async def test_a_job_outside_the_research_directory_is_refused(job_server):
     """渡された場所で何でも動かさない（研究テーマのディレクトリの中だけ）。"""
-    from kei_agent.research import RemotePueue
+    RemotePueue = jobs.RemotePueue
 
     base, pueue = job_server
     remote = RemotePueue(Agent(base, TOKEN, timeout=30))
@@ -256,14 +251,14 @@ async def test_a_job_outside_the_research_directory_is_refused(job_server):
 
 def test_the_research_root_itself_is_not_a_theme_directory(config):
     """研究テーマを並べた場所そのものは、どのテーマでもないので断る。テーマの中と overview は通す。"""
-    from kei_agent_research.executor import ResearchExecutor
+    from kei_agent_modules.research.agent import Executor
 
-    executor = ResearchExecutor(config, pueue=FakePueue())
+    executor = Executor(config, pueue=FakePueue())
     theme = config.research_root / "vlm"
     theme.mkdir(parents=True)
     config.overview_dir.mkdir(parents=True)
 
     with pytest.raises(ValueError, match="ジョブを動かしてよい場所ではありません"):
-        executor._theme_dir(str(config.research_root))
-    assert executor._theme_dir(str(theme)) == theme.resolve()
-    assert executor._theme_dir(str(config.overview_dir)) == config.overview_dir.resolve()
+        executor._job_dir(str(config.research_root))
+    assert executor._job_dir(str(theme)) == theme.resolve()
+    assert executor._job_dir(str(config.overview_dir)) == config.overview_dir.resolve()

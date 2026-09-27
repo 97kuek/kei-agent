@@ -22,10 +22,10 @@ import aiohttp
 from kei_agent import (
     dates,
     digest,
+    jobs,
     maintenance,
     modules,
     morning,
-    research,
     settings,
     themes,
     timelog,
@@ -196,7 +196,9 @@ class Scheduler:
         if owner is not None:
             # モジュールの処理は、そのモジュールの実行役の provider（AI を使わないモジュールなら要らない）
             return settings.selected_provider(self.config, self.store, owner.name) if owner.actor else None
-        return settings.selected_provider(self.config, self.store, "research")
+        # 夜間の Task などは、研究テーマを受け持つモジュールの担当（無ければ動かさない）
+        owner = themes.catch_all_module(self.config)
+        return settings.selected_provider(self.config, self.store, owner) if owner else ""
 
     def can_run(self, name: str, now: float, provider: str | None = None) -> bool:
         provider = self.task_provider(name) if provider is None else provider
@@ -653,7 +655,7 @@ async def _run_once(name: str, record: bool) -> None:
     store = Store(config.db_path)
     slack = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
     auth = await slack.auth_test()
-    pueue = research.pueue(config)
+    pueue = jobs.queue(config)
     await pueue.ensure_group()  # 夜間の Task がジョブを投入することがある
     assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
                           os.environ["SLACK_BOT_TOKEN"], auth["user_id"],

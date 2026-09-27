@@ -24,7 +24,7 @@ MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
-CORE_AGENT_LABELS = {"research": "研究"}
+CORE_AGENT_LABELS: dict[str, str] = {}
 CROSS_AGENT_LABELS = {"router": "振り分け・Daily", "self_fix": "自己改善"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される
 TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",

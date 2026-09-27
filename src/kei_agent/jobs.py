@@ -23,6 +23,11 @@ from kei_agent.store import Job, Store, dumps
 log = logging.getLogger(__name__)
 
 PUEUE_GROUP = "kei-agent"
+# ジョブの待ち行列を持つ担当プロセス（研究テーマを受け持つモジュール。組み込みは研究）に頼む仕事の名前。本体と担当の約束
+SUBMIT_JOB = "submit-job"
+LIST_JOBS = "list-jobs"
+CANCEL_JOB = "cancel-job"
+FORGET_JOB = "forget-job"
 REQUESTS_DIR = Path(".kei-agent/requests")
 JOBS_DIR = Path(".kei-agent/jobs")
 # ジョブのログの末尾を読むとき、読み込む最大の大きさ
@@ -361,3 +366,54 @@ def log_tail(job: Job, lines: int = 20) -> str:
     text = tail.decode("utf-8", "replace")
     collapsed = "\n".join(segment.split("\r")[-1] for segment in text.split("\n"))
     return "\n".join(collapsed.splitlines()[-lines:])
+
+
+class RemotePueue:
+    """担当プロセス（研究のモジュール）越しの pueue。`Pueue` と同じ使い方ができる。"""
+
+    def __init__(self, agent):
+        self.agent = agent
+
+    async def _ask(self, skill: str, body: dict | None = None):
+        from kei_agent import agents
+
+        reply = await agents.ask(self.agent, skill, text=json.dumps(body or {}, ensure_ascii=False))
+        if not reply.ok:
+            # Pueue と同じ形で失敗を返す（JobManager の扱いを変えずに済む）
+            raise RuntimeError(reply.text or f"{skill} に失敗しました")
+        return reply
+
+    async def ensure_group(self) -> None:
+        """待ち行列の用意は、相手が最初の投入のときに行う。"""
+        return None
+
+    async def add(self, cwd, command: str, label: str) -> int:
+        reply = await self._ask(SUBMIT_JOB, {"cwd": str(cwd), "command": command, "label": label})
+        try:
+            return int(reply.data["task_id"])
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(f"ジョブの番号が返りませんでした: {reply.text[:200]}") from None
+
+    async def kill(self, task_id: int) -> None:
+        await self._ask(CANCEL_JOB, {"task_id": int(task_id)})
+
+    async def remove(self, task_id: int) -> None:
+        await self._ask(FORGET_JOB, {"task_id": int(task_id)})
+
+    async def tasks(self) -> dict[int, dict]:
+        reply = await self._ask(LIST_JOBS)
+        found = reply.data.get("tasks") or {}
+        return {int(k): v for k, v in found.items()}
+
+
+def queue(config: Config) -> Pueue | RemotePueue:
+    """ジョブの待ち行列。研究テーマを受け持つモジュールの担当プロセスがいれば、そちらの pueue を使う
+    （いなければ、この Mac の pueue）。その担当は SUBMIT_JOB などの仕事を受ける。"""
+    from kei_agent import a2a
+
+    owner = themes.catch_all_module(config)
+    url = config.a2a.url(owner) if owner else ""
+    if not url:
+        return Pueue(config)
+    log.info("ジョブは %s の担当プロセスの pueue を使います（%s）", owner, url)
+    return RemotePueue(a2a.Agent(url, config.a2a_token, timeout=config.a2a.timeout_seconds))

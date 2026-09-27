@@ -16,8 +16,8 @@ WORK = {"filesystem.deny_read", "app.allowlist"}
 @pytest.mark.parametrize("actor,case,provider,model,effort,prompt_name,has_skills,capabilities", [
     ("router", UseCase.ROUTING, "codex", "gpt-6-luna", "low", "router.md", False, ROUTER),
     ("router", UseCase.ROUTING, "claude", "claude-haiku-4-5", "", "router.md", False, ROUTER),
-    ("research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-sol", "high", "system.md", True, RESEARCH),
-    ("research", UseCase.RESEARCH_EXECUTE, "claude", "claude-sonnet-5", "high", "system.md", True, RESEARCH),
+    ("research", "research_execute", "codex", "gpt-6-sol", "high", "research.md", True, RESEARCH),
+    ("research", "research_execute", "claude", "claude-sonnet-5", "high", "research.md", True, RESEARCH),
     ("course", "course_explain", "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
     ("course", "course_explain", "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
     ("work", "work_single_source", "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
@@ -33,8 +33,8 @@ def test_agent_provider_contract_matrix(config, actor, case, provider, model, ef
         workspace, resolve(actor, provider, case), None, "C1", "1.1"))
 
     assert (contract.recipe.model, contract.recipe.reasoning_effort) == (model, effort)
-    # 大学・仕事の指示書はモジュールのフォルダ（modules/<名前>/）、本体の担当はリポジトリの prompts/
-    folder = config.repo_root / (f"modules/{actor}" if actor in ("course", "work") else "prompts")
+    # 研究・大学・仕事の指示書はモジュールのフォルダ（modules/<名前>/）、本体の担当はリポジトリの prompts/
+    folder = config.repo_root / (f"modules/{actor}" if actor in ("research", "course", "work") else "prompts")
     assert contract.prompt_text == (folder / prompt_name).read_text(encoding="utf-8")
     assert len(contract.prompt_version) == 12
     assert (contract.skill_dir is not None) is has_skills
@@ -45,12 +45,12 @@ def test_agent_provider_contract_matrix(config, actor, case, provider, model, ef
 def test_research_contract_uses_workspace_prompt_and_agent_skills(config):
     workspace = themes.resolve(config, "vlm")
     request = runner.ExecutionRequest(
-        workspace, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"
+        workspace, resolve("research", "codex", "research_execute"), None, "C1", "1.1"
     )
 
     contract = resolve_contract(config, request)
 
-    prompt_path = workspace.system_prompt or config.repo_root / "prompts" / "system.md"
+    prompt_path = workspace.system_prompt or config.repo_root / "modules" / "research" / "research.md"
     assert contract.recipe == request.recipe
     assert contract.prompt_text == prompt_path.read_text(encoding="utf-8")
     assert contract.skill_dir == config.agent_plugin_dir("research") / "skills"
@@ -72,7 +72,7 @@ def test_router_contract_does_not_inherit_research_skills_or_write(config):
 
 def test_read_only_research_contract_does_not_request_write_and_reads_notion_only(config):
     request = runner.ExecutionRequest(
-        themes.resolve(config, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXTRACT),
+        themes.resolve(config, "vlm"), resolve("research", "codex", "research_extract"),
         None, "C1", "1.1", read_only=True,
     )
 
@@ -97,20 +97,22 @@ def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
         config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, "C1", "1.1", contract.policy)
 
 
-def test_research_skill_change_invalidates_the_session_version(config, tmp_path):
-    repo = tmp_path / "repo"
-    prompt = repo / "prompts" / "system.md"
-    prompt.parent.mkdir(parents=True)
-    prompt.write_text("Kei Agent の指示")
-    skill = repo / "plugin" / "research" / "skills" / "run" / "SKILL.md"
+def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
+    """指示書か skill が変わったら、古い会話を再開しない（会話の版が変わる）。"""
+    from kei_agent import modules
+
+    folder = tmp_path / "modules" / "lab"
+    (folder / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (folder / "plugin" / ".claude-plugin" / "plugin.json").write_text('{"name": "lab"}', encoding="utf-8")
+    skill = folder / "plugin" / "skills" / "run" / "SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text("元の手順")
-    local = replace(config, repo_root=repo)
-    first = prompt_version(local, "research")
-    request = runner.ExecutionRequest(
-        themes.resolve(local, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXECUTE),
-        None, "C1", "1.1")
-    contract_version = resolve_contract(local, request).prompt_version
-    skill.write_text("更新した手順")
-    assert prompt_version(local, "research") != first
-    assert resolve_contract(local, request).prompt_version != contract_version
+    skill.write_text("元の手順", encoding="utf-8")
+    (folder / "lab.md").write_text("# 実験の担当\n", encoding="utf-8")
+    (folder / "module.toml").write_text('api = 1\nname = "lab"\n[actor]\nprompt = "lab.md"\nplugin = true\n'
+                                        '[use_cases.lab_run]\nclaude = { model = "claude-sonnet-5" }\n', encoding="utf-8")
+    modules.register_user_modules(tmp_path / "modules")
+    first = prompt_version(config, "lab")
+    skill.write_text("更新した手順", encoding="utf-8")
+    assert prompt_version(config, "lab") != first
+    (folder / "lab.md").write_text("# 実験の担当（直した）\n", encoding="utf-8")
+    assert len({first, prompt_version(config, "lab")}) == 2

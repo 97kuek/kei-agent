@@ -13,7 +13,7 @@ from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_c
 from kei_agent.provider_permissions import preflight
 
 
-def request(config, *, actor="research", provider="claude", use_case=UseCase.RESEARCH_EXECUTE,
+def request(config, *, actor="research", provider="claude", use_case="research_execute",
             session_id=None, read_only=False):
     ws = router.workspace(config) if actor == "router" else themes.resolve(config, "vlm")
     return runner.ExecutionRequest(ws, resolve(actor, provider, use_case), session_id, "C1", "1.1", read_only)
@@ -126,7 +126,7 @@ def test_execution_request_has_no_model_or_effort_override_fields(config):
 
 def test_resolved_recipe_is_the_only_model_and_effort_sent_to_codex(config):
     command = runner.build_command(config, runner.ExecutionRequest(
-        themes.resolve(config, "vlm"), resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "", ""))
+        themes.resolve(config, "vlm"), resolve("research", "codex", "research_execute"), None, "", ""))
 
     assert command.count("gpt-6-sol") == 1
     assert "model_reasoning_effort=high" in command
@@ -136,7 +136,7 @@ def test_resolved_recipe_is_the_only_model_and_effort_sent_to_codex(config):
 def test_execution_request_uses_resolved_recipe_without_model_override_fields(config):
     workspace = themes.resolve(config, "vlm")
     execution = runner.ExecutionRequest(
-        workspace, resolve("research", "codex", UseCase.RESEARCH_DESIGN), None, "C1", "1.1",
+        workspace, resolve("research", "codex", "research_design"), None, "C1", "1.1",
     )
 
     command = runner.build_command(config, execution)
@@ -146,7 +146,7 @@ def test_execution_request_uses_resolved_recipe_without_model_override_fields(co
 
 def test_execution_request_rejects_a_forged_manual_recipe(config):
     forged = runner.ResolvedModel(
-        "research", UseCase.RESEARCH_EXECUTE, "codex", "gpt-6-astra", "xhigh",
+        "research", "research_execute", "codex", "gpt-6-astra", "xhigh",
     )
 
     with pytest.raises(ModelPolicyError, match="recipe"):
@@ -206,7 +206,7 @@ def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
 
     ws = themes.resolve(config, "vlm")
     thinking = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
+        ws, resolve("research", "claude", "research_execute"), None, "", ""))
     no_thinking = runner.build_command(config, runner.ExecutionRequest(
         ws, resolve("router", "claude", UseCase.ROUTING), None, "", ""))
 
@@ -339,8 +339,9 @@ def test_nonzero_exit_discards_even_a_result_text():
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
     """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
-    text = (config.repo_root / "prompts" / "system.md").read_text(encoding="utf-8")
-    assert "自動で" in text and "続き" in text and "止まる" in text
+    for path in (config.repo_root / "prompts" / "system.md", config.repo_root / "modules" / "research" / "research.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "自動で" in text and "続き" in text and "止まる" in text, path
 
 
 def test_env_strips_secrets_and_adds_thread(config):
@@ -513,7 +514,7 @@ async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(c
 
     result = await asyncio.wait_for(
         runner.run_model(config, runner.ExecutionRequest(
-            ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "hi"),
+            ws, resolve("research", "claude", "research_execute"), None, "C1", "1.1"), "hi"),
         timeout=10,
     )
 
@@ -546,7 +547,7 @@ async def test_run_claude_keeps_a_successful_result_even_if_it_had_to_be_killed(
 
     result = await asyncio.wait_for(
         runner.run_model(config, runner.ExecutionRequest(
-            ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "hi"),
+            ws, resolve("research", "claude", "research_execute"), None, "C1", "1.1"), "hi"),
         timeout=10,
     )
 
@@ -588,7 +589,7 @@ async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_pa
 
     result = await runner.run_model(
         config, runner.ExecutionRequest(
-            ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて",
+            ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて",
         on_activity=on_activity,
     )
 
@@ -612,7 +613,7 @@ async def test_codex_profile_canary_failure_stops_before_starting_the_model(conf
     ws = themes.resolve(config, "vlm")
 
     result = await runner.run_model(config, runner.ExecutionRequest(
-        ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
+        ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて")
 
     assert result.is_error and result.failure_kind == "capability"
     assert result.text == ""
@@ -639,7 +640,7 @@ async def test_codex_nonzero_exit_never_returns_its_completed_message(config, tm
     monkeypatch.setattr(runner, "verify_codex_profile", verified)
 
     result = await runner.run_model(config, runner.ExecutionRequest(
-        ws, resolve("research", "codex", UseCase.RESEARCH_EXECUTE), None, "C1", "1.1"), "調べて")
+        ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて")
 
     assert result.is_error and result.failure_kind == "runtime"
     assert result.text == ""
@@ -706,10 +707,10 @@ def test_research_runner_loads_only_the_research_plugin(config):
     """担当外の plugin（大学・仕事）を、同じ claude に読ませない。"""
     ws = themes.resolve(config, "vlm")
     cmd = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
+        ws, resolve("research", "claude", "research_execute"), None, "", ""))
 
     loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
-    assert loaded == [str(config.repo_root / "plugin" / "research")]
+    assert loaded == [str(config.repo_root / "modules" / "research" / "plugin")]
 
 
 def test_agent_plugin_dir_refuses_an_unknown_agent(config):
@@ -723,7 +724,7 @@ def test_research_runner_uses_only_the_scoped_notion_mcp(config):
     """研究の Notion は、研究ホームだけを操作できるゲートウェイ経由。ほかの MCP は読み込まない。"""
     ws = themes.resolve(config, "vlm")
     cmd = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", UseCase.RESEARCH_EXECUTE), None, "", ""))
+        ws, resolve("research", "claude", "research_execute"), None, "", ""))
 
     mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["kei-notion"]
     assert mcp["url"] == config.notion_gateway_url

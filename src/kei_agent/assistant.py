@@ -28,7 +28,6 @@ from kei_agent import (
     guard,
     improve,
     modules,
-    research,
     router,
     runner,
     settings,
@@ -159,7 +158,11 @@ class ThemeRuns:
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える。モジュールの担当は module.toml の default_use_case）
-VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT}
+# 研究テーマ（ほかのどれにも当たらないチャンネル）を受け持つモジュールが、オンになっていないとき
+NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがないよ。研究テーマに使うなら、config.toml の modules に"
+                  " research を足してね。")
+# 声からの問い合わせで使う、読むだけの軽い用途（研究のモジュールの用途。無ければ担当の default_use_case）
+VOICE_USE_CASES = {"research": "research_extract"}
 # 時間記録の科目選び（大学のチャンネルで /toggl）で、今学期の履修科目を聞くモジュールと仕事
 COURSE_MODULE, CURRENT_COURSES = "course", "list-current-courses"
 
@@ -222,6 +225,8 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         self.time_tracker = TimeTracker(store)
         # モジュールの窓口（kei_agent.api.Core）と、動き（modules/<名前>/module.py の class Module）。
         # コアとモジュールは窓口でだけやり取りする
+        # 研究テーマを受け持つモジュールが core.work で答えた結果（process が呼び出し元に返す。依頼ごと）
+        self._work_results: dict[int, runner.RunResult] = {}
         self.cores = {spec.name: api.Core(self, spec) for spec in modules.enabled(config.modules)}
         self.modules: dict[str, object] = {
             spec.name: cls(self.cores[spec.name])
@@ -650,10 +655,10 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             )
             welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
             if welcome is not None:
-                # テーマを受け持つモジュールの案内（そのモジュールが自分でテーマを登録する）
+                # テーマを受け持つモジュールの案内
                 text += "\n" + welcome()
-            elif not ws.module:
-                await self.register_theme(channel, ws)
+            # 研究ホームのテーマの行（研究ホームは Notion のモジュールができるまで本体が持つ）
+            await self.register_theme(channel, ws)
         await self.slack.chat_postMessage(channel=channel, text=text)
 
     async def on_channel_rename(self, event: dict) -> None:
@@ -962,8 +967,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         with self.claude_running():
             if agent is not None:
                 # 担当のプロセスに、作業場（チャンネルの名前）と許可済みの接続先を添えて頼む
-                return await research.run(agent, ws, prompt, session_id, channel, thread_ts,
-                                          use_case, on_activity, provider=recipe.provider, read_only=read_only)
+                return await agents.run_in_workspace(agent, ws, prompt, session_id, channel, thread_ts,
+                                                     use_case, on_activity, provider=recipe.provider,
+                                                     read_only=read_only)
             return await runner.run_model(
                 self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts, read_only),
                 prompt, on_activity,
@@ -994,10 +1000,14 @@ class Assistant(SettingsActions, SelfFix, Handoff):
     # 決まった時刻の処理から使う（schedule.py）
 
     async def run_detached(self, ws: Workspace, channel_name: str, prompt: str, trigger: str,
-                           *, actor: str = research.AGENT,
-                           use_case: UseCase | None = None) -> runner.RunResult:
-        """スレッドを作らずに claude -p を動かす（定期処理用）。結果を見てから投稿先を決める。"""
+                           *, actor: str = "",
+                           use_case: UseCase | str | None = None) -> runner.RunResult:
+        """スレッドを作らずに claude -p を動かす（定期処理用）。結果を見てから投稿先を決める。
+
+        担当を渡さなければ、作業場の担当（研究テーマなら、テーマを受け持つモジュール）。
+        """
         assert ws.cwd is not None
+        actor = actor or themes.actor_of(ws)
         themes.ensure_workspace(ws)
         async with self.semaphore:
             run_id = self.store.start_run("", "", channel_name, trigger)
@@ -1009,10 +1019,10 @@ class Assistant(SettingsActions, SelfFix, Handoff):
                 except ModelPolicyError as e:
                     result = runner.RunResult(is_error=True, errors=[str(e)])
                 else:
-                    agent = self.agents.get(research.AGENT) if actor == research.AGENT else None
+                    agent = self.agents.get(actor) if actor in modules.known() else None
                     if agent is not None:
-                        result = await research.run(agent, ws, prompt, None, "", "", use_case,
-                                                    provider=recipe.provider)
+                        result = await agents.run_in_workspace(agent, ws, prompt, None, "", "", use_case,
+                                                               provider=recipe.provider)
                     else:
                         result = await runner.run_model(
                             self.config, runner.ExecutionRequest(ws, recipe, None, "", ""), prompt,
@@ -1117,12 +1127,20 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
+        if ws.kind in (ChannelKind.THEME, ChannelKind.OVERVIEW) and themes.actor_of(ws) not in self.modules:
+            # 研究テーマを受け持つモジュール（研究）がオフ
+            await self.post(req, NO_THEME_OWNER)
+            await self.mark_answered(req, failed=True)
+            return None
         if ws.kind is ChannelKind.MODULE:
             await self._dispatch(req, themes.actor_of(ws), "")
             return None
-        if (ws.kind is ChannelKind.THEME and (owner := self.actor_for(req, ws)) in self.modules
-                and await self._dispatch(req, owner, "")):
-            return None
+        if ws.kind is ChannelKind.THEME and (owner := self.actor_for(req, ws)) in self.modules:
+            # 研究テーマを受け持つモジュール（研究）が答える。作業場での会話の結果（core.work）は、夜間の Task の
+            # ように結果を見て次を決める呼び出し元に返す
+            self._work_results.pop(id(req), None)
+            if await self._dispatch(req, owner, ""):
+                return self._work_results.pop(id(req), None)
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
             ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
@@ -1156,8 +1174,14 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマのチャンネルではありません")
         themes.ensure_workspace(ws)
         ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
+        if ws.channel_name not in self.registered_themes:
+            # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
+            self.registered_themes.add(ws.channel_name)
+            await self.register_theme(req.channel, ws)
         try:
-            return await self.run(req, ws)
+            result = await self.run(req, ws)
+            self._work_results[id(req)] = result
+            return result
         except Exception:
             log.exception("依頼の処理に失敗しました")
             await self.post(req, safe_failure("connection"))
@@ -1347,7 +1371,7 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        actor = actor or (themes.actor_of(ws) if ws is not None else research.AGENT)
+        actor = actor or (themes.actor_of(ws) if ws is not None else "")
         provider = settings.selected_provider(self.config, self.store, actor)
         version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
@@ -1421,7 +1445,9 @@ class Assistant(SettingsActions, SelfFix, Handoff):
         prompt = today_line() + question.strip()
         # モジュールの担当は、module.toml の default_use_case（読むだけの1回）で答える
         use_case = VOICE_USE_CASES.get(actor) or spec.actor.default_use_case
-        if actor == research.AGENT:
+        if modules.use_case_owner(str(use_case)) is None:
+            use_case = spec.actor.default_use_case
+        if actor == themes.catch_all_module(self.config):
             if not theme.strip():
                 return "どの研究テーマを調べるかも教えて。"
             try:

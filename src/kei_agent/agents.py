@@ -131,3 +131,23 @@ async def run_ask(agent: a2a.Agent, payload: dict,
                                 limit_reset_at=reply.limit_reset_at,
                                 provider=str(payload.get("provider") or "") or None)
     return to_result(reply.data)
+
+
+async def run_in_workspace(agent: a2a.Agent, ws, prompt: str, session_id: str | None, channel: str, thread_ts: str,
+                           use_case: str, on_activity: Callable[[str], Awaitable[None]] | None = None,
+                           *, provider: str = "", read_only: bool = False) -> runner.RunResult:
+    """担当のプロセスに、チャンネルの作業場（研究テーマなど）で provider を1回動かしてもらう（どの担当とも同じ ask）。
+
+    ほかの担当と同じ依頼の形に、作業場のチャンネルの名前と、許可済みの接続先を足す（担当は channel_workspace で作業場を作る）。
+    """
+    return await run_ask(agent, {
+        "channel_name": ws.channel_name,
+        "prompt": prompt,
+        "session_id": session_id,
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "allowed_domains": list(ws.allowed_domains),
+        "use_case": str(use_case),
+        "provider": provider,
+        "read_only": read_only,
+    }, on_activity)

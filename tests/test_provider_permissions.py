@@ -13,7 +13,7 @@ from kei_agent.provider_permissions import CapabilityUnavailable, preflight
 def _contract(config, *, provider="codex", read_only=False):
     request = runner.ExecutionRequest(
         themes.resolve(config, "vlm"),
-        resolve("research", provider, UseCase.RESEARCH_EXTRACT if read_only else UseCase.RESEARCH_EXECUTE),
+        resolve("research", provider, "research_extract" if read_only else "research_execute"),
         None, "C1", "1.1", read_only=read_only,
     )
     return resolve_contract(config, request)

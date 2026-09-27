@@ -691,10 +691,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
-research = [
-    { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "uvicorn" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -711,10 +707,6 @@ agents = [
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
-]
-research = [
-    { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
-    { name = "uvicorn", specifier = ">=0.53.0" },
 ]
 
 [[package]]

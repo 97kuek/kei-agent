@@ -29,7 +29,8 @@ EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
-AGENT_PLUGINS = frozenset({"research"})
+# 本体の担当で skill を持つもの（研究はモジュールになったので、今は無い）
+AGENT_PLUGINS: frozenset[str] = frozenset()
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
 CORE_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
 
@@ -274,9 +275,9 @@ class Config:
         return self.state_dir / "hub.json"
 
     def agent_plugin_dir(self, agent: str) -> Path:
-        """そのエージェントの skill の置き場（`plugin/<agent>/`）。
+        """そのエージェントの skill の置き場（モジュールのフォルダの `plugin/`）。
 
-        `--plugin-dir` に `plugin/` そのものを渡すと、Claude Code は中の plugin を全部読む。
+        `--plugin-dir` に plugin の親を渡すと、Claude Code は中の plugin を全部読む。
         担当外の skill を同じ claude に見せないため、必ずエージェント1つぶんを名指しする。
         """
         spec = modules.known().get(agent)
@@ -405,6 +406,11 @@ def _enabled_modules(data: dict, home: Path) -> list[modules.ModuleSpec]:
         raise ConfigError(f"config.toml の modules に知らないモジュールがあります: {', '.join(unknown)}"
                           f"（知っているもの: {', '.join(sorted(known)) or 'なし'}）")
     enabled = [known[n] for n in dict.fromkeys(names)]
+    catch_all = [spec.name for spec in enabled if spec.catch_all]
+    if len(catch_all) > 1:
+        # ほかのどれにも当たらないチャンネル（研究テーマ）を受け持てるのは、オンのモジュールのうち1つだけ
+        raise ConfigError(f"モジュール「{catch_all[0]}」と「{catch_all[1]}」が、どちらもほかのどれにも当たらないチャンネル（*）を"
+                          "受け持とうとしています。config.toml の modules でどちらかを外してください")
     for spec in enabled:
         missing = [r for r in spec.requires if r not in names]
         if missing:

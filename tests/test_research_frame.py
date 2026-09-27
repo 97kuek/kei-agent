@@ -39,7 +39,7 @@ manual = true
 claude = { model = "claude-fable-5", effort = "high" }
 
 [channels]
-theme = ["*"]
+lab = ["*"]
 '''
 
 LAB_CODE = '''from kei_agent.api import Core, Request
@@ -132,13 +132,14 @@ def test_one_module_can_take_every_unclaimed_channel(tmp_path):
     assert ws.cwd == config.research_root / "vlm-counting"
     course = themes.resolve(config, "20_course")
     assert (course.kind, course.module) == (themes.ChannelKind.MODULE, "course")
-    # 受け持つモジュールが無ければ、今までどおり本体の研究
+    # 受け持つモジュールが無ければ、研究テーマには担当がいない（そのチャンネルでは答えない）
     plain = themes.resolve(replace(config, modules=("course",)), "vlm")
-    assert (plain.module, themes.actor_of(plain)) == ("", "research")
+    assert (plain.module, themes.actor_of(plain)) == ("", "")
 
 
 def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
-    home = _home(tmp_path)
+    """受け持てるのは、オンのモジュールのうち1つだけ（研究をオフにすれば、自分のモジュールに受け持たせられる）。"""
+    home = _home(tmp_path, 'modules = ["lab", "lab2"]\n')
     _lab(home / "modules")
     other = home / "modules" / "lab2"
     other.mkdir()
@@ -151,7 +152,7 @@ def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
 
 
 def test_the_catch_all_mark_stands_alone(tmp_path):
-    folder = _lab(tmp_path, LAB_TOML.replace('theme = ["*"]', 'theme = ["*", "vlm"]'))
+    folder = _lab(tmp_path, LAB_TOML.replace('lab = ["*"]', 'lab = ["*", "vlm"]'))
     with pytest.raises(modules.ModuleError, match="それだけを書いて"):
         modules.load_spec(folder)
 
@@ -171,8 +172,9 @@ class RecordingClaude(FakeClaude):
 @pytest.fixture
 def lab(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(_lab(tmp_path / "user-modules").parent)
-    config = replace(config, modules=(*config.modules, "lab"),
-                     module_channels={**config.module_channels, "theme": ("*",)},
+    # 研究テーマは lab が受け持つ（組み込みの研究はオフ）
+    config = replace(config, modules=(*[name for name in config.modules if name != "research"], "lab"),
+                     module_channels={**config.module_channels, "lab": ("*",)},
                      agent_profiles={**config.agent_profiles, "lab": config.agent_profiles["work"]})
     slack = FakeSlack({"C1": "vlm"})
     claude = RecordingClaude()
@@ -210,3 +212,27 @@ async def test_joining_a_theme_channel_shows_the_modules_welcome(lab, config):
     text, = slack.texts()
     assert str(config.research_root / "vlm") in text and text.endswith("実験のことを書いてね。")
     assert (config.research_root / "vlm").is_dir()
+
+
+# 研究のモジュール（modules/research/）
+
+def test_research_is_the_builtin_module_that_takes_theme_channels():
+    spec = modules.builtin()["research"]
+    assert spec.catch_all and spec.port == 8788 and spec.actor.shell and spec.actor.files == "write"
+    manual = {u.name for u in spec.actor.use_cases if u.manual}
+    assert manual == {"manual_astra", "manual_fable"} and spec.actor.default_use_case == "research_execute"
+    assert (spec.path / spec.actor.prompt).name == "research.md"
+    code = modules.load_agent(spec)
+    assert [skill.id for skill in code.SKILLS] == ["ask", "submit-job", "list-jobs", "cancel-job", "forget-job"]
+
+
+async def test_without_a_module_for_themes_the_channel_is_told_so(config, store, monkeypatch):
+    """研究をオフにすると、研究テーマのチャンネルでは答えない（受け持つモジュールが無いと伝える）。"""
+    slack = FakeSlack({"C1": "vlm"})
+    claude = RecordingClaude()
+    monkeypatch.setattr(runner, "run_model", claude)
+    config = replace(config, modules=tuple(name for name in config.modules if name != "research"))
+    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await settle(assistant)
+    assert claude.calls == [] and "受け持つモジュールがない" in slack.texts()[-1]

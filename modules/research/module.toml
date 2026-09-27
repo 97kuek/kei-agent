@@ -1,0 +1,56 @@
+# 研究のモジュール（docs/architecture.md の「振り分けと A2A」）。ほかのどれにも当たらないチャンネルを研究テーマとして受け持つ
+api = 1
+name = "research"
+label = "研究"
+description = "研究テーマのチャンネルで、テーマの作業場（~/research/<テーマ>）を使って作業し、結果を返す。長い処理はジョブにする"
+
+[depends]
+optional = ["notion"]
+
+# AI の実行役（provider は App Home で選ぶ）。テーマの作業場の中で、コマンドも Web も使う。Notion は研究ホームの下だけ
+[actor]
+prompt = "research.md"
+plugin = true
+files = "write"
+shell = true
+web = true
+notion = "write"
+default_use_case = "research_execute"
+classify = "書誌・固定項目・ログの抽出は research_extract、明確な基準の候補仕分けは research_screen、比較・結果分析は research_compare、実験コード・データ処理・通常調査は research_execute、仮説・実験計画・手法選択・厳密レビューは research_design。"
+
+[use_cases.research_extract]
+claude = { model = "claude-haiku-4-5" }
+codex = { model = "gpt-6-luna", effort = "low" }
+
+[use_cases.research_screen]
+claude = { model = "claude-haiku-4-5" }
+codex = { model = "gpt-6-luna", effort = "medium" }
+
+[use_cases.research_compare]
+claude = { model = "claude-sonnet-5", effort = "medium" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+
+[use_cases.research_execute]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "high" }
+
+[use_cases.research_design]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "xhigh" }
+
+# 依頼者が依頼の頭に [[manual-astra]] / [[manual-fable]] と書いたときだけ（分類器は選ばない）
+[use_cases.manual_astra]
+manual = true
+codex = { model = "gpt-6-astra", effort = "xhigh" }
+
+[use_cases.manual_fable]
+manual = true
+claude = { model = "claude-fable-5", effort = "high" }
+
+# 担当プロセス（A2A のサーバー）。テーマの作業場で AI を動かし、長い処理（pueue のジョブ）の待ち行列を持つ
+[process]
+port = 8788
+
+# ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ
+[channels]
+theme = ["*"]

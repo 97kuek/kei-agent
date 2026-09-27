@@ -23,26 +23,24 @@ kei-agent-notion-setup = "kei_agent.notion:main"
 kei-agent-hub-setup = "kei_agent.notion_hub:main"
 kei-agent-time-cards = "kei_agent.time_cards_setup:main"
 kei-agent-ask = "kei_agent.ask:main"
-kei-agent-research = "kei_agent_research.app:main"
 # モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module knowledge
 kei-agent-module = "kei_agent_a2a.launch:main"
 
 [tool.uv.build-backend]
-# A2A のエージェント（src/kei_agent_a2a、src/kei_agent_research）は、Kei Agent 本体とは別のパッケージにしてある
-# （依存をそれぞれに閉じる）。モジュールは modules/ に置き、ここには書かない
-module-name = ["kei_agent", "kei_agent_a2a", "kei_agent_research"]
+# A2A の担当の土台（src/kei_agent_a2a）は、Kei Agent 本体とは別のパッケージにしてある（依存を閉じる）。
+# 機能はモジュールとして modules/ に置き、ここには書かない
+module-name = ["kei_agent", "kei_agent_a2a"]
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-# A2A のサーバー側（研究の担当と、モジュールの担当プロセス）に必要なもの
+# A2A のサーバー側（モジュールの担当プロセス）に必要なもの
 agents = [
     "a2a-sdk[http-server]>=1.1.4",
     "uvicorn>=0.53.0",
 ]
-research = [{ include-group = "agents" }]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

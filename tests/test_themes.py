@@ -164,8 +164,9 @@ def test_agent_workspaces_are_stable_places_for_sessions(config):
     # 仕事はモジュール。作業場は前と同じ場所（会話の続きが切れない）
     assert (work.kind, work.module) == (ChannelKind.MODULE, "work") and work.cwd == config.state_dir / "agents" / "work"
     assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
+    # 実行役を持たないモジュール（声）には、作業場が無い
     with pytest.raises(ValueError):
-        themes.agent_workspace(config, "research")
+        themes.agent_workspace(config, "voice")
 
 
 # チャンネル名の先頭の番号（並び順のためのもの）

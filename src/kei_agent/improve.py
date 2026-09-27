@@ -116,7 +116,7 @@ def catch_up_with_main(worktree: Path) -> CommandResult:
 
 
 # エージェントのテストを飛ばさないために、確認で入れる依存のグループ
-AGENT_GROUPS = ("--group", "research", "--group", "agents")
+AGENT_GROUPS = ("--group", "agents")
 
 
 def run_checks(worktree: Path) -> CommandResult:
@@ -127,7 +127,7 @@ def run_checks(worktree: Path) -> CommandResult:
     """
     outputs = []
     pytest_args = ["uv", "run", "--frozen", *AGENT_GROUPS, "pytest", "-q"]
-    for args in (pytest_args, ["uvx", "ruff", "check", "src", "tests", "plugin", "modules"]):
+    for args in (pytest_args, ["uvx", "ruff", "check", "src", "tests", "modules"]):
         proc = subprocess.run(args, cwd=worktree, capture_output=True, text=True, timeout=1800)
         tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
         outputs.append(f"$ {' '.join(args)}\n{tail}")
@@ -249,7 +249,7 @@ FIX_PROMPT = """\
 
 - いまのディレクトリは、この作業のための git worktree です。ここの中だけを書き換えます
 - `src/kei_agent/guard.py`、`config.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
-- 直したら `uv run --frozen pytest -q` と `uvx ruff check src tests plugin` を通してください
+- 直したら `uv run --frozen --group agents pytest -q` と `uvx ruff check src tests modules` を通してください
 - テストのないところを直すときは、先に落ちるテストを書いてから直してください
 - コミットはしないでください（Kei Agent 本体がまとめてコミットします）
 - 最後に、何をどう変えたかと、テストの結果を短くまとめてください

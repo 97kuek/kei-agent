@@ -32,18 +32,11 @@ class ModelPolicyError(ValueError):
 
 class UseCase(StrEnum):
     ROUTING = "routing"
-    RESEARCH_EXTRACT = "research_extract"
-    RESEARCH_SCREEN = "research_screen"
-    RESEARCH_COMPARE = "research_compare"
-    RESEARCH_EXECUTE = "research_execute"
-    RESEARCH_DESIGN = "research_design"
     OVERVIEW_DAILY = "overview_daily"
     OVERVIEW_PLAN = "overview_plan"
     SELF_FIX_DESIGN = "self_fix_design"
     SELF_FIX_IMPLEMENTATION = "self_fix_implementation"
     SELF_FIX_REVIEW = "self_fix_review"
-    MANUAL_ASTRA = "manual_astra"
-    MANUAL_FABLE = "manual_fable"
 
 
 @dataclass(frozen=True)
@@ -61,16 +54,6 @@ class ResolvedModel:
 _RECIPES: dict[tuple[str, UseCase], tuple[str, str]] = {
     ("codex", UseCase.ROUTING): ("gpt-6-luna", "low"),
     ("claude", UseCase.ROUTING): ("claude-haiku-4-5", ""),
-    ("codex", UseCase.RESEARCH_EXTRACT): ("gpt-6-luna", "low"),
-    ("claude", UseCase.RESEARCH_EXTRACT): ("claude-haiku-4-5", ""),
-    ("codex", UseCase.RESEARCH_SCREEN): ("gpt-6-luna", "medium"),
-    ("claude", UseCase.RESEARCH_SCREEN): ("claude-haiku-4-5", ""),
-    ("codex", UseCase.RESEARCH_COMPARE): ("gpt-6-sol", "medium"),
-    ("claude", UseCase.RESEARCH_COMPARE): ("claude-sonnet-5", "medium"),
-    ("codex", UseCase.RESEARCH_EXECUTE): ("gpt-6-sol", "high"),
-    ("claude", UseCase.RESEARCH_EXECUTE): ("claude-sonnet-5", "high"),
-    ("codex", UseCase.RESEARCH_DESIGN): ("gpt-6-sol", "xhigh"),
-    ("claude", UseCase.RESEARCH_DESIGN): ("claude-opus-5", "high"),
     ("codex", UseCase.OVERVIEW_DAILY): ("gpt-6-luna", "medium"),
     ("claude", UseCase.OVERVIEW_DAILY): ("claude-sonnet-5", "medium"),
     ("codex", UseCase.OVERVIEW_PLAN): ("gpt-6-sol", "high"),
@@ -83,17 +66,7 @@ _RECIPES: dict[tuple[str, UseCase], tuple[str, str]] = {
     ("claude", UseCase.SELF_FIX_REVIEW): ("claude-sonnet-5", "high"),
 }
 
-_MANUAL = {
-    ("codex", UseCase.MANUAL_ASTRA): ("gpt-6-astra", "xhigh"),
-    ("claude", UseCase.MANUAL_FABLE): ("claude-fable-5", "high"),
-}
-
 _ACTOR_USE_CASES = {
-    "research": frozenset({
-        UseCase.RESEARCH_EXTRACT, UseCase.RESEARCH_SCREEN, UseCase.RESEARCH_COMPARE,
-        UseCase.RESEARCH_EXECUTE, UseCase.RESEARCH_DESIGN, UseCase.MANUAL_ASTRA,
-        UseCase.MANUAL_FABLE,
-    }),
     "router": frozenset({UseCase.ROUTING, UseCase.OVERVIEW_DAILY, UseCase.OVERVIEW_PLAN}),
     "self_fix": frozenset({
         UseCase.SELF_FIX_DESIGN, UseCase.SELF_FIX_IMPLEMENTATION, UseCase.SELF_FIX_REVIEW,
@@ -151,9 +124,7 @@ def is_allowed_model(provider: str, model: str) -> bool:
 
 
 def is_manual(use_case: UseCase | str) -> bool:
-    """依頼者が明示したときだけ使う用途か（コアの manual_*、モジュールの manual = true）。"""
-    if use_case in (UseCase.MANUAL_ASTRA, UseCase.MANUAL_FABLE):
-        return True
+    """依頼者が明示したときだけ使う用途か（モジュールの manual = true）。"""
     owner = modules.use_case_owner(str(use_case))
     return bool(owner and owner.actor and any(u.name == use_case and u.manual for u in owner.actor.use_cases))
 
@@ -184,13 +155,6 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
     case = use_case_of(use_case)
     if case not in allowed_use_cases(actor):
         raise ModelPolicyError(f"{actor} では {case} を使えません")
-    if (provider, case) in _MANUAL:
-        if not manual:
-            raise ModelPolicyError(f"{case} は依頼者による手動指定だけで使えます")
-        model, effort = _MANUAL[(provider, case)]
-        if not is_allowed_model(provider, model):
-            raise ModelPolicyError(f"許可されていない model です: {model}")
-        return ResolvedModel(actor, case, provider, model, effort, manual_only=True)
     found = _recipe(provider, case)
     if found is None:
         raise ModelPolicyError(f"{actor} では {case} を {provider} で使えません")
@@ -198,7 +162,7 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
     if not is_allowed_model(provider, model):
         raise ModelPolicyError(f"許可されていない model です: {model}")
     if is_manual(case):
-        # モジュールの手動指定だけの用途（manual = true）
+        # 手動指定だけの用途（module.toml の manual = true）
         if not manual:
             raise ModelPolicyError(f"{case} は依頼者による手動指定だけで使えます")
         return ResolvedModel(actor, case, provider, model, effort, manual_only=True)

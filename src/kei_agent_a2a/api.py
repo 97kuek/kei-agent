@@ -21,6 +21,9 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
 モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
 本体の問い合わせ口に研究・大学・仕事の中身を聞くのは `ask_orchestrator`、Slack の外から依頼を置くのは `put_request`。
 
+研究テーマを受け持つモジュール（[channels] に "*"）の担当は、`SkillExecutor.workspace(ask)` を `channel_workspace` で
+書き換えてテーマの作業場で動かす。ジョブの待ち行列（pueue）は `Pueue` と、仕事の名前 SUBMIT_JOB など（本体との約束）。
+
 A2A ではない常駐のプロセス（module.toml の [process] に kind = "service"）は、agent.py の代わりに service.py に
 `serve(config, port) -> int` を置く（Notion のモジュールのゲートウェイ）。起動は同じく `kei-agent-module <名前>`。
 """
@@ -38,6 +41,7 @@ from kei_agent import a2a, agents, ask, modules, runner, themes, version
 from kei_agent.agent_policy import policy_of
 from kei_agent.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
+from kei_agent.jobs import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB, Pueue
 from kei_agent.model_json import json_list, json_object
 from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
 from kei_agent.notion import (
@@ -52,15 +56,17 @@ from kei_agent.notion import (
 )
 from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
 from kei_agent.records import Records
+from kei_agent.themes import Workspace
 from kei_agent.timelog import Toggl, TogglError, load_toggl
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
 from kei_agent_a2a.run import progress
 
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "ASK", "GATEWAY_TOKEN_ENV", "MAIN_CLIENT", "RUNNING_VERSION", "WEEKDAYS", "AIError",
-           "AgentSkill", "Config", "Notion", "NotionConfig", "NotionError", "OrchestratorError", "Records", "Setup",
-           "SkillExecutor", "TaskUpdater", "Toggl", "TogglError", "ai_runs_shell", "append_blocks", "ask_orchestrator",
-           "asked_days", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
+__all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV", "LIST_JOBS", "MAIN_CLIENT",
+           "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
+           "NotionError", "OrchestratorError", "Pueue", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl",
+           "TogglError", "Workspace", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
+           "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
            "put_request", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings", "weekday",
            "workspace"]
@@ -132,6 +138,20 @@ def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
 def settings(config: Config, module: str) -> dict:
     """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
     return config.settings(module)
+
+
+def channel_workspace(config: Config, channel_name: str, allowed_domains=(), *, create: bool = True) -> Workspace:
+    """研究テーマ（と研究全体）のチャンネルの作業場。core.work の ask に添えて届く channel_name と allowed_domains から作る。
+
+    作業場の無いチャンネル（モジュールのチャンネルなど）なら ValueError。create なら、無ければ作る（読むだけの回は作らない）。
+    """
+    ws = themes.resolve(config, channel_name)
+    if ws.cwd is None or ws.kind not in (themes.ChannelKind.THEME, themes.ChannelKind.OVERVIEW):
+        raise ValueError(f"#{ws.channel_name} には作業用ディレクトリがありません")
+    ws = replace(ws, allowed_domains=tuple(allowed_domains or ()))
+    if create:
+        themes.ensure_workspace(ws)
+    return ws
 
 
 def workspace(config: Config, agent: str) -> Path:

@@ -1,7 +1,7 @@
-"""頼まれた作業（provider を1回動かす／長い処理をジョブにする）をこなすところ。
+"""研究の担当プロセス（A2A のサーバー）。起動は共通のコマンド `kei-agent-module research`。
 
-できるのは2つ。provider を1回動かすこと（どのエージェントでも同じ `ask`）と、長い処理（pueue のジョブ）の出し入れ。
-依頼は JSON で届く。
+できるのは2つ。テーマの作業場で provider を1回動かすこと（どの担当とも同じ `ask`）と、長い処理（pueue のジョブ）の
+出し入れ。依頼は JSON で届く。
 
     ask         {"channel_name": "amr-query", "prompt": "図を作って", "session_id": null,
                  "channel": "C1", "thread_ts": "1.2", "allowed_domains": ["example.com"]}
@@ -9,36 +9,60 @@
     list-jobs   {}
     cancel-job / forget-job  {"task_id": 12}
 
-ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、オーケストレーターが覚えている。
-ここは pueue の待ち行列を持つだけ（docs/architecture.md）。
-
-`ask` の依頼と返事の形、経過と柵の扱いは `kei_agent_a2a`（大学・仕事のエージェントと共通）。
-研究だけが違うのは、動かす場所がテーマの作業場になること。
-
-会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方は持たない。
-それはオーケストレーターの仕事（docs/architecture.md）。
+ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、本体（kei_agent.jobs）が覚えている。
+ここは pueue の待ち行列を持つだけ。会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方も本体の仕事。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import replace
 from pathlib import Path
 
-from a2a.server.tasks import TaskUpdater
-
-from kei_agent import themes
-from kei_agent.config import Config, load_config
-from kei_agent.jobs import Pueue
-from kei_agent.store import Store
-from kei_agent.themes import Workspace
-from kei_agent_a2a.executor import ASK, SkillExecutor
-from kei_agent_research.skills import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB
+from kei_agent_a2a.api import (
+    ASK,
+    CANCEL_JOB,
+    FORGET_JOB,
+    LIST_JOBS,
+    SUBMIT_JOB,
+    AgentSkill,
+    Config,
+    Pueue,
+    SkillExecutor,
+    TaskUpdater,
+    Workspace,
+    channel_workspace,
+)
 
 log = logging.getLogger(__name__)
 
-SKILLS = (ASK, SUBMIT_JOB, LIST_JOBS, CANCEL_JOB, FORGET_JOB)
+DESCRIPTION = "研究テーマの作業場で、選択済み provider を1回動かす。長い処理は pueue のジョブにする"
+SKILLS = [
+    AgentSkill(
+        id=ASK,
+        name="研究用 provider を1回動かす",
+        description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、テーマの作業場で"
+                    "選択済み provider を1回動かして、答えを返す",
+        tags=["research"],
+        examples=['{"channel_name": "amr-query", "prompt": "図を作って"}'],
+    ),
+    AgentSkill(
+        id=SUBMIT_JOB,
+        name="ジョブを投入する",
+        description="JSON（cwd・command・label）を受け取り、pueue の待ち行列に入れて task_id を返す。"
+                    "cwd は研究テーマの中か、研究全体の作業場だけ",
+        tags=["research", "jobs"],
+        examples=['{"cwd": "~/research/amr-query", "command": "uv run train.py", "label": "kei-agent-3"}'],
+    ),
+    AgentSkill(id=LIST_JOBS, name="ジョブの状態",
+               description="待ち行列にあるジョブの状態をまとめて返す（data.tasks に pueue の中身）",
+               tags=["research", "jobs"], examples=[]),
+    AgentSkill(id=CANCEL_JOB, name="ジョブを止める", description="JSON（task_id）で、走っているジョブを止める",
+               tags=["research", "jobs"], examples=[]),
+    AgentSkill(id=FORGET_JOB, name="ジョブを片づける", description="JSON（task_id）で、終わったジョブを待ち行列から消す",
+               tags=["research", "jobs"], examples=[]),
+]
+NAMES = tuple(skill.id for skill in SKILLS)
 NO_JSON = "依頼は JSON で渡してください"
 
 
@@ -52,20 +76,20 @@ def _json(text: str) -> dict:
     return data
 
 
-class ResearchExecutor(SkillExecutor):
+class Executor(SkillExecutor):
+    # 制限の表とモデルの一覧を引く名前（共通の起動コマンドも同じ名前を入れる）
     agent = "research"
 
-    def __init__(self, config: Config | None = None, pueue: Pueue | None = None, store: Store | None = None):
-        self.config = config or load_config()
+    def __init__(self, config: Config | None = None, store=None, pueue: Pueue | None = None):
+        super().__init__(config, store)
         self.pueue = pueue or Pueue(self.config)
-        self.store = store or Store(self.config.db_path)
         # pueue のグループは最初に使うときだけ用意する
         self._group_ready = False
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = metadata.get("skill", ASK)
-        if skill not in SKILLS:
-            await self.fail(updater, f"できるのは {' / '.join(SKILLS)} です")
+        if skill not in NAMES:
+            await self.fail(updater, f"できるのは {' / '.join(NAMES)} です")
             return
         if skill == ASK:
             await self.answer(updater, text)
@@ -79,19 +103,14 @@ class ResearchExecutor(SkillExecutor):
 
     def workspace(self, ask: dict) -> Workspace:
         """研究はテーマの作業場で動かす。許可済みの接続先は、本体が依頼に添えてくる。"""
-        ws = themes.resolve(self.config, str(ask.get("channel_name") or ""))
-        if ws.cwd is None:
-            raise ValueError(f"#{ws.channel_name} には作業用ディレクトリがありません")
-        ws = replace(ws, allowed_domains=tuple(ask.get("allowed_domains") or ()))
-        if not ask.get("read_only"):
-            themes.ensure_workspace(ws)
-        return ws
+        return channel_workspace(self.config, str(ask.get("channel_name") or ""), ask.get("allowed_domains") or (),
+                                 create=not ask.get("read_only"))
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""
         try:
             if skill == SUBMIT_JOB:
-                cwd = self._theme_dir(str(ask.get("cwd") or ""))
+                cwd = self._job_dir(str(ask.get("cwd") or ""))
                 if not self._group_ready:
                     await self.pueue.ensure_group()
                     self._group_ready = True
@@ -113,7 +132,7 @@ class ResearchExecutor(SkillExecutor):
         except RuntimeError as e:
             await self.fail(updater, f"pueue が失敗しました: {e}")
 
-    def _theme_dir(self, cwd: str) -> Path:
+    def _job_dir(self, cwd: str) -> Path:
         """ジョブを動かしてよい場所だけを受け付ける（渡された場所で何でも動かさない）。
 
         研究テーマの中と、研究全体の作業場（`<agent_root>/overview`。研究テーマの外にある）。

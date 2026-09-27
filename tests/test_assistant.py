@@ -2403,11 +2403,12 @@ async def test_explicit_use_case_survives_the_handoff_memo(env, store, monkeypat
     assistant, _, claude, _ = env
     classified = []
 
-    async def classify(_config, _store, prompt, **_kw):
+    async def classify(_config, _store, _spec, prompt, **_kw):
         classified.append(prompt)
         raise AssertionError("明示指定があるのに分類器に回った")
 
-    monkeypatch.setattr(model_classifier, "classify_research", classify)
+    # 研究の分類器は、研究のモジュールの classify（classify_module）
+    monkeypatch.setattr(model_classifier, "classify_module", classify)
     store.upsert_thread("C1", "10.1", "vlm", None)
     store.update_thread("C1", "10.1", handoff_memo="前のスレッドの要点: 実験Aは終わった\n\n")
     await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1",

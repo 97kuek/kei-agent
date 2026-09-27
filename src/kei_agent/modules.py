@@ -373,7 +373,6 @@ def _check_collisions(specs: dict[str, ModuleSpec]) -> None:
         keys = [f"用途「{u.name}」" for u in (spec.actor.use_cases if spec.actor else ())]
         keys += [f"定期処理「{s.name}」" for s in spec.schedules]
         keys += [f"チャンネルの種類「{kind}」" for kind in spec.channels]
-        keys += ["ほかのどれにも当たらないチャンネル（*）"] if spec.catch_all else []
         keys += [f"番地「{spec.port}」"] if spec.port else []
         for key in keys:
             if key in seen and seen[key] != spec.name:

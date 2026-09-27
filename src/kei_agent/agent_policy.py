@@ -94,8 +94,6 @@ def _read(access: Access) -> Access:
 
 
 POLICIES: dict[str, AgentPolicy] = {
-    "research": AgentPolicy("research", "system.md", plugin=True, files="write", shell=True, web=True,
-                            notion="write"),
     # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),
