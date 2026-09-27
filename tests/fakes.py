@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from kei_agent import ask, runner
+from kei_agent import ask, runner, themes
 from kei_agent.jobs import REQUESTS_DIR
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Note, Task
@@ -712,3 +712,86 @@ def pending_asks(config) -> list[tuple[Path, dict]]:
     directory = ask.ask_dir(config)
     return [(path, json.loads(path.read_text(encoding="utf-8")))
             for path in sorted(directory.glob("*.json"))] if directory.is_dir() else []
+
+
+class FakeHub:
+    has_time_db = True
+    has_reading_db = True
+
+    def __init__(self):
+        self.readings: dict[str, dict] = {}
+        self.trashed: list[str] = []
+        self.notes = []
+        self.appended = []
+        self.reviews: dict[str, str] = {}
+        self.edited: list[Note] = []
+        self.minutes: dict[str, float] = {}
+        self.known: set[str] = set()
+        self.recorded = []
+        self.calendar: list[dict] = []
+
+    def upsert_day(self, kind, day, title, markdown, slack_url):
+        note = Note(f"hub-{day}", title, kind, day, f"https://notion.example/hub/{day}", markdown)
+        self.notes.append(note)
+        return note
+
+    def append_review_conclusion(self, page_id, text, stamp, message_id=None):
+        self.appended.append((page_id, text))
+
+    def reviews_edited_since(self, since):
+        return list(self.edited)
+
+    def review_text(self, day):
+        return self.reviews.get(day, "")
+
+    def time_minutes_by_domain(self, start, days=7):
+        return dict(self.minutes)
+
+    def time_url(self):
+        return "https://www.notion.so/timedb"
+
+    def time_ids_since(self, since):
+        return set(self.known)
+
+    def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
+        self.recorded.append((entry_id, domain, label, minutes, source))
+
+    def add_reading(self, item, day):
+        page_id = f"reading-{len(self.readings) + 1}"
+        self.readings[page_id] = {"item": item, "day": day}
+        return page_id
+
+    def trash_page(self, page_id):
+        self.trashed.append(page_id)
+
+    collect = ([], [])
+
+    def collect_settings(self):
+        return self.collect
+
+    def schema_problems(self):
+        return []
+
+    def calendar_rows(self, source, window_start, window_end):
+        return [dict(row) for row in self.calendar if row["出典"] == source]
+
+    def calendar_upsert(self, source, item, checked_at, existing_id=None):
+        if existing_id:
+            next(row for row in self.calendar if row["id"] == existing_id).update(
+                {"名前": item.title, "日付": item.start, "同期状態": "確認済み"})
+            return
+        self.calendar.append({"id": f"cal-{len(self.calendar)}", "出典": source, "出典 ID": item.source_id,
+                              "名前": item.title, "日付": item.start, "同期状態": "確認済み"})
+
+    def calendar_mark_stale(self, row_id):
+        next(row for row in self.calendar if row["id"] == row_id)["同期状態"] = "要確認"
+
+
+def make_theme(config, name="vlm", keywords=("vision language model counting",)):
+    ws = themes.resolve(config, name)
+    themes.ensure_workspace(ws)
+    if keywords is not None:
+        md = ws.cwd / "CLAUDE.md"
+        text = md.read_text().replace("## 検索キーワード\n", "## 検索キーワード\n\n" + "\n".join(f"- {k}" for k in keywords) + "\n", 1)
+        md.write_text(text)
+    return ws

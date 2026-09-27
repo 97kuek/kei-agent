@@ -1,4 +1,7 @@
-"""決まった時刻の処理: 先行研究の新着と読みもの（知識の担当）、Daily、Retro & Planning、🌙 の夜間 Task、放置されたスレッドへの声かけ。"""
+"""決まった時刻の処理: 🌙 の夜間 Task、Daily、Retro & Planning、保守、放置されたスレッドへの声かけ。
+
+モジュールの定期処理（module.toml の [schedules]）も同じ順番の中で動かし、中身はモジュールの run_schedule に任せる。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +10,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import socket
 import time
 from contextlib import suppress
@@ -21,7 +23,6 @@ from kei_agent import (
     course,
     dates,
     digest,
-    knowledge,
     maintenance,
     modules,
     morning,
@@ -105,18 +106,6 @@ def label(day: str) -> str:
     return dates.day_label(date.fromisoformat(day))
 
 
-def search_keywords(claude_md: Path) -> list[str]:
-    """テーマの CLAUDE.md の「## 検索キーワード」の箇条書きを読む。"""
-    if not claude_md.exists():
-        return []
-    text = re.sub(r"<!--.*?-->", "", claude_md.read_text(encoding="utf-8"), flags=re.DOTALL)
-    m = re.search(r"^## 検索キーワード\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
-    if not m:
-        return []
-    return [line.strip()[2:].strip() for line in m.group(1).splitlines()
-            if line.strip().startswith("- ") and line.strip()[2:].strip()]
-
-
 class Scheduler:
     def __init__(self, config: Config, store: Store, assistant: Assistant):
         self.config = config
@@ -190,7 +179,9 @@ class Scheduler:
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
         log.info("定期処理を始めます: %s（%s）", name, day)
         try:
-            detail = await getattr(self, f"run_{name}")(day)
+            owner = modules.schedule_owner(self.config.modules, name)
+            module = self.assistant.modules.get(owner.name) if owner is not None else None
+            detail = await (module.run_schedule(name, day) if module is not None else getattr(self, f"run_{name}")(day))
         except Exception as e:
             log.exception("定期処理 %s が失敗しました", name)
             detail = {"status": "error", "error": f"{type(e).__name__}: {e}"}
@@ -204,8 +195,7 @@ class Scheduler:
             return None
         if name in ("daily", "review"):
             return settings.selected_provider(self.config, self.store, "router")
-        owner = next((spec for spec in modules.enabled(self.config.modules) if any(s.name == name for s in spec.schedules)),
-                     None)
+        owner = modules.schedule_owner(self.config.modules, name)
         if owner is not None:
             # モジュールの処理は、そのモジュールの実行役の provider（AI を使わないモジュールなら要らない）
             return settings.selected_provider(self.config, self.store, owner.name) if owner.actor else None
@@ -320,98 +310,6 @@ class Scheduler:
         if status == "完了" and message_ts:
             await self.assistant.react_done(channel, message_ts)
         return {**info, "status": status, "summary": summary}
-
-    # 先行研究の新着
-
-    async def run_literature(self, day: str) -> dict:
-        """先行研究の新着。テーマの検索キーワードと前提（CLAUDE.md）を知識の担当に渡し、選ばれた論文を
-        研究ホームの先行研究 DB と、各テーマのチャンネルに出す。そのスレッドの質問は知識の担当が答える。"""
-        ids = await self.assistant.channel_ids()
-        notion = self.assistant.notion
-        if notion is None:
-            return {"status": "no_notion"}
-        try:
-            known = set(await asyncio.to_thread(notion.paper_ids))
-        except (NotionError, KeyError) as e:
-            log.warning("先行研究 DB を読めません: %s", e)
-            return {"status": "error", "error": f"先行研究 DB を読めません: {e}"}
-        results: dict[str, dict] = {}
-        for cwd in themes.theme_dirs(self.config):
-            name = cwd.name
-            if name not in ids:
-                continue  # アーカイブしたテーマや、Kei Agent のいないテーマは見張らない
-            claude_md = cwd / "CLAUDE.md"
-            keywords = search_keywords(claude_md)
-            if not keywords:
-                results[name] = {"status": "no_keywords"}
-                continue
-            premises = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
-            reply = await self.assistant.ask_knowledge(knowledge.PAPER_DIGEST, {
-                "theme": name, "keywords": keywords, "premises": premises, "known_ids": sorted(known),
-                "count": knowledge.PAPERS_PER_THEME})
-            if not reply.ok:
-                results[name] = {"status": "error"}
-                continue
-            items = reply.data.get("items") or []
-            if not items:
-                results[name] = {"status": "no_new"}
-                continue
-            try:
-                await asyncio.to_thread(notion.add_papers, name, items, "毎朝の新着")
-            except (NotionError, KeyError) as e:
-                log.warning("先行研究 DB に書けません（%s）: %s", name, e)
-                results[name] = {"status": "error", "error": f"先行研究 DB に書けません: {e}"}
-                continue
-            known |= {str(item.get("id")) for item in items}
-            posted = await self.assistant.slack.chat_postMessage(
-                channel=ids[name], text=knowledge.papers_text(items, label(day)), unfurl_links=False, unfurl_media=False)
-            thread_ts = str(posted.get("ts") or "")
-            if thread_ts:
-                # このスレッドの続きは、知識の担当が答える（ほかのスレッドは研究の担当）
-                self.store.upsert_thread(ids[name], thread_ts, name, None)
-                self.store.set_agent_session(ids[name], thread_ts, knowledge.AGENT, "")
-            results[name] = {"status": "posted", "count": len(items), "thread_ts": thread_ts}
-        failed = any(result.get("status") == "error" for result in results.values())
-        return {"status": "error" if failed else "done", "themes": results}
-
-    async def run_reading(self, day: str) -> dict:
-        """朝の読みもの。共通ホームの「収集」ページの興味と情報源と、最近 👍 した記事を知識の担当に渡し、
-        選ばれた記事を1記事 = 1投稿で出す（👍 とスレッドが記事ごとになる）。"""
-        channels = self.config.module_channels.get("knowledge", ())
-        name = channels[0] if channels else ""
-        channel = (await self.assistant.channel_ids()).get(name) if name else None
-        if channel is None:
-            return {"status": "no_channel"}
-        hub = self.assistant.hub
-        if hub is None:
-            return {"status": "no_hub"}
-        try:
-            interests, sources = await asyncio.to_thread(hub.collect_settings)
-        except NotionError as e:
-            log.warning("「収集」ページを読めません: %s", e)
-            return {"status": "error", "error": f"「収集」ページを読めません: {e}"}
-        if not interests or not sources:
-            return {"status": "no_settings"}
-        liked = self.store.liked_readings(time.time() - knowledge.LIKED_DAYS * 86400, knowledge.LIKED_EXAMPLES)
-        reply = await self.assistant.ask_knowledge(knowledge.READING_DIGEST, {
-            "interests": interests, "sources": sources, "count": knowledge.READING_COUNT,
-            "liked": [{key: item.get(key) for key in ("title", "source", "interests")} for item in liked]})
-        if not reply.ok:
-            return {"status": "error"}
-        items = reply.data.get("items") or []
-        failed = [str(source) for source in reply.data.get("failed_sources") or []]
-        if not items:
-            return {"status": "no_new", "failed_sources": failed}
-        for number, item in enumerate(items, 1):
-            posted = await self.assistant.slack.chat_postMessage(
-                channel=channel, text=knowledge.reading_post_text(item, number, len(items), hint=number == len(items)),
-                unfurl_links=False, unfurl_media=False)
-            ts = str(posted.get("ts") or "")
-            if ts:
-                # スレッドの質問は知識の担当へ（元の投稿も渡る）。👍 はこの控えで記事を知る
-                self.store.upsert_thread(channel, ts, name, None)
-                self.store.add_reading_post(channel, ts, day, item)
-        return {"status": "posted", "count": len(items), "channel": channel, "failed_sources": failed}
 
     # Daily と振り返り
 
@@ -634,6 +532,8 @@ class Scheduler:
         # エージェントの claude の会話も、セッションの記録と同じ日数で忘れる
         detail["agent_sessions"] = self.store.drop_old_agent_sessions(
             time.time() - self.config.maintenance.session_retention_days * 86400)
+        # モジュールの記録は、モジュールが決めた日数で忘れる（kei_agent.api.Records）
+        detail["module_records"] = self.store.drop_expired_module_records(time.time())
         detail["toggl"] = await self.import_toggl()
         if self.config.maintenance.backup:
             try:
@@ -740,28 +640,22 @@ class Scheduler:
         return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
 
     def morning_notes(self, now: datetime | None = None, failed_now: list[str] | None = None) -> list[str]:
-        """時刻の無いもの（今朝の先行研究の新着と読みもの、うまくいかなかったこと）を、1行ずつ。"""
+        """時刻の無いもの（モジュールの今朝の分、うまくいかなかったこと）を、1行ずつ。"""
         now = now or datetime.now()
         today = now.date().isoformat()
         notes = []
-        themes_ = self.today_detail("literature", today).get("themes") or {}
-        posted = [name for name, got in themes_.items() if got.get("status") == "posted"]
-        if posted:
-            notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
-        reading = self.today_detail("reading", today)
-        if reading.get("status") == "posted" and reading.get("channel"):
-            notes.append(f"読みもの: {reading.get('count')}件（<#{reading['channel']}>）")
+        for name, module in self.assistant.modules.items():
+            if not hasattr(module, "morning_notes"):
+                continue
+            try:
+                notes += [str(note) for note in module.morning_notes(today)]
+            except Exception:
+                # 朝の一覧は止めない
+                log.exception("モジュール「%s」の朝の一覧の行を作れませんでした", name)
         failure = self.failure_note(now, failed_now)
         if failure:
             notes.append(failure)
         return notes
-
-    def today_detail(self, name: str, today: str) -> dict:
-        """その定期処理の今日の記録（まだなら空）。昨日の分を、今朝のもののように載せないため。"""
-        last = self.store.last_schedule(name)
-        if last is None or last["day"] != today:
-            return {}
-        return json.loads(last["detail"] or "{}") or {}
 
     async def notify_due_soon(self, now: datetime) -> None:
         """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる。"""

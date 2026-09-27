@@ -1,15 +1,20 @@
 """モジュール（機能のまとまり）の定義 `module.toml` を読む（docs/extensibility.md）。
 
 組み込みのモジュールはリポジトリ直下の `modules/<名前>/`、利用者のモジュールは `~/.config/kei-agent/modules/<名前>/`。
-どちらも同じ形で読む。ここでは動き（module.py）は読み込まず、変わらない事実だけを読んで確かめる。
+どちらも同じ形で読む。変わらない事実（module.toml）は設定を読むときに確かめ、動き（module.py）は
+本体が起動するときに load_code で読み込む。
 
-コアのほかの部品（設定・モデル・制限の表）がここを読むので、ここからは kei_agent のどこも読み込まない。
+コアのほかの部品（設定・モデル・制限の表）がここを読むので、ここからは kei_agent のどこも読み込まない
+（module.py が読み込むのは、窓口の kei_agent.api だけ）。
 """
 
 from __future__ import annotations
 
+import importlib
 import re
+import sys
 import tomllib
+import types
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -17,6 +22,9 @@ from pathlib import Path
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
 SPEC_FILE = "module.toml"
+CODE_FILE = "module.py"
+# モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
+PACKAGE = "kei_agent_modules"
 BUILTIN_DIR = Path(__file__).resolve().parents[2] / "modules"
 PROVIDERS = ("claude", "codex")
 ACCESS = ("none", "read", "write")
@@ -194,13 +202,15 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         raise ModuleError(f"{where} の [process] port は 1024〜65535 の整数にしてください")
     channels = {kind: _names(names, f"{where} の [channels] {kind}")
                 for kind, names in _table(data, "channels", where).items()}
+    schedules = _schedules(_table(data, "schedules", where), where)
+    if (channels or schedules) and not (directory / CODE_FILE).is_file():
+        raise ModuleError(f"{where}: [channels] と [schedules] を動かす {CODE_FILE}（class Module）が、同じフォルダにありません")
     return ModuleSpec(
         name=name, label=str(data.get("label") or name), description=str(data.get("description") or ""),
         path=directory, builtin=builtin,
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
-        actor=actor, port=port, channels=channels,
-        schedules=_schedules(_table(data, "schedules", where), where))
+        actor=actor, port=port, channels=channels, schedules=schedules)
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:
@@ -260,9 +270,55 @@ def enabled(names) -> list[ModuleSpec]:
     return [specs[name] for name in names if name in specs]
 
 
+def schedule_owner(names, schedule: str) -> ModuleSpec | None:
+    """その定期処理を持つ、オンのモジュール（names は設定の modules）。本体の定期処理なら None。"""
+    return next((spec for spec in enabled(names) if any(s.name == schedule for s in spec.schedules)), None)
+
+
 def use_case_owner(use_case: str) -> ModuleSpec | None:
     """その用途を持つモジュール。コアの用途なら None。"""
     for spec in known().values():
         if spec.actor and any(u.name == use_case for u in spec.actor.use_cases):
             return spec
     return None
+
+
+def package(spec: ModuleSpec) -> str:
+    """モジュールのフォルダを Python のパッケージとして読めるようにして、その名前を返す。
+
+    module.py は `from . import texts` のように、同じフォルダのファイルを読み込める。
+    """
+    name = f"{PACKAGE}.{spec.name.replace('-', '_')}"
+    if PACKAGE not in sys.modules:
+        parent = types.ModuleType(PACKAGE)
+        parent.__path__ = []
+        sys.modules[PACKAGE] = parent
+    if getattr(sys.modules.get(name), "__path__", None) != [str(spec.path)]:
+        # 同じ名前のモジュールを別の場所から読み直すとき（試験など）は、前に読んだものを捨てる
+        for loaded in [key for key in sys.modules if key == name or key.startswith(f"{name}.")]:
+            del sys.modules[loaded]
+        found = types.ModuleType(name)
+        found.__path__ = [str(spec.path)]
+        sys.modules[name] = found
+    return name
+
+
+def load_code(spec: ModuleSpec) -> type | None:
+    """そのモジュールの動き（module.py の class Module）を読み込む。module.py が無ければ None。
+
+    module.toml に書いたのに動かす口が無いもの（定期処理の run_schedule、チャンネルの on_message）は、
+    起動のときに断る（黙って動かないままにしない）。
+    """
+    where = spec.path / CODE_FILE
+    if not where.is_file():
+        return None
+    importlib.invalidate_caches()
+    code = importlib.import_module(f"{package(spec)}.module")
+    cls = getattr(code, "Module", None)
+    if not isinstance(cls, type):
+        raise ModuleError(f"{where} に class Module がありません")
+    if spec.schedules and not callable(getattr(cls, "run_schedule", None)):
+        raise ModuleError(f"{where}: [schedules] があるので、class Module に run_schedule(name, day) を書いてください")
+    if spec.channels and not callable(getattr(cls, "on_message", None)):
+        raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req) を書いてください")
+    return cls

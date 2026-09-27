@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from kei_agent import themes
@@ -190,12 +192,18 @@ def test_course_channel_points_at_the_course_workspace(config):
     assert "授業と課題の資料は Box" in (ws.cwd / "CLAUDE.md").read_text()
 
 
-def test_knowledge_channel_is_its_own_kind_and_actor(config):
+def test_module_channel_belongs_to_its_module(config):
+    """モジュールのチャンネル（module.toml の [channels]）は、研究テーマではなく、そのモジュールのもの。"""
     ws = themes.resolve(config, "40_knowledge")
-    assert ws.kind is ChannelKind.KNOWLEDGE and ws.cwd is None
-    assert [themes.actor_of(kind) for kind in (ChannelKind.KNOWLEDGE, ChannelKind.COURSE, ChannelKind.WORK,
-                                               ChannelKind.IMPROVE, ChannelKind.THEME, ChannelKind.OVERVIEW)] == [
+    assert (ws.kind, ws.module, ws.cwd) == (ChannelKind.MODULE, "knowledge", None)
+    assert [themes.actor_of(themes.resolve(config, name)) for name in (
+        "40_knowledge", "20_course", "30_work", "00_kei-agent", "vlm", "01_overview")] == [
         "knowledge", "course", "work", "self_fix", "research", "research"]
     assert themes.agent_workspace(config, "knowledge").cwd == config.state_dir / "agents" / "knowledge"
+    # 設定の [channels] で名前を変えたら、その名前がモジュールのもの。モジュールを外せば、ただのテーマ
+    renamed = replace(config, module_channels={"knowledge": ("reading",)})
+    assert themes.resolve(renamed, "reading").module == "knowledge"
+    assert themes.resolve(renamed, "knowledge").kind is ChannelKind.THEME
+    assert themes.resolve(replace(config, modules=(), module_channels={}), "knowledge").kind is ChannelKind.THEME
     # 研究テーマのディレクトリには、もう papers/ を作らない（論文は研究ホームの先行研究 DB）
     assert "papers" not in themes.THEME_SUBDIRS

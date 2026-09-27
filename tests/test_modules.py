@@ -13,11 +13,21 @@ label = "天気"
 label = "天気と電車"
 default = "06:30"
 '''
+# 定期処理だけのモジュールの動き（module.py）
+SCHEDULE_ONLY = '''class Module:
+    def __init__(self, core):
+        self.core = core
+
+    async def run_schedule(self, name, day):
+        return {"status": "done"}
+'''
 
 
-def _module(root, name, text):
+def _module(root, name, text, code=None):
     (root / name).mkdir(parents=True)
     (root / name / "module.toml").write_text(text, encoding="utf-8")
+    if code is not None:
+        (root / name / "module.py").write_text(code, encoding="utf-8")
     return root / name
 
 
@@ -52,7 +62,7 @@ def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
 
 def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     home_dir = _config(tmp_path)
-    _module(home_dir / "modules", "weather", WEATHER)
+    _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
     assert config.modules == ("knowledge",)            # 知っていても、設定に書くまではオンにしない
@@ -64,14 +74,15 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
 
 def test_two_modules_cannot_share_a_schedule(tmp_path):
     home_dir = _config(tmp_path)
-    _module(home_dir / "modules", "news", 'api = 1\nname = "news"\n[schedules.reading]\ndefault = "07:00"\n')
+    _module(home_dir / "modules", "news", 'api = 1\nname = "news"\n[schedules.reading]\ndefault = "07:00"\n',
+            SCHEDULE_ONLY)
     with pytest.raises(ConfigError, match="定期処理「reading」がぶつかっています"):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
 def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_path):
     home_dir = _config(tmp_path, 'modules = ["knowledge", "weather"]\n')
-    _module(home_dir / "modules", "weather", WEATHER)
+    _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == ("knowledge", "weather")
     assert config.module_channels == {"knowledge": ("knowledge",)}
@@ -109,3 +120,49 @@ def test_a_module_can_only_pick_models_from_the_core_list(tmp_path):
 def _store(config):
     from kei_agent.store import Store
     return Store(config.db_path)
+
+
+# 動き（module.py）
+
+def test_a_module_without_code_cannot_have_channels_or_schedules(tmp_path):
+    with pytest.raises(modules.ModuleError, match="module.py"):
+        modules.load_spec(_module(tmp_path, "weather", WEATHER))
+    with pytest.raises(modules.ModuleError, match="module.py"):
+        modules.load_spec(_module(tmp_path, "memo", 'api = 1\nname = "memo"\n[channels]\nmemo = ["memo"]\n'))
+    # 実行役だけのモジュール（ほかのモジュールから使うもの）は、module.py が無くてよい
+    spec = modules.load_spec(_module(tmp_path, "helper", 'api = 1\nname = "helper"\n'))
+    assert modules.load_code(spec) is None
+
+
+@pytest.mark.parametrize(("text", "code", "message"), [
+    (WEATHER, "VALUE = 1\n", "class Module がありません"),
+    (WEATHER, "class Module:\n    pass\n", "run_schedule"),
+    ('api = 1\nname = "weather"\n[channels]\nweather = ["weather"]\n', "class Module:\n    pass\n", "on_message"),
+])
+def test_code_without_the_hooks_it_needs_is_refused_at_startup(tmp_path, text, code, message):
+    spec = modules.load_spec(_module(tmp_path, "weather", text, code))
+    with pytest.raises(modules.ModuleError, match=message):
+        modules.load_code(spec)
+
+
+def test_code_can_read_files_next_to_it_and_is_reloaded_from_a_new_place(tmp_path):
+    """module.py は同じフォルダのファイルを `from . import` で読める。同じ名前でも、場所が変われば読み直す。"""
+    first = _module(tmp_path / "a", "weather", WEATHER, "from . import texts\n\n" + SCHEDULE_ONLY
+                    + "    label = texts.LABEL\n")
+    (first / "texts.py").write_text('LABEL = "晴れ"\n', encoding="utf-8")
+    assert modules.load_code(modules.load_spec(first)).label == "晴れ"
+
+    second = _module(tmp_path / "b", "weather", WEATHER, SCHEDULE_ONLY + '    label = "雨"\n')
+    assert modules.load_code(modules.load_spec(second)).label == "雨"
+
+
+def test_builtin_module_code_only_imports_the_api():
+    """組み込みのモジュールも、利用者のモジュールと同じく、窓口（kei_agent.api）だけでコアに触れる。"""
+    import ast
+
+    for path in modules.BUILTIN_DIR.glob(f"*/{modules.CODE_FILE}"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
+        imported += [node.module for node in ast.walk(tree)
+                     if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module]
+        assert [name for name in imported if name.startswith("kei_agent") and name != "kei_agent.api"] == [], path

@@ -185,17 +185,16 @@ CREATE TABLE IF NOT EXISTS active_timers (
     entry_id TEXT NOT NULL UNIQUE,
     FOREIGN KEY(entry_id) REFERENCES time_entries(id)
 );
--- 朝の読みもの（1記事 = 1投稿）。👍 で共通ホームの「読みもの」に入れ、次からの選び方の参考にする
-CREATE TABLE IF NOT EXISTS reading_posts (
-    channel TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    day TEXT NOT NULL,
-    -- 記事（JSON: title, url, source, interests, summary, why）
-    item TEXT NOT NULL,
-    posted_at REAL NOT NULL,
-    liked_at REAL,
-    notion_page_id TEXT,
-    PRIMARY KEY (channel, ts)
+-- モジュールの記録（kei_agent.api.Records）。モジュール・種類・鍵で1件、中身は JSON。
+-- expires_at を過ぎたものは毎晩の保守で消す（NULL なら、モジュールが消すまで残す）
+CREATE TABLE IF NOT EXISTS module_records (
+    module TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    expires_at REAL,
+    PRIMARY KEY (module, kind, key)
 );
 """
 
@@ -297,6 +296,24 @@ class Store:
                 for name, kind in columns.items():
                     if name not in have:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+            self._move_reading_posts()
+
+    def _move_reading_posts(self) -> None:
+        """朝の読みものの控え（2026-09 の reading_posts）を、知識のモジュールの記録に写して、表を消す。"""
+        try:
+            rows = self.conn.execute("SELECT * FROM reading_posts").fetchall()
+        except sqlite3.OperationalError:
+            return      # もう無い（ほかのプロセスが先に移した）
+        for row in rows:
+            value = {"channel": row["channel"], "ts": row["ts"], "day": row["day"], "item": json.loads(row["item"]),
+                     "liked_at": row["liked_at"], "page": row["notion_page_id"]}
+            # 👍 していないものは30日で消す（modules/knowledge/module.py の POST_KEEP_DAYS）
+            expires = None if row["liked_at"] is not None else row["posted_at"] + 30 * 86400
+            self.conn.execute(
+                "INSERT OR IGNORE INTO module_records (module, kind, key, value, updated_at, expires_at) "
+                "VALUES ('knowledge', 'post', ?, ?, ?, ?)",
+                (f"{row['channel']}:{row['ts']}", json.dumps(value, ensure_ascii=False), row["posted_at"], expires))
+        self.conn.execute("DROP TABLE IF EXISTS reading_posts")
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。
@@ -715,28 +732,33 @@ class Store:
         with self.conn:
             self.conn.execute("INSERT OR REPLACE INTO notices (key, at) VALUES (?, ?)", (key, time.time()))
 
-    # 朝の読みもの
+    # モジュールの記録（kei_agent.api.Records）
 
-    def add_reading_post(self, channel: str, ts: str, day: str, item: dict) -> None:
+    def put_module_record(self, module: str, kind: str, key: str, value: str, expires_at: float | None) -> None:
         with self.conn:
             self.conn.execute(
-                "INSERT OR REPLACE INTO reading_posts (channel, ts, day, item, posted_at) VALUES (?, ?, ?, ?, ?)",
-                (channel, ts, day, json.dumps(item, ensure_ascii=False), time.time()))
+                """INSERT INTO module_records (module, kind, key, value, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (module, kind, key) DO UPDATE SET value = excluded.value,
+                     updated_at = excluded.updated_at, expires_at = excluded.expires_at""",
+                (module, kind, key, value, time.time(), expires_at))
 
-    def reading_post(self, channel: str, ts: str) -> sqlite3.Row | None:
-        return self.conn.execute("SELECT * FROM reading_posts WHERE channel = ? AND ts = ?", (channel, ts)).fetchone()
+    def module_record(self, module: str, kind: str, key: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM module_records WHERE module = ? AND kind = ? AND key = ?",
+                                 (module, kind, key)).fetchone()
 
-    def set_reading_like(self, channel: str, ts: str, liked_at: float | None, notion_page_id: str | None) -> None:
-        """👍 を付けた（liked_at）か外した（None）。Notion の行も一緒に覚える（外すときに消すため）。"""
+    def module_records(self, module: str, kind: str) -> list[sqlite3.Row]:
+        """その種類の記録（新しく書いた順）。"""
+        return self.conn.execute("SELECT * FROM module_records WHERE module = ? AND kind = ? ORDER BY updated_at DESC",
+                                 (module, kind)).fetchall()
+
+    def delete_module_record(self, module: str, kind: str, key: str) -> None:
         with self.conn:
-            self.conn.execute("UPDATE reading_posts SET liked_at = ?, notion_page_id = ? WHERE channel = ? AND ts = ?",
-                              (liked_at, notion_page_id, channel, ts))
+            self.conn.execute("DELETE FROM module_records WHERE module = ? AND kind = ? AND key = ?", (module, kind, key))
 
-    def liked_readings(self, since: float, limit: int) -> list[dict]:
-        """since より後に 👍 した記事を、新しい順に（次の読みものを選ぶときの参考）。"""
-        rows = self.conn.execute(
-            "SELECT item FROM reading_posts WHERE liked_at >= ? ORDER BY liked_at DESC LIMIT ?", (since, limit))
-        return [json.loads(row["item"]) for row in rows]
+    def drop_expired_module_records(self, now: float) -> int:
+        """残す日数を過ぎたモジュールの記録を消す（毎晩の保守から呼ぶ）。消した行数を返す。"""
+        with self.conn:
+            return self.conn.execute("DELETE FROM module_records WHERE expires_at < ?", (now,)).rowcount
 
     def drop_old_agent_sessions(self, before: float) -> int:
         """古いスレッドのエージェントの会話と、済んだ記録を忘れる（毎晩の保守から呼ぶ）。消した行数を返す。
@@ -749,8 +771,6 @@ class Store:
             removed = 0
             for sql, args in (
                 ("DELETE FROM agent_sessions WHERE updated_at < ?", (before,)),
-                # 👍 した記事は、次からの選び方の参考と、外したときに Notion から消すために残す
-                ("DELETE FROM reading_posts WHERE posted_at < ? AND liked_at IS NULL", (before,)),
                 ("DELETE FROM provider_sessions WHERE updated_at < ?", (before,)),
                 ("DELETE FROM provider_thread_state WHERE updated_at < ?", (before,)),
                 ("DELETE FROM deferred_runs WHERE done = 1 AND created_at < ?", (before,)),

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from kei_agent import modules
 from kei_agent.config import Config
 
 THEME_SUBDIRS = ("inputs", "outputs", "logs")
@@ -65,8 +66,8 @@ class ChannelKind(Enum):
     COURSE = "course"
     # 仕事（会社の予定など）。同じく、仕事エージェントに取り次ぐ
     WORK = "work"
-    # 知識（読みもの・論文の新着・その質問）。知識エージェントに取り次ぐだけで、ファイルは持たない
-    KNOWLEDGE = "knowledge"
+    # モジュールのチャンネル（module.toml の [channels]）。そのモジュールの module.py に取り次ぐだけで、ファイルは持たない
+    MODULE = "module"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
     SELF_FIX = "self_fix"
 
@@ -84,6 +85,8 @@ class Workspace:
     system_prompt: Path | None = None
     # claude 1回の上限時間（分）。既定は config.run_timeout_minutes
     timeout_minutes: int | None = None
+    # MODULE のときの、モジュールの名前
+    module: str = ""
 
 
 # Slack のチャンネル名は日本語も使えるので、パスとして危ない形だけを弾く
@@ -102,7 +105,7 @@ def theme_name(channel_name: str) -> str:
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・改善・大学・仕事以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・改善・大学・仕事・モジュール以外は、すべて研究テーマとして扱う。"""
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
@@ -111,8 +114,9 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     if channel_name in config.course_channels:
         # 作業場は大学エージェントの claude が使う（本体はここで claude を動かさない）
         return Workspace(channel_name, ChannelKind.COURSE, config.course_root)
-    if channel_name in config.module_channels.get("knowledge", ()):
-        return Workspace(channel_name, ChannelKind.KNOWLEDGE, None)
+    module = module_of_channel(config, channel_name)
+    if module:
+        return Workspace(channel_name, ChannelKind.MODULE, None, module=module)
     if channel_name in config.overview_channels:
         return Workspace(channel_name, ChannelKind.OVERVIEW, config.overview_dir)
     if not _SAFE_NAME.match(channel_name) or ".." in channel_name:
@@ -120,27 +124,35 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     return Workspace(channel_name, ChannelKind.THEME, config.research_root / channel_name)
 
 
-# チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は研究の担当）
-_ACTORS = {ChannelKind.COURSE: "course", ChannelKind.WORK: "work", ChannelKind.IMPROVE: "self_fix",
-           ChannelKind.KNOWLEDGE: "knowledge"}
+def module_of_channel(config: Config, channel_name: str) -> str:
+    """そのチャンネルを持つ、オンのモジュールの名前（設定の [channels] で変えた名前も見る）。無ければ空文字。"""
+    for spec in modules.enabled(config.modules):
+        if any(channel_name in config.module_channels.get(kind, ()) for kind in spec.channels):
+            return spec.name
+    return ""
 
 
-def actor_of(kind: ChannelKind) -> str:
-    return _ACTORS.get(kind, "research")
+# チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は研究の担当、モジュールはそのモジュール）
+_ACTORS = {ChannelKind.COURSE: "course", ChannelKind.WORK: "work", ChannelKind.IMPROVE: "self_fix"}
+
+
+def actor_of(ws: Workspace) -> str:
+    return ws.module if ws.kind is ChannelKind.MODULE else _ACTORS.get(ws.kind, "research")
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:
-    """大学・仕事のエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
+    """大学・仕事・モジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
 
-    大学は `course_root`（前提のメモの CLAUDE.md を置く）、仕事は状態の置き場の下。どちらも手元のファイルは
-    作業場を読むだけ（制限の表）。
+    大学は `course_root`（前提のメモの CLAUDE.md を置く）、仕事とモジュールは状態の置き場の下。どれも手元の
+    ファイルは作業場を読むだけ（制限の表）。
     """
+    spec = modules.known().get(agent)
     if agent == "course":
         ws = Workspace(agent, ChannelKind.COURSE, config.course_root)
     elif agent == "work":
         ws = Workspace(agent, ChannelKind.WORK, config.state_dir / "agents" / agent)
-    elif agent == "knowledge":
-        ws = Workspace(agent, ChannelKind.KNOWLEDGE, config.state_dir / "agents" / agent)
+    elif spec is not None and spec.actor is not None:
+        ws = Workspace(agent, ChannelKind.MODULE, config.state_dir / "agents" / agent, module=agent)
     else:
         raise ValueError(f"作業場を持たないエージェントです: {agent}")
     ensure_workspace(ws)
@@ -165,6 +177,18 @@ def theme_dirs(config: Config) -> list[Path]:
         except ValueError:
             continue
     return dirs
+
+
+def search_keywords(claude_md: Path) -> list[str]:
+    """テーマの CLAUDE.md の「## 検索キーワード」の箇条書きを読む。"""
+    if not claude_md.exists():
+        return []
+    text = re.sub(r"<!--.*?-->", "", claude_md.read_text(encoding="utf-8"), flags=re.DOTALL)
+    m = re.search(r"^## 検索キーワード\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    if not m:
+        return []
+    return [line.strip()[2:].strip() for line in m.group(1).splitlines()
+            if line.strip().startswith("- ") and line.strip()[2:].strip()]
 
 
 def ensure_workspace(ws: Workspace) -> bool:

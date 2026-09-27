@@ -23,11 +23,12 @@ from pathlib import Path
 from kei_agent import (
     a2a,
     agents,
+    api,
     ask,
     course,
     guard,
     improve,
-    knowledge,
+    modules,
     research,
     router,
     runner,
@@ -49,7 +50,6 @@ from kei_agent.course import CourseChannel
 from kei_agent.execution_contract import prompt_version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.jobs import JobManager, missing_outputs
-from kei_agent.knowledge import KnowledgeChannel
 from kei_agent.model_policy import PROVIDERS, ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.notion import NotionError
 from kei_agent.notion_hub import HubStore
@@ -154,9 +154,8 @@ class ThemeRuns:
 
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
-# 大学・仕事で、メンションだけで本文が無いときの質問
-AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて", "work": "今日の予定は？",
-                           "knowledge": "今日の読みものについて教えて"}
+# 大学・仕事で、メンションだけで本文が無いときの質問（モジュールは class Module の default_question）
+AGENT_DEFAULT_QUESTIONS = {"course": "授業について教えて", "work": "今日の予定は？"}
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える）
 VOICE_USE_CASES = {"research": UseCase.RESEARCH_EXTRACT, "course": UseCase.COURSE_EXPLAIN,
                    "work": UseCase.WORK_SINGLE_SOURCE}
@@ -171,8 +170,7 @@ def time_label(entry: TimeEntry) -> str:
     return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
 
 
-class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, KnowledgeChannel,
-                voice.VoiceNotices):
+class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, voice.VoiceNotices):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -219,6 +217,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         self.agent_skills: dict[str, list[dict]] = {}
         self.agent_skills_read_at: dict[str, float] = {}
         self.time_tracker = TimeTracker(store)
+        # モジュールの動き（modules/<名前>/module.py の class Module）。コアとは窓口（kei_agent.api.Core）でだけやり取りする
+        self.modules: dict[str, object] = {
+            spec.name: cls(api.Core(self, spec))
+            for spec in modules.enabled(config.modules) if (cls := modules.load_code(spec)) is not None}
 
     async def on_time_action(self, body: dict) -> None:
         if not self.is_allowed(body.get("user", {}).get("id")):
@@ -632,8 +634,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
             text = "Kei Agent です。このチャンネルの用事は大学エージェントに取り次ぎます。\n" + course.CAN_DO
         elif ws.kind is ChannelKind.WORK:
             text = "Kei Agent です。このチャンネルの用事は仕事エージェントに取り次ぎます。\n" + work.CAN_DO
-        elif ws.kind is ChannelKind.KNOWLEDGE:
-            text = "Kei Agent です。このチャンネルの用事は知識エージェントに取り次ぎます。\n" + knowledge.CAN_DO
+        elif ws.kind is ChannelKind.MODULE:
+            text = f"Kei Agent です。このチャンネルの用事は{modules.known()[ws.module].label}エージェントに取り次ぎます。"
+            welcome = getattr(self.modules.get(ws.module), "welcome", None)
+            if welcome is not None:
+                text += "\n" + welcome()
         else:
             state = "作りました" if created else "使います"
             text = (
@@ -764,9 +769,24 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         return (event.get("reaction") == NIGHT_REACTION and item.get("type") == "message"
                 and self.is_allowed(event.get("user")) and event.get("item_user") == event.get("user"))
 
+    async def module_reaction(self, event: dict, added: bool) -> bool:
+        """モジュールの投稿へのリアクション（朝の読みものへの 👍 など）。どれかのモジュールが扱ったら True。"""
+        for name, module in self.modules.items():
+            on_reaction = getattr(module, "on_reaction", None)
+            if on_reaction is None:
+                continue
+            try:
+                if await on_reaction(event, added):
+                    return True
+            except Exception:
+                # 1つのモジュールが落ちても、ほかのモジュールと 🌙 は止めない
+                log.exception("モジュール「%s」がリアクションを扱えませんでした", name)
+                await self.notify_trouble(f"モジュール「{name}」がリアクションを扱えませんでした")
+        return False
+
     async def on_reaction_added(self, event: dict) -> None:
-        """自分のメッセージに 🌙 をつけると、夜間の Task になる。朝の読みものへの 👍 は knowledge.py で扱う。"""
-        if await self.reading_reaction(event, added=True) or not self._own_night_reaction(event):
+        """自分のメッセージに 🌙 をつけると、夜間の Task になる。モジュールの投稿へのリアクションは、そのモジュールが扱う。"""
+        if await self.module_reaction(event, added=True) or not self._own_night_reaction(event):
             return
         channel, ts = event["item"]["channel"], event["item"]["ts"]
         name = await self.channel_name(channel)
@@ -795,7 +815,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         await self.post(req, f"🌙 今夜の Task にしたよ: <{task.url}|{task.title}>")
 
     async def on_reaction_removed(self, event: dict) -> None:
-        if (await self.reading_reaction(event, added=False) or not self._own_night_reaction(event)
+        if (await self.module_reaction(event, added=False) or not self._own_night_reaction(event)
                 or self.notion is None):
             return
         link = await self.permalink(event["item"]["channel"], event["item"]["ts"])
@@ -993,11 +1013,11 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
             return await self.improve(req, ws)
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
-        if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK, ChannelKind.KNOWLEDGE):
-            await self._dispatch(req, themes.actor_of(ws.kind), "")
+        if ws.kind in (ChannelKind.COURSE, ChannelKind.WORK, ChannelKind.MODULE):
+            await self._dispatch(req, themes.actor_of(ws), "")
             return None
-        if (ws.kind is ChannelKind.THEME and self.actor_for(req, ws.kind) == knowledge.AGENT
-                and await self._dispatch(req, knowledge.AGENT, "")):
+        if (ws.kind is ChannelKind.THEME and (owner := self.actor_for(req, ws)) in self.modules
+                and await self._dispatch(req, owner, "")):
             return None
         themes.ensure_workspace(ws)
         if ws.kind is ChannelKind.THEME:
@@ -1030,7 +1050,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         if req.trigger not in ("message", "voice") or not self.agents:
             return False
         answered = self.store.thread_agent(req.channel, req.thread_ts)
-        if answered in self.agents and await self._dispatch(req, answered, ""):
+        if (answered in self.agents or answered in self.modules) and await self._dispatch(req, answered, ""):
             return True
         row = self.store.get_thread(req.channel, req.thread_ts)
         if row is not None and row["session_id"]:
@@ -1042,16 +1062,23 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         choice = await router.pick_across(self.config, catalog, req.text, store=self.store)
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
-    def actor_for(self, req: Request, kind: ChannelKind) -> str:
-        """その依頼に答える担当。テーマのチャンネルでも、朝の論文の新着のスレッドは知識の担当が答える。"""
-        if kind is ChannelKind.THEME and self.store.thread_agent(req.channel, req.thread_ts) == knowledge.AGENT:
-            return knowledge.AGENT
-        return themes.actor_of(kind)
+    def actor_for(self, req: Request, ws: Workspace) -> str:
+        """その依頼に答える担当。テーマのチャンネルでも、モジュールが引き取ったスレッド（朝の論文の新着など）は、
+        そのモジュールが答える（api.Core.claim_thread）。"""
+        if ws.kind is ChannelKind.THEME:
+            owner = self.store.thread_agent(req.channel, req.thread_ts)
+            if owner in self.modules:
+                return owner
+        return themes.actor_of(ws)
 
     async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
-        """エージェントに渡す。同じスレッドで2つ同時に動かさず、全体の同時実行の上限も守る。"""
-        handler = {course.AGENT: self.course, work.AGENT: self.work, knowledge.AGENT: self.knowledge}.get(agent)
-        if handler is None:
+        """エージェントかモジュールに渡す。同じスレッドで2つ同時に動かさず、全体の同時実行の上限も守る。
+
+        モジュールには class Module の on_message(req) で渡す（skill と params は大学・仕事のためのもの）。
+        """
+        handler = {course.AGENT: self.course, work.AGENT: self.work}.get(agent)
+        on_message = None if handler else getattr(self.modules.get(agent), "on_message", None)
+        if handler is None and on_message is None:
             return False
         # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
         # 研究全体から回した続きも、毎回どこに聞くかを選び直してしまう
@@ -1059,7 +1086,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         self.store.set_agent_session(req.channel, req.thread_ts, agent,
                                      self.store.agent_session(req.channel, req.thread_ts, agent) or "")
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
-            await handler(req, skill, params)
+            if handler is not None:
+                await handler(req, skill, params)
+            else:
+                await on_message(req)
         return True
 
     async def drop_deferred_for(self, req: Request) -> None:
@@ -1186,14 +1216,14 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
                         actor: str | None = None) -> runner.RunResult:
         """このスレッドの会話の続きとして担当の AI を動かす。会話が失われていたら、Slack の履歴から戻す。
 
-        研究・自己改善は run_agent、大学・仕事はそのエージェントの `ask` に頼む。会話の続け方
+        研究・自己改善は run_agent、大学・仕事・モジュールはそのエージェントの `ask` に頼む。会話の続け方
         （session の版、履歴からの戻し、session が消えていたときのやり直し）はどの担当も同じ。
         ui がなければ、経過を Slack に見せずに動かす（引き継ぎメモを書かせるときなど）。
         """
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        actor = actor or (themes.actor_of(ws.kind) if ws is not None else research.AGENT)
+        actor = actor or (themes.actor_of(ws) if ws is not None else research.AGENT)
         provider = settings.selected_provider(self.config, self.store, actor)
         version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
@@ -1229,10 +1259,10 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
             # 今日の日付と曜日は、どの担当にも同じ形で先頭に付ける（「今日の授業は？」に答えられるように）
             prompt = today_line() + prompt
-            if actor in (course.AGENT, work.AGENT, knowledge.AGENT):
+            if ws is None:
+                # 作業場を本体に持たない担当（大学・仕事・モジュール）
                 return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
                                             on_activity, provider=provider)
-            assert ws is not None
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
                                         on_activity, provider=provider,
                                         use_case=use_case, request_text=request_text)
@@ -1281,8 +1311,13 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         answer, _ = self.render_reply(result)
         return answer
 
+    def default_question(self, actor: str) -> str:
+        """メンションだけで本文が無いときに、担当に聞くこと。"""
+        return (AGENT_DEFAULT_QUESTIONS.get(actor) or getattr(self.modules.get(actor), "default_question", "")
+                or "何ができるか教えて")
+
     async def converse_with_agent(self, req: Request, actor: str) -> runner.RunResult:
-        """大学・仕事の自由な質問。研究と同じ流れ（会話の続き・経過・上限・出力の確認・再起動からのやり直し）。
+        """大学・仕事・モジュールの自由な質問。研究と同じ流れ（会話の続き・経過・上限・出力の確認・再起動からのやり直し）。
 
         研究と違って本体に作業場を持たないので、添付の保存・スレッドのログ・出力の添付はない。
         スレッドのロックと同時実行の上限は、呼び出し側（_dispatch）が持つ。
@@ -1293,7 +1328,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
         # 途中で終了させられても、次の起動で拾ってやり直せるように控えておく
         in_flight = self.store.start_in_flight(req.to_payload())
         try:
-            result = await self._converse(req, None, req.text or AGENT_DEFAULT_QUESTIONS[actor], ui, actor=actor)
+            result = await self._converse(req, None, req.text or self.default_question(actor), ui, actor=actor)
         except asyncio.CancelledError:
             self.store.end_run(run_id, is_error=True, cost_usd=None)
             raise
@@ -1520,7 +1555,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, K
             req = Request.from_payload(payload)
             original_provider = payload.get("provider")
             if original_provider:
-                actor = self.actor_for(req, themes.resolve(self.config, req.channel_name).kind)
+                actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
                 if settings.selected_provider(self.config, self.store, actor) != original_provider:
                     await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
                     continue
