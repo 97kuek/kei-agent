@@ -189,6 +189,7 @@ class Module:
 - 出来事と App Home: `emit(種類, 中身...)`（出来事を配る）、`home_action_id(名前)`・`home_checkboxes(名前, 値→表示名, 付いている値)`（App Home の項目）、`selected_values(action)`（押された項目の、選ばれた値）
 - ほかのモジュール: `ask_module(名前, skill, 材料)`（`[depends]` に書いたモジュールの担当に頼む）
 - Toggl: `load_toggl` / `Toggl` / `TogglError` / `TogglAmbiguousWrite`（窓口の kei_agent.api から）
+- 実行役: `provider`（App Home で選んだ AI。選ばれていなければ空文字）
 - 自分のフォルダと Kei Agent 自身: `state_dir`（状態の置き場の `modules/<名前>`。AI に書かせてよいのはこの中だけ）、`repo_root`（Kei Agent のコード）、`check_change(フォルダ, base)`（直した差分を本体の柵で確かめる）、`restart_for_update(前のコミット, 1行)`（作業が終わってから新しい版で起動し直す。起動できなければ本体が前の版に戻す）、`last_update()`（入れ替えたあとの起動なら、その結果 `Update`。`on_start` で読む）、`busy()`（その間は入れ替えを待たせる）、`contains_secret(文)`（公開の場所に書く前に、秘密情報らしいものを見る）
 - そのほか: `spawn`（裏で動かす）、`notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
 
@@ -292,6 +293,10 @@ class Executor(SkillExecutor):               # self.config と self.store は土
   - 設定は `config.toml` の `[time]`: `prefixes`（時間を測るチャンネルの名前の頭 → 領域。既定は `10_` 研究・`20_` 大学・`30_` 仕事）、`pick_course`（始めるときに今学期の科目を選ぶチャンネル。大学のモジュールに聞く）
   - 計測の記録はモジュールの記録に置く。本体が持っていたころの表（`time_entries` など）からは一度だけ写し、表は念のため残してある。前のボタンの名前のままのカードは、起動して最初の見回りで描き直す（消されていたカードは置き直さずに忘れる）
   - カードを置くのは `kei-agent-module time cards`（カードのあるチャンネルには置かない）
+- **自己改善**: 自己改善はモジュール（`modules/improve/`）。Kei Agent のチャンネル（`[channels] improve`）の会話を受け持ち（`core_channels`）、要望を公開の issue にして、直し方を相談し、worktree で直して取り込む。AI・テスト・取り込みは本体のプロセスの中で動かす（担当のプロセスは持たない）
+  - 柵（`guard.py`）・新しい版での起動し直し（`updates.py`、`deploy/run.sh`）・困りごとの知らせは本体に残す。モジュールは `core.check_change`・`core.restart_for_update`・`on_start` と `core.last_update()` で使う
+  - オフにすると、Kei Agent のチャンネルは困りごとを知らせるだけの場所になる
+  - 記録は本体の表（`improvements`）から一度だけモジュールの記録に写した（表は念のため残してある）。App Home で選んだ AI（前の名前 `self_fix`）も `improve` に写し、`config.toml` の `[agents.self_fix]` もそのまま読める
 - **Notion**: 今の DB の形（名前・列）を「標準の形」として固定し、setup が作る。使うかどうかは任意
   - ホームのページ ID は `config.toml` の `[notion]` にまとめる（研究は `research_home`、大学は `course_home`、ほかのモジュールは `[notion.homes]` に「名前 = ページ ID」）。ホームを書いたモジュールは、自分の名前の合言葉で、そのホームの下だけに届く（AI の道具も、Python の `gateway_notion(名前)` も）
   - ホームの無い担当には Notion の道具を渡さない。シェルを使える AI の実行役がいるモジュールは、Python からの `/notion/v1`（何でも送れる口）を使えず、MCP の道具だけ
@@ -317,7 +322,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①②は済み（2026-09-27）。自己改善は ① 枠を広げる（本体のチャンネルの会話を受け持つ `core_channels`、自分のフォルダで AI を動かす `work(folder=)`・`run_ai`、柵の確認、新しい版での起動し直しと `on_start`・`last_update`）② 自己改善を `modules/improve/` へ（柵・起動し直し・困りごとの知らせは本体に残す。AI は本体の中で動かし、プロセスは増やさない）。①は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①②は済み（2026-09-27）。自己改善は ① 枠を広げる（本体のチャンネルの会話を受け持つ `core_channels`、自分のフォルダで AI を動かす `work(folder=)`・`run_ai`、柵の確認、新しい版での起動し直しと `on_start`・`last_update`）② 自己改善を `modules/improve/` へ（柵・起動し直し・困りごとの知らせは本体に残す。AI は本体の中で動かし、プロセスは増やさない）。①は済み（2026-09-27）、②は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 

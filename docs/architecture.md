@@ -8,7 +8,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 | プロセス | コマンド | ポート | パッケージ | 役目 |
 |---|---|---|---|---|
-| 本体（オーケストレーター） | `kei-agent` | 8786 | `src/kei_agent/` | Slack の受け口、振り分け、柵、Notion、定期実行、自己改善。8786 は声からの問い合わせ口（12章） |
+| 本体（オーケストレーター） | `kei-agent` | 8786 | `src/kei_agent/` | Slack の受け口、振り分け、柵、Notion、定期実行。自己改善（`modules/improve/`）もこのプロセスの中で動く。8786 は声からの問い合わせ口（12章） |
 | 大学エージェント | `kei-agent-module course` | 8787 | `modules/course/` | Moodle・Box・授業ホーム・Toggl。モジュールの担当プロセス（`agent.py`） |
 | 研究エージェント | `kei-agent-module research` | 8788 | `modules/research/` | 作業場での CLI 実行と pueue ジョブ。研究のモジュールの担当プロセス（`agent.py`）で、研究テーマ（ほかのどれにも当たらないチャンネル）を受け持つ |
 | 仕事エージェント | `kei-agent-module work` | 8789 | `modules/work/` | Microsoft 365 を読む。モジュールの担当プロセス（`agent.py`） |
@@ -34,7 +34,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 ~/kei-agent/              Kei Agent 自身のもの（agent_root）
 ├── overview/             #01_overview などの作業場。Daily・レトプラ・時間はここに置かず、Notion の共通ホームに残す
 └── state/                毎晩の保守が書き出す SQLite の中身と Notion の ID
-~/.local/state/kei-agent/ 状態（kei-agent.db、notion.json、asks/、worktrees/ など）
+~/.local/state/kei-agent/ 状態（kei-agent.db、notion.json、asks/、モジュールのフォルダ modules/<名前>/ など）
 ~/.config/kei-agent/      利用者のもの（KEI_AGENT_HOME で変えられる。docs/extensibility.md）
 ├── config.toml           設定の本体（リポジトリには config.example.toml だけ）
 ├── profile.md            話し方・所属・興味。会話する担当の指示書の最後に差し込む（例は profile.example.md）
@@ -66,7 +66,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 仕事 | 仕事エージェント。同上 |
 | モジュールのチャンネル（知識は `#40_knowledge`） | そのモジュールの `module.py` の `on_message`（知識は知識エージェントの `ask`）。研究テーマのチャンネルでも、モジュールが引き取ったスレッド（朝の論文の新着）はそのモジュール |
 | overview | 軽いモデル（routing recipe）が名刺のスキル一覧から相手と仕事を選ぶ。選べなければそのドメインの `ask` |
-| improve | 本体の自己改善（9章） |
+| improve（Kei Agent のチャンネル） | 自己改善のモジュール（`modules/improve/`。9章）。オフなら、困りごとを知らせるだけの場所 |
 
 - A2A v1.0。名刺は `/.well-known/agent-card.json`、JSON-RPC の `SendMessage` / `GetTask`、長い仕事は `SendStreamingMessage`（SSE）
 - 仕事を頼むには共有の Bearer トークン `KEI_AGENT_A2A_TOKEN` が要る
@@ -107,7 +107,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 
 ## 5. provider とモデル
 
-- 各 actor（`research` / `course` / `work` / `knowledge` / `router` / `self_fix`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
+- 各 actor（`research` / `course` / `work` / `knowledge` / `router` / `improve`）ごとに、App Home で Claude か Codex を選ぶ。既定はなく、選ぶまで動かない（`config.toml` の `[agents.<actor>]` は `provider` だけ）
 - model と effort は actor・用途（use case）・provider から決める。本体の用途は `src/kei_agent/model_policy.py`、モジュールの用途は `module.toml` の `[use_cases]`（知識は `modules/knowledge/module.toml`）。使ってよいモデルの一覧は `model_policy.py` にだけ置き、モジュールはその中からしか選べない
 - 許可する model は Codex が `gpt-6-luna` / `gpt-6-sol` / `gpt-6-astra`、Claude が `claude-haiku-4-5` / `claude-sonnet-5` / `claude-opus-5` / `claude-fable-5` だけ
 - 別 provider や上位 model への自動の切り替えはしない。provider 未選択、連携が使えない、上限到達のときは理由を出して止まる
@@ -123,7 +123,7 @@ Kei Agent のいまの作り。使い方は [`using.md`](using.md)、入れ方�
 | 仕事: 1つの出典 / 横断 / 判断 | luna medium / sol medium / sol high | sonnet-5 medium / high / opus-5 high |
 | 知識: 選ぶ / 要約 / 質問 | luna low / luna medium / luna medium | haiku-4-5 / sonnet-5 medium / sonnet-5 medium |
 | Daily / Retro & Planning | luna medium / sol high | sonnet-5 medium / opus-5 high |
-| 自己改善: 案 / 実装 / 確認 | sol xhigh / high / medium | opus-5 high / sonnet-5 high / high |
+| 自己改善: 案 / 実装 / issue の要約 | sol xhigh / sol high / luna low | opus-5 high / sonnet-5 high / haiku-4-5 |
 | 明示指定だけ | `[[manual-astra]]` → astra / xhigh | `[[manual-fable]]` → fable-5 / high |
 
 - 自由文の用途は選択中 provider の軽量分類器が決める。JSON が壊れている、自信が低い、失敗したときはその actor の通常の用途に落とす
@@ -154,7 +154,7 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 6. Slack に出す文（出力契約）
 
-モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`modules/research/research.md`、`prompts/system.md`（自己改善）、`modules/course/course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
+モデルの自由回答は、最終回答を `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間にだけ書く（`modules/research/research.md`、`modules/improve/improve.md`（自己改善）、`modules/course/course.md`、`modules/work/work.md`）。本体が `src/kei_agent/response_output.py` で次のように扱う。
 
 | 種類 | 扱い |
 |---|---|
@@ -229,11 +229,12 @@ AI を起動するのは `src/kei_agent/runner.py` の `run_model` だけ（研�
 
 ## 9. 自己改善（`#00_kei-agent`）
 
-- 新しい要望は、`self_fix` で選んだ provider の routing recipe（read-only の一時ディレクトリ）が題（60字以内）と1〜4行の本文に要約し、`gh` で `origin` の公開 issue（ラベル `kei-agent-request`）にする。番号は SQLite の `improvements` に置く（`issues.py`）
+- 自己改善はモジュール（`modules/improve/`）。Kei Agent のチャンネルの会話を受け持ち（`core_channels = ["improve"]`）、AI・テスト・取り込みは本体のプロセスの中で動かす。柵（`guard.py`）・新しい版での起動し直し（`updates.py`）・困りごとの知らせは本体が持ち、モジュールは窓口（`core.check_change`・`core.restart_for_update`・`on_start`）で使う
+- 新しい要望は、自己改善（`improve`）で選んだ provider の軽い用途（`improve_issue`。read-only で動かす）が題（60字以内）と1〜4行の本文に要約し、`gh` で `origin` の公開 issue（ラベル `kei-agent-request`）にする。番号はモジュールの記録（`fix`）に置く（`modules/improve/issues.py`）
 - URL・`/Users/`・`~/`・メンション・`#チャンネル`・秘密情報・原文と20字以上同じところを含む要約は捨てる。issue にできなければ、provider 未選択はスレッドに、それ以外は改善チャンネルに知らせる。ファイルには逃がさない
 - 取り込んだ版で起動できたら、そのコミットの短い sha を添えて issue を閉じる
-- 案を考える回は、リポジトリを読むだけ（書けるのは一時ディレクトリ）
-- `🛠 着手` で `<state_dir>/worktrees/` の git worktree を作って直す。書けるのは worktree の中だけ
+- 案を考える回は、リポジトリを読むだけ（書けるのは相談の作業用のフォルダ `<state_dir>/modules/improve/talk/<スレッド>`）
+- `🛠 着手` で `<state_dir>/modules/improve/worktrees/` の git worktree を作って直す。書けるのは worktree の中だけ。使い終わった worktree と作業用のフォルダは、モジュールが1日に1回片づける
 - `🛠 着手` / `📦 取り込み` は、その回が依頼者の投稿で始まったときだけ効く
 - 取り込む前に、変えたファイル、差分（添付）、テストの結果を出す。依存の追加は先頭に出す
 - 取り込み: 柵のファイルに触れた差分は捨てる。手元に未コミットの変更があれば止める。main が進んでいれば合わせ直し、テスト・`ruff`・鍵・大きなファイルを確かめてから早送りで取り込んで push する
@@ -335,6 +336,5 @@ Notion への道は、ゲートウェイの1つだけ。鍵は `NOTION_TOKEN`（
 | `version.py` | 動いている版（担当の版ずれを見つける） |
 | `notion.py` / `notion_store.py` / `notion_hub.py` | 研究ホームと共通ホーム |
 | `home.py` / `settings.py` / `settings_actions.py` | App Home と設定 |
-| `improve.py` / `self_fix.py` / `issues.py` | 自己改善、要望の GitHub issue |
 | `updates.py` | 新しい版での起動し直し（入れ替え）と、その結果（`update-pending`、`deploy/run.sh` が戻したか） |
 | `timelog.py` | Toggl の API（時間記録と大学のモジュールが窓口から使う）と、Kei Agent の稼働時間の数え方 |
