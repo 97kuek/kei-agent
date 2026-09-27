@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fakes import FakeGitHub
 
+from kei_agent import config as config_module
 from kei_agent import improve, issues, model_classifier, modules, research
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, model_actors
 from kei_agent.store import Store
@@ -38,6 +39,27 @@ def no_real_restarts(monkeypatch):
 def no_user_modules(monkeypatch):
     """利用者のモジュールは、テストごとに空から始める（読んだものがほかのテストに残らない）。"""
     monkeypatch.setattr(modules, "_user", {})
+
+
+@pytest.fixture(autouse=True)
+def no_real_state(tmp_path_factory, monkeypatch):
+    """置き場所を書かない設定を読むテストでも、本物の状態（~/.local/state/kei-agent）と研究データを触らない。
+
+    2026-09-27、module.toml のテストが既定の置き場所のまま Store を開き、本番の SQLite の表を作り替えてしまった
+    （まだ古い版で動いていた朝の読みものが「no such table: reading_posts」で止まった）。既定の置き場所を
+    一時フォルダに差し替え、それでも本物の SQLite を開こうとしたら、テストを落とす。
+    """
+    root = tmp_path_factory.mktemp("default-paths")
+    real_state = Path(config_module.DEFAULT_PATHS["state_dir"]).expanduser().resolve()
+    monkeypatch.setattr(config_module, "DEFAULT_PATHS", {name: str(root / name) for name in config_module.DEFAULT_PATHS})
+    opened = Store.__init__
+
+    def guarded(self, path: Path):
+        if Path(path).expanduser().resolve().is_relative_to(real_state):
+            raise AssertionError(f"テストから本物の状態を開こうとしました: {path}")
+        opened(self, path)
+
+    monkeypatch.setattr(Store, "__init__", guarded)
 
 
 @pytest.fixture(autouse=True)

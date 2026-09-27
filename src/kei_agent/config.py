@@ -269,6 +269,9 @@ TOP_LEVEL_KEYS = {
 }
 PATHS_KEYS = {"secrets"}
 AGENT_PROFILE_KEYS = {"provider"}
+# 設定に書かなかったときの置き場所。テストは conftest で一時フォルダに差し替え、本物の状態や研究データを触らない
+DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
+                 "state_dir": "~/.local/state/kei-agent"}
 # 本体が持つチャンネルの種類（モジュールの種類は module.toml の [channels] から足す）
 CHANNELS_KEYS = {"overview", "improve", "course", "work"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
@@ -408,7 +411,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     _check_keys(paths, PATHS_KEYS, "[paths]")
     module_schedules = [s for spec in enabled for s in spec.schedules]
     _check_times(schedule, data.get("maintenance", {}), tuple(s.name for s in module_schedules))
-    state_dir = _expand(data.get("state_dir", "~/.local/state/kei-agent"))
+    state_dir = _expand(data.get("state_dir", DEFAULT_PATHS["state_dir"]))
     secrets_dir = _expand(paths.get("secrets", str(home / "secrets")))
     # 既定の読ませない場所には、使うたびに更新するトークン（Box など）の置き場も足す。
     # 秘密情報の置き場所は、deny_read を書き換えていても必ず足す
@@ -416,9 +419,9 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     if str(secrets_dir) not in {str(_expand(p)) for p in deny_read}:
         deny_read.append(str(secrets_dir))
     return Config(
-        research_root=_expand(data.get("research_root", "~/research")),
-        agent_root=_expand(data.get("agent_root", "~/kei-agent")),
-        course_root=_expand(data.get("course_root", "~/course")),
+        research_root=_expand(data.get("research_root", DEFAULT_PATHS["research_root"])),
+        agent_root=_expand(data.get("agent_root", DEFAULT_PATHS["agent_root"])),
+        course_root=_expand(data.get("course_root", DEFAULT_PATHS["course_root"])),
         state_dir=state_dir,
         repo_root=REPO_ROOT,
         allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),

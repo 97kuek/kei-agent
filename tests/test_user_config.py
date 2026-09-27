@@ -94,3 +94,16 @@ def test_launch_scripts_can_ask_where_the_secrets_are(tmp_path):
 
     assert ask(home) == str((tmp_path / "local").resolve())
     assert ask(tmp_path / "nowhere") == str((tmp_path / "nowhere").resolve() / "secrets")
+
+
+def test_tests_never_point_at_the_real_state(tmp_path):
+    """置き場所を書かない設定でも、テストの中では本物の ~/.local/state/kei-agent や ~/research を指さない（conftest）。"""
+    from pathlib import Path
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text("", encoding="utf-8")
+    config = load_config(env={"KEI_AGENT_HOME": str(home)})
+    for path in (config.state_dir, config.research_root, config.agent_root, config.course_root, config.db_path):
+        assert not path.is_relative_to(Path.home() / ".local" / "state")
+        assert path not in (Path.home() / "research", Path.home() / "kei-agent", Path.home() / "course")
