@@ -102,6 +102,15 @@ def test_old_deadline_notices_move_to_the_course_module(tmp_path):
     Store(path)     # 2回目は何もしない
 
 
+def test_the_course_module_reads_its_settings_through_both_windows(env, config):
+    """設定は module.toml の [settings] の既定と config.toml の [course]。本体側は core.settings、担当側は settings()。"""
+    from kei_agent_a2a.api import settings
+
+    scheduler, assistant, slack = env
+    assert assistant.cores["course"].settings == {"school": "", "periods": {}, "terms": {}}
+    assert settings(config, "course") == assistant.cores["course"].settings
+
+
 def test_course_commands_run_through_the_common_command():
     """setup などは `kei-agent-module course <コマンド>` で動く（pyproject.toml にコマンドの名前を持たない）。"""
     commands = modules.load_commands(modules.builtin()["course"])

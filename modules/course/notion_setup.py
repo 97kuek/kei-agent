@@ -5,22 +5,29 @@ Notion はゲートウェイ経由（client は course）で、授業ホーム�
 
 使い方（Notion ゲートウェイが動いていること）:
     source ~/.config/kei-agent/secrets/kei-agent.zsh   # 置き場所は config.toml の [paths] secrets
-    kei-agent-module course setup [<授業ホームのページID>]
+    kei-agent-module course setup [<授業ホームのページID>] [--seed <履修科目のファイル>]
+
+「授業」の「学期」と「科目群」の選択肢は、学校（config.toml の [course] と学校の部品。school.py）から作る。
+履修科目のファイルの書き方は、同じフォルダの courses.example.toml。
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
+import tomllib
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from kei_agent_a2a.api import NotionError, Setup, gateway_notion, load_config
+from kei_agent_a2a.api import WEEKDAYS, NotionError, Setup, gateway_notion, load_config
 
-from . import notion_props, periods
+from . import notion_props
 from .course_identity import normalize_course_name
+from .school import OTHER, School, SchoolError, from_config
 
 # 科目の台帳。学期のあいだ変わらないもの
 COURSES = {
@@ -32,26 +39,14 @@ COURSES = {
         "年度": {"number": {"format": "number"}},
         "履修年次": {"number": {"format": "number"}},
         "単位": {"number": {"format": "number"}},
-        "科目群": {"select": {"options": [
-            {"name": "A群", "color": "blue"}, {"name": "B群", "color": "green"},
-            {"name": "C群", "color": "purple"}, {"name": "他箇所聴講科目", "color": "yellow"},
-            {"name": "その他", "color": "gray"},
-        ]}},
+        # 選択肢は学校から作る（course_spec）
+        "科目群": {"select": {"options": []}},
         "科目区分": {"select": {"options": []}},
         "必選区分": {"select": {"options": [
             {"name": "必修", "color": "red"}, {"name": "選択必修", "color": "orange"},
             {"name": "選択", "color": "blue"}, {"name": "その他", "color": "gray"},
         ]}},
-        "学期": {"select": {"options": [
-            {"name": "春学期", "color": "green"},
-            {"name": "秋学期", "color": "orange"},
-            {"name": "通年", "color": "blue"},
-            {"name": "春ク", "color": "pink"},
-            {"name": "夏ク", "color": "green"},
-            {"name": "秋ク", "color": "orange"},
-            {"name": "冬ク", "color": "purple"},
-            {"name": "その他", "color": "gray"},
-        ]}},
+        "学期": {"select": {"options": []}},
         "曜日": {"select": {"options": [
             {"name": day, "color": color} for day, color in
             [("月", "red"), ("火", "orange"), ("水", "yellow"), ("木", "green"),
@@ -135,35 +130,86 @@ SPECS = {"courses": ("授業", COURSES), "assignments": ("課題", ASSIGNMENTS),
 # 既存の title property は増やさず、同じ property ID の表示名を改める。
 TITLE_ALIASES = {"assignments": {"課題": "タイトル"}, "grades": {"授業名": "科目名"}}
 
-# 秋学期の履修（2026年度）。Moodle のカレンダーに出てくる科目名と、ここの名前をそろえる
-AUTUMN_2026 = [
-    ("データベース", "月", 2),
-    ("情報通信ネットワークB", "月", 4),
-    ("マルチメディア工学A", "火", 5),
-    ("情報セキュリティB", "金", 2),
-    ("マルチメディア工学B", "金", 3),
-    ("次世代ネットワーク", "金", 4),
-    ("統計解析実習", "他", None),
-    ("プロジェクト研究B", "他", None),
-]
+# 学校から作る選択肢の色（順に使う。「その他」は灰色）
+_COLORS = ("green", "orange", "blue", "pink", "purple", "yellow", "red", "brown")
+# 履修科目のファイルの「曜日」に書けるもの（「他」は曜日の決まっていない科目）
+_WEEKDAYS = (*WEEKDAYS, "他")
+
+
+def _options(names: list[str]) -> list[dict]:
+    names = list(dict.fromkeys(name for name in names if name != OTHER))
+    return [{"name": name, "color": _COLORS[n % len(_COLORS)]} for n, name in enumerate(names)] + [
+        {"name": OTHER, "color": "gray"}]
+
+
+def course_spec(school: School) -> dict:
+    """「授業」の形。「学期」の選択肢は学期の設定から、「科目群」は学校の部品から作る。"""
+    spec = copy.deepcopy(COURSES)
+    spec["properties"]["学期"]["select"]["options"] = _options(list(school.terms))
+    spec["properties"]["科目群"]["select"]["options"] = _options(list(school.course_groups))
+    return spec
+
+
+def specs(school: School) -> dict[str, tuple[str, dict]]:
+    """その学校の、正本の DB の名前と形。"""
+    return {**SPECS, "courses": (SPECS["courses"][0], course_spec(school))}
+
+
+@dataclass(frozen=True)
+class Course:
+    """履修科目のファイルの1行。学期を省くと、ファイルの term（それも無ければ今日の学期）。"""
+    name: str
+    weekday: str
+    period: int | None = None
+    term: str = ""
+
+
+def read_seed(path: Path) -> tuple[int | None, list[Course]]:
+    """履修科目のファイル（courses.example.toml の形）を読む。年度（書かなければ None）と科目の並び。"""
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise ValueError(f"履修科目のファイルを読めません: {e}") from None
+    year, term, rows = data.get("year"), data.get("term", ""), data.get("courses")
+    if year is not None and (not isinstance(year, int) or isinstance(year, bool)):
+        raise ValueError(f"{path.name} の year は年度の数にしてください（例: year = 2026）")
+    if not isinstance(term, str) or not isinstance(rows, list) or not rows:
+        raise ValueError(f"{path.name} には courses（科目の並び）を書いてください。書き方は courses.example.toml")
+    found = []
+    for n, row in enumerate(rows, 1):
+        row = row if isinstance(row, dict) else {}
+        name, weekday, period = row.get("name"), row.get("weekday", "他"), row.get("period")
+        own_term = row.get("term", term)
+        if (not isinstance(name, str) or not name.strip() or weekday not in _WEEKDAYS
+                or not (period is None or (isinstance(period, int) and not isinstance(period, bool)))
+                or not isinstance(own_term, str)):
+            raise ValueError(f"{path.name} の {n} 件目: name（科目名）、weekday（月〜日か「他」）、"
+                             "period（時限の数。無ければ省く）、term（学期）の形で書いてください")
+        found.append(Course(name.strip(), weekday, period, own_term))
+    return year, found
 
 
 class CourseSetup(Setup):
-    """授業ホームの下に正本6 DBを作る（すでにあれば、足りない項目だけ足す）。"""
+    """授業ホームの下に正本の5つの DB を作る（すでにあれば、足りない項目だけ足す）。"""
 
-    def run(self, courses: list[tuple[str, str, int | None]] | None = None, year: int | None = None) -> None:
+    def __init__(self, notion, home_page_id: str, state_path: Path, school: School | None = None):
+        super().__init__(notion, home_page_id, state_path)
+        self.school = school or School()
+
+    def run(self, courses: list[Course] | None = None, year: int | None = None) -> None:
         titles = [
             block["child_database"]["title"] for block in self.notion.children(self.home)
             if block["type"] == "child_database"
         ]
-        canonical = {title for title, _spec in SPECS.values()}
+        wanted = specs(self.school)
+        canonical = {title for title, _spec in wanted.values()}
         duplicates = sorted(title for title, count in Counter(titles).items() if title in canonical and count > 1)
         if duplicates:
             raise NotionError(f"正本データベースが重複しています: {'、'.join(duplicates)}。正本を確認してから整理してください")
-        for key, (title, spec) in SPECS.items():
+        for key, (title, spec) in wanted.items():
             self.database(key, self.home, title, spec)
-        for name, weekday, period in courses or []:
-            self.add_course(name, weekday, period, year=year)
+        for course in courses or []:
+            self.add_course(course.name, course.weekday, course.period, term=course.term, year=year)
 
     def database(self, key: str, parent: str, title: str, spec: dict) -> dict:
         """正本 schema に不足を補い、既存 title alias は同じ property ID で改名する。"""
@@ -188,12 +234,14 @@ class CourseSetup(Setup):
         return super().database(key, parent, title, spec)
 
     def add_course(self, name: str, weekday: str, period: int | None = None,
-                   term: str = periods.AUTUMN, year: int | None = None) -> None:
+                   term: str = "", year: int | None = None) -> None:
         """科目を1つ足す（同じ年度・同じ名前があれば何もしない）。曜日と時限は別の列に入れる。
 
-        年度を省くと今日の年度にする。年度が無いと、次の年も「履修中」の科目として出てしまう。
+        年度を省くと今日の年度、学期を省くと今日の学期にする。年度が無いと、次の年も「履修中」の科目として出てしまう。
         """
-        year = year or periods.academic_year(date.today())
+        today = date.today()
+        year = year or self.school.academic_year(today)
+        term = term or self.school.term_of(today) or OTHER
         db = self.state["databases"]["courses"]
         for row in self.notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
             props = row.get("properties", {})
@@ -221,21 +269,26 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-module course setup")
     parser.add_argument("home_page_id", nargs="?", default="",
                         help="授業ホームのページID（省くと config.toml の [notion] course_home）")
-    parser.add_argument("--seed", type=int, metavar="年度",
-                        help="秋学期の履修科目（AUTUMN_2026）を、その年度の科目として入れる")
+    parser.add_argument("--seed", type=Path, metavar="ファイル",
+                        help="履修科目のファイル（書き方は modules/course/courses.example.toml）の科目を「授業」に入れる")
     args = parser.parse_args(argv)
     config = load_config()
     home = args.home_page_id or config.notion.course_home
     if not home:
         sys.exit("授業ホームのページ ID がありません（config.toml の [notion] course_home）")
     try:
+        school = from_config(config)
+        year, courses = read_seed(args.seed.expanduser()) if args.seed else (None, None)
+    except (SchoolError, ValueError) as e:
+        sys.exit(str(e))
+    try:
         notion = gateway_notion("course", config=config)
     except NotionError as e:
         sys.exit(str(e))
     state_path = Path(config.state_dir) / "notion-course.json"
-    setup = CourseSetup(notion, home, state_path)
+    setup = CourseSetup(notion, home, state_path, school)
     try:
-        setup.run(AUTUMN_2026 if args.seed else None, year=args.seed)
+        setup.run(courses, year=year)
     except NotionError as e:
         sys.exit(f"Notion で失敗しました: {e}")
     finally:

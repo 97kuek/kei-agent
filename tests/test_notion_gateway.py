@@ -522,7 +522,7 @@ def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
 
     course = via("course")
     setup = notion_setup.CourseSetup(course, world.course.root, tmp_path / "notion-course.json")
-    setup.run(notion_setup.AUTUMN_2026[:1], year=2026)
+    setup.run([notion_setup.Course("データベース", "月", 2, "秋学期")], year=2026)
     assert set(setup.state["databases"]) == {"courses", "assignments", "grades", "requirements", "gpa"}
 
     event = Event(uid="1@moodle", summary="第3回レポート の 提出期限", starts_at=datetime(2026, 9, 25, 23, 59),

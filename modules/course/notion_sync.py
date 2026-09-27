@@ -24,10 +24,10 @@ from pathlib import Path
 
 from kei_agent_a2a.api import Notion, NotionError, gateway_notion, load_config
 
-from . import periods
 from .course_identity import normalize_course_name
 from .ics import Event
 from .notion_props import number, plain, select
+from .school import School
 
 log = logging.getLogger(__name__)
 
@@ -122,12 +122,13 @@ def _when(prop: dict | None) -> datetime | None:
 
 
 class CourseNotion:
-    """授業用の Notion への書き込み（「授業」は読むだけ、「課題」に書く）。"""
+    """授業用の Notion への書き込み（「授業」は読むだけ、「課題」に書く）。学期の見分けは学校（school.py）に聞く。"""
 
-    def __init__(self, notion: Notion, state: dict):
+    def __init__(self, notion: Notion, state: dict, school: School | None = None):
         self.notion = notion
         self.courses = state["databases"]["courses"]["data_source_id"]
         self.assignments = state["databases"]["assignments"]["data_source_id"]
+        self.school = school or School()
 
     def _rows(self, data_source_id: str) -> list[dict]:
         return self.notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
@@ -197,7 +198,7 @@ class CourseNotion:
             props = row["properties"]
             if select(props.get("状態")) not in ("", "履修中"):
                 continue
-            if not periods.in_term(select(props.get("学期")), on, number(props.get("年度"))):
+            if not self.school.in_term(select(props.get("学期")), on, number(props.get("年度"))):
                 continue
             day = select(props.get("曜日"))
             if weekday and day != weekday:
@@ -298,18 +299,19 @@ class CourseNotion:
         return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
 
 
-def _client(state: dict | None = None) -> CourseNotion:
+def _client(state: dict | None = None, school: School | None = None) -> CourseNotion:
     """Notion はゲートウェイ経由（client は course。授業ホームの中だけに届く）。状態は省くとファイルから読む。"""
-    return CourseNotion(gateway_notion("course"), state or read_state())
+    return CourseNotion(gateway_notion("course"), state or read_state(), school)
 
 
-def courses_on(weekday: str = "", on: date | None = None, state: dict | None = None) -> list[dict]:
+def courses_on(weekday: str = "", on: date | None = None, state: dict | None = None,
+               school: School | None = None) -> list[dict]:
     """履修中の科目（曜日・時限つき）。朝のまとめで、時限を時刻に直すのに使う。"""
-    return _client(state).courses_on(weekday, on)
+    return _client(state, school).courses_on(weekday, on)
 
 
-def current_courses(on: date | None = None, state: dict | None = None) -> list[dict]:
-    return _client(state).current_courses(on)
+def current_courses(on: date | None = None, state: dict | None = None, school: School | None = None) -> list[dict]:
+    return _client(state, school).current_courses(on)
 
 
 def course_names(state: dict | None = None) -> set[str]:

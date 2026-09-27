@@ -1,6 +1,10 @@
+"""早稲田の部品（schools/waseda.py）の成績の読み方。保存した成績と単位の HTML から、原文を残さない記録を作る。"""
+
 from pathlib import Path
 
-from kei_agent_modules.course.academic_record import parse_academic_record
+import pytest
+
+from kei_agent_modules.course.schools import waseda
 
 
 def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):
@@ -30,7 +34,7 @@ def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):
         encoding="utf-8",
     )
 
-    record = parse_academic_record(grades, credits)
+    record = waseda.read_record([grades, credits])
 
     assert len(record.grades) == 1
     assert record.grades[0].course_name == "数学"
@@ -40,3 +44,8 @@ def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):
     assert record.requirements[-1].remaining == 5.0
     assert [entry.kind for entry in record.gpa] == ["春学期", "秋学期", "通算"]
     assert record.gpa[-1].gpa == 3.4
+
+
+def test_waseda_needs_the_grade_and_credit_pages_in_order(tmp_path: Path):
+    with pytest.raises(ValueError, match="成績の HTML と単位の HTML の2つ"):
+        waseda.read_record([tmp_path / "grades.html"])

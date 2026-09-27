@@ -8,8 +8,11 @@ import pytest
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
 from kei_agent.dates import weekday
-from kei_agent_modules.course import notion_sync
+from kei_agent_modules.course import notion_sync, school
 from kei_agent_modules.course.ics import Event
+
+# 時限の時刻と学期は、早稲田の部品の既定
+WASEDA = school.load({"school": "waseda"})
 
 STATE = {"home_page_id": "course-home", "databases": {
     "courses": {"data_source_id": "ds-courses"},
@@ -228,7 +231,7 @@ def test_courses_on_takes_only_the_courses_being_taken():
     from datetime import date
 
     notion = FakeNotion(courses=COURSE_ROWS_FULL)
-    found = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 9, 21))
+    found = notion_sync.CourseNotion(notion, STATE, WASEDA).courses_on("月", date(2026, 9, 21))
     assert [c["subject"] for c in found] == ["データベース"]   # 終了した科目は出さない
 
 
@@ -236,7 +239,7 @@ def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
     from datetime import date
 
     notion = FakeNotion(courses=COURSE_ROWS_FULL)
-    found = notion_sync.CourseNotion(notion, STATE).courses_on(on=date(2026, 9, 21))
+    found = notion_sync.CourseNotion(notion, STATE, WASEDA).courses_on(on=date(2026, 9, 21))
     # 時限の早い順。時限のないもの（集中講義など）は最後
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
 
@@ -244,7 +247,7 @@ def test_courses_on_without_a_weekday_returns_all_and_sorts_by_period():
 def test_current_courses_returns_only_this_terms_enrolled_courses():
     from datetime import date
 
-    found = notion_sync.CourseNotion(FakeNotion(courses=COURSE_ROWS_FULL), STATE).current_courses(date(2026, 9, 21))
+    found = notion_sync.CourseNotion(FakeNotion(courses=COURSE_ROWS_FULL), STATE, WASEDA).current_courses(date(2026, 9, 21))
 
     assert [c["subject"] for c in found] == ["データベース", "次世代ネットワーク", "プロジェクト研究B"]
 
@@ -256,7 +259,7 @@ def test_finished_course_stays_out_of_the_schedule():
         "科目名": _title("数学"), "年度": {"number": 2025}, "学期": _select("春学期"),
         "状態": _select("終了"),
     }}]
-    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE)
+    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE, WASEDA)
 
     assert "数学" not in [item["subject"] for item in course.current_courses(date(2026, 9, 21))]
 
@@ -270,7 +273,7 @@ def test_last_years_course_left_as_enrolled_does_not_come_back():
         "状態": _select("履修中"), "学期": _select("秋学期"), "年度": {"number": year}}}
         for key, name, year in (("old", "去年のデータベース", 2025), ("now", "データベース", 2026))]
 
-    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE)
+    course = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE, WASEDA)
     assert [c["subject"] for c in course.courses_on("月", date(2026, 9, 21))] == ["データベース"]
     assert [c["subject"] for c in course.courses_on("月", date(2027, 1, 18))] == ["データベース"]
 
@@ -280,44 +283,28 @@ def test_last_years_course_left_as_enrolled_does_not_come_back():
     ("その他", True, True), ("", True, True), ("通年", True, True),
 ])
 def test_quarters_follow_their_semester(term, spring, autumn):
-    from datetime import date
-
-    from kei_agent_modules.course import periods
-
-    assert periods.in_term(term, date(2026, 5, 11)) is spring
-    assert periods.in_term(term, date(2026, 11, 9)) is autumn
+    assert WASEDA.in_term(term, date(2026, 5, 11)) is spring
+    assert WASEDA.in_term(term, date(2026, 11, 9)) is autumn
 
 
 def test_academic_year_starts_in_april():
-    from datetime import date
-
-    from kei_agent_modules.course import periods
-
-    assert periods.academic_year(date(2027, 3, 31)) == 2026
-    assert periods.academic_year(date(2027, 4, 1)) == 2027
+    assert WASEDA.academic_year(date(2027, 3, 31)) == 2026
+    assert WASEDA.academic_year(date(2027, 4, 1)) == 2027
 
 
 def test_next_weekday_is_today_or_later():
-    from datetime import date
-
-    from kei_agent_modules.course import periods
-
     friday = date(2026, 9, 25)
-    assert periods.next_weekday("金", friday) == friday
-    assert periods.next_weekday("月", friday) == date(2026, 9, 28)
-    assert periods.next_weekday("他", friday) == friday
+    assert school.next_weekday("金", friday) == friday
+    assert school.next_weekday("月", friday) == date(2026, 9, 28)
+    assert school.next_weekday("他", friday) == friday
 
 
 def test_waseda_periods_turn_into_times():
-    from datetime import date
-
-    from kei_agent_modules.course import periods
-
     assert weekday(date(2026, 9, 21)) == "月"
-    start, end = periods.at(date(2026, 9, 21), 2)
+    start, end = WASEDA.at(date(2026, 9, 21), 2)
     assert (start.hour, start.minute) == (10, 40) and (end.hour, end.minute) == (12, 20)
-    assert periods.at(date(2026, 9, 21), None) is None      # 時限なし（集中講義）
-    assert periods.at(date(2026, 9, 21), 9) is None         # 無い時限
+    assert WASEDA.at(date(2026, 9, 21), None) is None      # 時限なし（集中講義）
+    assert WASEDA.at(date(2026, 9, 21), 9) is None         # 無い時限
 
 
 def test_courses_on_drops_the_other_term():
@@ -333,11 +320,11 @@ def test_courses_on_drops_the_other_term():
             "状態": _select("履修中"), "学期": _select("通年")}},
     ]
     notion = FakeNotion(courses=rows)
-    autumn = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 9, 21))
+    autumn = notion_sync.CourseNotion(notion, STATE, WASEDA).courses_on("月", date(2026, 9, 21))
     assert [c["subject"] for c in autumn] == ["データベース", "通年の科目"]
 
     notion = FakeNotion(courses=rows)
-    spring = notion_sync.CourseNotion(notion, STATE).courses_on("月", date(2026, 5, 11))
+    spring = notion_sync.CourseNotion(notion, STATE, WASEDA).courses_on("月", date(2026, 5, 11))
     assert [c["subject"] for c in spring] == ["春の科目", "通年の科目"]
 
 
@@ -347,7 +334,7 @@ def test_a_course_without_a_term_is_kept():
 
     rows = [{"id": "p9", "url": "", "properties": {
         "科目名": _title("学期なし"), "曜日": _select("月"), "時限": {"number": 2}, "状態": _select("履修中")}}]
-    found = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE).courses_on("月", date(2026, 5, 11))
+    found = notion_sync.CourseNotion(FakeNotion(courses=rows), STATE, WASEDA).courses_on("月", date(2026, 5, 11))
     assert [c["subject"] for c in found] == ["学期なし"]
 
 

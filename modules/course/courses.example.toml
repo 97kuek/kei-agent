@@ -1,0 +1,29 @@
+# 履修科目のファイル（例）。`kei-agent-module course setup --seed <このファイル>` で、授業ホームの「授業」に入れる。
+# 同じ年度に同じ名前の科目があれば足さないので、何度実行してもよい。自分のものは利用者のフォルダ（~/.config/kei-agent/）に置く
+
+# 年度（省くと今日の年度）
+year = 2026
+# 学期（省くと今日の学期。科目ごとにも書ける）。名前は config.toml の [course] terms（書かなければ学校の部品）とそろえる
+term = "秋学期"
+
+# 科目名は、Moodle のカレンダーに出てくる名前とそろえる。weekday は月〜日（曜日の決まっていない科目は「他」）、
+# period は時限（無ければ省く）
+[[courses]]
+name = "データベース"
+weekday = "月"
+period = 2
+
+[[courses]]
+name = "情報セキュリティ"
+weekday = "金"
+period = 2
+
+[[courses]]
+name = "プロジェクト研究"
+weekday = "他"
+
+[[courses]]
+name = "英語コミュニケーション"
+weekday = "火"
+period = 1
+term = "秋ク"

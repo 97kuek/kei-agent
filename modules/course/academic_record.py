@@ -1,4 +1,8 @@
-"""早稲田の保存済み成績HTMLを、Notionへ渡せる派生データにする。"""
+"""成績の記録の形（学校の部品の read_record が返す）と、保存した学務の HTML から表を拾う道具。
+
+成績のページの読み方は学校ごとに違うので、学校の部品（schools/。書き方は school.py）に置く。ここには、どの学校でも
+同じ記録の形（成績・単位要件・GPA）と、部品が使える HTML の表の読み方だけを置く。原文は残さない。
+"""
 
 from __future__ import annotations
 
@@ -7,17 +11,17 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
-from .periods import GRADE_TERM_NAMES
-
 
 @dataclass(frozen=True)
 class Grade:
     course_name: str
     year: int
+    # 成績に書かれた学期の名前（授業 DB の学期への直し方は、学校の部品の course_term）
     term: str
     credits: float
     grade: str
     gp: float | None
+    # 「科目群 / 科目区分」（区分が無ければ科目群だけ）
     category: str
 
 
@@ -94,7 +98,8 @@ class _TableCounter(HTMLParser):
             self.count += 1
 
 
-def _tables(path: Path) -> list[list[list[str]]]:
+def tables(path: Path) -> list[list[list[str]]]:
+    """HTML の表を全部。1つの表は行の並びで、1行はセルの文字の並び（空白は1つにまとめる）。"""
     text = path.read_text(encoding="utf-8", errors="strict")
     counter = _TableCounter()
     counter.feed(text)
@@ -106,107 +111,22 @@ def _tables(path: Path) -> list[list[list[str]]]:
     return found
 
 
-def _find_table(path: Path, header: list[str]) -> list[list[str]]:
-    for rows in _tables(path):
+def find_table(path: Path, header: list[str]) -> list[list[str]]:
+    """1行目が header で始まる表。無ければ ValueError（保存したページが違うか、学務の画面が変わった）。"""
+    for rows in tables(path):
         if rows and rows[0][: len(header)] == header:
             return rows
     raise ValueError(f"HTMLに表がありません: {path.name} / {'、'.join(header)}")
 
 
-def _number(value: str) -> float | None:
+def cell_number(value: str) -> float | None:
+    """セルの数。空か数でなければ None。"""
     try:
         return float(value) if value.strip() else None
     except ValueError:
         return None
 
 
-def _year(value: str) -> int | None:
+def cell_year(value: str) -> int | None:
+    """セルの年（4桁の数）。そうでなければ None。"""
     return int(value) if re.fullmatch(r"\d{4}", value.strip()) else None
-
-
-def _grades(path: Path) -> tuple[Grade, ...]:
-    rows = _find_table(path, ["科目名", "取得年度", "学期", "単位", "成績", "ＧＰ"])
-    result: list[Grade] = []
-    group = ""
-    subcategory = ""
-    for row in rows[1:]:
-        if len(row) < 6 or not row[0]:
-            continue
-        name, year_text, term, credits_text, grade, gp_text = row[:6]
-        year = _year(year_text)
-        credits = _number(credits_text)
-        if year is None or credits is None:
-            if name.startswith("◎"):
-                group = name.strip("◎").strip()
-            elif name.startswith(("【", "《")):
-                subcategory = name.strip("【】《》").strip()
-            continue
-        result.append(Grade(
-            course_name=name,
-            year=year,
-            term=term if term in GRADE_TERM_NAMES else "その他",
-            credits=credits,
-            grade=grade,
-            gp=_number(gp_text),
-            category=" / ".join(x for x in (group, subcategory) if x),
-        ))
-    return tuple(result)
-
-
-def _requirements(path: Path) -> tuple[Requirement, ...]:
-    rows = _find_table(path, ["科目区分名", "所定", "既得", "算入"])
-    result: list[Requirement] = []
-    current_group = ""
-    for row in rows[1:]:
-        if not row:
-            continue
-        numbers = [_number(value) for value in row[-3:]]
-        if not any(value is not None for value in numbers):
-            continue
-        labels = row[:-3]
-        if len(labels) >= 2:
-            group, name = labels[0].strip(), labels[1].strip()
-        elif labels:
-            group, name = "", labels[0].strip()
-        else:
-            group, name = "", ""
-        if not group:
-            group = current_group
-        if group:
-            current_group = group
-        if not name:
-            name = group or "（名称なし）"
-        required, earned, included = (value or 0 for value in numbers)
-        kind = "総合計" if name == "総合計" else "小計" if "小計" in name else "区分"
-        result.append(Requirement(name, group, required, earned, included, max(required - included, 0), kind))
-    return tuple(result)
-
-
-def _gpa(path: Path) -> tuple[GPAEntry, ...]:
-    rows = _find_table(path, ["年度", "GPA"])
-    result: list[GPAEntry] = []
-    current_year: int | None = None
-    term_index = 0
-    for row in rows[1:]:
-        if not row:
-            continue
-        if re.fullmatch(r"\d{4}年度", row[0]):
-            current_year = int(row[0][:4])
-            term_index = 0
-        value = _number(row[-1])
-        if value is None:
-            continue
-        if row[0] == "通算":
-            result.append(GPAEntry("通算", 0, value, "通算"))
-            continue
-        if current_year is None:
-            raise ValueError("GPA表の年度が見つかりません")
-        kind = "春学期" if term_index == 0 else "秋学期"
-        term_index += 1
-        result.append(GPAEntry(f"{current_year}年度（{kind}）", current_year, value, kind))
-    return tuple(result)
-
-
-def parse_academic_record(grades_html: Path, credits_html: Path) -> AcademicRecord:
-    """2つのHTMLを読み、原文を保持しない成績レコードに変換する。"""
-    return AcademicRecord(_grades(grades_html), _requirements(credits_html), _gpa(credits_html))

@@ -241,9 +241,9 @@ def test_fetch_unfolds_before_decoding_so_a_split_character_survives(monkeypatch
     assert ics.parse(moodle.fetch("https://example.invalid/calendar.ics"))[0].summary == "課題"
 
 
-def test_add_course_writes_the_academic_year_and_seed_takes_a_year(tmp_path, monkeypatch):
-    """年度が無いと、次の年も「履修中」の科目として出てしまう。"""
-    from kei_agent_modules.course import notion_setup
+def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeypatch):
+    """年度が無いと、次の年も「履修中」の科目として出てしまう。履修科目は、自分のフォルダのファイルから入れる。"""
+    from kei_agent_modules.course import notion_setup, school
 
     posts = []
 
@@ -262,18 +262,55 @@ def test_add_course_writes_the_academic_year_and_seed_takes_a_year(tmp_path, mon
     setup.add_course("データベース", "月", 2, year=2026)
     assert posts[0]["properties"]["年度"] == {"number": 2026}
 
+    seed = tmp_path / "courses.toml"
+    seed.write_text('year = 2027\nterm = "春学期"\n[[courses]]\nname = "英語"\nweekday = "火"\nperiod = 1\n'
+                    '[[courses]]\nname = "卒業研究"\nweekday = "他"\nterm = "通年"\n', encoding="utf-8")
     seeded, clients = [], []
-    fake_config = type("C", (), {"state_dir": str(tmp_path),
-                                 "notion": type("N", (), {"course_home": "course-home"})()})()
+    fake_config = type("C", (), {"state_dir": str(tmp_path), "user_dir": None,
+                                 "notion": type("N", (), {"course_home": "course-home"})(),
+                                 "settings": lambda self, name: {"school": "waseda"}})()
     monkeypatch.setattr(notion_setup, "load_config", lambda: fake_config)
     monkeypatch.setattr(notion_setup, "gateway_notion",
                         lambda client, config=None: clients.append(client) or _Notion())
     monkeypatch.setattr(notion_setup.CourseSetup, "run",
-                        lambda self, courses=None, year=None: seeded.append((self.home, year)))
-    notion_setup.main(["--seed", "2027"])
-    assert seeded == [("course-home", 2027)]
+                        lambda self, courses=None, year=None: seeded.append((self.home, year, courses, self.school)))
+    notion_setup.main(["--seed", str(seed)])
+    (home, year, courses, chosen), = seeded
+    assert (home, year) == ("course-home", 2027) and chosen.name == "waseda"
+    assert courses == [notion_setup.Course("英語", "火", 1, "春学期"), notion_setup.Course("卒業研究", "他", None, "通年")]
     # Notion にはゲートウェイの course（授業ホームだけに届く）として届く
     assert clients == ["course"]
+
+    # 学期を省いた科目は、今日の学期（学校の設定から）
+    setup = notion_setup.CourseSetup(_Notion(), "home", tmp_path / "notion-course.json", school.load({"school": "waseda"}))
+    setup.state = {"databases": {"courses": {"data_source_id": "ds"}}}
+    posts.clear()
+    setup.add_course("統計", "水", 3, year=2026)
+    assert posts[0]["properties"]["学期"]["select"]["name"] in ("春学期", "秋学期")
+
+
+@pytest.mark.parametrize(("text", "message"), [
+    ('year = 2026\n', "courses"),
+    ('year = "2026"\n[[courses]]\nname = "英語"\n', "year"),
+    ('[[courses]]\nname = "英語"\nweekday = "Mon"\n', "1 件目"),
+    ('[[courses]]\nname = "英語"\nperiod = "1"\n', "1 件目"),
+    ('[[courses]]\nweekday = "月"\n', "1 件目"),
+])
+def test_a_broken_seed_file_says_what_is_wrong(tmp_path, text, message):
+    from kei_agent_modules.course import notion_setup
+
+    seed = tmp_path / "courses.toml"
+    seed.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        notion_setup.read_seed(seed)
+
+
+def test_the_example_seed_file_can_be_read():
+    from kei_agent_modules.course import notion_setup
+
+    year, courses = notion_setup.read_seed(notion_setup.Path(notion_setup.__file__).parent / "courses.example.toml")
+    assert year == 2026 and courses[0] == notion_setup.Course("データベース", "月", 2, "秋学期")
+    assert courses[-1].term == "秋ク"
 
 
 def test_course_setup_without_the_gateway_password_says_so(tmp_path, monkeypatch, config):

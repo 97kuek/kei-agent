@@ -2,7 +2,11 @@
 
 import pytest
 
+from kei_agent_modules.course import school
 from kei_agent_modules.course.academic_sync import academic_relation_changes, historical_course_changes
+
+# 学期の直し方・GPA の期間・単位要件の名前の対応は、早稲田の部品のもの
+WASEDA = school.load({"school": "waseda"})
 
 
 def test_only_exact_grade_requirement_and_term_gpa_relations_are_added():
@@ -22,7 +26,7 @@ def test_only_exact_grade_requirement_and_term_gpa_relations_are_added():
         }}],
     }
 
-    assert academic_relation_changes(rows) == {"grade": {
+    assert academic_relation_changes(rows, WASEDA) == {"grade": {
         "単位要件": {"relation": [{"id": "requirement"}]},
         "GPA推移": {"relation": [{"id": "gpa"}]},
     }}
@@ -40,7 +44,7 @@ def test_existing_manual_relation_is_not_replaced():
         "要件名": {"title": [{"plain_text": "数学"}]},
     }}], "gpa": []}
 
-    assert academic_relation_changes(rows) == {}
+    assert academic_relation_changes(rows, WASEDA) == {}
 
 
 def test_historical_course_is_planned_once_with_grade_and_verified_relations():
@@ -52,7 +56,7 @@ def test_historical_course_is_planned_once_with_grade_and_verified_relations():
         "授業": {"relation": []}, "単位要件": {"relation": [{"id": "r1"}]},
         "GPA推移": {"relation": [{"id": "p1"}]},
     }}
-    planned = historical_course_changes([grade], [])
+    planned = historical_course_changes([grade], [], WASEDA)
     assert planned[0]["grade_id"] == "g1"
     assert planned[0]["properties"]["年度"] == {"number": 2024}
     assert planned[0]["properties"]["学期"] == {"select": {"name": "春学期"}}
@@ -61,7 +65,7 @@ def test_historical_course_is_planned_once_with_grade_and_verified_relations():
         "科目名": {"title": [{"plain_text": "基礎物理学Ａ"}]},
         "年度": {"number": 2024}, "学期": {"select": {"name": "春学期"}},
     }}
-    assert historical_course_changes([grade], [existing]) == []
+    assert historical_course_changes([grade], [existing], WASEDA) == []
 
 
 def test_historical_course_identity_collision_stops_before_write():
@@ -74,7 +78,7 @@ def test_historical_course_identity_collision_stops_before_write():
         historical_course_changes([grade], [{"id": key, "properties": {
             "科目名": {"title": [{"plain_text": "情報数学"}]},
             "年度": {"number": 2024}, "学期": {"select": {"name": "春学期"}},
-        }} for key in ("c1", "c2")])
+        }} for key in ("c1", "c2")], WASEDA)
 
 
 @pytest.mark.parametrize(("group", "category", "requirement_name"), [
@@ -92,7 +96,7 @@ def test_verified_parent_requirement_links(group, category, requirement_name):
         "大区分": {"rich_text": [{"plain_text": group}]},
         "要件名": {"title": [{"plain_text": requirement_name}]},
     }}], "gpa": []}
-    assert academic_relation_changes(rows) == {"g": {
+    assert academic_relation_changes(rows, WASEDA) == {"g": {
         "単位要件": {"relation": [{"id": "r"}]},
     }}
 
@@ -106,7 +110,7 @@ def test_quarter_and_annual_gpa_mapping_leaves_unverified_winter_unlinked():
         "requirements": [], "gpa": [{"id": kind, "properties": {
             "年度": {"number": 2025}, "種別": {"select": {"name": kind}},
         }} for kind in ("春学期", "秋学期")]}
-    changes = academic_relation_changes(rows)
+    changes = academic_relation_changes(rows, WASEDA)
     assert changes["夏ク"]["GPA推移"]["relation"] == [{"id": "春学期"}]
     assert changes["秋ク"]["GPA推移"]["relation"] == [{"id": "秋学期"}]
     assert changes["通年"]["GPA推移"]["relation"] == [{"id": "秋学期"}]

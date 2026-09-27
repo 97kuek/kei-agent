@@ -1,9 +1,9 @@
 """大学のモジュールの、手で動かすコマンド（`kei-agent-module course <コマンド> [引数...]`）。
 
-- setup … 授業ホームに DB を作る（`--seed 年度` で、秋学期の履修科目を入れる）
+- setup … 授業ホームに DB を作る（`--seed ファイル` で、履修科目を入れる。書き方は courses.example.toml）
 - sync … Moodle の締切を「課題」に取り込む（`--days`、`--all`）
 - inspect … Moodle の科目と「授業」を見比べる（読むだけ）
-- academic-import … 成績の HTML を読んで Notion に入れる（`--dry-run` / `--apply`）
+- academic-import … 成績のファイルを学校の部品で読んで Notion に入れる（`--dry-run` / `--apply`）
 """
 
 from __future__ import annotations

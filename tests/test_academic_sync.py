@@ -2,9 +2,11 @@ import copy
 
 import pytest
 
-from kei_agent_modules.course import academic_sync
+from kei_agent_modules.course import academic_sync, school
 from kei_agent_modules.course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
 from kei_agent_modules.course.academic_sync import AcademicSync, grade_key
+
+WASEDA = school.load({"school": "waseda"})
 
 
 def _property(property_id: str, kind: str = "rich_text") -> dict:
@@ -180,7 +182,7 @@ def test_academic_sync_writes_existing_property_names():
 
     state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
     notion = Notion()
-    AcademicSync(notion, state).sync(AcademicRecord(
+    AcademicSync(notion, state, WASEDA).sync(AcademicRecord(
         grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=(),
     ))
 
@@ -213,7 +215,7 @@ def test_academic_sync_keeps_separate_grade_category_and_chronological_gpa_label
 
     state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
     notion = Notion()
-    AcademicSync(notion, state).sync(AcademicRecord(
+    AcademicSync(notion, state, WASEDA).sync(AcademicRecord(
         grades=(Grade("数学", 2024, "春期", 2, "A", 4, "Ｂ群 / 数学"),),
         requirements=(), gpa=(GPAEntry("2024年度（春学期）", 2024, 3.06, "春学期"),),
     ))
@@ -275,7 +277,7 @@ def test_academic_sync_upserts_same_record_without_duplicate_pages():
         requirements=(Requirement("総合計", "", 124, 10, 10, 114, "総合計"),),
         gpa=(GPAEntry("2025年度（春学期）", 2025, 4, "春学期"),),
     )
-    sync = AcademicSync(Notion(), state)
+    sync = AcademicSync(Notion(), state, WASEDA)
 
     first = sync.sync(record)
     second = sync.sync(record)
@@ -304,7 +306,7 @@ def test_ambiguous_course_is_reported_without_grade_relation():
             return row
 
     state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
-    result = AcademicSync(Notion(), state).sync(AcademicRecord(
+    result = AcademicSync(Notion(), state, WASEDA).sync(AcademicRecord(
         grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=(),
     ))
 
@@ -331,7 +333,7 @@ def test_academic_sync_updates_an_existing_requirement_by_stable_key():
             raise AssertionError((method, path, body))
 
     state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
-    result = AcademicSync(Notion(), state).sync(AcademicRecord(
+    result = AcademicSync(Notion(), state, WASEDA).sync(AcademicRecord(
         grades=(), requirements=(Requirement("総合計", "", 124, 12, 12, 112, "総合計"),), gpa=(),
     ))
 
@@ -365,26 +367,58 @@ def test_academic_sync_preserves_an_existing_grade_course_relation():
             raise AssertionError((method, path, body))
 
     state = {"databases": {key: {"data_source_id": key} for key in ("courses", "grades", "requirements", "gpa")}}
-    result = AcademicSync(Notion(), state).sync(AcademicRecord(
+    result = AcademicSync(Notion(), state, WASEDA).sync(AcademicRecord(
         grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=(),
     ))
 
     assert result.unchanged == {"grades": 1, "requirements": 0, "gpa": 0}
 
 
+class _ReadingSchool:
+    """成績のファイルを読んだことにする学校（読んだファイルを覚える）。"""
+
+    def __init__(self, record):
+        self.record = record
+        self.files = []
+
+    def read_record(self, files):
+        self.files.append(files)
+        return self.record
+
+
+def _school_from_config(monkeypatch, record):
+    part = _ReadingSchool(record)
+    monkeypatch.setattr(academic_sync, "load_config", lambda: object())
+    monkeypatch.setattr(academic_sync, "from_config", lambda _config: part)
+    return part
+
+
 def test_academic_import_cli_dry_run_never_reads_state_or_writes(tmp_path, monkeypatch):
     record = AcademicRecord(grades=(), requirements=(), gpa=())
-    monkeypatch.setattr(academic_sync, "parse_academic_record", lambda *_paths: record)
+    part = _school_from_config(monkeypatch, record)
     monkeypatch.setattr(academic_sync, "read_state", lambda: (_ for _ in ()).throw(AssertionError("state")))
 
     assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html"), "--dry-run"]) == 0
     assert academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html")]) == 2
+    # ファイルの読み方は学校の部品が決める（渡した順のまま）
+    assert part.files[0] == [tmp_path / "grades.html", tmp_path / "credits.html"]
+
+
+def test_academic_import_cli_says_why_the_files_cannot_be_read(tmp_path, monkeypatch):
+    """学校の部品が選ばれていない、ファイルが違う、などは、トレースバックではなく理由で止まる。"""
+    monkeypatch.setattr(academic_sync, "load_config", lambda: object())
+    monkeypatch.setattr(academic_sync, "from_config", lambda _config: school.School())
+    with pytest.raises(SystemExit, match="学校の部品が選ばれていません"):
+        academic_sync.main([str(tmp_path / "grades.html"), "--dry-run"])
+    monkeypatch.setattr(academic_sync, "from_config", lambda _config: WASEDA)
+    with pytest.raises(SystemExit, match="成績を読めません"):
+        academic_sync.main([str(tmp_path / "grades.html"), str(tmp_path / "credits.html"), "--dry-run"])
 
 
 def test_academic_import_cli_writes_only_through_the_gateway(tmp_path, monkeypatch):
     """書き込みはゲートウェイの course（授業ホームだけに届く）として。合言葉が無ければ state も読まずに止まる。"""
     record = AcademicRecord(grades=(), requirements=(), gpa=())
-    monkeypatch.setattr(academic_sync, "parse_academic_record", lambda *_paths: record)
+    _school_from_config(monkeypatch, record)
     monkeypatch.setattr(academic_sync, "read_state", lambda: (_ for _ in ()).throw(AssertionError("state")))
 
     with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
@@ -418,7 +452,7 @@ def test_duplicate_record_keys_stop_before_any_write():
                                     Grade("数学", 2025, "春期", 2, "B", 3, "基礎")), requirements=(), gpa=())
 
     with pytest.raises(ValueError, match="重複"):
-        AcademicSync(notion, STATE).sync(record)
+        AcademicSync(notion, STATE, WASEDA).sync(record)
 
     assert notion.writes == []
 
@@ -428,7 +462,7 @@ def test_duplicate_identity_already_in_notion_stops_before_any_write():
     notion = CountingNotion({"grades": [{"id": "a", **row}, {"id": "b", **row}]})
 
     with pytest.raises(ValueError, match="重複"):
-        AcademicSync(notion, STATE).sync(AcademicRecord(
+        AcademicSync(notion, STATE, WASEDA).sync(AcademicRecord(
             grades=(Grade("数学", 2025, "春期", 2, "A", 4, "基礎"),), requirements=(), gpa=()))
 
     assert notion.writes == []
@@ -436,7 +470,7 @@ def test_duplicate_identity_already_in_notion_stops_before_any_write():
 
 def test_each_database_is_read_once_per_run():
     notion = CountingNotion()
-    AcademicSync(notion, STATE).sync(AcademicRecord(
+    AcademicSync(notion, STATE, WASEDA).sync(AcademicRecord(
         grades=tuple(Grade(f"科目{i}", 2025, "春期", 2, "A", 4, "基礎") for i in range(5)),
         requirements=tuple(Requirement(f"要件{i}", "", 2, 2, 2, 0, "区分") for i in range(3)),
         gpa=(GPAEntry("2025年度（春学期）", 2025, 3.5, "春学期"),),
@@ -451,7 +485,7 @@ def test_grade_matches_a_course_whose_name_differs_only_in_width():
         "科目名": {"title": [{"plain_text": "情報セキュリティB"}]}, "年度": {"number": 2025},
         "学期": {"select": {"name": "秋学期"}}}}]})
 
-    AcademicSync(notion, STATE).sync(AcademicRecord(
+    AcademicSync(notion, STATE, WASEDA).sync(AcademicRecord(
         grades=(Grade("情報セキュリティＢ", 2025, "秋期", 2, "A", 4, "基礎"),), requirements=(), gpa=()))
 
     (_method, _path, body), = notion.writes

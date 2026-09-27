@@ -202,7 +202,7 @@ async def test_list_classes_for_another_weekday_uses_that_days_date(server, monk
     """曜日を指定されたら、今日ではなく、次のその曜日の日付で学期と時刻を決める。"""
     from datetime import date
 
-    from kei_agent_modules.course import agent, notion_sync
+    from kei_agent_modules.course import agent, notion_sync, school
 
     class _Today(date):
         @classmethod
@@ -211,14 +211,29 @@ async def test_list_classes_for_another_weekday_uses_that_days_date(server, monk
 
     seen = []
 
-    def courses_on(weekday, day):
+    def courses_on(weekday, day, school=None):
         seen.append((weekday, day))
         return [{"id": "p1", "subject": "データベース", "weekday": weekday, "term": "秋学期", "period": 2, "url": ""}]
 
     monkeypatch.setattr(agent, "date", _Today)
     monkeypatch.setattr(notion_sync, "courses_on", courses_on)
+    # 時限の時刻は、設定の [course] school で選んだ学校の部品から（ここでは早稲田）
+    monkeypatch.setattr(agent, "from_config", lambda _config: school.load({"school": "waseda"}))
     result = await Agent(server, TOKEN).ask("list-classes", json.dumps({"weekday": "月"}, ensure_ascii=False))
 
     assert seen == [("月", date(2026, 9, 28))]
     item, = json.loads(result.answer)["data"]["items"]
     assert item["start"] == "2026-09-28T10:40"
+
+
+async def test_list_classes_without_period_times_says_how_to_set_them(server, monkeypatch):
+    """学校を選んでいなければ時刻は空にして、設定の書き方を添える（朝の一覧には時刻のある授業だけが並ぶ）。"""
+    from kei_agent_modules.course import agent, notion_sync, school
+
+    monkeypatch.setattr(notion_sync, "courses_on", lambda weekday, day, school=None: [
+        {"id": "p1", "subject": "データベース", "weekday": weekday, "term": "秋学期", "period": 2, "url": ""}])
+    monkeypatch.setattr(agent, "from_config", lambda _config: school.School())
+    result = await Agent(server, TOKEN).ask("list-classes", json.dumps({"weekday": "月"}, ensure_ascii=False))
+
+    envelope = json.loads(result.answer)
+    assert envelope["data"]["items"][0]["start"] == "" and "[course] に school か periods" in envelope["text"]

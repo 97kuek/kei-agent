@@ -1,5 +1,7 @@
-"""成績 HTML から作った学業記録を、授業ホームの成績・単位要件・GPA の DB に書き込む。
+"""成績のファイルから作った学業記録を、授業ホームの成績・単位要件・GPA の DB に書き込む。
 
+ファイルの読み方と、学校ごとの対応（成績の学期と授業 DB の学期、GPA の期間、単位要件の名前）は学校の部品
+（school.py）が持つ。ここは、どの学校でも同じ書き込み方だけを受け持つ。
 行は stable key（`Kei Agent 成績ID` など）で1度だけ作り、2回目からは差分だけを直す。
 各 DB は1回の実行で1度だけ読み、照合は手元の索引で行う。
 """
@@ -11,19 +13,14 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent_a2a.api import Notion, NotionError, gateway_notion
+from kei_agent_a2a.api import Notion, NotionError, gateway_notion, load_config
 
-from . import periods
-from .academic_record import AcademicRecord, GPAEntry, Grade, Requirement, parse_academic_record
+from .academic_record import AcademicRecord, GPAEntry, Grade, Requirement
 from .course_identity import normalize_course_name
 from .notion_props import number, plain, select, text, title
 from .notion_sync import read_state
+from .school import School, from_config
 
-# 成績の学期 → GPA の期間。夏ク・秋ク・通年は公表値と照合済み。冬クはどちらに入るか確かめていないので結ばない
-_GPA_TERMS = {**periods.GRADE_TERMS, "夏ク": periods.SPRING, "秋ク": periods.AUTUMN,
-              periods.ALL_YEAR: periods.AUTUMN}
-# 科目群の表記（成績 HTML → 授業 DB の選択肢）
-_COURSE_GROUPS = {"Ａ群": "A群", "Ｂ群": "B群", "Ｃ群(専門教育科目)": "C群", "他箇所聴講科目": "他箇所聴講科目"}
 _ACADEMIC_KEYS = ("grades", "requirements", "gpa")
 
 
@@ -47,12 +44,6 @@ def gpa_key(entry: GPAEntry) -> str:
     return f"gpa:{entry.year}:{entry.kind}"
 
 
-def gpa_display_label(year: int, kind: str) -> str | None:
-    """GPA の期間名。グラフで時系列に並ぶよう、年度・学期番号・学期名の順にする。"""
-    term = {periods.SPRING: 1, periods.AUTUMN: 2}.get(kind)
-    return f"{year} {term} {kind}" if term and year else None
-
-
 def _unique(kind: str, keys: list[str]) -> None:
     """同じ識別子が2つあれば、書き込む前に止める（後の行で前の行を黙って上書きしない）。"""
     duplicates = sorted(key for key, count in Counter(keys).items() if count > 1)
@@ -60,8 +51,8 @@ def _unique(kind: str, keys: list[str]) -> None:
         raise ValueError(f"{kind} の識別子が重複しています: {'、'.join(duplicates)}")
 
 
-def _course_key(name: str, year: object, term: str) -> tuple[str, object, str]:
-    return normalize_course_name(name), year, periods.course_term(term)
+def _course_key(name: str, year: object, term: str, school: School) -> tuple[str, object, str]:
+    return normalize_course_name(name), year, school.course_term(term)
 
 
 class AcademicSync:
@@ -69,9 +60,10 @@ class AcademicSync:
 
     ID_PROPERTIES = {"grades": "Kei Agent 成績ID", "requirements": "Kei Agent 要件ID", "gpa": "Kei Agent GPAID"}
 
-    def __init__(self, notion, state: dict):
+    def __init__(self, notion, state: dict, school: School):
         databases = state["databases"]
         self.notion = notion
+        self.school = school
         self.sources = {key: databases[key]["data_source_id"] for key in ("courses", *_ACADEMIC_KEYS)}
 
     def _rows(self, key: str) -> list[dict]:
@@ -89,7 +81,8 @@ class AcademicSync:
         index: dict[tuple, list[str]] = {}
         for row in self._rows("courses"):
             props = row.get("properties", {})
-            key = _course_key(plain(props.get("科目名")), number(props.get("年度")), select(props.get("学期")))
+            key = _course_key(plain(props.get("科目名")), number(props.get("年度")), select(props.get("学期")),
+                              self.school)
             index.setdefault(key, []).append(row["id"])
         return index
 
@@ -154,7 +147,7 @@ class AcademicSync:
                 "GP": {"number": grade.gp}, "科目群": text(group), "科目区分": text(subcategory),
             }
             label = f"成績履歴: {grade.course_name} / {grade.year} / {grade.term}"
-            matches = courses.get(_course_key(grade.course_name, grade.year, grade.term), [])
+            matches = courses.get(_course_key(grade.course_name, grade.year, grade.term, self.school), [])
             if len(matches) == 1:
                 properties["授業"] = {"relation": [{"id": matches[0]}]}
             elif len(matches) > 1:
@@ -175,7 +168,7 @@ class AcademicSync:
         for entry in record.gpa:
             identity = gpa_key(entry)
             outcome, _ = self._upsert("gpa", indexes["gpa"], identity, {
-                "期間": title(gpa_display_label(entry.year, entry.kind) or entry.period),
+                "期間": title(self.school.gpa_label(entry.year, entry.kind) or entry.period),
                 "Kei Agent GPAID": text(identity),
                 "年度": {"number": entry.year}, "種別": {"select": {"name": entry.kind}}, "GPA": {"number": entry.gpa},
             })
@@ -187,7 +180,7 @@ def _grade_name(props: dict) -> str:
     return plain(props.get("授業名") or props.get("科目名"))
 
 
-def academic_relation_changes(rows: dict[str, list[dict]]) -> dict[str, dict]:
+def academic_relation_changes(rows: dict[str, list[dict]], school: School) -> dict[str, dict]:
     """一意な区分・年度/学期だけを結ぶ。手入力済みの relation は維持する。"""
     requirements: dict[tuple[str, str], list[str]] = {}
     for page in rows["requirements"]:
@@ -207,25 +200,16 @@ def academic_relation_changes(rows: dict[str, list[dict]]) -> dict[str, dict]:
             group, category = category.split(" / ", 1)
         patch: dict = {}
         if not props.get("単位要件", {}).get("relation"):
-            target = requirements.get((group, category), [])
-            # 要件側の名前が成績側と違うもの（学務の表記を確かめて対応づけたものだけ）
-            if not target and (group, category) == ("Ｃ群(専門教育科目)", "専門選択必修"):
-                target = requirements.get((group, "専門選択必修（学系別専門）"), [])
-            if not target and (group, category) in {
-                ("Ａ群", "外国語 英語"), ("Ｂ群", "自然科学 物理学"),
-                ("Ｂ群", "自然科学 化学"),
-            }:
-                target = requirements.get((group, category + " 必修"), [])
+            # 要件側の名前が成績側と違うものは、学校の部品が候補を足す
+            target: list[str] = []
+            for name in school.requirement_names(group, category):
+                target = requirements.get((group, name), [])
+                if target:
+                    break
             if group and category and len(target) == 1:
                 patch["単位要件"] = {"relation": [{"id": target[0]}]}
         if not props.get("GPA推移", {}).get("relation"):
-            term = select(props.get("学期"))
-            kind = _GPA_TERMS.get(term)
-            # 成績の「その他」は学期を示さない。既知のαだけは2025春の
-            # 公表値との単位加重計算で照合済み。
-            if term == "その他" and number(props.get("取得年度")) == 2025 \
-                    and _grade_name(props).startswith("データ科学入門α "):
-                kind = periods.SPRING
+            kind = school.gpa_kind(select(props.get("学期")), number(props.get("取得年度")), _grade_name(props))
             target = gpas.get((number(props.get("取得年度")), kind), []) if kind else []
             if len(target) == 1:
                 patch["GPA推移"] = {"relation": [{"id": target[0]}]}
@@ -234,12 +218,12 @@ def academic_relation_changes(rows: dict[str, list[dict]]) -> dict[str, dict]:
     return changes
 
 
-def historical_course_changes(grades: list[dict], courses: list[dict]) -> list[dict]:
+def historical_course_changes(grades: list[dict], courses: list[dict], school: School) -> list[dict]:
     """成績の年度・学期・名称から一意な過去授業だけを新規作成する計画。"""
     existing: dict[tuple, list[str]] = {}
     for row in courses:
         props = row["properties"]
-        key = _course_key(plain(props.get("科目名")), number(props.get("年度")), select(props.get("学期")))
+        key = _course_key(plain(props.get("科目名")), number(props.get("年度")), select(props.get("学期")), school)
         if all(key):
             existing.setdefault(key, []).append(row["id"])
     planned: list[dict] = []
@@ -250,16 +234,16 @@ def historical_course_changes(grades: list[dict], courses: list[dict]) -> list[d
             continue
         name = _grade_name(props)
         year = number(props.get("取得年度"))
-        term = periods.course_term(select(props.get("学期")))
+        term = school.course_term(select(props.get("学期")))
         if not name or not year or not term:
             raise ValueError(f"過去授業の識別情報が不足しています: {grade['id']}")
-        key = _course_key(name, year, term)
+        key = _course_key(name, year, term, school)
         if key in seen or len(existing.get(key, [])) > 1:
             raise ValueError(f"過去授業の識別子が重複しています: {key}")
         seen.add(key)
         if existing.get(key):
             continue
-        group_select = _COURSE_GROUPS.get(plain(props.get("科目群")))
+        group_select = school.course_group(plain(props.get("科目群")))
         category = plain(props.get("科目区分"))
         properties = {
             "科目名": title(name), "年度": {"number": year},
@@ -288,26 +272,26 @@ def _missing_options(current: list[dict], wanted: list[dict]) -> list[dict] | No
     return [{"name": item["name"], "color": item["color"]} for item in current] + additions
 
 
-def reconcile_academic_history(notion: Notion, state: dict, apply: bool = False) -> dict[str, int]:
+def reconcile_academic_history(notion: Notion, state: dict, school: School, apply: bool = False) -> dict[str, int]:
     """確定済みの成績から過去授業を作り、検証できる relation を接続する。"""
-    from .notion_setup import COURSES
+    from .notion_setup import course_spec
 
     sources = {key: state["databases"][key]["data_source_id"] for key in ("courses", *_ACADEMIC_KEYS)}
     rows = {key: notion.paginate("POST", f"/data_sources/{source}/query", {"page_size": 100})
             for key, source in sources.items()}
-    relation_patches = academic_relation_changes(rows)
+    relation_patches = academic_relation_changes(rows, school)
     report = {"requirements": sum("単位要件" in patch for patch in relation_patches.values()),
               "gpa": sum("GPA推移" in patch for patch in relation_patches.values()),
-              "historical_courses": len(historical_course_changes(rows["grades"], rows["courses"]))}
+              "historical_courses": len(historical_course_changes(rows["grades"], rows["courses"], school))}
     if not apply:
         return report
 
     source_id = sources["courses"]
     course_props = notion.request("GET", f"/data_sources/{source_id}")["properties"]
     schemas: dict = {}
+    wanted = course_spec(school)["properties"]
     for key in ("科目群", "学期"):
-        options = _missing_options(course_props[key]["select"]["options"],
-                                   COURSES["properties"][key]["select"]["options"])
+        options = _missing_options(course_props[key]["select"]["options"], wanted[key]["select"]["options"])
         if options:
             schemas[key] = {"select": {"options": options}}
     categories = sorted({plain(row["properties"].get("科目区分")) for row in rows["grades"]} - {""})
@@ -322,7 +306,7 @@ def reconcile_academic_history(notion: Notion, state: dict, apply: bool = False)
         notion.request("PATCH", f"/pages/{page_id}", {"properties": properties})
         # 読み直さずに、手元の成績にも同じ relation を反映する（過去授業へ引き継ぐため）
         grades[page_id]["properties"].update(properties)
-    for entry in historical_course_changes(rows["grades"], rows["courses"]):
+    for entry in historical_course_changes(rows["grades"], rows["courses"], school):
         notion.request("POST", "/pages", {
             "parent": {"type": "data_source_id", "data_source_id": source_id},
             "properties": entry["properties"],
@@ -331,16 +315,22 @@ def reconcile_academic_history(notion: Notion, state: dict, apply: bool = False)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """成績 HTML の解析を dry-run し、明示時だけ Notion へ書き込む入口。"""
-    parser = argparse.ArgumentParser(prog="kei-agent-module course academic-import")
-    parser.add_argument("grades_html", type=Path)
-    parser.add_argument("credits_html", type=Path)
+    """成績のファイルを学校の部品で読んで dry-run し、明示時だけ Notion へ書き込む入口。"""
+    parser = argparse.ArgumentParser(
+        prog="kei-agent-module course academic-import",
+        description="成績のファイルを学校の部品（config.toml の [course] school）で読み、授業ホームに入れる")
+    parser.add_argument("files", type=Path, nargs="+",
+                        help="成績のファイル（早稲田は、成績の HTML と単位の HTML をこの順に2つ）")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")
     parser.add_argument("--delete-inputs", action="store_true")
     args = parser.parse_args(argv)
-    record = parse_academic_record(args.grades_html, args.credits_html)
+    try:
+        school = from_config(load_config())
+        record = school.read_record(args.files)
+    except (ValueError, OSError) as e:
+        raise SystemExit(f"成績を読めません: {e}") from None
     print(f"成績 {len(record.grades)} 件・単位要件 {len(record.requirements)} 件・GPA {len(record.gpa)} 件")
     if args.dry_run:
         print("dry-run: Notion への書き込みは行いません")
@@ -353,8 +343,8 @@ def main(argv: list[str] | None = None) -> int:
     except NotionError as e:
         raise SystemExit(str(e)) from None
     state = read_state()
-    result = AcademicSync(notion, state).sync(record)
-    links = reconcile_academic_history(notion, state, apply=True)
+    result = AcademicSync(notion, state, school).sync(record)
+    links = reconcile_academic_history(notion, state, school, apply=True)
     print("作成 " + "・".join(f"{key} {count} 件" for key, count in result.created.items()))
     print("更新 " + "・".join(f"{key} {count} 件" for key, count in result.updated.items()))
     print("連携 " + "・".join(f"{key} {count} 件" for key, count in links.items()))
@@ -365,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     if total != expected:
         raise RuntimeError(f"反映件数の検証に失敗しました: expected={expected}, actual={total}")
     if args.delete_inputs:
-        args.grades_html.unlink()
-        args.credits_html.unlink()
-        print("入力 HTML を削除しました")
+        for path in args.files:
+            path.unlink()
+        print("入力のファイルを削除しました")
     return 0

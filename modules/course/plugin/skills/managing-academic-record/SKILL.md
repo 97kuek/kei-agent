@@ -20,10 +20,11 @@ description: Use when大学エージェントがGPA、取得単位、卒業要�
 
 ## 取り込み直し
 
-成績と単位の取り込みは、依頼者が手元で `kei-agent-course-academic-import` を実行して行う（原HTMLは Notion に
-保存しない）。AI からは実行できないので、取り込み直しを頼まれたら、この手順を案内する。
+成績と単位の取り込みは、依頼者が手元で `kei-agent-module course academic-import` を実行して行う（原文のファイルは
+Notion に保存しない）。ファイルの読み方は学校の部品（設定の `[course] school`）で決まり、早稲田は成績の HTML と単位の
+HTML の2つを渡す。AI からは実行できないので、取り込み直しを頼まれたら、この手順を案内する。
 
-1. `kei-agent-course-academic-import --dry-run <grades.html> <credits.html>` で件数だけ確認する（書き込まない）
+1. `kei-agent-module course academic-import --dry-run <grades.html> <credits.html>` で件数だけ確認する（書き込まない）
 2. `--apply` を付けて作成・更新・未変更を確かめる
 3. 入力を消してよいときだけ `--apply --delete-inputs` を使う
 

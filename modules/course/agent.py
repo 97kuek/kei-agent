@@ -5,7 +5,7 @@ Box の学部要項と過去問を扱う。自由な質問には、選択済み 
 
 metadata の `skill`（なければ本文の1行目）で、どの仕事かを決める。細かい指定（`days`・`weekday`）は、本体（module.py）
 が本文の JSON で渡す。返事は全担当で共通の封筒。締切の一覧は `data.items` に入れ、見せ方は本体が決める
-（朝の一覧、24時間前の知らせ、スレッドへの返事で形が違う）。
+（朝の一覧、24時間前の知らせ、スレッドへの返事で形が違う）。時限の時刻と学期は、学校の設定（school.py）で決まる。
 """
 
 from __future__ import annotations
@@ -26,8 +26,9 @@ from kei_agent_a2a.api import (
     weekday,
 )
 
-from . import moodle, notion_sync, periods, toggl_report
+from . import moodle, notion_sync, toggl_report
 from .ics import Event
+from .school import SchoolError, from_config, next_weekday
 from .skills import (
     LIST_CALENDAR_ASSIGNMENTS,
     LIST_CLASSES,
@@ -106,6 +107,8 @@ NO_ICS = ("Moodle のカレンダーの URL がありません。Moodle のカ�
 MAX_DUE = 20
 # 「締切の近い課題」で見る先の長さ（日）。取り込みは学期の終わりまで見るので、こちらだけ短くする
 DUE_DAYS = 14
+NO_PERIODS = ("（時限の時刻が分からないので、時刻は空にしたよ。config.toml の [course] に school か periods を"
+              "書いてね）")
 
 
 def asked_skill(text: str, metadata: dict | None = None) -> str:
@@ -201,25 +204,27 @@ class Executor(SkillExecutor):
         """
         today = date.today()
         wanted = asked_weekday(text) or weekday(today)
-        day = periods.next_weekday(wanted, today)
+        day = next_weekday(wanted, today)
         try:
-            found = await asyncio.to_thread(notion_sync.courses_on, wanted, day)
-        except (notion_sync.SyncError, NotionError) as e:
+            school = from_config(self.config)
+            found = await asyncio.to_thread(notion_sync.courses_on, wanted, day, school=school)
+        except (notion_sync.SyncError, NotionError, SchoolError) as e:
             await self.fail(updater, str(e))
             return
         items = []
         for course in found:
-            span = periods.at(day, course["period"])
+            span = school.at(day, course["period"])
             items.append({**course,
                           "start": span[0].isoformat(timespec="minutes") if span else "",
                           "end": span[1].isoformat(timespec="minutes") if span else ""})
-        await self.done(updater, f"{wanted}曜の授業は {len(items)} コマ",
+        note = NO_PERIODS if not school.periods and any(item["period"] for item in items) else ""
+        await self.done(updater, f"{wanted}曜の授業は {len(items)} コマ{note}",
                          {"weekday": wanted, "items": items})
 
     async def _list_current_courses(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         try:
-            items = await asyncio.to_thread(notion_sync.current_courses)
-        except (notion_sync.SyncError, NotionError) as e:
+            items = await asyncio.to_thread(notion_sync.current_courses, school=from_config(self.config))
+        except (notion_sync.SyncError, NotionError, SchoolError) as e:
             await self.fail(updater, str(e))
             return
         await self.done(updater, f"今学期の履修科目は {len(items)} 件", {"items": items})
