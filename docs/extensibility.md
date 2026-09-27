@@ -97,6 +97,9 @@ label = "読みもの"
 short = "読みもの"              # App Home のチェックに出す短い名前
 default = "07:00"               # 空文字なら、既定では動かさない
 
+# [slash_commands]              # Slack のスラッシュコマンド（/ を付けない名前 = 説明）。Slack の App にも同じ名前で足す
+# stamp = "スタンプを押す"      # 打たれると class Module の on_slash_command(name, body)
+
 # [settings]                    # 設定（持つなら）。名前 = 既定の値。利用者は config.toml の、モジュールの名前の表で変える
 # school = ""                   # （大学なら [course] school = "waseda"）。値は既定と同じ形（文字・数・真偽・配列・表）にする
 ```
@@ -153,7 +156,13 @@ class Module:
 | `on_event(kind, data)` | 本体やほかのモジュールが出来事を配ったとき（`core.emit`。種類は下の「出来事」）。投げっぱなしなので返事は要らない。落ちても配った側は止まらない |
 | `home()` | App Home を作るとき。このモジュールの項目（Slack の blocks）を返すと、表示名の見出しの下に並ぶ。押せるものの action_id は `core.home_action_id(名前)`、チェックは `core.home_checkboxes(名前, 値→表示名, 付いている値)` で作る。依頼者にだけ出る |
 | `on_home_action(name, action)` | App Home の、このモジュールの項目が押されたとき（`name` は action_id を作ったときの名前、`action` は Slack の action。選ばれた値は `selected_values(action)`）。終わると App Home を作り直す |
+| `on_slash_command(name, body)` | `[slash_commands]` のコマンドが打たれたとき。返した文を、打った人にだけ見せる。Slack は3秒以内の返事を求めるので、時間のかかることは `core.spawn` に回す |
+| `on_action(name, body)` | このモジュールの投稿のボタンなど（action_id は `core.action_id(名前)`）が押されたとき |
+| `on_view(name, body)` | このモジュールの入力の画面（callback_id は `core.view_id(名前)`）が送られたとき。欄の下に出す理由を `{block_id: 文}` で返すと、画面を閉じない |
+| `material(now)` | Daily と振り返りの材料を作るとき。足す行を返す（今週の時間など） |
 | `welcome()` | モジュールのチャンネルに Kei Agent が招かれたとき |
+
+コマンド・ボタン・入力の画面は、依頼者のときだけモジュールに渡る。
 
 出来事（`core.emit(種類, 中身...)` で配り、`on_event(種類, 中身)` で受け取る。空の中身は外して渡す）:
 
@@ -167,13 +176,15 @@ class Module:
 
 窓口 `core` でできること（`src/kei_agent/api.py`）:
 
-- Slack: `post`（ts を返す）、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
+- Slack: `post`（ts を返す。`blocks=` でボタンも置ける）、`update`（自分の投稿を書き換える）、`open_view` / `update_view`（入力の画面）、`permalink`、`channel_name`（番号つきの名前）、`action_id` / `view_id`、`reply`（`failed=True` なら ⚠️）、`react`、`channel_ids`、`channels(種類)`、`is_owner`、`watch_thread`（メンションなしの返信を拾う）、`claim_thread`（研究テーマのチャンネルでも、そのスレッドの続きを受ける）。失敗の決まった文は `failure_text()`
 - 担当: `work(req)`（研究テーマのチャンネルで、そのチャンネルの作業場を使って担当と会話して答える。添付・できたファイル・接続先の許可・引き継ぎ・ジョブは研究と同じ流れ）、`ask_agent(skill, 材料)`（`[process]` の担当に仕事を頼む）、`tell_agent(skill, 材料)`（AI を動かさない知らせだけを渡す。届かなくても困りごととして知らせない）、`converse(req)`（担当と会話として答える）、`pick_skill(req)`（言われたことが名刺のどの仕事かを軽いモデルで選ぶ。選べなければ `ASK`）
 - 記録: `records`（`put` / `get` / `update` / `items` / `delete`。種類と鍵で1件、中身は JSON にできる辞書。`keep_days` を付けたものは、その日数で毎晩の保守が消す）、`schedule_detail(名前, 日付)`
 - 設定: `settings`（module.toml の `[settings]` の既定に、config.toml の `[<名前>]` を重ねた写し）
 - 予定カレンダー: `sync_calendar(出典, 予定, day=, days=, complete=, expected_count=)`（出典と ID で照合し、手入力の行には触らない。見えなくなった行は消さずに「要確認」）
 - 出来事と App Home: `emit(種類, 中身...)`（出来事を配る）、`home_action_id(名前)`・`home_checkboxes(名前, 値→表示名, 付いている値)`（App Home の項目）、`selected_values(action)`（押された項目の、選ばれた値）
-- そのほか: `notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
+- ほかのモジュール: `ask_module(名前, skill, 材料)`（`[depends]` に書いたモジュールの担当に頼む）
+- Toggl: `load_toggl` / `Toggl` / `TogglError` / `TogglAmbiguousWrite`（窓口の kei_agent.api から）
+- そのほか: `spawn`（裏で動かす）、`notify_trouble`、`notice_once`、`themes()`（研究テーマの名前・場所・検索キーワード・前提）、`to_thread`（時間のかかる読み書き）。Notion は、Notion のモジュールができるまで `hub`（共通ホーム）と `notion`（研究ホーム）をそのまま渡す
 
 ### agent.py の書き方（枠の版 1）
 
@@ -296,7 +307,7 @@ class Executor(SkillExecutor):               # self.config と self.store は土
 |---|---|---|
 | 1 | 個人のものを `~/.config/kei-agent/` に出す（設定・プロフィール・指示書の差し替え・秘密情報の場所）。リポジトリには例の設定だけを残す | 済み（2026-09-26） |
 | 2 | モジュールの枠。まず知識を載せ替えて形を確かめる。3つに分けて反映する: ① 定義と読み込み（`module.toml` から、担当の名前・表示名・用途とモデル・制限の表の行・チャンネルと定期処理の既定・担当プロセスの番地を作る）② 差し込み口と `core`（チャンネル・定期処理・リアクション・朝の一覧・招かれたときの案内。知識の本体側を `modules/knowledge/module.py` へ）③ 担当プロセスを `modules/knowledge/agent.py` へ移し、共通の起動コマンドで動かす | 済み（2026-09-27） |
-| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②は済み（2026-09-27）、③は反映待ち |
+| 3 | 残りを載せ替える（仕事 → 大学（学校の部品化と早稲田）→ 声 → Notion → 研究（テーマの置き場所を含む）→ Daily・振り返り・時間記録・自己改善）。仕事は2つに分ける: ① 枠を広げる（連携の道具・用途の選び分け・plugin・振り分けの受け渡し・予定の agenda・声）② 仕事を `modules/work/` へ | 仕事の①②済み（2026-09-27）。大学は ① 枠を広げる（見回り tick・取り込み prepare・予定の種類・予定カレンダーの窓口・モジュールのコマンド・担当側の窓口）② 大学を `modules/course/` へ ③ 学校ごとの違いを部品にする（早稲田はその1つ）。大学の①②③は済み（2026-09-27）。声は ① 枠を広げる（出来事の受け口・App Home のモジュールの項目・担当側の常駐の仕事と窓口）② 声を `modules/voice/` へ。①②は済み（2026-09-27）。Notion は ① ホームをモジュールごとに持てるようにする（`[notion.homes]`、ゲートウェイの利用者をホームから決める）② ゲートウェイを `modules/notion/` へ（A2A ではない常駐のプロセス `kind = "service"`）。①②は済み（2026-09-27）。研究は ① 枠を広げる（用途の手動指定 `[[名前]]` と `manual`、ほかのどれにも当たらないチャンネル `"*"`、チャンネルの作業場での会話 `core.work`）② 研究を `modules/research/` へ ③ テーマの置き場所（`themes.toml`、招いたときの選択、既存のフォルダへの配慮、保護フォルダ）。①②③は済み（2026-09-27）。時間記録は ① 枠を広げる（スラッシュコマンド、投稿のボタンと入力の画面、`ask_module`、Daily の材料）② 時間記録を `modules/time/` へ。①は反映待ち |
 | 4 | `kei-agent setup` / `doctor` / `module add`、Slack の manifest の生成、常駐の登録 | |
 | 5 | README、モジュールの作り方の文書、`kei-agent module new`、`kei_agent.testing`、GitHub Actions | |
 
