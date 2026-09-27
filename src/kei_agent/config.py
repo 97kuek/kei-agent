@@ -232,6 +232,10 @@ class Config:
         `--plugin-dir` に `plugin/` そのものを渡すと、Claude Code は中の plugin を全部読む。
         担当外の skill を同じ claude に見せないため、必ずエージェント1つぶんを名指しする。
         """
+        spec = modules.known().get(agent)
+        if spec is not None and spec.actor is not None and spec.actor.plugin:
+            # モジュールの skill とフックは、そのモジュールのフォルダの plugin/
+            return spec.path / modules.PLUGIN_DIR
         if agent not in AGENT_PLUGINS:
             raise ValueError(f"未知のagent: {agent}（使えるのは {', '.join(sorted(AGENT_PLUGINS))}）")
         return self.repo_root / "plugin" / agent

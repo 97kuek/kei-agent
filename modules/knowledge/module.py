@@ -88,7 +88,7 @@ class Module:
     def welcome(self) -> str:
         return CAN_DO
 
-    async def on_message(self, req: Request) -> None:
+    async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         """知識のチャンネルと、論文の新着のスレッドの依頼。どれも自由な質問として、担当に聞く。"""
         await self.core.converse(req)
 

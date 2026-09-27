@@ -6,7 +6,6 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -34,9 +33,14 @@ class CalendarItem:
     status: str
 
 
+# 手で入れた予定の出典。どの同期も、この行には触らない
+MANUAL = "手入力"
+
+
 @dataclass(frozen=True)
 class CalendarSnapshot:
-    source: Literal["Outlook", "課題"]
+    # 出典（Outlook・課題のほか、予定を出すモジュールの出典）。「手入力」は使えない
+    source: str
     complete: bool
     items: tuple[CalendarItem, ...]
     expected_count: int | None = None
@@ -66,7 +70,7 @@ def _datetime(value: str, source: str) -> str:
 
 
 def _validated(snapshot: CalendarSnapshot) -> tuple[CalendarItem, ...]:
-    if snapshot.source not in {"Outlook", "課題"}:
+    if not snapshot.source or snapshot.source == MANUAL:
         raise IncompleteSnapshot("出典が分かりません")
     if snapshot.expected_count is not None and snapshot.expected_count != len(snapshot.items):
         raise IncompleteSnapshot("出典の件数が応答と一致しません")

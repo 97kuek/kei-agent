@@ -770,6 +770,29 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         return (event.get("reaction") == NIGHT_REACTION and item.get("type") == "message"
                 and self.is_allowed(event.get("user")) and event.get("item_user") == event.get("user"))
 
+    async def module_agenda(self, days: int) -> tuple[dict[str, list[dict]], list[str]]:
+        """モジュールの予定（class Module の agenda）。読めたモジュールの名前 → 予定と、読めなかったモジュールの表示名。
+
+        読めなかった（None を返した・落ちた）モジュールは、予定が無いのとは分ける（予定カレンダーの行を
+        「要確認」にしないため）。
+        """
+        found: dict[str, list[dict]] = {}
+        failed: list[str] = []
+        for name, module in self.modules.items():
+            agenda = getattr(module, "agenda", None)
+            if agenda is None:
+                continue
+            try:
+                items = await agenda(days)
+            except Exception:
+                log.exception("モジュール「%s」の予定を読めませんでした", name)
+                items = None
+            if items is None:
+                failed.append(modules.known()[name].label)
+                continue
+            found[name] = [item for item in items if isinstance(item, dict)]
+        return found, failed
+
     async def module_reaction(self, event: dict, added: bool) -> bool:
         """モジュールの投稿へのリアクション（朝の読みものへの 👍 など）。どれかのモジュールが扱ったら True。"""
         for name, module in self.modules.items():
@@ -873,7 +896,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     async def ask_agent(self, actor: str, prompt: str, session_id: str | None = None,
                         channel: str = "", thread_ts: str = "", on_activity=None, *,
                         provider: str | None = None, read_only: bool = False,
-                        use_case: UseCase | None = None) -> runner.RunResult:
+                        use_case: UseCase | str | None = None) -> runner.RunResult:
         """大学・仕事のエージェントに自由な依頼（`ask`）を1回頼む。結果は研究の run_agent と同じ形。
 
         用途を渡さなければ、エージェントがその担当の分類器で決める。
@@ -888,7 +911,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
         payload = {"prompt": prompt, "session_id": session_id, "channel": channel, "thread_ts": thread_ts,
                    "provider": provider, "read_only": read_only}
         if use_case is not None:
-            payload["use_case"] = use_case.value
+            payload["use_case"] = str(use_case)
         with self.claude_running():
             return await agents.run_ask(agent, payload, on_activity)
 
@@ -1079,7 +1102,8 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
     async def _dispatch(self, req: Request, agent: str, skill: str, params: dict | None = None) -> bool:
         """エージェントかモジュールに渡す。同じスレッドで2つ同時に動かさず、全体の同時実行の上限も守る。
 
-        モジュールには class Module の on_message(req) で渡す（skill と params は大学・仕事のためのもの）。
+        モジュールには class Module の on_message で渡す。skill と params は、研究全体のチャンネルで
+        振り分け係が選んだ仕事（無ければ空。モジュールは core.pick_skill で自分で選べる）。
         """
         handler = {course.AGENT: self.course, work.AGENT: self.work}.get(agent)
         on_message = None if handler else getattr(self.modules.get(agent), "on_message", None)
@@ -1094,7 +1118,7 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
             if handler is not None:
                 await handler(req, skill, params)
             else:
-                await on_message(req)
+                await on_message(req, skill=skill, params=dict(params or {}))
         return True
 
     async def drop_deferred_for(self, req: Request) -> None:
@@ -1296,12 +1320,15 @@ class Assistant(SettingsActions, SelfFix, Handoff, CourseChannel, WorkChannel, v
 
         担当を呼べるのは本体だけ。どの担当にも読むだけで頼み、Slack に出すときと同じ出力の確認を通す。
         """
-        if actor not in VOICE_USE_CASES:
+        spec = modules.known().get(actor)
+        module_actor = actor in self.modules and actor in self.agents and spec is not None and spec.actor is not None
+        if actor not in VOICE_USE_CASES and not module_actor:
             return "研究、授業、仕事のどれを調べるか分からなかった。"
         if not question.strip():
             return "何を調べるか分からなかった。"
         prompt = today_line() + question.strip()
-        use_case = VOICE_USE_CASES[actor]
+        # モジュールの担当は、module.toml の default_use_case（読むだけの1回）で答える
+        use_case = VOICE_USE_CASES.get(actor) or spec.actor.default_use_case
         if actor == research.AGENT:
             if not theme.strip():
                 return "どの研究テーマを調べるかも教えて。"

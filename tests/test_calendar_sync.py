@@ -200,3 +200,13 @@ def test_existing_rows_are_looked_up_around_the_window():
     sync_calendar(hub, CalendarSnapshot("Outlook", True, ()), datetime.fromisoformat("2026-09-24T10:00:00+09:00"))
     start, end = hub.windows[0]
     assert start.isoformat() < "2026-09-24" and end.isoformat() > "2026-10-23"
+
+
+def test_a_module_source_is_written_but_manual_rows_can_never_be_a_source():
+    """予定を出すモジュールは自分の出典で書ける。手で入れた行（手入力）は、どの同期も出典にできない。"""
+    hub = FakeCalendarHub()
+    now = datetime.fromisoformat("2026-09-24T10:00:00+09:00")
+    assert sync_calendar(hub, CalendarSnapshot("Google", False, (item("g1"),)), now) == SyncReport(1, 0, 0)
+    with pytest.raises(IncompleteSnapshot, match="出典"):
+        sync_calendar(hub, CalendarSnapshot("手入力", True, ()), now)
+    assert hub.rows[0] == {"id": "manual", "出典": "手入力", "出典 ID": "", "名前": "会議", "同期状態": ""}

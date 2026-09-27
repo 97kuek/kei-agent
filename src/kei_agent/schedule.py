@@ -348,8 +348,8 @@ class Scheduler:
             return {"course": "error"}
         return {"course": "synced", "course_counts": report.__dict__}
 
-    async def sync_meetings(self, events: list[dict], now: datetime) -> dict | str:
-        """朝に読んだ会議（7日ぶん）を、共通ホームの予定カレンダーに足す。
+    async def sync_meetings(self, events: list[dict], now: datetime, source: str = "Outlook") -> dict | str:
+        """朝に読んだ会議（7日ぶん）を、共通ホームの予定カレンダーに足す（出典は source）。
 
         AI が読んだ一覧は全部とは言い切れないので、見つからなくなった会議は消さずに「要確認」にする
         （0件のときは読み損ねを疑って、印も付けない）。
@@ -358,7 +358,7 @@ class Scheduler:
         if hub is None:
             return "no_hub"
         try:
-            snapshot = CalendarSnapshot("Outlook", False, outlook_items(events))
+            snapshot = CalendarSnapshot(source, False, outlook_items(events))
             report = await asyncio.to_thread(sync_calendar, hub, snapshot, now.astimezone(JST), VOICE_DAYS)
         except (IncompleteSnapshot, NotionError, ValueError, TypeError) as e:
             log.warning("会議を予定カレンダーに書けません: %s", e)
@@ -599,6 +599,17 @@ class Scheduler:
             if reply.ok:
                 # 読んだ会議は、共通ホームの予定カレンダーにも書く（AI をもう一度動かさない）
                 detail["meetings"] = await self.sync_meetings(events, now)
+        # モジュールの予定（agenda）。会議は朝の一覧と声に載せ、出典ごとに予定カレンダーにも書く
+        agenda, unread = await self.assistant.module_agenda(VOICE_DAYS)
+        synced: dict[str, dict | str] = {}
+        for name, items in agenda.items():
+            meetings = [item for item in items if item.get("kind", "meeting") == "meeting"]
+            events += meetings
+            for source in dict.fromkeys(str(item.get("source") or name) for item in meetings):
+                synced[source] = await self.sync_meetings(
+                    [item for item in meetings if str(item.get("source") or name) == source], now, source)
+        if synced or unread:
+            detail["agenda"] = {"synced": synced, "unread": unread}
         detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
         # 朝に出した締切は、そのあと24時間前の知らせで繰り返さない。ただし記録するのは
         # Slack に出せたあと（出す前に記録すると、投稿に失敗したときに黙って消える）
@@ -610,8 +621,10 @@ class Scheduler:
             {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
              "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}
             for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
-        failed_now = [label for label, failed in (("課題の取り込み", detail.get("synced") is False),
-                                                  ("会議の書き込み", detail.get("meetings") == "error")) if failed]
+        failed_now = [label for label, failed in (
+            ("課題の取り込み", detail.get("synced") is False),
+            ("会議の書き込み", detail.get("meetings") == "error" or "error" in synced.values())) if failed]
+        failed_now += [f"{label}の予定の読み取り" for label in unread]
         return morning.text(classes, events, dues, now, self.morning_notes(now, failed_now)), detail, notices
 
     def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:

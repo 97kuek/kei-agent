@@ -6,14 +6,19 @@
 
 module.py には `class Module` を置き、`__init__(self, core)` で窓口（Core）を受け取る。使う差し込み口だけを書く。
 
-- `async on_message(req)` … モジュールのチャンネルと、claim_thread したスレッドへの依頼者の書き込み。
-  答えは core.reply か core.converse で返す（どちらも依頼の 👀 を ✅ に変える。例外を投げたら ⚠️ と知らせ）。
-  [channels] があれば必須
+- `async on_message(req, skill="", params=None)` … モジュールのチャンネルと、claim_thread したスレッドへの
+  依頼者の書き込み。研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事が skill と params に入る
+  （空なら core.pick_skill で選べる）。答えは core.reply か core.converse で返す（どちらも依頼の 👀 を ✅ に
+  変える。例外を投げたら ⚠️ と知らせ）。[channels] があれば必須
 - `async on_reaction(event, added) -> bool` … リアクションの付け外し（Slack の reaction_added の中身）。
   自分の投稿へのものなら扱って True を返す（ほかのモジュールと 🌙 には回らない）
 - `async run_schedule(name, day) -> dict` … module.toml の [schedules] の処理（day は YYYY-MM-DD）。
   返した辞書は記録に残り、{"status": "error"} なら朝の一覧の「うまくいかなかったこと」に載る。[schedules] があれば必須
 - `morning_notes(day) -> list[str]` … 朝の一覧（Daily の投稿）に足す行
+- `async agenda(days) -> list[dict] | None` … これから days 日の、時刻のある予定。朝の一覧・声のレイヤ・
+  共通ホームの予定カレンダー（source ごと）・振り返りの材料に載る。1件は
+  `{"kind": "meeting", "subject", "start": "YYYY-MM-DDTHH:MM", "end", "location", "url", "id", "source"}`。
+  読めなかったら None を返す（空の [] と分ける。予定カレンダーの行を「要確認」にしないため）
 - `welcome() -> str` … モジュールのチャンネルに招かれたときの案内（できること）
 - `default_question` … 本文の無いメンションのときに、担当に聞くこと
 """
@@ -28,18 +33,27 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, dates, modules, settings, themes
+from kei_agent import agents, dates, modules, router, settings, themes
 from kei_agent.agents import Reply
 from kei_agent.notion import NotionError
 from kei_agent.request import Request
+from kei_agent.response_output import safe_failure
 from kei_agent.slack_text import escape, split_text
 
 if TYPE_CHECKING:
     from kei_agent.assistant import Assistant
 
 API_VERSION = modules.API_VERSION
-__all__ = ["API_VERSION", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "day_label", "escape"]
+__all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "day_label", "escape",
+           "failure_text"]
+# 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
+ASK = router.ASK
 _KEEP = object()
+
+
+def failure_text(kind: str = "connection") -> str:
+    """失敗したときに Slack に出す、決まった文（connection / timeout / login など。中の詳しいことは書かない）。"""
+    return safe_failure(kind)
 
 
 def day_label(day: str | date) -> str:
@@ -144,11 +158,11 @@ class Core:
         slack = self._assistant.slack
         await self._assistant._react(slack.reactions_remove if remove else slack.reactions_add, channel, ts, emoji)
 
-    async def reply(self, req: Request, text: str) -> None:
-        """依頼のスレッドに答える（依頼の 👀 を ✅ に変える）。AI の担当に答えさせるなら converse。"""
+    async def reply(self, req: Request, text: str, *, failed: bool = False) -> None:
+        """依頼のスレッドに答える（依頼の 👀 を ✅ に、failed なら ⚠️ に変える）。AI の担当に答えさせるなら converse。"""
         for chunk in split_text(text):
             await self._assistant.post(req, chunk)
-        await self._assistant.mark_answered(req, failed=False)
+        await self._assistant.mark_answered(req, failed=failed)
 
     def watch_thread(self, channel: str, ts: str, channel_name: str) -> None:
         """そのスレッドへの返信を、メンションなしでも拾う（投稿した本人が Kei Agent なので、元の投稿も会話に渡る）。"""
@@ -199,6 +213,18 @@ class Core:
                                       f"{reply.text[:300]}")
         await self._assistant.note_limit(reply, self.name, provider)
         return reply
+
+    async def pick_skill(self, req: Request) -> tuple[str, dict]:
+        """言われたことが、この担当の名刺のどの仕事に当たるかを軽いモデルで選ぶ（選べなければ ASK）。
+
+        返すのは仕事の id と、振り分け係が拾った指定（days・limit）。
+        """
+        skills = await self._assistant.skills_of(self.name)
+        if not skills:
+            return ASK, {}
+        await self._assistant.thread_ui(req).activity(router.STATUS_TEXT)
+        choice = await router.pick(self._assistant.config, skills, req.text, store=self._assistant.store)
+        return choice.skill or ASK, choice.params
 
     async def converse(self, req: Request) -> None:
         """そのスレッドの会話として、このモジュールの担当（[actor] と [process]）に聞いて答える。

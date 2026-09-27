@@ -37,7 +37,7 @@ class Module:
     def welcome(self) -> str:
         return texts.WELCOME
 
-    async def on_message(self, req: Request) -> None:
+    async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         if req.text == "こわして":
             raise RuntimeError("こわれた")
         ts = await self.core.post(req.channel, "📌 " + req.text)

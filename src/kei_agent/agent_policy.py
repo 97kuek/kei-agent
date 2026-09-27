@@ -136,11 +136,16 @@ POLICIES: dict[str, AgentPolicy] = {
 
 
 def module_policy(spec: modules.ModuleSpec) -> AgentPolicy:
-    """モジュールの実行役の制限（module.toml の [actor]）。連携の道具は、枠の版 1 ではまだ持てない。"""
+    """モジュールの実行役の制限（module.toml の [actor]）。連携は、書いてある道具だけを使える。"""
     assert spec.actor is not None
     actor = spec.actor
+    connectors = tuple(
+        Connector(c.name, c.claude_server, c.claude_tools,
+                  tuple(CodexApp(app.name, _codex_tools(app.namespace, app.tools)) for app in c.codex_apps))
+        for c in actor.connectors)
     return AgentPolicy(spec.name, actor.prompt, plugin=actor.plugin, files=actor.files, shell=actor.shell,
-                       web=actor.web, notion=actor.notion, timeout_minutes=actor.timeout_minutes)
+                       web=actor.web, notion=actor.notion, connectors=connectors,
+                       timeout_minutes=actor.timeout_minutes)
 
 
 def is_offline(use_case: UseCase | str | None) -> bool:

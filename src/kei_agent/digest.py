@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, deadline, themes, timelog, work
+from kei_agent import course, deadline, modules, themes, timelog, work
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.dates import parse_time, weekday
@@ -101,6 +101,7 @@ class DigestBuilder:
         if domains:
             lines += await self._course(now)
             lines += await self._work(now)
+            lines += await self._agenda(now)
         # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
         tasks, notes = await self._notion(since, now)
         lines += ["", *tasks]
@@ -140,6 +141,19 @@ class DigestBuilder:
         lines.append(f"- 今日あった会議: {_events(events, at.date()) or 'なし'}")
         lines.append(f"- 明日の会議: {_events(events, (at + timedelta(days=1)).date()) or 'なし'}")
         return [*lines, ""]
+
+    async def _agenda(self, now: float) -> list[str]:
+        """モジュールの予定（今日あったもの、明日のもの）。材料なので、件名と時刻だけ。"""
+        at = datetime.fromtimestamp(now)
+        agenda, unread = await self.assistant.module_agenda(2)
+        lines: list[str] = []
+        for name, items in agenda.items():
+            lines += ["", f"## {modules.known()[name].label}", "",
+                      f"- 今日あった予定: {_events(items, at.date()) or 'なし'}",
+                      f"- 明日の予定: {_events(items, (at + timedelta(days=1)).date()) or 'なし'}", ""]
+        for label in unread:
+            lines += ["", f"## {label}", "", "- 予定を読めなかった", ""]
+        return lines
 
     def _threads(self, since: float) -> list[str]:
         lines = ["## やり取りのあったスレッド", ""]

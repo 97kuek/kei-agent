@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import re
 import sys
 import tomllib
@@ -36,7 +37,12 @@ _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
              "schedules"}
 _DEPENDS_KEYS = {"requires", "optional"}
-_ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case"}
+_ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
+               "classify", "connectors"}
+_CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
+_CODEX_APP_KEYS = {"name", "namespace", "tools"}
+# skill と二の柵のフック（Claude Code の plugin）の置き場所。モジュールのフォルダの中
+PLUGIN_DIR = "plugin"
 _USE_CASE_KEYS = {"offline", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
 _PROCESS_KEYS = {"port"}
@@ -57,6 +63,23 @@ class UseCaseSpec:
 
 
 @dataclass(frozen=True)
+class CodexAppSpec:
+    """Codex の App（表示名）と、使う道具（`<namespace>.<道具>`）。"""
+    name: str
+    namespace: str
+    tools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ConnectorSpec:
+    """アカウントの連携（Claude は claude.ai のコネクタ、Codex は App）。書いた道具だけを使える（読む道具だけを書く）。"""
+    name: str
+    claude_server: str
+    claude_tools: tuple[str, ...]
+    codex_apps: tuple[CodexAppSpec, ...] = ()
+
+
+@dataclass(frozen=True)
 class ActorSpec:
     """AI の実行役。provider は App Home で選び、どこまで触れるかはここに書いたものが制限の表の行になる。"""
     prompt: str
@@ -66,9 +89,12 @@ class ActorSpec:
     web: bool
     notion: str
     timeout_minutes: int | None
-    # 自由な質問の用途（分類器を動かさない）
+    # 自由な質問の用途。classify を書かなければ、分類器を動かさずにこれを使う
     default_use_case: str
     use_cases: tuple[UseCaseSpec, ...]
+    # 自由な質問の用途を、軽いモデルで選び分けるときの見分け方（Web を使う用途の中から。迷えば default_use_case）
+    classify: str = ""
+    connectors: tuple[ConnectorSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,6 +163,37 @@ def _use_cases(data: dict, where: str) -> tuple[UseCaseSpec, ...]:
     return tuple(found)
 
 
+def _tools(value: object, where: str) -> tuple[str, ...]:
+    tools = _names(value, where)
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", tool) for tool in tools):
+        raise ModuleError(f"{where} の道具の名前は、英数字と _ . - だけにしてください")
+    return tools
+
+
+def _connectors(value: object, at: str) -> tuple[ConnectorSpec, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ModuleError(f"{at} の connectors は [[actor.connectors]] の形にしてください")
+    found = []
+    for item in value:
+        where = f"{at} の connectors の {item.get('name') or '（名前なし）'}"
+        _check_keys(item, _CONNECTOR_KEYS, where)
+        apps = []
+        for app in item.get("codex_apps", []):
+            if not isinstance(app, dict):
+                raise ModuleError(f"{where} の codex_apps は [[actor.connectors.codex_apps]] の形にしてください")
+            _check_keys(app, _CODEX_APP_KEYS, f"{where} の codex_apps")
+            if not app.get("name") or not app.get("namespace"):
+                raise ModuleError(f"{where} の codex_apps には name（App の表示名）と namespace が要ります")
+            apps.append(CodexAppSpec(str(app["name"]), str(app["namespace"]),
+                                     _tools(app.get("tools", []), f"{where} の codex_apps")))
+        server = str(item.get("claude_server") or "")
+        claude_tools = _tools(item.get("claude_tools", []), where)
+        if not item.get("name") or not ((server and claude_tools) or apps):
+            raise ModuleError(f"{where}: name と、claude_server と claude_tools か codex_apps の、少なくとも片方が要ります")
+        found.append(ConnectorSpec(str(item["name"]), server, claude_tools, tuple(apps)))
+    return tuple(found)
+
+
 def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorSpec:
     at = f"{where} の [actor]"
     _check_keys(data, _ACTOR_KEYS, at)
@@ -156,10 +213,17 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
         raise ModuleError(f"{at} の prompt は指示書のファイル名（例: knowledge.md）にしてください")
     if not (Path(where).parent / prompt).is_file():
         raise ModuleError(f"{at} の prompt（{prompt}）が、module.toml と同じフォルダにありません")
-    return ActorSpec(prompt=prompt, plugin=bool(data.get("plugin", False)), files=data.get("files", "none"),
+    plugin = bool(data.get("plugin", False))
+    if plugin and not (Path(where).parent / PLUGIN_DIR / ".claude-plugin" / "plugin.json").is_file():
+        raise ModuleError(f"{at} の plugin = true には、同じフォルダに {PLUGIN_DIR}/.claude-plugin/plugin.json が要ります")
+    classify = str(data.get("classify") or "")
+    if classify and len([u for u in use_cases if not u.offline]) < 2:
+        raise ModuleError(f"{at} の classify は、Web を使う用途（offline でないもの）が2つ以上あるときに書いてください")
+    return ActorSpec(prompt=prompt, plugin=plugin, files=data.get("files", "none"),
                      shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
                      notion=data.get("notion", "none"), timeout_minutes=timeout, default_use_case=default,
-                     use_cases=use_cases)
+                     use_cases=use_cases, classify=classify,
+                     connectors=_connectors(data.get("connectors", []), at))
 
 
 def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:
@@ -324,8 +388,15 @@ def load_code(spec: ModuleSpec) -> type | None:
         raise ModuleError(f"{where} に class Module がありません")
     if spec.schedules and not callable(getattr(cls, "run_schedule", None)):
         raise ModuleError(f"{where}: [schedules] があるので、class Module に run_schedule(name, day) を書いてください")
-    if spec.channels and not callable(getattr(cls, "on_message", None)):
-        raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req) を書いてください")
+    on_message = getattr(cls, "on_message", None)
+    if spec.channels and not callable(on_message):
+        raise ModuleError(f"{where}: [channels] があるので、class Module に on_message(req, skill, params) を書いてください")
+    if callable(on_message):
+        try:
+            inspect.signature(on_message).bind(None, None, skill="", params={})
+        except TypeError:
+            raise ModuleError(f"{where}: on_message は on_message(self, req, skill=\"\", params=None) の形にしてください"
+                              "（研究全体のチャンネルで振り分け係が選んだ仕事が、skill と params で届く）") from None
     return cls
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from kei_agent import modules, runner
 from kei_agent.config import Config
 from kei_agent.model_json import json_object
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier
+from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier, use_case_of
 from kei_agent.router import workspace
 
 _RESEARCH_CASES = frozenset({
@@ -25,7 +25,7 @@ class UsageLimited(RuntimeError):
         super().__init__("軽量分類器の利用上限に達しました")
 
 
-def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase | None:
+def parse(text: str, allowed: frozenset[UseCase | str] = _RESEARCH_CASES) -> UseCase | str | None:
     """形式不正・低信頼は None。呼び出し側が通常 recipe へ安全に戻す。"""
     try:
         data = json_object(text, "use_case")
@@ -33,7 +33,7 @@ def parse(text: str, allowed: frozenset[UseCase] = _RESEARCH_CASES) -> UseCase |
         return None
     try:
         confidence = float(data.get("confidence"))
-        use_case = UseCase(str(data.get("use_case") or ""))
+        use_case = use_case_of(str(data.get("use_case") or ""))
     except (TypeError, ValueError, AttributeError):
         return None
     return use_case if confidence >= 0.8 and use_case in allowed else None
@@ -69,18 +69,23 @@ CLASSIFIERS = {"research": classify_research, "course": classify_course, "work":
 
 async def classify(config: Config, store, actor: str, prompt: str, *,
                    provider: str | None = None) -> UseCase | str:
-    """担当の用途を分類する（研究・大学・仕事で同じ呼び方）。モジュールの実行役は、分類器を動かさずに
-    module.toml の default_use_case にする。"""
+    """担当の用途を分類する（どの担当も同じ呼び方）。モジュールの実行役は、module.toml に classify
+    （見分け方）があれば Web を使う用途の中から選び、無ければ分類器を動かさずに default_use_case にする。"""
     if actor in CLASSIFIERS:
         return await CLASSIFIERS[actor](config, store, prompt, provider=provider)
     spec = modules.known().get(actor)
     if spec is None or spec.actor is None:
         raise KeyError(actor)
-    return spec.actor.default_use_case
+    if not spec.actor.classify:
+        return spec.actor.default_use_case
+    cases = [u.name for u in spec.actor.use_cases if not u.offline]
+    return await _classify(config, store, actor, prompt, frozenset(cases), spec.actor.default_use_case,
+                           ", ".join(cases), spec.actor.classify, provider=provider)
 
 
-async def _classify(config: Config, store, actor: str, prompt: str, allowed: frozenset[UseCase],
-                    fallback: UseCase, candidates: str, guidance: str, *, provider: str | None = None) -> UseCase:
+async def _classify(config: Config, store, actor: str, prompt: str, allowed: frozenset[UseCase | str],
+                    fallback: UseCase | str, candidates: str, guidance: str, *,
+                    provider: str | None = None) -> UseCase | str:
     try:
         recipe = resolve_classifier(config, store, actor, provider=provider)
     except ModelPolicyError:
@@ -88,7 +93,7 @@ async def _classify(config: Config, store, actor: str, prompt: str, allowed: fro
     classifier_prompt = ("次の依頼をユースケースに分類してください。JSON 1行だけで答えてください。"
                          "形: {\"use_case\":\"候補名\",\"confidence\":0.0から1.0}。\n"
                          f"候補は {candidates}。\n{guidance}\n"
-                         f"迷うときは {fallback.value} と confidence を 0.7 未満にしてください。\n\n依頼:\n{prompt[:1200]}")
+                         f"迷うときは {fallback} と confidence を 0.7 未満にしてください。\n\n依頼:\n{prompt[:1200]}")
     try:
         result = await runner.run_model(
             config, runner.ExecutionRequest(workspace(config, actor), recipe, None, "", "", read_only=True),
