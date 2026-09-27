@@ -8,6 +8,7 @@ config.toml は利用者のフォルダ（既定は ~/.config/kei-agent/。環�
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import tomllib
@@ -124,7 +125,7 @@ class NotionConfig:
     hub_home: str = ""
     # 研究ホーム（kei-agent-notion-setup の notion.json と同じ）
     research_home: str = ""
-    # 授業ホーム（kei-agent-course-setup の notion-course.json と同じ）
+    # 授業ホーム（kei-agent-module course setup の notion-course.json と同じ）
     course_home: str = ""
 
 
@@ -192,6 +193,17 @@ class Config:
     user_dir: Path | None = None
     # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
     secrets_dir: Path | None = None
+    # モジュールの設定のうち、config.toml の [<名前>] に書いたもの（書かなかったものは settings() が既定で埋める）
+    module_settings: dict[str, dict] = field(default_factory=dict)
+
+    def settings(self, name: str) -> dict:
+        """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねたもの）。
+
+        返すのは写しなので、書き換えても設定には響かない。
+        """
+        spec = modules.known().get(name)
+        defaults = spec.settings if spec is not None else {}
+        return copy.deepcopy({**defaults, **self.module_settings.get(name, {})})
 
     def module_workspace(self, name: str) -> Path:
         """モジュールの実行役の作業場。module.toml の [actor] workspace（無ければ状態の置き場の agents/<名前>）。
@@ -376,6 +388,47 @@ def _enabled_modules(data: dict, home: Path) -> list[modules.ModuleSpec]:
     return enabled
 
 
+def _same_kind(value: object, default: object) -> bool:
+    """利用者の設定の値が、module.toml の既定と同じ形か（小数の既定には整数も書ける。真偽は数と分ける）。"""
+    if isinstance(default, bool) or isinstance(value, bool):
+        return isinstance(value, bool) and isinstance(default, bool)
+    if isinstance(default, float):
+        return isinstance(value, (int, float))
+    return isinstance(value, type(default))
+
+
+# 設定の値の形の呼び方（書き方が違うときの知らせに使う）
+_KINDS = {str: "文字列", int: "整数", float: "数", bool: "true か false", list: "配列", dict: "表"}
+
+
+def _module_settings(data: dict) -> dict[str, dict]:
+    """モジュールの設定（config.toml の [<名前>]）を、module.toml の [settings] と見比べて読む。
+
+    オフのモジュールの設定も確かめて残す（modules から外すたびに消さなくてよい）。
+    """
+    found: dict[str, dict] = {}
+    for name, spec in modules.known().items():
+        if name in TOP_LEVEL_KEYS:
+            if spec.settings:
+                raise ConfigError(f"モジュール「{name}」の設定が、config.toml の [{name}]（本体の設定）とぶつかります。"
+                                  "モジュールの名前を変えてください")
+            continue
+        if name not in data:
+            continue
+        if not spec.settings:
+            raise ConfigError(f"config.toml の [{name}]: モジュール「{name}」には設定がありません")
+        values = data[name]
+        if not isinstance(values, dict):
+            raise ConfigError(f"config.toml の [{name}] はテーブルにしてください")
+        _check_keys(values, set(spec.settings), f"[{name}]")
+        for key, value in values.items():
+            default = spec.settings[key]
+            if not _same_kind(value, default):
+                raise ConfigError(f"config.toml の [{name}] {key} は、{_KINDS.get(type(default), '既定と同じ形')}で書いてください")
+        found[name] = dict(values)
+    return found
+
+
 def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
     """[agents.<name>] を読み、未指定の actor は provider 未選択にする。"""
     if not isinstance(data, dict):
@@ -420,8 +473,10 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
     sandbox = data.get("sandbox", {})
-    _check_keys(data, TOP_LEVEL_KEYS, "一番外側")
     enabled = _enabled_modules(data, home)
+    # モジュールの設定は、そのモジュールの名前の表（[course] など）に書く
+    module_settings = _module_settings(data)
+    _check_keys(data, TOP_LEVEL_KEYS | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in enabled for kind in spec.channels}, "[channels]")
     _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     paths = data.get("paths", {})
@@ -466,4 +521,5 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
         user_dir=home,
         secrets_dir=secrets_dir,
+        module_settings=module_settings,
     )

@@ -15,6 +15,7 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
 
 手で動かすコマンド（setup など）は commands.py に `COMMANDS = {"名前": main(argv)}` を置く（`kei-agent-module
 <名前> <コマンド>`）。Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
+モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionError", "Setup",
            "SkillExecutor", "TaskUpdater", "Toggl", "TogglError", "asked_days", "day_label", "gateway_notion",
            "json_list", "json_object", "load_config", "load_toggl", "parse_time", "progress", "requested_days",
-           "run_ai", "weekday", "workspace"]
+           "run_ai", "settings", "weekday", "workspace"]
 # 本文の JSON の days で受け付ける上限（日）
 MAX_DAYS = 400
 
@@ -63,6 +64,11 @@ def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
     except (TypeError, ValueError, AttributeError):
         return default
     return days if 1 <= days <= maximum else default
+
+
+def settings(config: Config, module: str) -> dict:
+    """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
+    return config.settings(module)
 
 
 def workspace(config: Config, agent: str) -> Path:

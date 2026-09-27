@@ -37,7 +37,7 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "schedules"}
+             "schedules", "settings"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
@@ -51,6 +51,8 @@ _USE_CASE_KEYS = {"offline", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
 _PROCESS_KEYS = {"port"}
 _SCHEDULE_KEYS = {"label", "short", "default"}
+# 設定（[settings]）の既定の値に使える形。利用者の設定（config.toml の [<名前>]）は、既定と同じ形にする
+SETTING_TYPES = (str, int, float, bool, list, dict)
 
 
 class ModuleError(ValueError):
@@ -126,6 +128,8 @@ class ModuleSpec:
     # チャンネルの種類 → 既定の名前（番号を外した名前。設定の [channels] で変えられる）
     channels: dict[str, tuple[str, ...]] = field(default_factory=dict)
     schedules: tuple[ScheduleSpec, ...] = ()
+    # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）
+    settings: dict[str, object] = field(default_factory=dict)
 
 
 def _check_keys(data: dict, known: set[str], where: str) -> None:
@@ -248,6 +252,16 @@ def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:
     return tuple(found)
 
 
+def _settings(data: dict, where: str) -> dict[str, object]:
+    """[settings] の名前と既定の値。値の形（文字・数・真偽・配列・表）が、利用者の設定で書ける形になる。"""
+    for name, value in data.items():
+        if not _USE_CASE.match(name):
+            raise ModuleError(f"{where} の [settings] {name}: 設定の名前は英小文字・数字・_ にしてください")
+        if not isinstance(value, SETTING_TYPES):
+            raise ModuleError(f"{where} の [settings] {name}: 既定の値は文字・数・真偽・配列・表のどれかにしてください")
+    return dict(data)
+
+
 def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     """1つのモジュールの定義を読んで確かめる。"""
     path = directory / SPEC_FILE
@@ -286,7 +300,8 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         path=directory, builtin=builtin,
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
-        actor=actor, port=port, channels=channels, schedules=schedules)
+        actor=actor, port=port, channels=channels, schedules=schedules,
+        settings=_settings(_table(data, "settings", where), where))
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:

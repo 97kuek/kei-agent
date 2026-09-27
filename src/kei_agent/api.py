@@ -158,6 +158,11 @@ class Core:
         self.name = spec.name
         self.records = Records(assistant.store, spec.name)
 
+    @property
+    def settings(self) -> dict:
+        """このモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
+        return self._assistant.config.settings(self.name)
+
     # Notion（Notion のモジュールができるまでは、コアの接続をそのまま渡す。使えなければ None）
 
     @property

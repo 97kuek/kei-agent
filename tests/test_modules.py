@@ -54,6 +54,8 @@ def test_the_knowledge_module_is_described_by_its_definition():
     ('api = 1\nname = "x"\n[process]\nport = 80\n', "1024"),
     ('api = 1\nname = "x"\n[schedules.a]\ndefault = "7:00"\n', "HH:MM"),
     ('api = 1\nname = "x"\n[actor]\nprompt = "x.md"\n[use_cases.a]\nclaude = { effort = "low" }\n', "model"),
+    ('api = 1\nname = "x"\n[settings]\nPlace = "東京"\n', "設定の名前"),
+    ('api = 1\nname = "x"\n[settings]\nsince = 2026-09-27\n', "既定の値"),
 ])
 def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
     with pytest.raises(modules.ModuleError, match=message.replace("[", r"\[").replace("]", r"\]")):
@@ -106,6 +108,51 @@ def test_modules_in_the_config_must_exist_and_bring_what_they_require(tmp_path):
     home_dir = _config(tmp_path, 'modules = ["digest"]\n')
     _module(home_dir / "modules", "digest", 'api = 1\nname = "digest"\n[depends]\nrequires = ["knowledge"]\n')
     with pytest.raises(ConfigError, match="knowledge が要ります"):
+        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
+
+
+# 設定（module.toml の [settings] と、config.toml の [<名前>]）
+
+WEATHER_SETTINGS = WEATHER + '[settings]\nplace = "東京"\nhours = 12\nalerts = []\n'
+
+
+def test_a_module_declares_its_settings_and_the_config_can_change_them(tmp_path):
+    """書ける項目と既定は module.toml の [settings]。利用者は config.toml の、モジュールの名前の表で変える。"""
+    home_dir = _config(tmp_path, 'modules = ["weather"]\n\n[weather]\nplace = "早稲田"\n')
+    _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
+    config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
+    assert config.settings("weather") == {"place": "早稲田", "hours": 12, "alerts": []}
+    config.settings("weather")["alerts"].append("雷")       # 渡すのは写し。書き換えても設定は変わらない
+    assert config.settings("weather")["alerts"] == [] and config.settings("knowledge") == {}
+
+
+@pytest.mark.parametrize(("text", "message"), [
+    ('[weather]\nplace = 1\n', r"\[weather\] place は、文字列で"),
+    ('[weather]\nhours = true\n', r"\[weather\] hours は、整数で"),
+    ('[weather]\ncolor = "red"\n', r"\[weather\] に知らないキー"),
+    ('weather = "晴れ"\n', r"\[weather\] はテーブル"),
+    ('[knowledge]\nplace = "東京"\n', "モジュール「knowledge」には設定がありません"),
+    ('[wether]\nplace = "東京"\n', "一番外側 に知らないキーがあります: wether（使えるキー: .*weather"),
+])
+def test_module_settings_in_the_config_must_match_the_definition(tmp_path, text, message):
+    """オフのモジュールの設定も確かめる（書き間違いを黙って無視しない）。"""
+    home_dir = _config(tmp_path, text)
+    _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
+    with pytest.raises(ConfigError, match=message):
+        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
+
+
+def test_settings_stay_when_the_module_is_turned_off(tmp_path):
+    home_dir = _config(tmp_path, 'modules = []\n\n[weather]\nplace = "早稲田"\n')
+    _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
+    config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
+    assert config.modules == () and config.settings("weather")["place"] == "早稲田"
+
+
+def test_a_module_with_settings_cannot_take_the_name_of_a_core_table(tmp_path):
+    home_dir = _config(tmp_path)
+    _module(home_dir / "modules", "paths", 'api = 1\nname = "paths"\n[settings]\nroot = "~"\n')
+    with pytest.raises(ConfigError, match="本体の設定"):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
@@ -164,7 +211,7 @@ def test_builtin_module_code_only_imports_the_windows():
     """
     import ast
 
-    for path in modules.BUILTIN_DIR.glob("*/*.py"):
+    for path in modules.BUILTIN_DIR.glob("*/**/*.py"):
         window = "kei_agent.api" if path.name == modules.CODE_FILE else "kei_agent_a2a.api"
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported = [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
