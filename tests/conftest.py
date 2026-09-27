@@ -1,78 +1,28 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 from fakes import FakeGitHub
 
-from kei_agent import config as config_module
-from kei_agent import model_classifier, modules, updates
+from kei_agent import model_classifier, modules
 from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
+
+# 本物の秘密情報・状態・launchd・利用者のフォルダに触れないための柵は、モジュールを作る人と同じもの
+# （kei_agent.testing.plugin）を使う。用途の分類器だけは、研究の言葉を当てる下の fake_model_classifier にする
+from kei_agent.testing.plugin import (  # noqa: F401
+    kei_agent_home,
+    module_kit,
+    no_real_restarts,
+    no_real_secrets,
+    no_real_state,
+    no_user_modules,
+)
 
 # 組み込みのモジュールのフォルダを、パッケージとして読めるようにしておく（from kei_agent_modules.knowledge import digest）
 for _spec in modules.builtin().values():
     modules.package(_spec)
-
-# 開発機のシェルには本物の秘密情報が入っている。テストから Toggl・Notion・Slack などに届かないよう、
-# 各テストの前に消す（使うテストは monkeypatch.setenv で入れ直す）
-_SECRET_PREFIXES = ("TOGGL_", "NOTION_", "SLACK_", "KEI_AGENT_", "BOX_", "WANDB_", "OPENAI_")
-
-
-@pytest.fixture(autouse=True)
-def no_real_secrets(monkeypatch):
-    for name in list(os.environ):
-        if name.startswith(_SECRET_PREFIXES):
-            monkeypatch.delenv(name)
-
-
-@pytest.fixture(autouse=True)
-def no_real_restarts(monkeypatch):
-    """本物の launchd の担当を起動し直さない。
-
-    自己改善の取り込みや古い担当の入れ替えのテストは、本物の com.kei-agent.* に kickstart をかけてしまう
-    （2026-09-26、テストを回すたびに本番の担当が起動し直されていた）。確かめたいテストは、自分で差し替える。
-    """
-    restarted: list[str] = []
-    monkeypatch.setattr(updates, "restart_service", lambda name: restarted.append(name) or True)
-    return restarted
-
-
-@pytest.fixture(autouse=True)
-def no_user_modules(monkeypatch):
-    """利用者のモジュールは、テストごとに空から始める（読んだものがほかのテストに残らない）。"""
-    monkeypatch.setattr(modules, "_user", {})
-
-
-@pytest.fixture(autouse=True)
-def no_real_state(tmp_path_factory, monkeypatch):
-    """置き場所を書かない設定を読むテストでも、本物の状態（~/.local/state/kei-agent）と研究データを触らない。
-
-    2026-09-27、module.toml のテストが既定の置き場所のまま Store を開き、本番の SQLite の表を作り替えてしまった
-    （まだ古い版で動いていた朝の読みものが「no such table: reading_posts」で止まった）。既定の置き場所を
-    一時フォルダに差し替え、それでも本物の SQLite を開こうとしたら、テストを落とす。
-    """
-    root = tmp_path_factory.mktemp("default-paths")
-    real_state = Path(config_module.DEFAULT_PATHS["state_dir"]).expanduser().resolve()
-    monkeypatch.setattr(config_module, "DEFAULT_PATHS", {name: str(root / name) for name in config_module.DEFAULT_PATHS})
-    opened = Store.__init__
-
-    def guarded(self, path: Path):
-        if Path(path).expanduser().resolve().is_relative_to(real_state):
-            raise AssertionError(f"テストから本物の状態を開こうとしました: {path}")
-        opened(self, path)
-
-    monkeypatch.setattr(Store, "__init__", guarded)
-
-
-@pytest.fixture(autouse=True)
-def kei_agent_home(no_real_secrets, tmp_path_factory, monkeypatch):
-    """利用者のフォルダ（~/.config/kei-agent）は、テストごとに空の設定だけのものにする（開発機の本物を読まない）。"""
-    home = tmp_path_factory.mktemp("kei-agent-home")
-    (home / "config.toml").write_text("", encoding="utf-8")
-    monkeypatch.setenv("KEI_AGENT_HOME", str(home))
-    return home
 
 
 @pytest.fixture
