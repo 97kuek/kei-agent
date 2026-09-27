@@ -98,8 +98,10 @@ def read_roots(config: Config, ws: Workspace) -> tuple[Path, ...]:
     from kei_agent.themes import ChannelKind
     assert ws.cwd is not None
     if ws.kind is ChannelKind.OVERVIEW:
-        # 各テーマを読む。作業場は ~/research の外にあるので、そこも読めるようにする
-        return (config.research_root, ws.cwd)
+        # 各テーマを読む。作業場は ~/research の外にあるので、そこも読めるようにする。既存のフォルダのテーマ
+        # （themes.toml）も読む
+        from kei_agent.themes import places
+        return (config.research_root, ws.cwd, *places(config).values())
     if ws.kind is ChannelKind.IMPROVE:
         return (config.repo_root,)    # 案を考えるために Kei Agent のコードを読む。書き込みは作業用の一時ディレクトリだけ
     return (ws.cwd,)                  # テーマと、自分を直すときの worktree

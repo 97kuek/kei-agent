@@ -89,6 +89,7 @@ from kei_agent.theme_files import (
     snapshot_outputs,
     split_uploads,
 )
+from kei_agent.theme_invite import ThemeInvite
 from kei_agent.themes import ChannelKind, Workspace
 from kei_agent.thread_ui import ThreadUI
 from kei_agent.time_cards import (
@@ -176,7 +177,7 @@ def time_label(entry: TimeEntry) -> str:
     return entry.course_name if entry.domain == "course" and entry.course_name else themes.theme_name(entry.channel_name)
 
 
-class Assistant(SettingsActions, SelfFix, Handoff):
+class Assistant(SettingsActions, SelfFix, Handoff, ThemeInvite):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -634,6 +635,10 @@ class Assistant(SettingsActions, SelfFix, Handoff):
             ws = themes.resolve(self.config, name)
         except ValueError as e:
             await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
+            return
+        if ws.kind is ChannelKind.THEME and not ws.external and ws.cwd is not None and not ws.cwd.exists():
+            # まだフォルダの無い研究テーマ: 置き場所を聞く（既定の場所に作る／既存のフォルダを使う。theme_invite.py）
+            await self.ask_theme_place(channel, ws)
             return
         created = themes.ensure_workspace(ws)
         self.registered_themes.add(name)
@@ -1747,9 +1752,11 @@ class Assistant(SettingsActions, SelfFix, Handoff):
     async def poll_jobs(self) -> None:
         """テーマのディレクトリに残った依頼を処理し、終わったジョブを報告する。"""
         root = self.config.research_root
-        if root.is_dir():
-            for cwd in sorted(p for p in root.iterdir() if (p / ".kei-agent" / "requests").is_dir()):
-                await self.handle_job_requests(cwd)
+        folders = [p for p in root.iterdir()] if root.is_dir() else []
+        # 既存のフォルダを使うテーマ（themes.toml）のジョブの依頼も拾う
+        folders += [p for p in themes.places(self.config).values() if p not in folders]
+        for cwd in sorted(p for p in folders if (p / ".kei-agent" / "requests").is_dir()):
+            await self.handle_job_requests(cwd)
         for job in await self.jobs.refresh():
             self.jobs.mark_reported(job)
             row = self.store.get_thread(job.channel, job.thread_ts)

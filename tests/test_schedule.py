@@ -516,8 +516,15 @@ async def test_daily_without_hub_still_posts_and_says_so(env, config):
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):
+    """まだフォルダの無いテーマは、置き場所を聞いてから作る。既定の場所を選ぶと、フォルダを作って研究ホームに登録する。"""
     scheduler, assistant, slack, claude = env
     await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
+    assert assistant.notion.themes == {} and not (config.research_root / "vlm").exists()
+    choice, = [kw for kw in slack.posted() if kw.get("blocks")]
+    default = next(el for b in choice["blocks"] if b["type"] == "actions" for el in b["elements"]
+                   if el["action_id"] == "kei_agent_theme_place_default")
+    await assistant.on_theme_place_action({"user": {"id": "UME"}, "actions": [default],
+                                           "container": {"channel_id": "C1", "message_ts": "5.5"}})
     assert assistant.notion.themes == {"vlm": "https://example.slack.com/archives/C1"}
     assert (config.research_root / "vlm" / "CLAUDE.md").exists()
 

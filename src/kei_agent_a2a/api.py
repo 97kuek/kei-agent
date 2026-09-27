@@ -68,8 +68,8 @@ __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV"
            "TogglError", "Workspace", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
            "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
-           "put_request", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings", "weekday",
-           "workspace"]
+           "put_request", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings", "theme_folders",
+           "weekday", "workspace"]
 # このプロセスが起動したときの版（commit）。常駐のプロセス（[process] kind = "service"）は /health で返す
 RUNNING_VERSION = version.RUNNING
 # 本文の JSON の days で受け付ける上限（日）
@@ -138,6 +138,11 @@ def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
 def settings(config: Config, module: str) -> dict:
     """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねた写し）。"""
     return config.settings(module)
+
+
+def theme_folders(config: Config) -> dict[str, Path]:
+    """研究テーマの名前とフォルダ（既定の置き場所の下と、themes.toml の既存のフォルダ）。"""
+    return themes.all_themes(config)
 
 
 def channel_workspace(config: Config, channel_name: str, allowed_domains=(), *, create: bool = True) -> Workspace:

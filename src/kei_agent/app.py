@@ -13,7 +13,7 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import home, jobs
+from kei_agent import home, jobs, theme_invite
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config
 from kei_agent.jobs import JobManager
@@ -91,6 +91,7 @@ async def serve() -> None:
     app.action(re.compile(r"^kei_agent_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
     app.action(re.compile(r"^kei_agent_home_"))(acked(assistant.on_home_action))
     app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
+    app.action(re.compile(r"^kei_agent_theme_place_(default|existing)$"))(acked(assistant.on_theme_place_action))
     app.action(re.compile(r"^kei_agent_time_(start|stop)$"))(acked(assistant.on_time_action))
     app.action(re.compile(r"^kei_agent_time_(memo|retry)$"))(acked(assistant.on_time_action))
 
@@ -111,6 +112,18 @@ async def serve() -> None:
         except Exception:
             log.exception("時間記録の入力を処理できませんでした")
             errors = {"memo": "保存できませんでした。もう一度試してね"}
+        if errors:
+            await ack(response_action="errors", errors=errors)
+        else:
+            await ack()
+
+    @app.view(theme_invite.SUBMIT_CALLBACK)
+    async def theme_place(ack, body):
+        try:
+            errors = await assistant.on_theme_place_submit(body)
+        except Exception:
+            log.exception("テーマの置き場所を決められませんでした")
+            errors = {theme_invite.FOLDER_BLOCK: "決められませんでした。Kei Agent のログを見てください"}
         if errors:
             await ack(response_action="errors", errors=errors)
         else:

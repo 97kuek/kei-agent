@@ -171,8 +171,7 @@ class DigestBuilder:
         lines = ["", f"## {days}日以上やり取りのないテーマ", ""]
         activity = self.store.last_activity_by_channel_name()
         limit = now - days * 86400
-        for d in themes.theme_dirs(self.config):
-            channel = d.name
+        for channel in themes.all_themes(self.config):
             if channel not in active_channels:
                 continue
             # 一度も依頼のなかったテーマは、招待しただけなので停滞として扱わない

@@ -32,6 +32,7 @@ from kei_agent_a2a.api import (
     TaskUpdater,
     Workspace,
     channel_workspace,
+    theme_folders,
 )
 
 log = logging.getLogger(__name__)
@@ -135,14 +136,14 @@ class Executor(SkillExecutor):
     def _job_dir(self, cwd: str) -> Path:
         """ジョブを動かしてよい場所だけを受け付ける（渡された場所で何でも動かさない）。
 
-        研究テーマの中と、研究全体の作業場（`<agent_root>/overview`。研究テーマの外にある）。
+        研究テーマの中（既存のフォルダを使うテーマも）と、研究全体の作業場（`<agent_root>/overview`）。
         研究テーマを並べた場所（`research_root`）そのものでは動かさない。
         """
-        research_root = self.config.research_root.resolve()
         overview = self.config.overview_dir.resolve()
         path = Path(cwd).expanduser().resolve()
-        # 研究テーマの親（research_root そのもの）は、どのテーマでもないので断る
-        inside = research_root in path.parents or overview == path or overview in path.parents
+        folders = [folder.resolve() for folder in theme_folders(self.config).values()]
+        inside = any(path == folder or folder in path.parents for folder in folders) \
+            or overview == path or overview in path.parents
         if not path.is_dir() or not inside:
             raise ValueError(f"ジョブを動かしてよい場所ではありません: {cwd}")
         return path

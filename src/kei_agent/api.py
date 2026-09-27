@@ -340,10 +340,10 @@ class Core:
     def themes(self) -> list[Theme]:
         """研究テーマ（作業用のフォルダと、CLAUDE.md の検索キーワード・前提）。"""
         found = []
-        for path in themes.theme_dirs(self._assistant.config):
+        for name, path in themes.all_themes(self._assistant.config).items():
             claude_md = path / "CLAUDE.md"
             premises = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
-            found.append(Theme(path.name, path, tuple(themes.search_keywords(claude_md)), premises))
+            found.append(Theme(name, path, tuple(themes.search_keywords(claude_md)), premises))
         return found
 
     async def to_thread(self, func, /, *args):

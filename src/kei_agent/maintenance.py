@@ -17,6 +17,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+from kei_agent import themes
 from kei_agent.config import Config
 from kei_agent.store import Store
 
@@ -60,7 +61,9 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None,
     root = config.research_root
 
     # 消すのは、Kei Agent が claude を動かす場所に対応するセッションだけ。ほかのプロジェクトには触らない
+    # （既存のフォルダを使うテーマ themes.toml も含む）
     workspaces = [p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")] if root.is_dir() else []
+    workspaces += [p for p in themes.places(config).values() if p.is_dir() and p not in workspaces]
     if config.overview_dir.is_dir():
         workspaces.append(config.overview_dir)
     names = {claude_project_dir_name(p.resolve()) for p in workspaces}

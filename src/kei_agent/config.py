@@ -222,6 +222,8 @@ class Config:
     secrets_dir: Path | None = None
     # モジュールの設定のうち、config.toml の [<名前>] に書いたもの（書かなかったものは settings() が既定で埋める）
     module_settings: dict[str, dict] = field(default_factory=dict)
+    # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）を、研究テーマの置き場所に選べるか（既定は選べない）
+    allow_protected_folders: bool = False
 
     def settings(self, name: str) -> dict:
         """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねたもの）。
@@ -322,7 +324,7 @@ class ConfigError(ValueError):
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a", "notion", "paths", "modules",
+    "schedule", "maintenance", "a2a", "notion", "paths", "modules", "allow_protected_folders",
 }
 PATHS_KEYS = {"secrets"}
 AGENT_PROFILE_KEYS = {"provider"}
@@ -524,7 +526,10 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
     deny_read = [*sandbox.get("deny_read", (*DEFAULT_DENY_READ, str(state_dir / "secrets")))]
     if str(secrets_dir) not in {str(_expand(p)) for p in deny_read}:
         deny_read.append(str(secrets_dir))
-    return Config(
+    allow_protected = data.get("allow_protected_folders", False)
+    if not isinstance(allow_protected, bool):
+        raise ConfigError("config.toml の allow_protected_folders は true か false にしてください")
+    config = Config(
         research_root=_expand(data.get("research_root", DEFAULT_PATHS["research_root"])),
         agent_root=_expand(data.get("agent_root", DEFAULT_PATHS["agent_root"])),
         course_root=_expand(data.get("course_root", DEFAULT_PATHS["course_root"])),
@@ -556,4 +561,13 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         user_dir=home,
         secrets_dir=secrets_dir,
         module_settings=module_settings,
+        allow_protected_folders=allow_protected,
     )
+    # 研究テーマの置き場所（themes.toml）の書き間違いは、起動のときに理由を出して止める
+    from kei_agent.themes import PlaceError, check_places
+
+    try:
+        check_places(config)
+    except PlaceError as e:
+        raise ConfigError(str(e)) from None
+    return config

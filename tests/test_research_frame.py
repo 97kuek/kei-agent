@@ -208,6 +208,8 @@ async def test_a_module_answers_in_the_channel_workspace_like_research(lab, conf
 
 async def test_joining_a_theme_channel_shows_the_modules_welcome(lab, config):
     assistant, slack, claude = lab
+    # フォルダがあるテーマ（無ければ、先に置き場所を聞く。test_theme_places.py）
+    (config.research_root / "vlm").mkdir(parents=True)
     await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
     text, = slack.texts()
     assert str(config.research_root / "vlm") in text and text.endswith("実験のことを書いてね。")

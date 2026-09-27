@@ -96,7 +96,7 @@ class SettingsActions:
     # App Home（設定画面）
 
     def _theme_names(self) -> list[str]:
-        return [p.name for p in themes.theme_dirs(self.config)]
+        return list(themes.all_themes(self.config))
 
     async def publish_home(self, user_id: str) -> None:
         owner = self.is_allowed(user_id)
