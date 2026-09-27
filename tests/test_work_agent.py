@@ -1,4 +1,4 @@
-"""仕事エージェント（Outlook の予定）と、その見せ方。"""
+"""仕事のモジュール（modules/work/）: 担当プロセス（Outlook の予定）と、本体側の見せ方。"""
 
 import asyncio
 import json
@@ -7,8 +7,8 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent import work
 from kei_agent.a2a import Agent
+from kei_agent_modules.work import module as work
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 pytest.importorskip("uvicorn")
@@ -67,20 +67,21 @@ async def server(config, monkeypatch):
     """仕事エージェントを立てる（会社の連携は偽物）。"""
     import uvicorn
 
-    from kei_agent_work import connector
-    from kei_agent_work.app import build_app
-    from kei_agent_work.executor import WorkExecutor
+    from kei_agent import modules
+    from kei_agent_a2a import launch
+    from kei_agent_modules.work import connector
+    from kei_agent_modules.work.agent import Executor
 
     asked = []
 
-    async def events(cfg, days=7, today=None, store=None):
+    async def events(cfg, store, days=7, today=None, provider=""):
         asked.append(days)
         return EVENTS
 
     monkeypatch.setattr(connector, "events", events)
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    app = build_app(base, TOKEN, executor=WorkExecutor(config))
+    app = launch.build_app(modules.builtin()["work"], base, TOKEN, executor=Executor(config))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     for _ in range(100):
@@ -101,7 +102,7 @@ async def test_card_says_it_reads_the_calendar(server):
 
 async def test_list_events_comes_back_in_the_envelope(server):
     base, asked = server
-    task = await Agent(base, TOKEN, timeout=30).ask("list-events", params={"days": 3})
+    task = await Agent(base, TOKEN, timeout=30).ask("list-events", json.dumps({"days": 3}))
     envelope = json.loads(task.answer)
     assert task.ok and envelope["ok"] is True
     assert envelope["data"]["days"] == 3 and len(envelope["data"]["items"]) == 3
@@ -110,9 +111,9 @@ async def test_list_events_comes_back_in_the_envelope(server):
 
 async def test_without_the_connection_it_says_so(server, monkeypatch):
     """連携が使えないときは、その理由を返す（黙って0件にしない）。"""
-    from kei_agent_work import connector
+    from kei_agent_modules.work import connector
 
-    async def broken(cfg, days=7, today=None, store=None):
+    async def broken(cfg, store, days=7, today=None, provider=""):
         raise connector.WorkCalendarError("連携を使えませんでした")
 
     monkeypatch.setattr(connector, "events", broken)
@@ -132,7 +133,7 @@ def test_connector_reads_the_json_and_drops_the_body():
             '"end": "2026-09-25T13:00", "location": "Teams", "organizer": "c@example.com"}]')
     found = json_list(text)
     assert found[0]["subject"] == "定例"
-    from kei_agent_work import connector
+    from kei_agent_modules.work import connector
 
     event = connector._event(found[0])
     assert set(event) == {"id", "subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
@@ -178,7 +179,7 @@ def test_work_connector_has_no_write_tools():
 async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(config, store, monkeypatch):
     """予定の一覧も、共通の起動口で「読むだけ」の1回として動かす（会話は続けない）。"""
     from kei_agent import runner
-    from kei_agent_work import connector
+    from kei_agent_modules.work import connector
 
     seen = {}
 
@@ -186,8 +187,8 @@ async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(confi
         seen.update(request=request, prompt=prompt)
         return runner.RunResult(text='[{"subject": "定例", "start": "2026-09-25T11:00"}]')
 
-    monkeypatch.setattr(connector.runner, "run_model", run_model)
-    events = await connector.events(config, 7, store=store, provider="claude")
+    monkeypatch.setattr(runner, "run_model", run_model)
+    events = await connector.events(config, store, 7, provider="claude")
 
     request = seen["request"]
     assert [e["subject"] for e in events] == ["定例"]
@@ -199,12 +200,12 @@ async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(confi
 
 async def test_calendar_failure_keeps_the_limit(config, store, monkeypatch):
     from kei_agent import runner
-    from kei_agent_work import connector
+    from kei_agent_modules.work import connector
 
     async def run_model(*_args, **_kwargs):
         return runner.RunResult(is_error=True, errors=["hit your session limit"], limit_reset_at=123.0)
 
-    monkeypatch.setattr(connector.runner, "run_model", run_model)
+    monkeypatch.setattr(runner, "run_model", run_model)
     with pytest.raises(connector.WorkCalendarError) as caught:
-        await connector.events(config, 7, store=store, provider="claude")
+        await connector.events(config, store, 7, provider="claude")
     assert caught.value.limit_reset_at == 123.0

@@ -161,7 +161,8 @@ def test_agent_workspaces_are_stable_places_for_sessions(config):
     course = themes.agent_workspace(config, "course")
     work = themes.agent_workspace(config, "work")
     assert (course.kind, course.cwd) == (ChannelKind.COURSE, config.course_root)
-    assert work.kind is ChannelKind.WORK and work.cwd == config.state_dir / "agents" / "work"
+    # 仕事はモジュール。作業場は前と同じ場所（会話の続きが切れない）
+    assert (work.kind, work.module) == (ChannelKind.MODULE, "work") and work.cwd == config.state_dir / "agents" / "work"
     assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
     with pytest.raises(ValueError):
         themes.agent_workspace(config, "research")

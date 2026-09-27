@@ -17,23 +17,25 @@ from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
 from kei_agent.config import REPO_ROOT
 
 PLUGIN = REPO_ROOT / "plugin"
+# 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
+PLUGINS = {"research": PLUGIN / "research", "course": PLUGIN / "course", "work": REPO_ROOT / "modules" / "work" / "plugin"}
 AGENTS = ("research", "course", "work")
 ALLOW, DENY = 0, 2
 
 
 def run_policy(agent: str, event: dict) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(PLUGIN / agent / "hooks" / "policy.py")],
+        [sys.executable, str(PLUGINS[agent] / "hooks" / "policy.py")],
         input=json.dumps(event), capture_output=True, text=True, check=False)
 
 
 @pytest.mark.parametrize("agent", AGENTS)
 def test_each_plugin_ships_its_hook(agent):
-    hooks = json.loads((PLUGIN / agent / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    hooks = json.loads((PLUGINS[agent] / "hooks" / "hooks.json").read_text(encoding="utf-8"))
     commands = [h["command"] for entry in hooks["hooks"]["PreToolUse"] for h in entry["hooks"]]
 
     assert any("${CLAUDE_PLUGIN_ROOT}/hooks/policy.py" in c for c in commands)
-    assert (PLUGIN / agent / "hooks" / "policy.py").stat().st_mode & 0o111
+    assert (PLUGINS[agent] / "hooks" / "policy.py").stat().st_mode & 0o111
 
 
 @pytest.mark.parametrize(("agent", "tool", "allowed"), [
@@ -112,7 +114,7 @@ def test_hook_policy(agent, tool, allowed):
 
 
 def _decide(agent: str):
-    spec = importlib.util.spec_from_file_location(f"{agent}_policy", PLUGIN / agent / "hooks" / "policy.py")
+    spec = importlib.util.spec_from_file_location(f"{agent}_policy", PLUGINS[agent] / "hooks" / "policy.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.decide
@@ -169,7 +171,7 @@ def test_research_hook_lets_ordinary_commands_through():
 
 @pytest.mark.parametrize("agent", AGENTS)
 def test_unreadable_input_is_refused(agent):
-    broken = subprocess.run([sys.executable, str(PLUGIN / agent / "hooks" / "policy.py")],
+    broken = subprocess.run([sys.executable, str(PLUGINS[agent] / "hooks" / "policy.py")],
                             input="これは JSON ではない", capture_output=True, text=True, check=False)
 
     assert broken.returncode == DENY
@@ -200,5 +202,5 @@ def test_the_hook_never_echoes_the_tool_input(agent):
 def test_every_policy_is_self_contained():
     """hook は plugin の中だけで動く（Kei Agent のパッケージを import しない）。"""
     for agent in AGENTS:
-        body = (PLUGIN / agent / "hooks" / "policy.py").read_text(encoding="utf-8")
+        body = (PLUGINS[agent] / "hooks" / "policy.py").read_text(encoding="utf-8")
         assert "kei_agent" not in body, agent

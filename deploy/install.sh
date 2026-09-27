@@ -6,7 +6,7 @@
 #         deploy/install.sh course remove 大学エージェントの登録を外す
 #         deploy/install.sh research      研究エージェント（A2A サーバー）を登録
 #         deploy/install.sh research remove 研究エージェントの登録を外す
-#         deploy/install.sh work          仕事エージェント（A2A サーバー）を登録
+#         deploy/install.sh work          仕事エージェント（担当プロセスを持つモジュール）を登録
 #         deploy/install.sh knowledge     知識エージェント（担当プロセスを持つモジュール）を登録
 #         deploy/install.sh voice         声のレイヤ（A2A サーバー＋マイク）を登録
 #         deploy/install.sh notion-gateway Notion ゲートウェイ（Notion に届く唯一の口）を登録

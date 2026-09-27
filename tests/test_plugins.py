@@ -13,6 +13,8 @@ import pytest
 from kei_agent.config import REPO_ROOT
 
 PLUGIN = REPO_ROOT / "plugin"
+# 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
+PLUGINS = {"research": PLUGIN / "research", "course": PLUGIN / "course", "work": REPO_ROOT / "modules" / "work" / "plugin"}
 AGENTS = ("research", "course", "work")
 # SKILL.md の本文の長さの上限（語数）。長いものは references/ に分ける
 MAX_WORDS = 500
@@ -39,7 +41,7 @@ def skill_metadata(plugin_dir: Path) -> dict[str, dict[str, str]]:
 
 
 def test_research_plugin_has_renamed_skills():
-    skills = skill_metadata(PLUGIN / "research")
+    skills = skill_metadata(PLUGINS["research"])
     assert {"running-jobs", "researching-literature"} <= set(skills)
     assert not (PLUGIN / "skills").exists()
     assert not (PLUGIN / ".claude-plugin").exists()
@@ -47,45 +49,45 @@ def test_research_plugin_has_renamed_skills():
 
 @pytest.mark.parametrize("agent", AGENTS)
 def test_each_agent_has_its_own_plugin_manifest(agent):
-    manifest = json.loads((PLUGIN / agent / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    manifest = json.loads((PLUGINS[agent] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert manifest["name"] == f"kei-agent-{agent}"
     assert manifest["description"]
 
 
 @pytest.mark.parametrize("agent", AGENTS)
 def test_every_skill_says_its_name_and_when_to_use_it(agent):
-    for name, meta in skill_metadata(PLUGIN / agent).items():
+    for name, meta in skill_metadata(PLUGINS[agent]).items():
         assert meta.get("name") == name, f"{agent}/{name}: frontmatter の name がディレクトリ名と違う"
         assert meta.get("description", "").startswith("Use when"), f"{agent}/{name}: description は使用条件から書く"
 
 
 @pytest.mark.parametrize("agent", AGENTS)
 def test_skills_stay_short_enough_to_read(agent):
-    for name, _ in skill_metadata(PLUGIN / agent).items():
-        body = (PLUGIN / agent / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+    for name, _ in skill_metadata(PLUGINS[agent]).items():
+        body = (PLUGINS[agent] / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
         assert len(body.split()) <= MAX_WORDS, f"{agent}/{name}: SKILL.md が長い（references/ に分ける）"
 
 
 def test_skills_do_not_depend_on_an_environment_variable_for_their_scripts():
     """skill のスクリプトは plugin の中から辿る。環境変数が無いと動かない形にしない。"""
-    for path in PLUGIN.glob("*/skills/*/SKILL.md"):
+    for path in (path for folder in PLUGINS.values() for path in folder.glob("skills/*/SKILL.md")):
         assert "KEI_AGENT_PLUGIN_DIR" not in path.read_text(encoding="utf-8"), path
 
 
 def test_course_plugin_has_three_scoped_skills():
-    assert set(skill_metadata(PLUGIN / "course")) == {
+    assert set(skill_metadata(PLUGINS["course"])) == {
         "finding-course-materials", "managing-assignments", "managing-course-notion", "managing-academic-record"}
 
 
 def test_course_skills_name_the_canonical_databases():
-    text = (PLUGIN / "course" / "skills" / "managing-academic-record" / "SKILL.md").read_text(encoding="utf-8")
-    course_schema = (PLUGIN / "course" / "skills" / "managing-course-notion" / "SKILL.md").read_text(encoding="utf-8")
+    text = (PLUGINS["course"] / "skills" / "managing-academic-record" / "SKILL.md").read_text(encoding="utf-8")
+    course_schema = (PLUGINS["course"] / "skills" / "managing-course-notion" / "SKILL.md").read_text(encoding="utf-8")
     for name in ("授業", "課題", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"):
         assert name in text or name in course_schema
 
 
 def test_work_plugin_has_three_scoped_skills():
-    assert set(skill_metadata(PLUGIN / "work")) == {
+    assert set(skill_metadata(PLUGINS["work"])) == {
         "researching-work-context", "preparing-meetings", "drafting-work-actions"}
 
 
@@ -96,6 +98,6 @@ def test_work_plugin_has_three_scoped_skills():
 ])
 def test_each_plugin_says_what_it_must_not_touch(agent, word):
     """権限の境界は、どこか1つの skill には必ず書いてある。"""
-    bodies = "\n".join((PLUGIN / agent / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-                       for name in skill_metadata(PLUGIN / agent))
+    bodies = "\n".join((PLUGINS[agent] / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+                       for name in skill_metadata(PLUGINS[agent]))
     assert word in bodies

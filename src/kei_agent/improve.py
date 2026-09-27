@@ -116,7 +116,7 @@ def catch_up_with_main(worktree: Path) -> CommandResult:
 
 
 # エージェントのテストを飛ばさないために、確認で入れる依存のグループ
-AGENT_GROUPS = ("--group", "course", "--group", "research", "--group", "work")
+AGENT_GROUPS = ("--group", "course", "--group", "research", "--group", "agents")
 
 
 def run_checks(worktree: Path) -> CommandResult:
@@ -127,7 +127,7 @@ def run_checks(worktree: Path) -> CommandResult:
     """
     outputs = []
     pytest_args = ["uv", "run", "--frozen", *AGENT_GROUPS, "pytest", "-q"]
-    for args in (pytest_args, ["uvx", "ruff", "check", "src", "tests", "plugin"]):
+    for args in (pytest_args, ["uvx", "ruff", "check", "src", "tests", "plugin", "modules"]):
         proc = subprocess.run(args, cwd=worktree, capture_output=True, text=True, timeout=1800)
         tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-15:])
         outputs.append(f"$ {' '.join(args)}\n{tail}")

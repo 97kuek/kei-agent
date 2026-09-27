@@ -1526,12 +1526,13 @@ async def test_work_channel_hides_a2a_failure_details(env):
     class _Agent:
         base_url = "http://127.0.0.1:8788"
 
-        async def ask(self, skill, text="", params=None):
+        async def stream(self, skill, text="", params=None, on_progress=None):
             return a2a.TaskResult(state="TASK_STATE_FAILED", text="RuntimeError: /private/secret")
 
     assistant.agents["work"] = _Agent()
 
-    await assistant.work(Request("C8", "30_work", "11.1", "11.1", "今日の予定は？"), skill="list-events")
+    await assistant.modules["work"].on_message(Request("C8", "30_work", "11.1", "11.1", "今日の予定は？"),
+                                               skill="list-events", params={})
 
     shown = "\n".join(slack.texts())
     assert "接続に失敗したよ" in shown
@@ -1764,7 +1765,7 @@ async def test_overview_thread_keeps_asking_the_agent_that_answered(env, monkeyp
     class _Work:
         base_url = "http://127.0.0.1:8789"
 
-        async def ask(self, skill, text="", params=None):
+        async def stream(self, skill, text="", params=None, on_progress=None):
             asked.append(skill)
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
                 "ok": True, "text": "予定はないよ", "data": {"items": []},
@@ -2149,8 +2150,8 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch, question, expe
         async def card(self):
             return {"skills": [{"id": "list-events", "description": "予定"}]}
 
-        async def ask(self, skill, text="", params=None):
-            asked.append((skill, params))
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            asked.append((skill, _json.loads(text), params))
             today = datetime.now().date().isoformat()
             tomorrow = (datetime.now().date() + timedelta(days=1)).isoformat()
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=_json.dumps({
@@ -2170,7 +2171,8 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch, question, expe
     await assistant.on_mention({"channel": "C8", "user": "UME", "ts": "15.1", "text": f"<@UBOT> {question}"})
     await settle(assistant)
 
-    assert asked == [("list-events", {"days": minimum_days, "provider": "claude"})]
+    # 日数は本文の JSON で、provider は metadata で渡す（明日を聞かれたら、明日まで入るように2日）
+    assert asked == [("list-events", {"days": minimum_days}, {"provider": "claude"})]
     assert claude.calls == []
     shown = "\n".join(slack.texts())
     assert expected in shown and excluded not in shown

@@ -21,21 +21,23 @@ WORK = {"filesystem.deny_read", "app.allowlist"}
     ("research", UseCase.RESEARCH_EXECUTE, "claude", "claude-sonnet-5", "high", "system.md", True, RESEARCH),
     ("course", UseCase.COURSE_EXPLAIN, "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
     ("course", UseCase.COURSE_EXPLAIN, "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
-    ("work", UseCase.WORK_SINGLE_SOURCE, "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
-    ("work", UseCase.WORK_SINGLE_SOURCE, "claude", "claude-sonnet-5", "medium", "work.md", True, WORK),
+    ("work", "work_single_source", "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
+    ("work", "work_single_source", "claude", "claude-sonnet-5", "medium", "work.md", True, WORK),
 ])
 def test_agent_provider_contract_matrix(config, actor, case, provider, model, effort, prompt_name, has_skills,
                                         capabilities):
     """Claude と Codex で、同じ担当は同じ指示書・skill・制限になる。"""
     workspace = (router.workspace(config) if actor == "router" else
                  themes.resolve(config, "vlm") if actor == "research" else
-                 Workspace(actor, ChannelKind.COURSE if actor == "course" else ChannelKind.WORK,
-                           config.course_root if actor == "course" else config.agent_root / "work"))
+                 Workspace(actor, ChannelKind.COURSE, config.course_root) if actor == "course" else
+                 themes.agent_workspace(config, actor))
     contract = resolve_contract(config, runner.ExecutionRequest(
         workspace, resolve(actor, provider, case), None, "C1", "1.1"))
 
     assert (contract.recipe.model, contract.recipe.reasoning_effort) == (model, effort)
-    assert contract.prompt_text == (config.repo_root / "prompts" / prompt_name).read_text(encoding="utf-8")
+    # 仕事の指示書はモジュールのフォルダ（modules/work/）、本体の担当はリポジトリの prompts/
+    folder = config.repo_root / ("modules/work" if actor == "work" else "prompts")
+    assert contract.prompt_text == (folder / prompt_name).read_text(encoding="utf-8")
     assert len(contract.prompt_version) == 12
     assert (contract.skill_dir is not None) is has_skills
     assert contract.capabilities == capabilities

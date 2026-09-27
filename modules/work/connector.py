@@ -2,11 +2,11 @@
 
 会社の IT が Anthropic・OpenAI のアプリに読み取りを許可しているので、Entra ID にアプリを登録しなくても
 Outlook を読める。この連携はアカウント側にあり、Python からは直接呼べない。そこで選択済み provider を
-共通の起動口（`kei_agent.runner`）で「読むだけ」の1回として動かし、JSON で答えさせる。
+「読むだけ」の1回として動かし（窓口の run_ai）、JSON で答えさせる。
 
-- 使える道具は制限の表（`kei_agent.agent_policy` の OUTLOOK）が決める。送信・作成・削除はできない
+- 使える道具は module.toml の [[actor.connectors]] が決める。送信・作成・削除はできない
 - `list-events` が返すのは件名・時間・場所・主催者・リンクまで。朝のまとめで1行ずつ並べる形なので、
-  本文を入れても読めない（秘密のためではない。自由な質問では本文を出してよい。prompts/work.md）
+  本文を入れても読めない（秘密のためではない。自由な質問では本文を出してよい。work.md）
 """
 
 from __future__ import annotations
@@ -14,16 +14,14 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-from kei_agent import runner, themes
-from kei_agent.config import Config
-from kei_agent.model_json import json_list
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
-from kei_agent.store import Store
+from kei_agent_a2a.api import AIError, Config, json_list, run_ai
 
 log = logging.getLogger(__name__)
 
 AGENT = "work"
 DEFAULT_DAYS = 7
+# 予定を読む回の用途（module.toml の [use_cases]）
+USE_CASE = "work_single_source"
 
 PROMPT = """Outlook の予定を検索する道具を使って、{since} から {until} までの私の予定を調べてください。
 
@@ -39,33 +37,27 @@ PROMPT = """Outlook の予定を検索する道具を使って、{since} から 
 - 予定が無ければ [] とだけ答えてください
 - 本文（会議の詳細、Teams の参加リンク、パスコード）は入れないでください"""
 
+
 class WorkCalendarError(RuntimeError):
     def __init__(self, message: str, limit_reset_at: float | None = None):
         super().__init__(message)
         self.limit_reset_at = limit_reset_at
 
 
-async def _read(config: Config, store: Store, prompt: str, provider: str = "") -> str:
+async def _read(config: Config, store, prompt: str, provider: str = "") -> str:
     """予定を JSON で答えさせる1回（読むだけ。会話は続けない）。"""
-    use_case = UseCase.WORK_SINGLE_SOURCE
     try:
-        recipe = (resolve(AGENT, provider, use_case) if provider
-                  else resolve_selected(config, store, AGENT, use_case))
-    except ModelPolicyError as e:
-        raise WorkCalendarError(str(e)) from None
-    result = await runner.run_model(config, runner.ExecutionRequest(
-        themes.agent_workspace(config, AGENT), recipe, None, "", "", read_only=True), prompt)
-    if result.is_error:
-        raise WorkCalendarError(f"Outlook の予定を読めませんでした: {result.failure_reason()}", result.limit_reset_at)
-    return result.text
+        return await run_ai(config, store, AGENT, USE_CASE, prompt, provider=provider)
+    except AIError as e:
+        raise WorkCalendarError(f"Outlook の予定を読めませんでした: {e}", e.limit_reset_at) from None
 
 
-async def events(config: Config, days: int = DEFAULT_DAYS, today: date | None = None,
-                 store: Store | None = None, provider: str = "") -> list[dict]:
+async def events(config: Config, store, days: int = DEFAULT_DAYS, today: date | None = None,
+                 provider: str = "") -> list[dict]:
     """これから days 日ぶんの予定を、始まる順に。"""
     start = today or date.today()
     prompt = PROMPT.format(since=start.isoformat(), until=(start + timedelta(days=max(days, 1))).isoformat())
-    text = await _read(config, store or Store(config.db_path), prompt, provider)
+    text = await _read(config, store, prompt, provider)
     try:
         found = json_list(text)
     except ValueError as e:

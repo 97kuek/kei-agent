@@ -50,7 +50,7 @@ def test_codex_profile_rejects_disallowed_domain(config):
         preflight(bad_config, _contract(bad_config), "codex_cli")
 
 
-@pytest.mark.parametrize("agent,case", [("course", UseCase.COURSE_EXPLAIN), ("work", UseCase.WORK_SINGLE_SOURCE)])
+@pytest.mark.parametrize("agent,case", [("course", UseCase.COURSE_EXPLAIN), ("work", "work_single_source")])
 def test_connector_agents_read_only_their_workspace_and_skills(config, agent, case):
     """連携だけを使う担当は、個人のファイル（ホーム）を読めず、自分の作業場と skill を読むだけ。書き込みも通信もない。"""
     workspace = themes.agent_workspace(config, agent)

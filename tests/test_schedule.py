@@ -94,7 +94,7 @@ async def test_hub_calendar_copies_all_future_assignments_without_asking_work(en
         return SyncReport(1, 0, 0)
 
     monkeypatch.setattr(assistant, "ask_course", ask_course)
-    monkeypatch.setattr(assistant, "ask_work", ask_work)
+    monkeypatch.setattr(assistant.modules["work"], "agenda", ask_work)
     monkeypatch.setattr(schedule_module, "sync_calendar", record_sync)
 
     result = await scheduler.sync_hub_calendar("2026-09-26")
@@ -112,7 +112,7 @@ async def test_hub_calendar_sync_without_hub_does_not_call_agents(env, monkeypat
         raise AssertionError("agent must not be called")
 
     monkeypatch.setattr(assistant, "ask_course", unexpected)
-    monkeypatch.setattr(assistant, "ask_work", unexpected)
+    monkeypatch.setattr(assistant.modules["work"], "agenda", unexpected)
     assert await scheduler.sync_hub_calendar("2026-09-24") == {"course": "no_hub"}
 
 
@@ -779,16 +779,16 @@ class FakeCourseAgent:
 
 
 class FakeWorkAgent:
-    """仕事エージェントの代わり（Outlook の予定）。"""
+    """仕事の担当の代わり（Outlook の予定）。仕事のモジュールは、日数を本文の JSON で頼む。"""
     base_url = "http://127.0.0.1:8789"
 
     def __init__(self, items):
         self.items = items
         self.asked = []
 
-    async def ask(self, skill, text="", params=None):
+    async def stream(self, skill, text="", params=None, on_progress=None):
         from kei_agent import a2a
-        self.asked.append((skill, params))
+        self.asked.append((skill, json.loads(text)))
         return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(
             {"ok": True, "text": "予定", "data": {"items": self.items},
              "limit_reset_at": None, "cost_usd": None}))
@@ -818,11 +818,11 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     assert "10:40–12:20` 🎓 データベース" in lines[2]
     assert "17:00" in lines[3] and "⏰ 締切: プロジェクト研究B 履修申請フォーム" in lines[3]
     assert "空き:" not in text and "9時 " not in text
-    # 読んだ会議は予定カレンダーにも書く（AI をもう一度動かさない）
+    # 読んだ会議は予定カレンダーにも書く（AI をもう一度動かさない）。仕事のモジュールの予定（agenda）から
     assert detail == {"synced": True, "classes": 1, "dues": 1, "events": 1,
-                      "meetings": {"created": 1, "updated": 0, "stale": 0}}
+                      "agenda": {"synced": {"Outlook": {"created": 1, "updated": 0, "stale": 0}}, "unread": []}}
     assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
-    assert [skill for skill, _ in assistant.agents["work"].asked] == ["list-events"]
+    assert assistant.agents["work"].asked == [("list-events", {"days": schedule_module.VOICE_DAYS})]
 
 
 # 1日の帯と空き時間（morning.py）
@@ -900,8 +900,8 @@ async def test_review_digest_gathers_all_three_domains(env, config, store):
     assert "今日が期限だったもの: プロジェクト研究B / 履修申請フォーム（17:00）" in text
     assert "第3回レポート" in text.split("残っている締切:")[1].splitlines()[0]
     assert "明日（" in text and "マルチメディア工学A" in text
-    assert "今日あった会議: 18:00–19:00 定例MTG" in text
-    assert "明日の会議: 11:00–13:00 ゆうちょ様AML" in text
+    assert "今日あった予定: 18:00–19:00 定例MTG" in text
+    assert "明日の予定: 11:00–13:00 ゆうちょ様AML" in text
 
 
 async def test_daily_digest_does_not_ask_the_agents_again(env, config, store):

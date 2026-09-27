@@ -1,0 +1,66 @@
+# 仕事のモジュール（docs/extensibility.md）。会社のアカウントの Microsoft 365 を読んで、予定と会社のことに答える
+api = 1
+name = "work"
+label = "仕事"
+description = "会社のアカウントの Outlook・Teams・SharePoint を読む（読むだけ）。予定の一覧と、会社のことの質問に答える"
+
+# AI の実行役（provider は App Home で選ぶ）。会社のアカウントは kei-agent-work.zsh の CLAUDE_CONFIG_DIR / CODEX_HOME。
+# 手元のファイル・コマンド・Web・Notion は使わない。送信・投稿・作成・削除は、道具を渡さないうえに二の柵（plugin）が断る
+[actor]
+prompt = "work.md"
+plugin = true
+files = "none"
+shell = false
+web = false
+notion = "none"
+timeout_minutes = 5
+default_use_case = "work_single_source"
+classify = "1件のメール・資料の要点は work_single_source、複数メール・予定・資料の状況要約は work_cross_source、優先順位・会議準備・論点整理は work_decide。"
+
+# Outlook: 予定・メール・人・空き時間を探して読む。Codex ではメールと予定が別の App で、道具の名前も違う
+[[actor.connectors]]
+name = "outlook"
+claude_server = "claude_ai_Microsoft_365"
+claude_tools = ["outlook_calendar_search", "outlook_email_search", "search_people", "find_meeting_availability",
+                "read_resource"]
+
+[[actor.connectors.codex_apps]]
+name = "Microsoft Outlook Email"
+namespace = "microsoft_outlook_email"
+tools = ["search_messages", "list_messages", "get_recent_emails", "fetch_message", "fetch_messages_batch",
+         "list_mail_folders", "find_mail_folder", "list_attachments", "fetch_attachment", "search_people",
+         "search_directory_users"]
+
+[[actor.connectors.codex_apps]]
+name = "Microsoft Outlook Calendar"
+namespace = "microsoft_outlook_calendar"
+tools = ["search_events", "list_events", "list_event_instances", "list_recurring_series", "fetch_event",
+         "fetch_events_batch", "list_calendars", "find_available_slots", "get_schedule", "search_people",
+         "search_directory_users"]
+
+# 同じ連携の Teams と SharePoint: メッセージと資料を探して読む。Codex の App は、道具の名前を確かめてから足す
+[[actor.connectors]]
+name = "teams-sharepoint"
+claude_server = "claude_ai_Microsoft_365"
+claude_tools = ["chat_message_search", "teams_list_teams", "teams_list_channels", "teams_list_channel_messages",
+                "teams_list_chats", "sharepoint_search", "sharepoint_folder_search"]
+
+[use_cases.work_single_source]
+claude = { model = "claude-sonnet-5", effort = "medium" }
+codex = { model = "gpt-6-luna", effort = "medium" }
+
+[use_cases.work_cross_source]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+
+[use_cases.work_decide]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "high" }
+
+# 担当プロセス（A2A のサーバー）。秘密情報は kei-agent-work.zsh（会社のアカウントの場所）
+[process]
+port = 8789
+
+# チャンネル（番号を外した名前。設定の [channels] work で変えられる）
+[channels]
+work = ["work"]

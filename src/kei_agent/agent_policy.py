@@ -52,28 +52,7 @@ class Connector:
 _BOX_READS = ("search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
               "get_file_details", "get_file_content", "get_file_preview", "get_preview_page")
 BOX = Connector("box", "claude_ai_Box", _BOX_READS, (CodexApp("Box", _codex_tools("box", _BOX_READS)),))
-# 会社の Microsoft 365 の Outlook: 予定・メール・人・空き時間を探して読む。送信・作成・変更・削除はしない。
-# Codex ではメールと予定が別の App で、道具の名前も違う
-OUTLOOK = Connector(
-    "outlook", "claude_ai_Microsoft_365",
-    ("outlook_calendar_search", "outlook_email_search", "search_people", "find_meeting_availability",
-     "read_resource"),
-    (CodexApp("Microsoft Outlook Email", _codex_tools("microsoft_outlook_email", (
-        "search_messages", "list_messages", "get_recent_emails", "fetch_message", "fetch_messages_batch",
-        "list_mail_folders", "find_mail_folder", "list_attachments", "fetch_attachment",
-        "search_people", "search_directory_users"))),
-     CodexApp("Microsoft Outlook Calendar", _codex_tools("microsoft_outlook_calendar", (
-         "search_events", "list_events", "list_event_instances", "list_recurring_series", "fetch_event",
-         "fetch_events_batch", "list_calendars", "find_available_slots", "get_schedule",
-         "search_people", "search_directory_users")))),
-)
-# 同じ連携の Teams と SharePoint: メッセージと資料を探して読む。投稿・ファイルの作成・移動・削除はしない。
-# Codex の Teams・SharePoint の App は、道具の名前を確かめてから足す（いまの Codex は Outlook だけを読む）
-TEAMS_SHAREPOINT = Connector(
-    "teams-sharepoint", "claude_ai_Microsoft_365",
-    ("chat_message_search", "teams_list_teams", "teams_list_channels", "teams_list_channel_messages",
-     "teams_list_chats", "sharepoint_search", "sharepoint_folder_search"),
-)
+# モジュールの連携（仕事の Microsoft 365 など）は、そのモジュールの module.toml の [[actor.connectors]]
 
 
 @dataclass(frozen=True)
@@ -124,8 +103,6 @@ POLICIES: dict[str, AgentPolicy] = {
     # Notion は授業ホームの中だけ（ゲートウェイが決める）。手元のファイル・コマンド・Web は使わない
     "course": AgentPolicy("course", "course.md", plugin=True, files="none", shell=False, web=False,
                           notion="write", connectors=(BOX,), timeout_minutes=5),
-    "work": AgentPolicy("work", "work.md", plugin=True, files="none", shell=False, web=False,
-                        notion="none", connectors=(OUTLOOK, TEAMS_SHAREPOINT), timeout_minutes=5),
     # 振り分け・分類・Daily/レトプラ。材料はプロンプトで渡すので、読むだけで道具も持たない
     "router": AgentPolicy("router", "system.md", plugin=False, files="read", shell=False, web=False,
                           notion="none"),

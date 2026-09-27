@@ -107,12 +107,13 @@ def test_lightweight_classifier_requires_valid_high_confidence_json():
 
 
 def test_lightweight_classifier_restricts_each_actor_to_its_own_cases():
-    from kei_agent.model_classifier import _COURSE_CASES, _WORK_CASES, parse
+    from kei_agent.model_classifier import _COURSE_CASES, parse
 
+    work = frozenset({"work_single_source", "work_cross_source", "work_decide"})    # 仕事のモジュールの用途
     assert parse('{"use_case":"course_requirements","confidence":0.9}', _COURSE_CASES) \
         is UseCase.COURSE_REQUIREMENTS
     assert parse('{"use_case":"work_decide","confidence":0.9}', _COURSE_CASES) is None
-    assert parse('{"use_case":"work_decide","confidence":0.9}', _WORK_CASES) is UseCase.WORK_DECIDE
+    assert parse('{"use_case":"work_decide","confidence":0.9}', work) == "work_decide"
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):

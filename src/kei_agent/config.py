@@ -28,7 +28,7 @@ EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
-AGENT_PLUGINS = frozenset({"research", "course", "work"})
+AGENT_PLUGINS = frozenset({"research", "course"})
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
 CORE_ACTORS = AGENT_PLUGINS | frozenset({"router", "self_fix"})
 
@@ -167,7 +167,6 @@ class Config:
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
     course_channels: tuple[str, ...] = ("course",)
     # 仕事エージェントに取り次ぐチャンネル
-    work_channels: tuple[str, ...] = ("work",)
     # 使うモジュール（設定の modules）と、そのチャンネル（種類 → 番号を外した名前）
     modules: tuple[str, ...] = field(default_factory=_default_modules)
     module_channels: dict[str, tuple[str, ...]] = field(default_factory=_default_module_channels)
@@ -281,7 +280,7 @@ AGENT_PROFILE_KEYS = {"provider"}
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
 # 本体が持つチャンネルの種類（モジュールの種類は module.toml の [channels] から足す）
-CHANNELS_KEYS = {"overview", "improve", "course", "work"}
+CHANNELS_KEYS = {"overview", "improve", "course"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
 SCHEDULE_TIME_KEYS = ("daily", "review", "night")
 SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
@@ -436,7 +435,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         overview_channels=tuple(channels.get("overview", Config.overview_channels)),
         improve_channels=tuple(channels.get("improve", Config.improve_channels)),
         course_channels=tuple(channels.get("course", Config.course_channels)),
-        work_channels=tuple(channels.get("work", Config.work_channels)),
         modules=tuple(spec.name for spec in enabled),
         module_channels={kind: tuple(channels.get(kind, names)) for spec in enabled
                          for kind, names in spec.channels.items()},

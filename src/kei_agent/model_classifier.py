@@ -14,7 +14,6 @@ _RESEARCH_CASES = frozenset({
 })
 _COURSE_CASES = frozenset({UseCase.COURSE_EXPLAIN, UseCase.COURSE_REQUIREMENTS,
                            UseCase.COURSE_COMPARE, UseCase.COURSE_DEGREE_PLAN})
-_WORK_CASES = frozenset({UseCase.WORK_SINGLE_SOURCE, UseCase.WORK_CROSS_SOURCE, UseCase.WORK_DECIDE})
 
 
 class UsageLimited(RuntimeError):
@@ -57,14 +56,7 @@ async def classify_course(config: Config, store, prompt: str, *, provider: str |
                            "履修・卒業計画の選択肢提案は degree_plan。", provider=provider)
 
 
-async def classify_work(config: Config, store, prompt: str, *, provider: str | None = None) -> UseCase:
-    return await _classify(config, store, "work", prompt, _WORK_CASES, UseCase.WORK_SINGLE_SOURCE,
-                           "work_single_source, work_cross_source, work_decide",
-                           "1件のメール・資料の要点は single_source、複数メール・予定・資料の状況要約は cross_source、"
-                           "優先順位・会議準備・論点整理は decide。", provider=provider)
-
-
-CLASSIFIERS = {"research": classify_research, "course": classify_course, "work": classify_work}
+CLASSIFIERS = {"research": classify_research, "course": classify_course}
 
 
 async def classify(config: Config, store, actor: str, prompt: str, *,
@@ -76,11 +68,18 @@ async def classify(config: Config, store, actor: str, prompt: str, *,
     spec = modules.known().get(actor)
     if spec is None or spec.actor is None:
         raise KeyError(actor)
+    return await classify_module(config, store, spec, prompt, provider=provider)
+
+
+async def classify_module(config: Config, store, spec: modules.ModuleSpec, prompt: str, *,
+                          provider: str | None = None) -> str:
+    """モジュールの実行役の用途。classify（見分け方）が無ければ、分類器を動かさずに default_use_case。"""
+    assert spec.actor is not None
     if not spec.actor.classify:
         return spec.actor.default_use_case
     cases = [u.name for u in spec.actor.use_cases if not u.offline]
-    return await _classify(config, store, actor, prompt, frozenset(cases), spec.actor.default_use_case,
-                           ", ".join(cases), spec.actor.classify, provider=provider)
+    return str(await _classify(config, store, spec.name, prompt, frozenset(cases), spec.actor.default_use_case,
+                               ", ".join(cases), spec.actor.classify, provider=provider))
 
 
 async def _classify(config: Config, store, actor: str, prompt: str, allowed: frozenset[UseCase | str],

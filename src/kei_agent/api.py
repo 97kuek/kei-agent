@@ -29,7 +29,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "Core", "NotionError", "Records", "Reply", "Request", "Theme", "day_label", "escape",
-           "failure_text"]
+           "failure_text", "parse_time"]
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
 ASK = router.ASK
 _KEEP = object()
@@ -59,6 +59,11 @@ def failure_text(kind: str = "connection") -> str:
 def day_label(day: str | date) -> str:
     """9/25（金）の形。YYYY-MM-DD の文字列も渡せる。"""
     return dates.day_label(date.fromisoformat(day) if isinstance(day, str) else day)
+
+
+def parse_time(value: object) -> datetime | None:
+    """予定・締切の時刻（ISO の文字列）を読む。読めなければ None。"""
+    return dates.parse_time(value)
 
 
 @dataclass(frozen=True)

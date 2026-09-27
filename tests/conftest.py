@@ -109,12 +109,14 @@ def fake_model_classifier(monkeypatch):
         from kei_agent.model_policy import UseCase
         return UseCase.COURSE_EXPLAIN
 
-    async def work(_config, _store, _prompt: str):
-        from kei_agent.model_policy import UseCase
-        return UseCase.WORK_SINGLE_SOURCE
+    async def module(_config, _store, spec, _prompt: str, *, provider=None):
+        return spec.actor.default_use_case
 
+    real_module = model_classifier.classify_module
     monkeypatch.setattr(model_classifier, "classify_course", course)
-    monkeypatch.setattr(model_classifier, "classify_work", work)
+    # モジュールの実行役（仕事など）は、分類器を動かさずに default_use_case。確かめたいテストは戻り値で本物に戻す
+    monkeypatch.setattr(model_classifier, "classify_module", module)
+    return real_module
 
 
 @pytest.fixture(autouse=True)

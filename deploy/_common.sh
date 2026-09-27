@@ -43,7 +43,7 @@ drop_notion_secrets() {
 
 # 担当プロセスの名前。本体に組み込みの担当と、担当プロセスを持つモジュール（module.toml に [process] がある。
 # 組み込みの modules/ と、利用者のフォルダの modules/ の両方）。起動の前に要るので、Python を使わずに探す
-CORE_AGENTS=(research course work voice)
+CORE_AGENTS=(research course voice)
 module_processes() {
   local file
   for file in "${REPO:-}"/modules/*/module.toml(N) "${KEI_AGENT_HOME:-$HOME/.config/kei-agent}"/modules/*/module.toml(N); do

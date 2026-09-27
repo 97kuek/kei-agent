@@ -64,8 +64,6 @@ class ChannelKind(Enum):
     IMPROVE = "improve"
     # 大学（授業と課題）。ここでの依頼は大学エージェントに取り次ぐだけで、ファイルは持たない
     COURSE = "course"
-    # 仕事（会社の予定など）。同じく、仕事エージェントに取り次ぐ
-    WORK = "work"
     # モジュールのチャンネル（module.toml の [channels]）。そのモジュールの module.py に取り次ぐだけで、ファイルは持たない
     MODULE = "module"
     # Kei Agent 自身を直すときの worktree（improve.py）。書き込めるのはその中だけ
@@ -107,12 +105,10 @@ def theme_name(channel_name: str) -> str:
 
 
 def resolve(config: Config, channel_name: str) -> Workspace:
-    """チャンネル名から作業場所を決める。研究全体・改善・大学・仕事・モジュール以外は、すべて研究テーマとして扱う。"""
+    """チャンネル名から作業場所を決める。研究全体・改善・大学・モジュール以外は、すべて研究テーマとして扱う。"""
     channel_name = theme_name(channel_name)
     if channel_name in config.improve_channels:
         return Workspace(channel_name, ChannelKind.IMPROVE, None)
-    if channel_name in config.work_channels:
-        return Workspace(channel_name, ChannelKind.WORK, None)
     if channel_name in config.course_channels:
         # 作業場は大学エージェントの claude が使う（本体はここで claude を動かさない）
         return Workspace(channel_name, ChannelKind.COURSE, config.course_root)
@@ -135,7 +131,7 @@ def module_of_channel(config: Config, channel_name: str) -> str:
 
 
 # チャンネルの種類ごとに、会話を続ける担当（研究テーマと研究全体は研究の担当、モジュールはそのモジュール）
-_ACTORS = {ChannelKind.COURSE: "course", ChannelKind.WORK: "work", ChannelKind.IMPROVE: "self_fix"}
+_ACTORS = {ChannelKind.COURSE: "course", ChannelKind.IMPROVE: "self_fix"}
 
 
 def actor_of(ws: Workspace) -> str:
@@ -143,16 +139,14 @@ def actor_of(ws: Workspace) -> str:
 
 
 def agent_workspace(config: Config, agent: str) -> Workspace:
-    """大学・仕事・モジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
+    """大学とモジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
 
-    大学は `course_root`（前提のメモの CLAUDE.md を置く）、仕事とモジュールは状態の置き場の下。どれも手元の
-    ファイルは作業場を読むだけ（制限の表）。
+    大学は `course_root`（前提のメモの CLAUDE.md を置く）、モジュール（仕事・知識など）は状態の置き場の下
+    （`agents/<名前>`）。どれも手元のファイルは作業場を読むだけ（制限の表）。
     """
     spec = modules.known().get(agent)
     if agent == "course":
         ws = Workspace(agent, ChannelKind.COURSE, config.course_root)
-    elif agent == "work":
-        ws = Workspace(agent, ChannelKind.WORK, config.state_dir / "agents" / agent)
     elif spec is not None and spec.actor is not None:
         ws = Workspace(agent, ChannelKind.MODULE, config.state_dir / "agents" / agent, module=agent)
     else:

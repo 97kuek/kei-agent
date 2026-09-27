@@ -14,8 +14,8 @@ from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import UseCase
 from kei_agent_a2a import envelope, run
 from kei_agent_course.executor import CourseExecutor
+from kei_agent_modules.work.agent import Executor as WorkExecutor
 from kei_agent_research.executor import ResearchExecutor
-from kei_agent_work.executor import WorkExecutor
 
 
 class _Updater:
@@ -43,7 +43,12 @@ class _Updater:
 def _executor(kind, config, store):
     if kind == "research":
         return ResearchExecutor(config, pueue=object(), store=store)
-    return {"course": CourseExecutor, "work": WorkExecutor}[kind](config, store)
+    if kind == "work":
+        # 仕事はモジュールの担当。名前は共通の起動コマンドが入れる（kei_agent_a2a.launch）
+        executor = WorkExecutor(config, store)
+        executor.agent = "work"
+        return executor
+    return CourseExecutor(config, store)
 
 
 @pytest.fixture
@@ -61,10 +66,10 @@ def ran(monkeypatch):
 
 
 @pytest.mark.parametrize(("kind", "use_case"), [
-    ("research", UseCase.RESEARCH_EXTRACT), ("course", UseCase.COURSE_EXPLAIN), ("work", UseCase.WORK_DECIDE)])
+    ("research", UseCase.RESEARCH_EXTRACT), ("course", UseCase.COURSE_EXPLAIN), ("work", "work_decide")])
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
-           "use_case": use_case.value, "provider": "claude", "channel_name": "vlm"}
+           "use_case": str(use_case), "provider": "claude", "channel_name": "vlm"}
     updater = _Updater()
 
     await _executor(kind, config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))

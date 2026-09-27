@@ -9,7 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 
-from kei_agent import course, deadline, modules, themes, timelog, work
+from kei_agent import course, deadline, modules, themes, timelog
 from kei_agent.assistant import Assistant
 from kei_agent.config import Config
 from kei_agent.dates import parse_time, weekday
@@ -88,8 +88,8 @@ class DigestBuilder:
                     domains: bool = False) -> str:
         """active_channels は Kei Agent が参加しているチャンネル名。アーカイブしたテーマは材料に入れない。
 
-        `domains` を立てると、大学と仕事の材料も集める。ここは相手のエージェントに聞きに行き、
-        仕事の予定は claude を1回動かすので、朝（すでに朝のまとめで聞いている）では立てない。
+        `domains` を立てると、大学とモジュールの予定（仕事の会議など）の材料も集める。ここは相手のエージェントに
+        聞きに行き、仕事の予定は claude を1回動かすので、朝（すでに朝のまとめで聞いている）では立てない。
         """
         lines = [f"# {title}", "", f"対象: {_ts(since)} 〜 {_ts(now)}", ""]
         lines += self._threads(since)
@@ -100,7 +100,6 @@ class DigestBuilder:
         lines += await self._time(now)
         if domains:
             lines += await self._course(now)
-            lines += await self._work(now)
             lines += await self._agenda(now)
         # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
         tasks, notes = await self._notion(since, now)
@@ -126,20 +125,6 @@ class DigestBuilder:
         classes = await self.assistant.ask_course(course.LIST_CLASSES, weekday=weekday(tomorrow))
         names = [str(c.get("subject") or "") for c in (classes.data.get("items") or [])] if classes.ok else []
         lines.append(f"- 明日（{weekday(tomorrow)}）の授業: {'、'.join(names) or 'なし'}")
-        return [*lines, ""]
-
-    async def _work(self, now: float) -> list[str]:
-        """仕事（今日あった会議、明日の会議）。材料なので、件名と時刻だけ。"""
-        if work.AGENT not in self.assistant.agents:
-            return []
-        at = datetime.fromtimestamp(now)
-        lines = ["", "## 仕事", ""]
-        reply = await self.assistant.ask_work(work.LIST_EVENTS, days=2)
-        if not reply.ok:
-            return [*lines, "- 仕事エージェントにつながらなかった", ""]
-        events = reply.data.get("items") or []
-        lines.append(f"- 今日あった会議: {_events(events, at.date()) or 'なし'}")
-        lines.append(f"- 明日の会議: {_events(events, (at + timedelta(days=1)).date()) or 'なし'}")
         return [*lines, ""]
 
     async def _agenda(self, now: float) -> list[str]:

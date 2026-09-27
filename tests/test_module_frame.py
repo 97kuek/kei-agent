@@ -198,8 +198,9 @@ def test_classify_needs_two_use_cases_and_plugin_needs_its_folder(tmp_path):
 
 # 用途の選び分け
 
-async def test_a_module_can_choose_its_use_case_with_the_light_classifier(env):
+async def test_a_module_can_choose_its_use_case_with_the_light_classifier(env, fake_model_classifier, monkeypatch):
     scheduler, assistant, slack, claude, _ = env
+    monkeypatch.setattr(model_classifier, "classify_module", fake_model_classifier)      # ここでは本物で選ぶ
     claude.behaviors = [{"text": '{"use_case": "calendar_plan", "confidence": 0.9}'}]
 
     use_case = await model_classifier.classify(assistant.config, assistant.store, "calendar", "来週の予定を組みたい",
