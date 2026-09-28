@@ -51,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import date, datetime
@@ -152,6 +153,13 @@ def selected_values(action: dict) -> set[str]:
     if action.get("selected_option"):
         chosen.add(str(action["selected_option"].get("value")))
     return chosen
+
+
+def reason_head(text: str) -> str:
+    """担当が返した理由の頭（最初の「: 」まで。HTTP の状態があれば添える）。改善のチャンネルの1行に使う。"""
+    head = re.split(r": |：", text.strip(), maxsplit=1)[0] or "理由なし"
+    status = re.search(r"HTTP Error (\d{3})", text)
+    return f"{head}、HTTP {status.group(1)}" if status else head
 
 
 def final_answer(text: str) -> str:
@@ -398,8 +406,9 @@ class Core:
         reply = await agents.ask(agent, skill, params={"provider": provider} if provider else {},
                                  on_progress=keep_alive, text=json.dumps(payload, ensure_ascii=False))
         if not reply.ok:
-            await self.notify_trouble(f"{self.spec.label}の担当（{agent.base_url}）の {skill} が返した理由: "
-                                      f"{reply.text[:300]}")
+            # 改善のチャンネルには最初の「: 」の前だけが出るので、理由の頭はそこに入れる（全文はログに残る）
+            await self.notify_trouble(f"{self.spec.label}の担当の {skill} がうまくいかなかった（{reason_head(reply.text)}）: "
+                                      f"{agent.base_url} が返した理由: {reply.text[:300]}")
         await self._assistant.note_limit(reply, self.name, provider)
         return reply
 

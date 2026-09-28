@@ -155,6 +155,25 @@ async def test_a_module_without_an_ai_can_ask_its_process(env):
     assert (reply.ok, reply.text, seen) == (True, "はい", [("count", {}, {"n": 1})])
 
 
+async def test_the_reason_an_agent_gave_reaches_the_trouble_channel(env):
+    """担当が断った理由の頭が、改善のチャンネルの1行に残る（URL や細かい中身はログだけ）。"""
+    scheduler, assistant, slack = env
+
+    class Agent:
+        base_url = "http://fake-agent/memo"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            body = json.dumps({"ok": False, "text": "arXiv を読めません: https://export.arxiv.org/api/query?x を読めません: "
+                                                    "HTTP Error 406: Not Acceptable", "data": {}})
+            return a2a.TaskResult(state="TASK_STATE_FAILED", text=body)
+
+    assistant.agents["memo"] = Agent()
+    assert not (await assistant.cores["memo"].ask_agent("count", {})).ok
+    notice = slack.texts()[-1]
+    assert notice.endswith("メモの担当の count がうまくいかなかった（arXiv を読めません、HTTP 406）")
+    assert "export.arxiv.org" not in notice
+
+
 async def test_one_broken_reaction_hook_does_not_stop_the_others(env, monkeypatch):
     scheduler, assistant, slack = env
 

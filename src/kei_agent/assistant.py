@@ -1543,7 +1543,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                 if known:
                     await self.post(req, f"{FAILED_PREFIX} {text}")
                 else:
-                    await self.notify_trouble(f"`{cwd}` のジョブの依頼: {text}")
+                    await self.notify_trouble(f"{cwd.name} のジョブの依頼を投入できなかった: {text}")
                 continue
             # 投入できた依頼は、JobManager がスレッドを確かめてある（jobs._check_thread）
             await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入したよ: `{o.job.command}`")
