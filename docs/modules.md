@@ -174,12 +174,12 @@ class Module:
 
 | 窓口 `core` | 使えるもの |
 |---|---|
-| Slack | `post`・`update`・`reply`・`react`・`upload`・`progress`・`open_view`・`update_view`・`permalink`・`channel_name`・`channels`・`thread_messages`・`watch_thread`・`claim_thread` |
+| Slack | `post`・`mention`・`update`・`reply`・`react`・`upload`・`progress`・`open_view`・`update_view`・`permalink`・`channel_name`・`channels`・`thread_messages`・`watch_thread`・`claim_thread` |
 | 担当と AI | `run_ai`（1回）・`work`（作業場で会話）・`converse`（担当と会話）・`ask_agent`・`tell_agent`・`pick_skill`・`ask_module` |
 | 記録と設定 | `records`（`put`・`get`・`update`・`items`・`delete`）・`settings`・`schedule_detail`・`state_dir` |
 | ボタンと App Home | `action_id`・`view_id`・`home_action_id`・`home_checkboxes`・`selected_values` |
 | Daily・振り返り | `morning`・`mark_shown`・`digest`・`gather_prepare`・`gather_agenda`・`publish`・`collect_conclusions`・`last_ran` |
-| そのほか | `emit`・`spawn`・`notify_trouble`・`notice_once`・`sync_calendar`・`themes`・`provider`・`contains_secret`・`checked_sections`・`final_answer` |
+| そのほか | `emit`・`spawn`・`notify_trouble`・`notice_once`・`sync_calendar`・`themes`・`provider`・`contains_secret`・`is_status_inquiry`・`checked_sections`・`final_answer` |
 | 自分を直す（自己改善） | `repo_root`・`check_change`・`restart_for_update`・`last_update`・`busy` |
 
 - `run_ai(用途, 文, req=)` は、答えをスレッドにも出す。返すのは答えの本文そのまま（Slack に出す部分は `final_answer(本文)`）

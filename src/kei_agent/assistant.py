@@ -69,6 +69,7 @@ from kei_agent.slack_text import (
     DONE_REACTION,
     FAILED_PREFIX,
     FAILED_REACTION,
+    HOLD_REACTION,
     NIGHT_REACTION,
     SEEN_REACTION,
     clean_text,
@@ -93,6 +94,8 @@ log = logging.getLogger(__name__)
 
 # これ以上かかった作業が終わったら、依頼者に通知の別投稿を送る（短い依頼には送らない）
 NOTIFY_AFTER_SECONDS = 60
+# 依頼者が画面を見ていないはずの回（ジョブの完了で再開した回）。短くても、終わったら知らせる
+UNATTENDED_TRIGGERS = ("job",)
 # 名刺（エージェントのスキル）を読み直す間隔。入れ替えても、これだけたてば新しいスキルを使える
 SKILLS_TTL_SECONDS = 600
 # 古い版の担当を起動し直してから、名刺を読み直すまでの秒数
@@ -881,6 +884,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if req.trigger == "message":
             self.store.set_awaiting(req.channel, req.thread_ts, False)
         if req.trigger in ("message", "voice"):
+            if await self.hold_until_limit_ends(req):
+                return
             await self.drop_deferred_for(req)
         if req.message_ts:
             await self._react(self.slack.reactions_add, req.channel, req.message_ts, SEEN_REACTION)
@@ -1041,6 +1046,46 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             await on_message(req, skill=skill, params=dict(params or {}))
         return True
 
+    async def hold_until_limit_ends(self, req: Request) -> bool:
+        """上限で止まってやり直し待ちのスレッドに書かれたら、いまは動かさず、明けてからこの続きとしてやる（True）。
+
+        すぐ動かすと、同じ上限にまた当たって知らせが重なる。やり直しの予約をこの依頼に置き換え、依頼に ⏳ を付ける
+        （投稿はしない）。進み具合を聞かれただけなら、止まっている理由をその場で答える。そのスレッドの担当の AI が
+        もう上限でなければ（明けた・別の provider に切り替えた）、何もしない（False。予約を取り消して動かす）。
+        """
+        pending = [(deferred_id, payload) for deferred_id, payload in self.store.pending_deferred("request")
+                   if payload.get("channel") == req.channel and payload.get("thread_ts") == req.thread_ts]
+        if not pending:
+            return False
+        try:
+            ws = themes.resolve(self.config, req.channel_name)
+        except ValueError:
+            return False
+        actor = self.actor_for(req, ws)
+        provider = settings.selected_provider(self.config, self.store, actor)
+        until = self.store.limit_until(provider) if provider else 0.0
+        if until <= time.time():
+            return False
+        when = datetime.fromtimestamp(until).strftime("%H:%M")
+        if is_status_inquiry(req.text):
+            await self.post(req, f"{provider} の利用上限で止まっているよ。{when} ごろに続きからやるね。")
+            await self.mark_answered(req, failed=False)
+            return True
+        # 添付は、控えに残せる形（保存した場所）にしてから待たせる。止まった依頼の添付も引き継ぐ
+        saved = await download_files(req.files, ws.cwd, self.bot_token) if req.files and ws.cwd is not None else []
+        earlier = [path for _, payload in pending for path in payload.get("saved_files") or []]
+        req = replace(req, files=[], saved_files=list(dict.fromkeys([*earlier, *req.saved_files, *saved])))
+        # 待たせた依頼の ⏳ は、やり直すときに外す（前に待たせたものも覚えておく）
+        held = [ts for _, payload in pending for ts in payload.get("held") or []]
+        for deferred_id, _ in pending:
+            self.store.finish_deferred(deferred_id)
+        payload = {**req.to_payload(), "provider": provider,
+                   "held": held + ([req.message_ts] if req.message_ts else [])}
+        self.store.defer_run("request", payload, until)
+        if req.message_ts:
+            await self._react(self.slack.reactions_add, req.channel, req.message_ts, HOLD_REACTION)
+        return True
+
     async def drop_deferred_for(self, req: Request) -> None:
         """上限で止まって自動でやり直す予定だった依頼を、このスレッドのぶんだけ取り消す。
 
@@ -1097,7 +1142,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         hide に書いた頭で始まる行は、Slack に出さない（合図の行など。返す結果の本文には残す）。
         """
         assert ws.cwd is not None
-        saved = await download_files(req.files, ws.cwd, self.bot_token)
+        saved = [*req.saved_files, *await download_files(req.files, ws.cwd, self.bot_token)]
+        # 上限や再起動のあとでやり直す回にも添付を渡せるよう、保存した場所を依頼の控えに残す
+        req = replace(req, files=[], saved_files=saved)
         prompt = req.text
         if saved:
             prompt += "\n\n添付ファイル（保存先）:\n" + "\n".join(f"- {p}" for p in saved)
@@ -1132,8 +1179,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
 
         if result.limit_reset_at is not None:
-            await self.defer_for_limit(req, result.limit_reset_at,
-                                       result.provider or "")
+            await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
+                                       mention=self._unattended(req, started))
             self.store.set_awaiting(req.channel, req.thread_ts, True)
             await ui.finish("")
             await self.mark_answered(req, failed=True)
@@ -1158,11 +1205,19 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             await self.offer_handoff(req, title)
         if awaiting:
             await self.notify_owner(req, "返事がほしいよ")
-        elif not waiting_for_job and time.monotonic() - started >= NOTIFY_AFTER_SECONDS:
+        elif not waiting_for_job and self._unattended(req, started):
             await self.notify_owner(req, "終わったよ")
         if waiting_for_job:
             await ui.keep_working()
         return result
+
+    def _unattended(self, req: Request, started: float) -> bool:
+        """依頼者が画面を見ていないはずの回か（ジョブの完了で再開した回・あとでやり直した回・長くかかった回）。
+
+        そういう回の終わりは、依頼者へのメンションで知らせる（スレッドの投稿は、メンションが無いと通知が届かない）。
+        """
+        return (req.trigger in UNATTENDED_TRIGGERS or req.retried
+                or time.monotonic() - started >= NOTIFY_AFTER_SECONDS)
 
     async def _converse(self, req: Request, ws: Workspace | None, prompt: str, ui: ThreadUI | None,
                         actor: str | None = None) -> runner.RunResult:
@@ -1204,6 +1259,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                                         reply_to_post=True)
 
         on_activity = ui.activity if ui is not None else None
+        # 進み具合を聞かれただけの回は、読むだけで動かす（書く・コマンド・ジョブの投入ができないので、作業は始まらない）
+        read_only = req.trigger in ("message", "voice") and is_status_inquiry(req.text)
 
         async def attempt(prompt: str, session_id: str | None) -> runner.RunResult:
             # 今日の日付と曜日は、どの担当にも同じ形で先頭に付ける（「今日の授業は？」に答えられるように）
@@ -1211,10 +1268,10 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             if ws is None:
                 # 作業場を本体に持たない担当（モジュール）
                 return await self.ask_agent(actor, prompt, session_id, req.channel, req.thread_ts,
-                                            on_activity, provider=provider, use_case=use_case)
+                                            on_activity, provider=provider, use_case=use_case, read_only=read_only)
             return await self.run_agent(ws, prompt, session_id, req.channel, req.thread_ts,
                                         on_activity, provider=provider,
-                                        use_case=use_case, request_text=request_text)
+                                        use_case=use_case, request_text=request_text, read_only=read_only)
 
         result = await attempt(prompt, session_id)
         if result.session_missing:
@@ -1292,6 +1349,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         研究と違って本体に作業場を持たないので、添付の保存・スレッドのログ・出力の添付はない。
         スレッドのロックと同時実行の上限は、呼び出し側（_dispatch）が持つ。
         """
+        started = time.monotonic()
         ui = self.thread_ui(req)
         await ui.start()
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
@@ -1312,7 +1370,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             self.store.count_turn(req.channel, req.thread_ts)
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
         if result.limit_reset_at is not None:
-            await self.defer_for_limit(req, result.limit_reset_at, result.provider or "")
+            await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
+                                       mention=self._unattended(req, started))
             self.store.set_awaiting(req.channel, req.thread_ts, True)
             await ui.finish("")
             await self.mark_answered(req, failed=True)
@@ -1325,6 +1384,10 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             for chunk in split_text(answer):
                 await self.post(req, chunk, markdown=True)
         await self.mark_answered(req, result.is_error)
+        if awaiting:
+            await self.notify_owner(req, "返事がほしいよ")
+        elif self._unattended(req, started):
+            await self.notify_owner(req, "終わったよ")
         return result
 
     async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,
@@ -1476,15 +1539,16 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         when = datetime.fromtimestamp(until).strftime("%H:%M")
         await self.notify_trouble(f"{agent} の {provider} 利用上限に当たりました。{when} ごろまで待ちます。")
 
-    async def defer_for_limit(self, req: Request, reset_at: float, provider: str) -> None:
-        """上限に達した依頼を、明けてからやり直すものとして覚えておく。"""
+    async def defer_for_limit(self, req: Request, reset_at: float, provider: str, *, mention: bool = False) -> None:
+        """上限に達した依頼を、明けてからやり直すものとして覚えておく。mention なら、知らせに依頼者へのメンションを付ける。"""
         until = self.limit_until(reset_at)
         if not provider:
             raise ValueError("provider が未選択です")
         self.store.set_limit_until(provider, max(self.store.limit_until(provider), until))
         self.store.defer_run("request", {**req.to_payload(), "provider": provider}, until)
         when = datetime.fromtimestamp(until).strftime("%H:%M")
-        await self.post(req, f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。")
+        text = f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。"
+        await self.post(req, f"<@{self.config.allowed_user_id}> {text}" if mention else text)
         self.emit("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
 
     # 再起動で途中で止まった依頼
@@ -1512,7 +1576,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             except Exception:
                 log.warning("中断を知らせられません", exc_info=True)
             # 元のメッセージの 👀 は残したまま。やり直しが終われば ✅ か ⚠️ に変わる
-            await self.submit(replace(req, text=interrupted_prompt(req.text)))
+            await self.submit(replace(req, text=interrupted_prompt(req.text), retried=True))
         if interrupted:
             log.info("再起動で止まっていた依頼を %d 件やり直します", len(interrupted))
         return len(interrupted)
@@ -1522,7 +1586,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         now = time.time() if now is None else now
         for deferred_id, payload in self.store.due_deferred("request", now):
             self.store.finish_deferred(deferred_id)
-            req = Request.from_payload(payload)
+            req = replace(Request.from_payload(payload), retried=True)
+            for ts in payload.get("held") or []:
+                await self._react(self.slack.reactions_remove, req.channel, ts, HOLD_REACTION)
             original_provider = payload.get("provider")
             if original_provider:
                 actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))

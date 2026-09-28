@@ -23,7 +23,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent.api import FAILED_PREFIX, AIError, Core, Request, Update, contains_secret, final_answer
+from kei_agent.api import (
+    FAILED_PREFIX,
+    AIError,
+    Core,
+    Request,
+    Update,
+    contains_secret,
+    final_answer,
+    is_status_inquiry,
+)
 
 from . import issues, repo
 from .fixes import ACTIVE, Fix, Fixes
@@ -71,8 +80,9 @@ class Module:
         await self.core.post(req.channel, text, thread_ts=req.thread_ts)
 
     async def _failed(self, req: Request, detail: str, text: str) -> None:
+        """止まったことを知らせる。直す・取り込むのは時間がかかり、依頼者は待っていないので、メンションを付ける。"""
         self.fixes.update(req.thread_ts, status="failed", detail=detail)
-        await self._post(req, f"{FAILED_PREFIX} {text}")
+        await self._post(req, self.core.mention(f"{FAILED_PREFIX} {text}"))
 
     # 相談
 
@@ -81,13 +91,13 @@ class Module:
         if req.trigger == "message" and req.message_ts == req.thread_ts:
             # やり直しの回（上限・再起動）でも、最初の要望の文を残す
             fix = self.fixes.request(req.channel, req.thread_ts, req.text)
-            if fix.issue_number is None:
-                # issue にするのは裏で進め、案を考えるのを待たせない
+            if fix.issue_number is None and not is_status_inquiry(fix.request):
+                # issue にするのは裏で進め、案を考えるのを待たせない（様子を聞いただけの一言は、要望ではないので issue にしない）
                 self.core.spawn(self.file_issue(req, fix.request))
         answer = await self.core.work(req, folder=self.talks / req.thread_ts, hide=HIDDEN)
-        # 「着手」「取り込み」は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。
-        # ジョブの完了や接続の許可で自動で再開した回の返事では動かない
-        if req.trigger != "message":
+        # 合図は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。ジョブの完了や接続の許可で自動で再開した回と、
+        # 様子を聞かれただけの回（読むだけで動く）の返事では動かない
+        if req.trigger != "message" or is_status_inquiry(req.text):
             return
         if repo.wants(answer, repo.START_MARKER):
             await self.start_fix(req)
@@ -104,7 +114,8 @@ class Module:
     async def start_fix(self, req: Request) -> None:
         """合意した案で、worktree を作って直し始める。直すのは1つずつ。"""
         messages = await self.core.thread_messages(req.channel, req.thread_ts)
-        if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts) < repo.REPLIES_BEFORE_START:
+        if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts,
+                              skip=is_status_inquiry) < repo.REPLIES_BEFORE_START:
             # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回をもらってから動く
             await self._post(req, "念のため確認させて。この直し方で進めていい？")
             return
@@ -156,6 +167,8 @@ class Module:
         await self._upload_diff(req, worktree, base)
         await self.core.post(req.channel, repo.review_summary(worktree, base, summary), thread_ts=req.thread_ts,
                              markdown=True)
+        # 直している間、依頼者は待っていない。取り込んでいいか見てもらえるよう、メンションで知らせる
+        await self._post(req, self.core.mention("直したよ。取り込んでいいか見てね"))
 
     async def _fence(self, req: Request, worktree: Path, base: str) -> bool:
         """柵に触れていないか、秘密情報が入っていないかを本体に確かめてもらう。だめなら失敗として知らせる。"""
@@ -244,7 +257,7 @@ class Module:
         取り込み待ちの直しは捨てる。
         """
         messages = await self.core.thread_messages(req.channel, req.thread_ts)
-        if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts) < 1:
+        if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts, skip=is_status_inquiry) < 1:
             await self._post(req, "念のため確認させて。直さずに、この要望を終わりにしていい？")
             return
         fix = self.fixes.get(req.thread_ts)
@@ -280,8 +293,9 @@ class Module:
         for fix in self.fixes.in_status("working"):
             self.fixes.update(fix.thread_ts, status="failed", detail="中断")
             try:
-                await self.core.post(fix.channel, f"{FAILED_PREFIX} 直している途中で Kei Agent が止まったので、中断したよ。"
-                                                  "続けるなら、もう一度「着手」まで進めて。", thread_ts=fix.thread_ts)
+                await self.core.post(fix.channel, self.core.mention(
+                    f"{FAILED_PREFIX} 直している途中で Kei Agent が止まったので、中断したよ。"
+                    "続けるなら、もう一度「着手」まで進めて。"), thread_ts=fix.thread_ts)
             except Exception:
                 log.warning("中断した直しを知らせられません", exc_info=True)
 
@@ -291,15 +305,16 @@ class Module:
         if update is None or fix is None:
             return
         if update.state == "rolled_back":
-            await self.core.post(fix.channel, f"{FAILED_PREFIX} 新しい版で起動できなかったので、`{update.previous[:7]}` に"
-                                              "戻したよ。取り消しの内容は GitHub にも送った。ログを見て、直し方を考え直そう。",
-                                 thread_ts=fix.thread_ts)
+            await self.core.post(fix.channel, self.core.mention(
+                f"{FAILED_PREFIX} 新しい版で起動できなかったので、`{update.previous[:7]}` に戻したよ。"
+                "取り消しの内容は GitHub にも送った。ログを見て、直し方を考え直そう。"), thread_ts=fix.thread_ts)
             self.fixes.update(fix.thread_ts, status="failed", detail="起動できなかった")
             await self.core.to_thread(repo.push_revert, self.core.repo_root)
             return
         fix = self.fixes.update(fix.thread_ts, status="done")
-        await self.core.post(fix.channel, f"✅ 新しい版で起動したよ（`{fix.merge_commit[:7]}`）。"
-                                          f"うまくいかなければ `{update.previous[:7]}` に戻せる。", thread_ts=fix.thread_ts)
+        await self.core.post(fix.channel, self.core.mention(
+            f"✅ 新しい版で起動したよ（`{fix.merge_commit[:7]}`）。うまくいかなければ `{update.previous[:7]}` に戻せる。"),
+            thread_ts=fix.thread_ts)
         await self._close_issue(fix)
 
     # 要望の issue

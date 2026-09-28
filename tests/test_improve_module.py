@@ -249,6 +249,7 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     assert git(Path(fix.worktree), "log", "-1", "--format=%s") == "app.py の値を直す"
     texts = "\n".join(slack.texts())
     assert "直し始めるね" in texts and "取り込んでいい？" in texts and "`src/app.py`" in texts
+    assert "<@UME> 直したよ。取り込んでいいか見てね" in slack.texts()   # 直している間は待っていないので知らせる
     upload, = [kw for name, kw in slack.calls if name == "files_upload_v2"]
     assert upload["file_uploads"][0]["filename"] == "change.diff"
 
@@ -344,7 +345,8 @@ async def test_failed_checks_are_reported_and_nothing_is_merged(env, monkeypatch
     await settle(assistant)
 
     assert git(cfg.repo_root, "rev-parse", "main") == before
-    assert "確認が通らなかった" in "\n".join(slack.texts())
+    notice, = [t for t in slack.texts() if "確認が通らなかった" in t]
+    assert notice.startswith("<@UME> ⚠️")
 
 
 async def test_protected_change_is_not_offered_for_review(env):
@@ -380,7 +382,8 @@ async def test_announce_after_a_successful_update(env, fake_github):
 
     assert fix_of(assistant).status == "done"
     assert not updates.pending_path(cfg).exists()
-    assert "新しい版で起動したよ" in "\n".join(slack.texts())
+    notice, = [t for t in slack.texts() if "新しい版で起動したよ" in t]
+    assert notice.startswith("<@UME> ✅")
     assert fake_github.calls == []                    # issue にしていない要望は何もしない
 
 
@@ -442,7 +445,8 @@ async def test_announce_after_a_rollback(env, monkeypatch, fake_github):
 
     assert fix_of(assistant).status == "failed"
     assert not updates.rolled_back_path(cfg).exists()
-    assert "起動できなかったので" in "\n".join(slack.texts())
+    notice, = [t for t in slack.texts() if "起動できなかったので" in t]
+    assert notice.startswith("<@UME> ⚠️")
     assert pushed == [cfg.repo_root]                  # 戻した取り消しを GitHub にも送る
     assert fake_github.closed() == []                 # 戻した要望の issue は開いたまま
 
@@ -454,6 +458,45 @@ async def test_an_update_asked_by_someone_else_is_left_alone(env, monkeypatch):
     updates.rolled_back_path(cfg).write_text("0123456789\n4\nほかのモジュール\n")
     await started(assistant)
     assert slack.texts() == []
+
+
+async def test_a_status_question_does_not_count_as_a_yes(env):
+    """様子を聞いただけの返事は、着手の前の「いいよ」に数えない。"""
+    assistant, slack, claude, cfg = env
+    claude.behaviors = [{"text": "こう直すつもり"}]
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
+    await settle(assistant)
+    slack.replies = [{"user": "UME", "ts": "20.1", "text": "直して"},
+                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"},
+                     {"user": "UME", "ts": "20.3", "text": "進捗は？"}]
+    claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}]
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.4", "thread_ts": "20.1", "text": "いいよ"})
+    await settle(assistant)
+
+    assert fix_of(assistant).status == "planning"
+    assert "この直し方で進めていい？" in "\n".join(slack.texts())
+
+
+async def test_a_status_question_opens_no_issue(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 状況は？"})
+    await settle(assistant)
+    assert fake_github.calls == []
+    assert claude.calls[-1]["read_only"] is True
+
+
+async def test_markers_in_the_answer_to_a_status_question_are_ignored(env, fake_github):
+    """様子を聞かれただけの回（読むだけで動く）の返事に合図があっても、動かない。"""
+    assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
+    claude.behaviors = [{"text": "まだ案のままだよ\n✅ 解決済み"}]
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.5", "thread_ts": "20.1",
+                                "text": "どうなってる？"})
+    await settle(assistant)
+
+    assert fix_of(assistant).status == "planning"
+    assert fake_github.closed() == []
+    assert claude.calls[-1]["read_only"] is True
 
 
 async def test_start_needs_a_second_yes(env):
@@ -639,7 +682,8 @@ async def test_fix_left_working_by_a_restart_is_marked_interrupted(env):
 
     fix = fix_of(assistant)
     assert fix.status == "failed" and fix.detail == "中断"
-    assert "中断した" in "\n".join(slack.texts())
+    notice, = [t for t in slack.texts() if "中断した" in t]
+    assert notice.startswith("<@UME> ⚠️")
 
 
 async def test_push_failure_undoes_the_local_merge_and_keeps_review(env, monkeypatch):

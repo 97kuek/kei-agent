@@ -38,10 +38,12 @@ def wants(text: str, marker: str) -> bool:
 
 
 def owner_replies(messages: list[dict], is_owner: Callable[[str], bool], thread_ts: str,
-                  current_ts: str | None = None) -> int:
-    """スレッドで依頼者が返事した回数（最初の依頼は数えない）。いま届いた返事も数える。"""
+                  current_ts: str | None = None, *, skip: Callable[[str], bool] = lambda text: False) -> int:
+    """スレッドで依頼者が返事した回数（最初の依頼は数えない）。いま届いた返事も数える。skip に当たる返事
+    （様子を聞いただけのもの）は数えない。"""
     seen = {m.get("ts") for m in messages
-            if m.get("ts") != thread_ts and not m.get("bot_id") and is_owner(str(m.get("user") or ""))}
+            if m.get("ts") != thread_ts and not m.get("bot_id") and is_owner(str(m.get("user") or ""))
+            and not skip(str(m.get("text") or ""))}
     if current_ts and current_ts != thread_ts:
         seen.add(current_ts)
     return len(seen)

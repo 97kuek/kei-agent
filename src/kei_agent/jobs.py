@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shlex
 import time
 from dataclasses import dataclass, field
@@ -32,6 +33,18 @@ REQUESTS_DIR = Path(".kei-agent/requests")
 JOBS_DIR = Path(".kei-agent/jobs")
 # ジョブのログの末尾を読むとき、読み込む最大の大きさ
 LOG_TAIL_BYTES = 64 * 1024
+# 進捗だけの行（1行ずつ出るもの）。続いたところは最後の1行だけ残す（tqdm の棒・「12/300 [===>...]」・「Epoch 3/100」）
+_PROGRESS_LINE = re.compile(
+    r"\d{1,3}(?:\.\d+)?%\|"
+    r"|^\s*\d+\s*/\s*\d+\s*\[[=>.\s-]*\]"
+    r"|^\s*\[?\s*(?:epoch|step|iter(?:ation)?|batch)\s*[:#]?\s*\d+\s*/\s*\d+",
+    re.IGNORECASE,
+)
+# Traceback が無いときに、エラーとして拾う1行
+_ERROR_LINE = re.compile(r"(?i:^\s*(?:error|fatal|critical)\b)|\b\w*(?:Error|Exception)\b:")
+_TRACEBACK = "Traceback (most recent call last):"
+# 末尾の前に足すエラーの行数の上限
+ERROR_LINES = 30
 # 書きかけのまま残った依頼のファイルを消すまでの秒数
 TMP_LIFETIME_SECONDS = 3600
 # pueue_id が空のまま、これより古い行は、投入の途中で止まったものとみなす
@@ -354,7 +367,11 @@ def missing_outputs(job: Job) -> list[str]:
 
 
 def log_tail(job: Job, lines: int = 20) -> str:
-    """ジョブのログの末尾。長く running するジョブのログは GB になりうるので、全部は読まない。"""
+    """ジョブのログの末尾。長く running するジョブのログは GB になりうるので、全部は読まない。
+
+    進捗だけの行が続くところは最後の1行にまとめる。末尾に入らなかったエラー（最後の Traceback）は、前に足す
+    （進捗の行に埋もれて、AI に渡らないことがある）。
+    """
     path = Path(job.cwd) / "logs" / f"job-{job.id}.log"
     if not path.exists():
         return ""
@@ -362,10 +379,38 @@ def log_tail(job: Job, lines: int = 20) -> str:
         f.seek(0, os.SEEK_END)
         f.seek(max(0, f.tell() - LOG_TAIL_BYTES))
         tail = f.read()
-    # curl などの進捗表示は \r で同じ行を上書きするだけなので、上書きの最終状態だけ残す
-    text = tail.decode("utf-8", "replace")
-    collapsed = "\n".join(segment.split("\r")[-1] for segment in text.split("\n"))
-    return "\n".join(collapsed.splitlines()[-lines:])
+    # curl などの進捗表示は \r で同じ行を上書きするだけなので、上書きの最終状態だけ残す（改行が \r\n のログも）
+    text = tail.decode("utf-8", "replace").replace("\r\n", "\n")
+    rows = _squeeze_progress("\n".join(segment.split("\r")[-1] for segment in text.split("\n")).splitlines())
+    cut = max(0, len(rows) - lines)
+    start, error = _last_error(rows)
+    if 0 <= start < cut:
+        # 末尾と重なるところは足さない
+        return "\n".join([*error[:cut - start], "（中略）", *rows[cut:]])
+    return "\n".join(rows[cut:])
+
+
+def _squeeze_progress(rows: list[str]) -> list[str]:
+    """進捗だけの行が続くところを、最後の1行にまとめる。"""
+    kept: list[str] = []
+    for row in rows:
+        if kept and _PROGRESS_LINE.search(row) and _PROGRESS_LINE.search(kept[-1]):
+            kept[-1] = row
+        else:
+            kept.append(row)
+    return kept
+
+
+def _last_error(rows: list[str]) -> tuple[int, list[str]]:
+    """最後のエラーの位置と行。最後の Traceback から例外の行まで（無ければ、エラーらしい最後の1行）。無ければ (-1, [])。"""
+    start = max((i for i, row in enumerate(rows) if _TRACEBACK in row), default=-1)
+    if start >= 0:
+        block = rows[start:start + ERROR_LINES]
+        # 字下げの無い行（ValueError: … など）が例外の行
+        end = next((n for n, row in enumerate(block[1:], 1) if row and not row[0].isspace()), len(block) - 1)
+        return start, block[:end + 1]
+    found = max((i for i, row in enumerate(rows) if _ERROR_LINE.search(row)), default=-1)
+    return found, [rows[found]] if found >= 0 else []
 
 
 class RemotePueue:

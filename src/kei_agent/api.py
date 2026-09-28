@@ -89,6 +89,7 @@ from kei_agent.response_output import (
     validate_structured_response,
 )
 from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
+from kei_agent.slack_text import is_status_inquiry as _is_status_inquiry
 from kei_agent.theme_files import append_thread_log
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.updates import Update
@@ -102,7 +103,7 @@ __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Co
            "Records", "Reply", "Request",
            "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_sections", "checked_text",
            "contains_secret",
-           "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "load_toggl", "parse_time",
+           "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "load_toggl", "parse_time",
            "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
 MODULE_PREFIX = modules.ACTION_PREFIX
@@ -175,6 +176,11 @@ def contains_secret(text: str) -> bool:
     return any(pattern.search(text) for pattern in guard.SECRET_PATTERNS)
 
 
+def is_status_inquiry(text: str) -> bool:
+    """進み具合を聞くだけの短い一言か（「進捗は？」「どうなってる？」など）。そういう回は、本体が読むだけで動かす。"""
+    return _is_status_inquiry(text)
+
+
 def checked_sections(text: str, headings: tuple[str, ...]) -> str | None:
     """AI の答え（Slack に出す部分）が、決まった見出し（`**今日のタスク**` など）をこの順で1回ずつ持ち、どれも中身が
     あるか確かめる。見出しの書き方はそろえて返す。形が違うもの・手元のパスや作業の実況を含むものは None。"""
@@ -240,6 +246,11 @@ class Core:
     def is_owner(self, user_id: str | None) -> bool:
         """依頼者本人か（Kei Agent に指示できるのは、この人だけ）。"""
         return self._assistant.is_allowed(user_id)
+
+    def mention(self, text: str) -> str:
+        """依頼者へのメンションを頭に付けた文。スレッドの投稿はメンションが無いと通知が届かないので、依頼者が
+        待っていないときの結果（長い作業の終わり・返事がほしいとき・失敗）に使う。ふつうの投稿（markdown にしない）で使う。"""
+        return f"<@{self._assistant.config.allowed_user_id}> {text}"
 
     async def channel_ids(self) -> dict[str, str]:
         """Kei Agent がいるチャンネル（番号を外した名前 → ID）。"""

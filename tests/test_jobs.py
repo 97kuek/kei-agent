@@ -207,6 +207,46 @@ def test_log_tail_collapses_carriage_return_progress_lines(store, theme):
     ]
 
 
+def _write_log(theme, job, text: str, newline: str = "\n") -> None:
+    log_dir = theme.cwd / "logs"
+    log_dir.mkdir(exist_ok=True)
+    (log_dir / f"job-{job.id}.log").write_bytes(text.replace("\n", newline).encode())
+
+
+def test_log_tail_squeezes_progress_lines_printed_one_per_line(store, theme):
+    """1行ずつ出る進捗（tqdm の棒・Epoch n/m など）は、続いたところを最後の1行にまとめる。結果の行は残す。"""
+    job = store.add_job("r6", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
+    epochs = "\n".join(f"Epoch {i}/100 - loss: 0.{i:02d}" for i in range(1, 101))
+    bars = "\n".join(f" {p}%|{'█' * (p // 10)}| {p}/100 [00:01<00:01]" for p in range(0, 101, 5))
+    _write_log(theme, job, f"start\n{epochs}\nTest accuracy: 91.2%\n{bars}\ndone\n")
+
+    assert log_tail(job, lines=10).splitlines() == [
+        "start", "Epoch 100/100 - loss: 0.100", "Test accuracy: 91.2%", " 100%|██████████| 100/100 [00:01<00:01]", "done"]
+
+
+def test_log_tail_brings_back_an_error_the_tail_does_not_show(store, theme):
+    """末尾がほかの行で埋まっても、その前の Traceback を前に足して AI に渡す。"""
+    job = store.add_job("r7", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
+    trace = 'Traceback (most recent call last):\n  File "train.py", line 3, in <module>\n    main()\nValueError: bad shape'
+    later = "\n".join(f"cleanup {i}" for i in range(30))
+    _write_log(theme, job, f"start\n{trace}\n{later}\n")
+
+    tail = log_tail(job, lines=5).splitlines()
+    assert tail == [*trace.splitlines(), "（中略）", *[f"cleanup {i}" for i in range(25, 30)]]
+
+
+def test_log_tail_does_not_repeat_an_error_already_in_the_tail(store, theme):
+    job = store.add_job("r8", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
+    _write_log(theme, job, "start\nRuntimeError: CUDA out of memory\nexit 1\n")
+    assert log_tail(job, lines=5).splitlines() == ["start", "RuntimeError: CUDA out of memory", "exit 1"]
+
+
+def test_log_tail_reads_logs_with_windows_line_endings(store, theme):
+    job = store.add_job("r10", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
+    _write_log(theme, job, "start\nloss 0.5\ndone\n", newline="\r\n")
+    assert log_tail(job, lines=5).splitlines() == ["start", "loss 0.5", "done"]
+
+
 async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
     """pueue に投入し終える前に状態を見に行っても、動いているジョブを失敗と決めつけない。"""
     store.upsert_thread("C1", "100.1", "vlm", None)

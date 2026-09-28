@@ -20,16 +20,23 @@ class Request:
     outputs_since: float | None = None
     # 終わったあと、依頼者の返事待ちとして扱う（失敗したジョブのあとなど）
     awaiting_after: bool = False
+    # 保存した添付の場所（作業場の中）。上限や再起動のあとのやり直しの回にも、AI に渡す
+    saved_files: list[str] = field(default_factory=list)
+    # 上限や再起動で止まって、あとでやり直した回（依頼者は画面を見ていないので、終わったら知らせる）
+    retried: bool = False
 
     def to_payload(self) -> dict:
-        """あとでやり直すために保存する形（添付は保存済みなので含めない）。"""
+        """あとでやり直すために保存する形（Slack の添付の情報は含めず、保存した場所だけ残す）。"""
         return {
             "channel": self.channel, "channel_name": self.channel_name, "thread_ts": self.thread_ts,
             "message_ts": self.message_ts, "text": self.text, "trigger": self.trigger,
             "outputs_since": self.outputs_since, "awaiting_after": self.awaiting_after,
+            "saved_files": list(self.saved_files), "retried": self.retried,
         }
 
     @classmethod
     def from_payload(cls, payload: dict) -> Request:
+        # saved_files と retried は、あとから足したもの（前からある控えには無い）
         return cls(**{k: payload[k] for k in (
-            "channel", "channel_name", "thread_ts", "message_ts", "text", "trigger", "outputs_since", "awaiting_after")})
+            "channel", "channel_name", "thread_ts", "message_ts", "text", "trigger", "outputs_since", "awaiting_after")},
+            saved_files=list(payload.get("saved_files") or []), retried=bool(payload.get("retried")))

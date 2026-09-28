@@ -17,10 +17,11 @@ def escape(text: str) -> str:
     """
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-# 依頼のメッセージにつけるリアクション（受け取った、答えた、止まった）と、夜間の Task にする印
+# 依頼のメッセージにつけるリアクション（受け取った、答えた、止まった、上限が明けるまで待たせた）と、夜間の Task にする印
 SEEN_REACTION = "eyes"
 DONE_REACTION = "white_check_mark"
 FAILED_REACTION = "warning"
+HOLD_REACTION = "hourglass_flowing_sand"
 NIGHT_REACTION = "crescent_moon"
 
 # Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
@@ -33,8 +34,11 @@ SLACK_TEXT_LIMIT = 11000
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 
 # 進み具合を尋ねるだけの短い一言に出てくる言葉。新しい依頼と混ざらないよう、短い文にだけ使う
-_STATUS_INQUIRY = re.compile(r"どんな感じ|進捗|終わ(った|りました|ってる|ってます)|できた|できました|止まってる|止まってます")
+_STATUS_INQUIRY = re.compile(r"どんな感じ|進捗|進み具合|状況|様子|どう(なって|なった)|今どう|どこまで"
+                             r"|終わ(った|りました|ってる|ってます)|できた|できました|止まってる|止まってます")
 _STATUS_INQUIRY_MAX_LENGTH = 12
+# 「〜して」「〜てください」のような頼み方で終わる文は、様子を聞いているのではない（「進捗表示を直して」など。「教えて」は除く）
+_REQUEST_ENDING = re.compile(r"(?<!教え)て(ください|ほしい|くれる|くれ|ね)?[。！!？?.…]*$")
 
 
 def clean_text(text: str) -> str:
@@ -46,7 +50,7 @@ def is_status_inquiry(text: str) -> bool:
     stripped = clean_text(text)
     if not stripped or len(stripped) > _STATUS_INQUIRY_MAX_LENGTH:
         return False
-    return bool(_STATUS_INQUIRY.search(stripped))
+    return bool(_STATUS_INQUIRY.search(stripped)) and not _REQUEST_ENDING.search(stripped)
 
 
 def format_duration(seconds: float) -> str:
