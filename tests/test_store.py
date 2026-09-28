@@ -126,3 +126,32 @@ def test_old_reading_posts_move_into_the_knowledge_module_records(tmp_path):
     assert store.module_record("knowledge", "post", "C40:2.2")["expires_at"] is None
     assert store.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reading_posts'").fetchone() is None
     Store(path)     # 2回目は何もしない
+
+
+def test_runs_remember_the_actor_use_case_and_model(tmp_path):
+    """走らせた記録に、担当・用途・provider・モデル・effort が残る（前からの記録には列だけ足す）。"""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, thread_ts TEXT NOT NULL, "
+                 "channel_name TEXT NOT NULL, trigger TEXT NOT NULL, started_at REAL NOT NULL, ended_at REAL, "
+                 "is_error INTEGER, cost_usd REAL)")
+    conn.execute("INSERT INTO runs (channel, thread_ts, channel_name, trigger, started_at, ended_at, is_error) "
+                 "VALUES ('C', '1', 'vlm', 'message', 1, 2, 0)")
+    conn.commit()
+    conn.close()
+
+    store = Store(path)
+    old, = store.conn.execute("SELECT actor, model FROM runs").fetchall()
+    assert tuple(old) == (None, None)
+    run_id = store.start_run("C", "2", "vlm", "message")
+    store.end_run(run_id, False, 0.5, actor="research", use_case="research_execute", provider="claude",
+                  model="claude-sonnet-5", effort="high")
+    row = store.conn.execute("SELECT actor, use_case, provider, model, effort, cost_usd FROM runs WHERE id = ?",
+                             (run_id,)).fetchone()
+    assert tuple(row) == ("research", "research_execute", "claude", "claude-sonnet-5", "high", 0.5)
+    # 分からないとき（落ちた回など）は空のまま
+    other = store.start_run("C", "3", "vlm", "message")
+    store.end_run(other, True, None)
+    assert tuple(store.conn.execute("SELECT actor, model FROM runs WHERE id = ?", (other,)).fetchone()) == (None, None)

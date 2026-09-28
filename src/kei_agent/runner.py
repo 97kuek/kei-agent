@@ -361,9 +361,19 @@ class RunResult:
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None
     failure_kind: Literal["quota", "timeout", "session_missing", "capability", "login", "runtime"] | None = None
+    # どの担当の、どの用途を、どのモデル・effort で動かしたか（run_model が入れる。走らせた記録に残す）
+    actor: str = ""
+    use_case: str = ""
+    model: str = ""
+    effort: str = ""
     _final_candidate: str = field(default="", repr=False)
     # 成功の最後のイベント（result / turn.completed）まで届いたか
     _completed: bool = field(default=False, repr=False)
+
+    def recipe_fields(self) -> dict[str, str]:
+        """走らせた記録（store.end_run）に残す、担当・用途・provider・モデル・effort。"""
+        return {"actor": self.actor, "use_case": self.use_case, "provider": self.provider or "", "model": self.model,
+                "effort": self.effort}
 
     @property
     def session_missing(self) -> bool:
@@ -535,7 +545,21 @@ async def run_model(
 
     この関数だけが CLI を起動する。呼び出し元は provider / model / effort を個別に
     指定できず、``ExecutionRequest.recipe`` を model policy で解決して渡す。
+    結果には、動かした担当・用途・モデル・effort を入れる（走らせた記録に残す）。
     """
+    result = await _run_model(config, request, prompt, on_activity)
+    recipe = request.recipe
+    result.actor, result.use_case = recipe.actor, str(recipe.use_case)
+    result.model, result.effort = recipe.model, recipe.reasoning_effort
+    return result
+
+
+async def _run_model(
+    config: Config,
+    request: ExecutionRequest,
+    prompt: str,
+    on_activity: Callable[[str], Awaitable[None]] | None = None,
+) -> RunResult:
     ws = request.workspace
     assert ws.cwd is not None
     recipe = request.recipe

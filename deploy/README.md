@@ -132,6 +132,15 @@ gh auth status                                      # 要望を GitHub issue に
 | モジュールを作る・試す | `uv run kei-agent module new <名前>` / `test <名前>`（[docs/modules.md](../docs/modules.md)） |
 | 定期処理を今すぐ1回 | `uv run kei-agent-schedule <名前>`（`--record` を付けなければ記録に残らない） |
 | Slack の外から依頼を置く | `uv run kei-agent-ask --theme <テーマ> "〜して"`（`--note` で記録だけ） |
+| モデルごとの回数・時間・費用を見る | 下のコマンド（読むだけ。本体が止まっていると開けない） |
+
+```zsh
+sqlite3 -header -column "file:$HOME/.local/state/kei-agent/kei-agent.db?mode=ro" \
+  "SELECT actor, use_case, model, effort, COUNT(*) AS 回数, ROUND(AVG(ended_at - started_at)) AS 平均秒,
+          ROUND(SUM(cost_usd), 2) AS 合計USD, SUM(is_error) AS 失敗
+   FROM runs WHERE model IS NOT NULL AND started_at > strftime('%s', 'now') - 30 * 86400
+   GROUP BY actor, use_case, model, effort ORDER BY 回数 DESC"
+```
 
 - `module add` / `remove` は `config.toml` の `modules` の行だけを書き換え、前のものを `config.toml.bak` に残す
 - 22:00 の保守: 研究のセッションの記録を90日で消し、使い終わった worktree を消し、`~/research` と `~/kei-agent` を非公開リポジトリに push する（50MB を超えるファイルは外す）

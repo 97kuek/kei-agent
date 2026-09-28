@@ -81,6 +81,8 @@
 - plugin は担当の1つだけ。フック（`plugin/hooks/policy.py`）は安全違反を断る第二の防御で、Claude にも Codex にも掛ける
 - Notion の MCP は `kei-notion`。合言葉は担当の名前で作る
 - 作業場の前提は `CLAUDE.md` に置き、どの provider でも読む
+- 走らせた記録（SQLite の `runs`）に、担当・用途・provider・モデル・effort・かかった時間・費用・失敗を残す。担当のプロセスで決まった用途とモデルも、返事の封筒で本体に戻す
+- 残さないのは、知識の朝の読みもの・論文の新着、声からの問い合わせ、振り分け
 
 ### actor とモデル
 

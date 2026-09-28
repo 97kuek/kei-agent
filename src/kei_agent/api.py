@@ -503,7 +503,8 @@ class Core:
                     channel=req.channel if req is not None else "", thread_ts=req.thread_ts if req is not None else "",
                     on_activity=ui.activity if ui is not None else None)
         finally:
-            assistant.store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None)
+            assistant.store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None,
+                                    **(result.recipe_fields() if result else {}))
             if ui is not None and (result is None or result.is_error):
                 with suppress(Exception):
                     await ui.finish("")

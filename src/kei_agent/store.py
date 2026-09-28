@@ -211,6 +211,8 @@ def _schedule_status(detail: str | None) -> str:
 ADDED_COLUMNS = {
     # ジョブが作るはずのファイル（JSON の配列）。終わったときに、あるかどうかを確かめる
     "jobs": {"expects": "TEXT"},
+    # 走らせた担当・用途・provider・モデル・effort（モデルの重さを実績で見直すため）
+    "runs": {"actor": "TEXT", "use_case": "TEXT", "provider": "TEXT", "model": "TEXT", "effort": "TEXT"},
     # Kei Agent の確認待ちや、失敗したジョブのあとに返事がない状態が始まった時刻
     "threads": {"awaiting_since": "REAL", "nudged": "INTEGER NOT NULL DEFAULT 0",
                 # この会話に渡した指示書と skill の版（execution_contract.prompt_version）
@@ -891,11 +893,15 @@ class Store:
             (since, until),
         ).fetchall()
 
-    def end_run(self, run_id: int, is_error: bool, cost_usd: float | None) -> None:
+    def end_run(self, run_id: int, is_error: bool, cost_usd: float | None, *, actor: str = "", use_case: str = "",
+                provider: str = "", model: str = "", effort: str = "") -> None:
+        """実行の終わりを記録する。担当・用途・provider・モデル・effort は、分かれば（RunResult.recipe_fields()）。"""
         with self.conn:
             self.conn.execute(
-                "UPDATE runs SET ended_at = ?, is_error = ?, cost_usd = ? WHERE id = ?",
-                (time.time(), int(is_error), cost_usd, run_id),
+                "UPDATE runs SET ended_at = ?, is_error = ?, cost_usd = ?, actor = ?, use_case = ?, provider = ?, "
+                "model = ?, effort = ? WHERE id = ?",
+                (time.time(), int(is_error), cost_usd, actor or None, use_case or None, provider or None, model or None,
+                 effort or None, run_id),
             )
 
 

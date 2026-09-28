@@ -25,7 +25,8 @@ ASK = "ask"
 MODEL_SKILLS = (ASK,)
 # `ask` の返事（封筒の data）のうち、受け取る RunResult の項目（知らない項目が増えても落ちないように、ここで絞る）
 FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
-          "timed_out", "requested_domains", "limit_reset_at", "provider", "failure_kind")
+          "timed_out", "requested_domains", "limit_reset_at", "provider", "failure_kind",
+          "actor", "use_case", "model", "effort")
 # 相手が入れ替わっている最中につながらなかったときに、待ってやり直す回数と秒数
 RETRIES, RETRY_WAIT = 1, 3.0
 

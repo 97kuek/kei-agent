@@ -150,6 +150,9 @@ async def test_the_ai_answers_what_was_queued_and_remembers_how_it_was_asked(tmp
     assert kit.thread(ts) == ["3件のメモ: 牛乳・卵・パン"]
     call, = kit.ai.calls
     assert (call["actor"], call["use_case"], call["provider"]) == ("memo", "memo_sum", "claude")
+    # 走らせた記録に、担当・用途・provider・モデル・effort が残る
+    run = kit.store.conn.execute("SELECT actor, use_case, provider, model, effort FROM runs").fetchone()
+    assert tuple(run) == ("memo", "memo_sum", "claude", "claude-haiku-4-5", None)
     assert kit.ai.prompts() == [call["prompt"]] and "まとめて" in call["prompt"]
 
 
@@ -190,6 +193,9 @@ async def test_a_builtin_module_can_be_named_and_brings_what_it_requires(module_
     kit.ai.answer("要点は3つ")
     ts = await kit.message("この記事の要点は？")
     assert kit.thread(ts)[-1] == "要点は3つ" and kit.ai.calls[0]["actor"] == "knowledge"
+    # 担当のプロセスで決まった用途とモデルも、封筒で本体に戻って記録に残る
+    run = kit.store.conn.execute("SELECT actor, use_case, provider, model, effort FROM runs").fetchone()
+    assert tuple(run) == ("knowledge", "knowledge_answer", "claude", "claude-sonnet-5", "medium")
 
 
 def test_the_kit_keeps_real_things_away_while_it_runs(tmp_path, monkeypatch):

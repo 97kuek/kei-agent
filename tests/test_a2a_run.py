@@ -164,3 +164,21 @@ async def test_failed_envelope_makes_the_a2a_task_fail():
     updater = _Updater()
     await run.finish(updater, envelope.failure("上限に達した"))
     assert updater.state == "failed"
+
+
+async def test_the_recipe_comes_back_in_the_envelope(config, store, monkeypatch):
+    """担当のプロセスで動かした担当・用途・モデル・effort は、封筒の data で本体に戻る（本体が記録に残す）。"""
+    from kei_agent import agents
+
+    async def inner(_config, request, prompt, on_activity=None):
+        return runner.RunResult(provider=request.recipe.provider, session_id="s-1",
+                                text="<<kei-agent-final>>答え<<kei-agent-final-end>>")
+
+    monkeypatch.setattr(runner, "_run_model", inner)
+    ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2", "use_case": "course_explain",
+           "provider": "claude", "channel_name": "course"}
+    updater = _Updater()
+    await _executor("course", config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
+    result = agents.to_result(updater.envelope()["data"])
+    assert result.recipe_fields() == {"actor": "course", "use_case": "course_explain", "provider": "claude",
+                                      "model": "claude-sonnet-5", "effort": "medium"}

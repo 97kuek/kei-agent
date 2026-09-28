@@ -1126,7 +1126,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             self.theme_runs.end(req.channel_name, req.thread_ts)
             raise
         self.store.finish_deferred(in_flight)
-        self.store.end_run(run_id, result.is_error, result.cost_usd)
+        self.store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
         if req.trigger in ("message", "voice"):
             self.store.count_turn(req.channel, req.thread_ts)
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
@@ -1307,7 +1307,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             self.store.end_run(run_id, is_error=True, cost_usd=None)
             raise
         self.store.finish_deferred(in_flight)
-        self.store.end_run(run_id, result.is_error, result.cost_usd)
+        self.store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
         if req.trigger in ("message", "voice"):
             self.store.count_turn(req.channel, req.thread_ts)
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)

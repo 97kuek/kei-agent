@@ -123,7 +123,7 @@ class Handoff:
                 # 控えは残したまま（次の起動でやり直す）、走りっぱなしの記録だけ閉じる
                 self.store.end_run(run_id, is_error=True, cost_usd=None)
                 raise
-            self.store.end_run(run_id, result.is_error, result.cost_usd)
+            self.store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
             self.store.finish_deferred(in_flight)
             memo, contract_failed = self.render_reply(result)
             if result.is_error or contract_failed:
