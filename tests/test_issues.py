@@ -257,5 +257,12 @@ async def test_create_needs_the_number_of_the_new_issue(config, monkeypatch):
 
 
 async def test_close_leaves_the_short_sha_of_the_merge(config, fake_github):
-    await issues.close(config.repo_root, 12, "abcdef1234567890")
-    assert fake_github.closed() == [("12", "abcdef1 で取り込みました。")]
+    await issues.close(config.repo_root, 12, commit="abcdef1234567890")
+    assert fake_github.closed() == [("12", "abcdef1 で取り込みました。", "completed")]
+
+
+async def test_close_says_so_when_nothing_was_merged(config, fake_github):
+    await issues.close(config.repo_root, 12)
+    await issues.close(config.repo_root, 13, reason=issues.NOT_PLANNED)
+    assert fake_github.closed() == [("12", "直さずに解決しました。", "completed"),
+                                    ("13", "見送ることにしました。", "not planned")]

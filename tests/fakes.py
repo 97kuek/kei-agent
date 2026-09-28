@@ -59,9 +59,10 @@ class FakeGitHub:
         """作った issue の title・body・label。"""
         return [_gh_flags(args) for args in self.calls if args[:2] == ("issue", "create")]
 
-    def closed(self) -> list[tuple[str, str]]:
-        """閉じた issue の番号と、添えたコメント。"""
-        return [(args[2], _gh_flags(args).get("comment", "")) for args in self.calls if args[:2] == ("issue", "close")]
+    def closed(self) -> list[tuple[str, str, str]]:
+        """閉じようとした issue の番号と、添えたコメントと、理由（`--reason`）。"""
+        return [(args[2], _gh_flags(args).get("comment", ""), _gh_flags(args).get("reason", ""))
+                for args in self.calls if args[:2] == ("issue", "close")]
 
 
 def pending_asks(config) -> list[tuple[Path, dict]]:

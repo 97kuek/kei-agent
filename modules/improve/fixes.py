@@ -1,7 +1,7 @@
 """自己改善の記録（1つの要望 = 1つのスレッド）。モジュールの記録（core.records）の種類 fix、鍵はスレッドの ts。
 
 状態は planning（案を出している）/ working（直している）/ review（取り込み待ち）/ restarting（取り込んで、新しい版での
-起動待ち）/ done / failed。直すのは一度に1つだけ。
+起動待ち）/ done（取り込んだ・直さずに解決した）/ dropped（見送った）/ failed。直すのは一度に1つだけ。
 """
 
 from __future__ import annotations
@@ -25,8 +25,9 @@ class Fix:
     base_commit: str = ""
     merge_commit: str = ""
     detail: str = ""
-    # 要望から作った公開の GitHub issue の番号（まだなら None）
+    # 要望から作った公開の GitHub issue の番号（まだなら None）と、それを閉じたか
     issue_number: int | None = None
+    issue_closed: bool = False
     created_at: float = 0.0
     updated_at: float = 0.0
 

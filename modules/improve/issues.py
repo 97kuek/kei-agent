@@ -31,6 +31,9 @@ TEXT_LIMIT = 2000
 GH_TIMEOUT_SECONDS = 60
 # 要約に使う用途（module.toml の [use_cases]。軽いモデルで、Web は使わない）
 SUMMARY_USE_CASE = "improve_issue"
+# issue を閉じる理由（gh issue close --reason）
+COMPLETED = "completed"
+NOT_PLANNED = "not planned"
 
 PROMPT = """次の、Kei Agent（Slack で動く個人用アシスタント）への要望を、公開リポジトリの GitHub issue 用に一般化して要約してください。
 - 日本語。title は{title}字以内の1行、body は1〜{lines}行の短い箇条書き
@@ -226,7 +229,12 @@ async def create(repo_root: Path, summary: Summary) -> Issue:
     return Issue(int(found.group(1)), found.group(0))
 
 
-async def close(repo_root: Path, number: int, commit: str) -> None:
-    """取り込んだ要望の issue を、取り込んだコミットの短い sha を添えて閉じる。"""
-    comment = f"{commit[:7]} で取り込みました。" if commit else "取り込みました。"
-    await gh(repo_root, "issue", "close", str(number), "--comment", comment)
+async def close(repo_root: Path, number: int, *, commit: str = "", reason: str = COMPLETED) -> None:
+    """終わった要望の issue を閉じる。取り込んだならそのコミットの短い sha を、直さずに終わったならそう添える。"""
+    if commit:
+        comment = f"{commit[:7]} で取り込みました。"
+    elif reason == NOT_PLANNED:
+        comment = "見送ることにしました。"
+    else:
+        comment = "直さずに解決しました。"
+    await gh(repo_root, "issue", "close", str(number), "--reason", reason, "--comment", comment)

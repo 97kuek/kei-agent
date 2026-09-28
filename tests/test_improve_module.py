@@ -399,8 +399,9 @@ async def test_announce_closes_the_issue_of_the_merged_request(env, fake_github)
 
     await started(assistant)
 
-    assert fake_github.closed() == [("7", "abcdef1 で取り込みました。")]
-    assert fix_of(assistant).status == "done"
+    assert fake_github.closed() == [("7", "abcdef1 で取り込みました。", "completed")]
+    fix = fix_of(assistant)
+    assert fix.status == "done" and fix.issue_closed
 
 
 async def test_announce_goes_on_when_the_issue_cannot_be_closed(env, fake_github):
@@ -477,8 +478,140 @@ async def test_start_needs_a_second_yes(env):
 
 
 def test_the_marks_are_hidden_but_nothing_else():
-    text = "直したよ。\n:memo: 件名: x\n🛠 着手\n📦 取り込み"
-    assert strip_lines(text, HIDDEN) == "直したよ。\n:memo: 件名: x"
+    text = "直したよ。\n:memo: 件名: x\n✅ テストは通った\n🛠 着手\n📦 取り込み\n✅ 解決済み\n🗑 見送り"
+    assert strip_lines(text, HIDDEN) == "直したよ。\n:memo: 件名: x\n✅ テストは通った"
+
+
+# 直さずに終わる
+
+async def asked(assistant, slack, claude, request="直して"):
+    """依頼 → 最初の返事まで進めたスレッドにする（要望は issue #1 になる）。"""
+    claude.behaviors = [{"text": "もう直っていたよ。終わりにしていい？"}]
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": f"<@UBOT> {request}"})
+    await settle(assistant)
+    slack.replies = [{"user": "UME", "ts": "20.1", "text": request},
+                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "もう直っていたよ。終わりにしていい？"}]
+
+
+async def reply(assistant, text="いいよ", ts="20.3"):
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": ts, "thread_ts": "20.1", "text": text})
+    await settle(assistant)
+
+
+async def test_resolved_marker_ends_the_request_and_closes_its_issue(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await asked(assistant, slack, claude)
+    claude.behaviors = [{"text": "終わりにするね\n✅ 解決済み"}]
+    await reply(assistant)
+
+    fix = fix_of(assistant)
+    assert (fix.status, fix.detail, fix.issue_closed) == ("done", "直さずに解決", True)
+    assert fake_github.closed() == [("1", "直さずに解決しました。", "completed")]
+    texts = "\n".join(slack.texts())
+    assert "issue #1 を閉じたよ（直さずに解決）" in texts and "✅ 解決済み" not in texts
+
+
+async def test_dropped_marker_closes_the_issue_as_not_planned(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await asked(assistant, slack, claude)
+    claude.behaviors = [{"text": "今回は見送るね\n🗑 見送り"}]
+    await reply(assistant, "やっぱりやらない")
+
+    fix = fix_of(assistant)
+    assert (fix.status, fix.detail, fix.issue_closed) == ("dropped", "見送り", True)
+    assert fake_github.closed() == [("1", "見送ることにしました。", "not planned")]
+    assert "issue #1 を閉じたよ（見送り）" in "\n".join(slack.texts())
+
+
+async def test_closing_in_the_first_answer_asks_first(env, fake_github):
+    """最初の依頼への返事に合図があっても閉じない。依頼者が一度答えてから。"""
+    assistant, slack, claude, cfg = env
+    claude.behaviors = [{"text": "もう直っていたよ\n✅ 解決済み"}]
+    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
+    await settle(assistant)
+
+    assert fix_of(assistant).status == "planning"
+    assert fake_github.closed() == []
+    assert "直さずに、この要望を終わりにしていい？" in "\n".join(slack.texts())
+
+
+async def test_closing_marker_from_an_automatic_run_is_ignored(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await asked(assistant, slack, claude)
+    claude.behaviors = [{"text": "✅ 解決済み"}]
+    await assistant.submit(Request("C9", "00_kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
+    await settle(assistant)
+
+    assert fix_of(assistant).status == "planning"
+    assert fake_github.closed() == []
+
+
+async def test_closing_while_fixing_is_refused(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await asked(assistant, slack, claude)
+    assistant.modules["improve"].fixes.update("20.1", status="working")
+    claude.behaviors = [{"text": "✅ 解決済み"}]
+    await reply(assistant)
+
+    assert fix_of(assistant).status == "working"
+    assert fake_github.closed() == []
+    assert "いま直している" in "\n".join(slack.texts())
+
+
+async def test_dropping_a_fix_waiting_for_review_removes_its_worktree(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await agreed(assistant, slack, claude)
+    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": edits_code()}]
+    await second_yes(assistant)
+    worktree = Path(fix_of(assistant).worktree)
+    assert fix_of(assistant).status == "review" and worktree.exists()
+
+    claude.behaviors = [{"text": "やめておくね\n🗑 見送り"}]
+    await reply(assistant, "やっぱりやめる", ts="20.6")
+
+    assert fix_of(assistant).status == "dropped"
+    assert not worktree.exists()
+    assert git(cfg.repo_root, "branch", "--list", "kei-agent/improve-20-1") == ""
+    assert (cfg.repo_root / "src" / "app.py").read_text() == "x = 1\n"          # main は変えない
+    assert fake_github.closed() == [("1", "見送ることにしました。", "not planned")]
+
+
+async def test_a_request_without_an_issue_just_ends(env, fake_github):
+    assistant, slack, claude, cfg = env
+    fake_github.fail["issue create"] = issues.IssueError("gh が失敗しました")
+    await asked(assistant, slack, claude)
+    claude.behaviors = [{"text": "✅ 解決済み"}]
+    await reply(assistant)
+
+    assert fix_of(assistant).status == "done"
+    assert fake_github.closed() == []
+    assert "この要望は終わりにしたよ（直さずに解決）。" in slack.texts()
+
+
+async def test_an_issue_that_cannot_be_closed_now_is_closed_later(env, fake_github):
+    assistant, slack, claude, cfg = env
+    await asked(assistant, slack, claude)
+    fake_github.fail["issue close"] = issues.IssueError("gh が失敗しました", "HTTP 502")
+    claude.behaviors = [{"text": "✅ 解決済み"}]
+    await reply(assistant)
+
+    fix = fix_of(assistant)
+    assert fix.status == "done" and not fix.issue_closed
+    assert "あとでやり直す" in "\n".join(slack.texts())
+    notice, = trouble_notices(slack)
+    assert "issue #1 を閉じられませんでした" in notice
+
+    # 1日1回の見回りで閉じ直す。まだ閉じられなくても、知らせは増やさない
+    module = assistant.modules["improve"]
+    await module.tick(datetime(2026, 9, 29, 0, 1))
+    assert not fix_of(assistant).issue_closed and len(trouble_notices(slack)) == 1
+    del fake_github.fail["issue close"]
+    await module.tick(datetime(2026, 9, 30, 0, 1))
+    assert fix_of(assistant).issue_closed
+    assert fake_github.closed()[-1] == ("1", "直さずに解決しました。", "completed")
+    calls = len(fake_github.calls)
+    await module.tick(datetime(2026, 10, 1, 0, 1))                               # 閉じたものは、もう触らない
+    assert len(fake_github.calls) == calls
 
 
 # 途中で止まったとき

@@ -3,12 +3,14 @@
 Kei Agent のチャンネル（#00_kei-agent。module.toml の core_channels）で要望を聞き、Kei Agent 自身を直す。
 
 - 新しい要望は、要約して公開の GitHub issue にする（原文は Slack に残す。issues.py）。取り込めたら閉じる
+- 直さずに済んだら（もう直っていた・やらないと決まった）、AI が「✅ 解決済み」「🗑 見送り」と書き、要望を終わりにして
+  issue を閉じる（見送りは not planned）
 - 直し方を相談する（AI は Kei Agent のコードを読むだけで、書けるのは相談の作業用のフォルダだけ）
 - 案に2回「いいよ」をもらい、AI が「🛠 着手」と書いたら、worktree で直す。差分を添付して、取り込んでいいか聞く
 - 直したものに「いいよ」をもらい、AI が「📦 取り込み」と書いたら、テストを回し、柵を確かめて main に取り込み、push して、
   作業が終わってから新しい版で起動し直す（起動できなければ、本体が前の版に戻す）
 - 起動したとき（on_start）: 途中で止まった直しを「中断」にし、入れ替えの結果を取り込みのスレッドに知らせる
-- 見回り（tick）: 使い終わった worktree と相談の作業用のフォルダを、1日に1回片づける
+- 見回り（tick）: 1日に1回、使い終わった worktree と相談の作業用のフォルダを片づけ、閉じられなかった issue を閉じ直す
 
 直すのは一度に1つだけ。柵（guard.py・config.example.toml・deploy/）に触れた差分は取り込まない（core.check_change）。
 """
@@ -28,8 +30,13 @@ from .fixes import ACTIVE, Fix, Fixes
 
 log = logging.getLogger(__name__)
 
-# 合図の行（着手・取り込み）。検出に使うだけで、Slack には出さない
-HIDDEN = (repo.START_MARKER, repo.MERGE_MARKER)
+# 合図の行（着手・取り込み・解決済み・見送り）。検出に使うだけで、Slack には出さない
+HIDDEN = (repo.START_MARKER, repo.MERGE_MARKER, repo.RESOLVED_MARKER, repo.DROPPED_MARKER)
+# 直さずに終わりにできる状態（直している途中と入れ替え待ちは除く。取り込み待ちの直しは捨てる）
+CLOSABLE = ("planning", "review", "failed")
+# 直さずに終わったときの detail（issue に添える言葉を選ぶのに使う）
+RESOLVED = "直さずに解決"
+DROPPED = "見送り"
 # 案を出したまま動きのない相談の作業用のフォルダを、残しておく日数
 TALK_KEEP_DAYS = 7
 
@@ -87,6 +94,10 @@ class Module:
         elif repo.wants(answer, repo.MERGE_MARKER):
             # テストは時間がかかるので、スレッドの順番待ちと同時実行の枠を空けて、裏で進める
             self.core.spawn(self.merge_fix(req))
+        elif repo.wants(answer, repo.RESOLVED_MARKER):
+            await self.close_without_fix(req, dropped=False)
+        elif repo.wants(answer, repo.DROPPED_MARKER):
+            await self.close_without_fix(req, dropped=True)
 
     # 直す
 
@@ -224,6 +235,40 @@ class Module:
         # 新しい版で起動できなければ、本体が base に戻す。次の起動で、このスレッドに結果を知らせる（on_start）
         self.core.restart_for_update(base, req.thread_ts)
 
+    # 直さずに終わる
+
+    async def close_without_fix(self, req: Request, *, dropped: bool) -> None:
+        """直さずに済んだ要望（もう直っていた・やらないと決まった）を終わりにし、issue を閉じる。
+
+        最初の依頼への返事では閉じず、依頼者が一度答えてから。直している途中と入れ替え待ちのものはそのまま。
+        取り込み待ちの直しは捨てる。
+        """
+        messages = await self.core.thread_messages(req.channel, req.thread_ts)
+        if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts) < 1:
+            await self._post(req, "念のため確認させて。直さずに、この要望を終わりにしていい？")
+            return
+        fix = self.fixes.get(req.thread_ts)
+        if fix is None:
+            await self._post(req, f"{FAILED_PREFIX} この要望の記録が見つからないので、終わりにしなかったよ。")
+            return
+        if fix.status in ("done", "dropped"):
+            await self._post(req, f"{FAILED_PREFIX} もう終わりにしてある要望だよ。")
+            return
+        if fix.status not in CLOSABLE or req.thread_ts in self._merging:
+            await self._post(req, f"{FAILED_PREFIX} いま直している（取り込んでいる）ところなので、終わりにしなかったよ。")
+            return
+        if fix.status == "review" and fix.worktree:
+            await self.core.to_thread(repo.remove_worktree, self.core.repo_root, Path(fix.worktree), fix.branch)
+        how = DROPPED if dropped else RESOLVED
+        fix = self.fixes.update(req.thread_ts, status="dropped" if dropped else "done", detail=how)
+        if not fix.issue_number:
+            await self._post(req, f"この要望は終わりにしたよ（{how}）。")
+        elif await self._close_issue(fix):
+            await self._post(req, f"この要望は終わりにして、issue #{fix.issue_number} を閉じたよ（{how}）。")
+        else:
+            await self._post(req, f"この要望は終わりにしたよ（{how}）。issue #{fix.issue_number} は閉じられなかったので、"
+                                  "あとでやり直す。")
+
     # 起動したとき
 
     async def on_start(self) -> None:
@@ -252,7 +297,7 @@ class Module:
             self.fixes.update(fix.thread_ts, status="failed", detail="起動できなかった")
             await self.core.to_thread(repo.push_revert, self.core.repo_root)
             return
-        self.fixes.update(fix.thread_ts, status="done")
+        fix = self.fixes.update(fix.thread_ts, status="done")
         await self.core.post(fix.channel, f"✅ 新しい版で起動したよ（`{fix.merge_commit[:7]}`）。"
                                           f"うまくいかなければ `{update.previous[:7]}` に戻せる。", thread_ts=fix.thread_ts)
         await self._close_issue(fix)
@@ -284,23 +329,40 @@ class Module:
         await self._post(req, f"要望を要約して、公開の GitHub issue <{issue.url}|#{issue.number}> にしたよ"
                               "（元の文は載せていない）。")
 
-    async def _close_issue(self, fix: Fix) -> None:
-        """取り込めた要望の issue を、取り込んだコミットを添えて閉じる。issue にしていない要望は何もしない。"""
-        if not fix.issue_number:
-            return
+    async def _close_issue(self, fix: Fix, *, notify: bool = True) -> bool:
+        """終わった要望の issue を閉じる。閉じたら True。issue にしていない要望と、もう閉じたものは何もしない。
+
+        取り込んだならそのコミットを、直さずに終わったならそう添える（見送りは not planned）。閉じられなければ
+        知らせ（notify のとき。やり直しでは、ログにだけ残す）、見回り（tick）でやり直す。
+        """
+        if not fix.issue_number or fix.issue_closed:
+            return False
+        if fix.status == "dropped":
+            commit, reason = "", issues.NOT_PLANNED
+        else:
+            commit, reason = ("" if fix.detail == RESOLVED else fix.merge_commit), issues.COMPLETED
+        head = f"issue #{fix.issue_number} を閉じられませんでした"
         try:
-            await issues.close(self.core.repo_root, fix.issue_number, fix.merge_commit)
-        except issues.IssueError as e:
-            await self.core.notify_trouble(trouble(f"issue #{fix.issue_number} を閉じられませんでした", e))
+            await issues.close(self.core.repo_root, fix.issue_number, commit=commit, reason=reason)
         except Exception as e:
-            # 起動の途中で呼ばれるので、何があっても起動は止めない
-            log.exception("issue を閉じられません")
-            await self.core.notify_trouble(f"issue #{fix.issue_number} を閉じられませんでした: {type(e).__name__}: {e}")
+            # 起動の途中でも呼ばれるので、何があっても止めない
+            if isinstance(e, issues.IssueError):
+                text = trouble(head, e)
+            else:
+                log.exception("issue を閉じられません")
+                text = f"{head}: {type(e).__name__}: {e}"
+            if notify:
+                await self.core.notify_trouble(text)
+            else:
+                log.warning("%s", text)
+            return False
+        self.fixes.update(fix.thread_ts, issue_closed=True)
+        return True
 
     # 片づけ
 
     async def tick(self, now: datetime) -> None:
-        """1日に1回、使い終わった worktree と、相談の作業用のフォルダを片づける。"""
+        """1日に1回、使い終わった worktree と相談の作業用のフォルダを片づけ、閉じられなかった issue を閉じ直す。"""
         day = now.date().isoformat()
         if self._cleaned == day:
             return
@@ -314,3 +376,5 @@ class Module:
                                             keep_worktrees, keep_talks)
         if removed:
             log.info("使い終わった worktree を %d 件片づけました", removed)
+        for fix in self.fixes.in_status("done", "dropped"):
+            await self._close_issue(fix, notify=False)
