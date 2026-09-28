@@ -207,6 +207,12 @@ def _squash(text: str) -> str:
     return re.sub(r"[^0-9a-z぀-ヿ一-鿿]", "", text.casefold())
 
 
+def _is_zenn_book(url: str) -> bool:
+    """Zenn の本（目次と概要しか読めない。有料・無料とも候補から外す）。"""
+    parts = urllib.parse.urlsplit(url)
+    return parts.netloc.lower() in ("zenn.dev", "www.zenn.dev") and "/books/" in parts.path
+
+
 def _mentions(text: str, keyword: str) -> bool:
     """英数字だけの言葉は単語として（RAG が storage に当たらないように）、日本語は含むかで見る。"""
     word = keyword.casefold().strip()
@@ -239,6 +245,8 @@ def candidates(entries: list[feeds.Entry], interests: list[Interest], seen: Seen
     for entry in entries:
         key = normalized_url(entry.url)
         if key in urls or f"url:{key}" in seen:
+            continue
+        if _is_zenn_book(entry.url):
             continue
         if entry.published is not None and entry.published < now - window:
             continue
@@ -313,6 +321,26 @@ def _bodies(urls: list[str]) -> list[str]:
         return list(pool.map(read, urls))
 
 
+def _read_without_paywall(chosen: list[tuple[feeds.Entry, list[str]]], found: list[tuple[feeds.Entry, list[str]]],
+                          remaining: list[int]) -> tuple[list[tuple[feeds.Entry, list[str]]], list[str]]:
+    """選んだ記事を読み、有料の合図がある本文は使わず、次点の候補と入れ替える（件数は保つ）。
+    次点が尽きたら、その分は諦めて件数を減らす。"""
+    chosen = list(chosen)
+    remaining = list(remaining)
+    bodies = _bodies([entry.url for entry, _ in chosen])
+    i = 0
+    while i < len(chosen):
+        if not feeds.is_paywalled(bodies[i]):
+            i += 1
+        elif remaining:
+            chosen[i] = found[remaining.pop(0)]
+            bodies[i] = _bodies([chosen[i][0].url])[0]
+        else:
+            chosen.pop(i)
+            bodies.pop(i)
+    return chosen, bodies
+
+
 async def _say(progress: Progress, text: str) -> None:
     if progress is not None:
         await progress(text)
@@ -346,10 +374,12 @@ async def reading(config: Config, store, payload: dict, *, provider: str = "", p
             raise
         log.warning("AI に選ばせられないので、興味ごとに順番に選びます: %s", e)
         picks = []
-    chosen = [found[i] for i in (picks or balanced(found, interests, count))]
+    chosen_idx = picks or balanced(found, interests, count)
+    remaining = [i for i in range(len(found)) if i not in chosen_idx]
+    chosen = [found[i] for i in chosen_idx]
 
     await _say(progress, "選んだ記事を読んでいます")
-    bodies = await asyncio.to_thread(_bodies, [entry.url for entry, _ in chosen])
+    chosen, bodies = await asyncio.to_thread(_read_without_paywall, chosen, found, remaining)
     await _say(progress, "要約を書いています")
     articles = "\n\n".join(
         f"{n}. [{e.source}] {e.title}\nURL: {e.url}\n当たった興味: {'、'.join(hits) or 'なし'}\n"

@@ -1,0 +1,26 @@
+modules = ["sample"]
+research_root = "/Users/keitaro/.local/state/kei-agent/modules/improve/worktrees/improve-1790635465-514599/pytest-of-keitaro/pytest-2/test_it_answers_in_its_channel0/kit-0/research_root"
+agent_root = "/Users/keitaro/.local/state/kei-agent/modules/improve/worktrees/improve-1790635465-514599/pytest-of-keitaro/pytest-2/test_it_answers_in_its_channel0/kit-0/agent_root"
+course_root = "/Users/keitaro/.local/state/kei-agent/modules/improve/worktrees/improve-1790635465-514599/pytest-of-keitaro/pytest-2/test_it_answers_in_its_channel0/kit-0/course_root"
+state_dir = "/Users/keitaro/.local/state/kei-agent/modules/improve/worktrees/improve-1790635465-514599/pytest-of-keitaro/pytest-2/test_it_answers_in_its_channel0/kit-0/state_dir"
+
+[agents.course]
+"provider" = "claude"
+
+[agents.daily]
+"provider" = "claude"
+
+[agents.improve]
+"provider" = "claude"
+
+[agents.knowledge]
+"provider" = "claude"
+
+[agents.research]
+"provider" = "claude"
+
+[agents.router]
+"provider" = "claude"
+
+[agents.work]
+"provider" = "claude"

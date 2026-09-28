@@ -35,6 +35,8 @@ ARTICLE_BYTES = 3 * 1024 * 1024
 ARTICLE_CHARS = 6000
 # 説明文の長さの上限（文字。候補の一覧に並べる）
 SUMMARY_CHARS = 400
+# 本文にこの言葉があれば、有料の記事とみなす（この先は読めない）
+PAYWALL_SIGNS = ("ここから先は", "続きを読むには")
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_TIMEOUT_SECONDS = 30
 # arXiv は混んでいるときや立て続けに読んだときに、しばらく断る（429・5xx）。朝に1テーマ1回しか読まないので、
@@ -309,3 +311,8 @@ def article_text(url: str, limit: int = ARTICLE_CHARS) -> str:
     data = fetch(url, limit=ARTICLE_BYTES)
     text = html_text(data.decode("utf-8", "replace"))
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def is_paywalled(text: str) -> bool:
+    """本文に「ここから先は」「続きを読むには」のような、有料の合図があるか。"""
+    return any(sign in text for sign in PAYWALL_SIGNS)

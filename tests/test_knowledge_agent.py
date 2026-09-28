@@ -196,6 +196,17 @@ def test_candidates_drop_seen_old_duplicate_and_off_topic_feeds(tmp_path):
     assert [(e.title, hits) for e, hits in found] == [("LLM の話", ["AI"]), ("Company news", [])]
 
 
+def test_candidates_drop_zenn_books(tmp_path):
+    """Zenn の本（目次と概要しか読めない）は、有料・無料とも候補から外す。"""
+    seen = digest.Seen(tmp_path / "seen.json", now=NOW.timestamp())
+    entries = [
+        _entry("LLM の本", "https://zenn.dev/a/books/llm-book"),
+        _entry("LLM の記事", "https://zenn.dev/a/articles/llm-article"),
+    ]
+    found = digest.candidates(entries, INTERESTS, seen, NOW)
+    assert [e.title for e, _ in found] == ["LLM の記事"]
+
+
 def test_likes_nudge_candidates_toward_liked_sources_and_interests(tmp_path):
     """👍 した記事と出どころ・興味が同じ候補は、少しだけ前に出る（当たる興味の数を上回らない程度）。"""
     seen = digest.Seen(tmp_path / "seen.json", now=NOW.timestamp())
@@ -213,6 +224,23 @@ def test_likes_nudge_candidates_toward_liked_sources_and_interests(tmp_path):
 def test_balanced_pick_takes_each_interest_in_turn():
     found = [(_entry("a", "1"), ["AI"]), (_entry("b", "2"), ["AI"]), (_entry("c", "3"), ["電子工作"])]
     assert digest.balanced(found, INTERESTS, 2) == [0, 2]
+
+
+def test_paywalled_bodies_are_replaced_by_the_next_candidate(monkeypatch):
+    """有料の合図がある本文は使わず、次点の候補と入れ替える（件数は保つ）。次点も尽きたら諦める。"""
+    found = [(_entry("a", "https://zenn.dev/a"), ["AI"]), (_entry("b", "https://zenn.dev/b"), ["AI"]),
+             (_entry("c", "https://zenn.dev/c"), ["AI"])]
+    texts = {"https://zenn.dev/a": "ここから先は有料です", "https://zenn.dev/b": "普通の本文",
+             "https://zenn.dev/c": "こちらも普通の本文"}
+    monkeypatch.setattr(feeds, "article_text", lambda url: texts[url])
+
+    chosen, bodies = digest._read_without_paywall([found[0], found[1]], found, [2])
+    assert [e.title for e, _ in chosen] == ["c", "b"] and bodies == ["こちらも普通の本文", "普通の本文"]
+
+    # 次点も有料・尽きたら、その分は諦める
+    texts["https://zenn.dev/c"] = "続きを読むには課金してください"
+    chosen, bodies = digest._read_without_paywall([found[0], found[1]], found, [2])
+    assert [e.title for e, _ in chosen] == ["b"] and bodies == ["普通の本文"]
 
 
 def test_seen_forgets_after_ninety_days(tmp_path):
@@ -284,6 +312,31 @@ async def test_reading_falls_back_to_descriptions_when_the_answer_is_broken(conf
                                                 "sources": ["zenn: llm"]}, provider="claude")
 
     assert data["items"][0]["summary"] == "RAG の 作り方" and "AI" in data["items"][0]["why"]
+
+
+PAYWALL_RSS = """<?xml version="1.0"?><rss version="2.0"><channel><title>Zenn</title>
+<item><title>第一の記事</title><link>https://zenn.dev/a/1</link><description>説明1</description>
+<pubDate>Fri, 25 Sep 2026 12:00:00 GMT</pubDate></item>
+<item><title>第二の記事</title><link>https://zenn.dev/a/2</link><description>説明2</description>
+<pubDate>Fri, 25 Sep 2026 11:00:00 GMT</pubDate></item>
+<item><title>第三の記事</title><link>https://zenn.dev/a/3</link><description>説明3</description>
+<pubDate>Fri, 25 Sep 2026 10:00:00 GMT</pubDate></item>
+</channel></rss>""".encode()
+
+
+async def test_reading_fills_the_count_with_the_next_candidate_when_a_pick_is_paywalled(config, store, monkeypatch):
+    monkeypatch.setattr(digest, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
+    monkeypatch.setattr(feeds, "fetch", lambda url, **kw: PAYWALL_RSS)
+    bodies = {"https://zenn.dev/a/1": "ここから先は有料です", "https://zenn.dev/a/2": "普通の本文2",
+             "https://zenn.dev/a/3": "普通の本文3"}
+    monkeypatch.setattr(feeds, "article_text", lambda url: bodies[url])
+    model = FakeModel({"knowledge_pick": {"picks": [1, 2]}, "knowledge_summary": {"items": []}})
+    monkeypatch.setattr(runner, "run_model", model)
+    payload = {"interests": [{"name": "AI", "keywords": ["LLM", "RAG"]}], "sources": ["zenn: llm"], "count": 2}
+
+    data = await digest.reading(config, store, payload, provider="claude")
+
+    assert [item["title"] for item in data["items"]] == ["第三の記事", "第二の記事"]
 
 
 async def test_reading_stops_at_the_usage_limit(config, store, monkeypatch, reading_feeds):
