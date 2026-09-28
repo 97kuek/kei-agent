@@ -1181,14 +1181,15 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if result.limit_reset_at is not None:
             await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
                                        mention=self._unattended(req, started))
-            self.store.set_awaiting(req.channel, req.thread_ts, True)
             await ui.finish("")
             await self.mark_answered(req, failed=True)
             self.theme_runs.end(req.channel_name, req.thread_ts)
             return result
 
         connect = self.new_connect_requests(ws, result.text, result.requested_domains)
-        awaiting = req.awaiting_after or result.is_error or AWAITING_MARKER in result.text or bool(connect)
+        # 返事待ちは、依頼者の判断を待つときだけ（❓ の確認・失敗したジョブのあと・接続の許可待ち）。エラーで止まった回は
+        # ⚠️ を付けるだけにする（返信すれば、止まった依頼の続きとしてやる）
+        awaiting = req.awaiting_after or bool(connect) or (not result.is_error and AWAITING_MARKER in result.text)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         if awaiting:
             self.emit("awaiting", theme=req.channel_name)
@@ -1203,13 +1204,19 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         offer, title = self.should_offer_handoff(req, ws, result.text, busy=awaiting or waiting_for_job)
         if offer and not result.is_error:
             await self.offer_handoff(req, title)
-        if awaiting:
-            await self.notify_owner(req, "返事がほしいよ")
-        elif not waiting_for_job and self._unattended(req, started):
-            await self.notify_owner(req, "終わったよ")
+        if awaiting or not waiting_for_job:
+            await self._notify_end(req, started, awaiting, result.is_error)
         if waiting_for_job:
             await ui.keep_working()
         return result
+
+    async def _notify_end(self, req: Request, started: float, awaiting: bool, failed: bool) -> None:
+        """回の終わりを、依頼者へのメンションで知らせる。返事がほしいときはいつも、待っていないはずの回は、
+        終わった・止まったことを（すぐ終わった回には送らない）。"""
+        if awaiting:
+            await self.notify_owner(req, "返事がほしいよ")
+        elif self._unattended(req, started):
+            await self.notify_owner(req, "止まったよ" if failed else "終わったよ")
 
     def _unattended(self, req: Request, started: float) -> bool:
         """依頼者が画面を見ていないはずの回か（ジョブの完了で再開した回・あとでやり直した回・長くかかった回）。
@@ -1372,22 +1379,19 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if result.limit_reset_at is not None:
             await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
                                        mention=self._unattended(req, started))
-            self.store.set_awaiting(req.channel, req.thread_ts, True)
             await ui.finish("")
             await self.mark_answered(req, failed=True)
             return result
         answer, _ = self.render_reply(result)
-        awaiting = result.is_error or AWAITING_MARKER in result.text
+        # 返事待ちは ❓ の確認のときだけ。エラーで止まった回は ⚠️ を付けるだけにする
+        awaiting = not result.is_error and AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         streamed = await ui.finish(answer, awaiting and not result.is_error)
         if not streamed:
             for chunk in split_text(answer):
                 await self.post(req, chunk, markdown=True)
         await self.mark_answered(req, result.is_error)
-        if awaiting:
-            await self.notify_owner(req, "返事がほしいよ")
-        elif self._unattended(req, started):
-            await self.notify_owner(req, "終わったよ")
+        await self._notify_end(req, started, awaiting, result.is_error)
         return result
 
     async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,

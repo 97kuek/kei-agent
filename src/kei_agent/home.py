@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 from kei_agent import modules, settings
 from kei_agent.config import Config
@@ -75,7 +76,7 @@ def checkboxes(action_id: str, options: dict[str, str], chosen: set[str]) -> dic
 
 
 def _now_working(config: Config, store: Store, now: float | None = None) -> list[str]:
-    """いま動いている依頼、走っているジョブ、返事待ちのスレッドを、短い行にして返す。"""
+    """いま動いている依頼、走っているジョブ、上限が明けるのを待っている依頼、返事待ちのスレッドを、短い行にして返す。"""
     now = time.time() if now is None else now
     lines = []
     for run in store.open_runs():
@@ -85,6 +86,10 @@ def _now_working(config: Config, store: Store, now: float | None = None) -> list
         started = "実行中" if job.status == "running" else "順番待ち"
         lines.append(f"🧪 ジョブ {job.id}「{job.name}」{started}"
                      f"（投入から {format_duration(now - job.submitted_at)}）")
+    for _, payload in store.pending_deferred("request"):
+        until = store.limit_until(str(payload.get("provider") or ""))
+        when = f"{datetime.fromtimestamp(until):%H:%M} ごろから" if until > now else "まもなく"
+        lines.append(f"⏸ *#{payload['channel_name']}* 上限が明けるのを待っている（{when}）")
     for row in store.threads_awaiting():
         lines.append(f"❓ *#{row['channel_name']}* 返事待ち（{format_duration(now - row['awaiting_since'])}）")
     return lines

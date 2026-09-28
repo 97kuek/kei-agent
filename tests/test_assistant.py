@@ -280,16 +280,29 @@ async def test_new_outputs_are_uploaded(env, config):
     assert upload["thread_ts"] == "10.1"
 
 
-async def test_error_result_is_reported(env):
+async def test_error_result_is_reported(env, store):
     assistant, slack, claude, _ = env
     claude.behaviors = [{"is_error": True, "text": "", "errors": ["rate limited"]}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
     await settle(assistant)
     assert "⚠️ 接続に失敗したよ。少し時間を置いてもう一度頼んでね。" in slack.streamed()
-    assert slack.texts()[-1] == "<@UME> 返事がほしいよ"
     # 止まったときは ✅ ではなく ⚠️ をつける
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "warning"}) in slack.calls
     assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) not in slack.calls
+    # 止まった回は返事待ちにしない（24時間後の声かけも「返事がほしいよ」も出さない）。返信すれば続きとしてやる
+    assert store.threads_awaiting() == [] and _mentions(slack) == []
+    assert store.get_thread("C1", "10.1")["stalled_request"] == "x"
+
+
+async def test_an_error_after_a_long_run_mentions_that_it_stopped(env, monkeypatch):
+    from kei_agent import assistant as mod
+
+    assistant, slack, claude, _ = env
+    monkeypatch.setattr(mod, "NOTIFY_AFTER_SECONDS", -1)
+    claude.behaviors = [{"is_error": True, "text": "", "errors": ["rate limited"]}]
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> x"})
+    await settle(assistant)
+    assert _mentions(slack) == ["<@UME> 止まったよ"]
 
 
 async def test_narration_goes_to_the_status_not_the_answer(env):
@@ -1297,13 +1310,19 @@ async def test_limit_notice_mentions_the_owner_after_a_long_run(env, monkeypatch
     assert notice.startswith("<@UME> ⚠️")
 
 
-async def test_quick_limit_notice_has_no_mention(env):
+async def test_quick_limit_notice_has_no_mention(env, store):
+    from kei_agent import home
+
     assistant, slack, claude, _ = env
     claude.behaviors = [{"is_error": True, "text": f"Claude AI usage limit reached|{int(time.time() + 3600)}"}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
     await settle(assistant)
     notice, = [t for t in slack.texts() if "上限に達したみたい" in t]
     assert notice.startswith("⚠️")
+    # 上限の回は返事待ちではない。App Home には、上限が明けるのを待っていると出す
+    assert store.threads_awaiting() == []
+    line, = home._now_working(assistant.config, store)
+    assert line.startswith("⏸ *#vlm* 上限が明けるのを待っている（") and "ごろから" in line
 
 
 async def test_status_question_in_an_idle_thread_runs_read_only(env, store):
@@ -1486,6 +1505,32 @@ async def test_course_answer_that_asks_back_mentions_the_owner(env):
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 過去問ある？"})
     await settle(assistant)
     assert len(_mentions(slack)) == 1 and "返事がほしい" in _mentions(slack)[0]
+
+
+async def test_course_error_is_not_left_waiting_for_a_reply(env, store):
+    """大学の担当が止まった（ログイン切れなど）スレッドを、返事待ちにしない（24時間後に声をかけない）。"""
+    import json as _json
+
+    from kei_agent import a2a
+
+    assistant, slack, claude, _ = env
+    slack.channels["C7"] = "20_course"
+
+    class _Agent:
+        base_url = "http://127.0.0.1:8787"
+
+        async def stream(self, skill, text="", params=None, on_progress=None):
+            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=_json.dumps({
+                "ok": True, "text": "", "limit_reset_at": None, "cost_usd": None,
+                "data": {"session_id": None, "text": "", "is_error": True, "provider": "claude",
+                         "errors": ["Not logged in"]}}))
+
+    assistant.agents["course"] = _Agent()
+    await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 過去問ある？"})
+    await settle(assistant)
+
+    assert ("reactions_add", {"channel": "C7", "timestamp": "11.2", "name": "warning"}) in slack.calls
+    assert store.threads_awaiting() == [] and _mentions(slack) == []
 
 
 async def test_quick_course_answer_has_no_mention(env):
