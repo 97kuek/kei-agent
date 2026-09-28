@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import socket
+import subprocess
 import urllib.error
 from datetime import UTC, datetime, timedelta
 
@@ -90,41 +91,79 @@ class _Response(io.BytesIO):
         return False
 
 
-def _answers(monkeypatch, *codes):
-    """urlopen が codes の順に答える（200 なら ARXIV を返す）。待った秒数を返す。"""
+def _answers(monkeypatch, *codes, agents=None):
+    """読みに行くと codes の順に答える（200 なら ARXIV を返す）。arXiv は curl、フィードは urllib で読む。
+    待った秒数を返す。agents に名乗った名前を残す。"""
     left, waited = list(codes), []
 
     def urlopen(request, timeout):
+        if agents is not None:
+            agents.append(request.get_header("User-agent"))
         code = left.pop(0)
         if code != 200:
             raise urllib.error.HTTPError(request.full_url, code, "no", {}, None)
         return _Response(ARXIV)
 
+    def run(command, capture_output, timeout, check):
+        if agents is not None:
+            agents.append(command[command.index("-A") + 1])
+        code = left.pop(0)
+        return subprocess.CompletedProcess(command, 0, ARXIV if code == 200 else b"", str(code).encode())
+
     monkeypatch.setattr(feeds.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(feeds.subprocess, "run", run)
     monkeypatch.setattr(feeds.time, "sleep", waited.append)
     return waited
 
 
 def test_arxiv_is_read_again_after_waiting_when_busy(monkeypatch):
-    waited = _answers(monkeypatch, 406, 503, 200)
+    waited = _answers(monkeypatch, 429, 503, 200)
     assert [p.id for p in feeds.arxiv_papers(["counting"])] == ["arXiv:2609.00001"]
     assert waited == list(feeds.ARXIV_WAITS[:2])
 
 
 def test_arxiv_gives_up_after_the_last_wait_or_on_a_real_refusal(monkeypatch):
-    waited = _answers(monkeypatch, *[406] * (len(feeds.ARXIV_WAITS) + 1))
-    with pytest.raises(feeds.FetchError, match="406"):
+    waited = _answers(monkeypatch, *[503] * (len(feeds.ARXIV_WAITS) + 1))
+    with pytest.raises(feeds.FetchError, match="503"):
         feeds.arxiv_papers(["counting"])
     assert waited == list(feeds.ARXIV_WAITS)
-    waited = _answers(monkeypatch, 404)
-    with pytest.raises(feeds.FetchError, match="404"):
-        feeds.arxiv_papers(["counting"])
-    assert waited == []
+    # 406 は待っても通らない断りなので、404 と同じく待たずにやめて理由を出す
+    for code in (404, 406):
+        waited = _answers(monkeypatch, code)
+        with pytest.raises(feeds.FetchError, match=str(code)):
+            feeds.arxiv_papers(["counting"])
+        assert waited == []
     # フィードと記事は、やり直さない（毎朝たくさん読むので、1つで待たない）
     waited = _answers(monkeypatch, 503)
     with pytest.raises(feeds.FetchError):
         feeds.fetch("https://blog.example/feed")
     assert waited == []
+
+
+def test_arxiv_is_read_with_curl_under_an_honest_name(monkeypatch):
+    """arXiv は Python から頼むと 406 で断られるので curl で読む。名前はブラウザのふりをしない。フィードは今のまま。"""
+    agents: list[str] = []
+    _answers(monkeypatch, 200, 200, agents=agents)
+    feeds.arxiv_papers(["counting"])
+    feeds.fetch("https://blog.example/feed")
+    assert agents == [feeds.ARXIV_USER_AGENT, feeds.USER_AGENT] and "Mozilla" not in feeds.ARXIV_USER_AGENT
+
+
+@pytest.mark.parametrize(("returncode", "error"), [(28, "curl が止まりました"), (63, "大きすぎます")])
+def test_curl_failures_say_what_happened(monkeypatch, returncode, error):
+    runs = []
+
+    def run(command, capture_output, timeout, check):
+        runs.append(command)
+        return subprocess.CompletedProcess(command, returncode, b"", b"curl: (x) failed000")
+
+    monkeypatch.setattr(feeds.subprocess, "run", run)
+    monkeypatch.setattr(feeds.time, "sleep", lambda _s: None)
+    with pytest.raises(feeds.FetchError, match=error):
+        feeds.arxiv_papers(["counting"])
+    # つながらない・時間切れはやり直し、大きすぎるのはやり直さない
+    assert len(runs) == (len(feeds.ARXIV_WAITS) + 1 if returncode == 28 else 1)
+    assert runs[0][0] == feeds.CURL and "--max-filesize" in runs[0]
 
 
 # 絞る（digest.py）

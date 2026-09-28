@@ -10,6 +10,8 @@ import email.utils
 import html
 import http.client
 import re
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -20,6 +22,11 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 
 USER_AGENT = "Mozilla/5.0 (Kei Agent reader)"
+# arXiv は curl で読む。arXiv の前にある配信の仕組みは、Python から頼むとキャッシュに無い問い合わせを 406 で断り、
+# 待っても通らない。Mac に入っている curl なら通る（2026-09-27・28 の朝、論文の新着が止まった。9/28 に確かめた）
+CURL = shutil.which("curl") or "/usr/bin/curl"
+# arXiv には、ブラウザのふりをしない、何のプログラムかが分かる名前で頼む（arXiv の求め）
+ARXIV_USER_AGENT = "kei-agent/1.0 (+https://github.com/97kuek/kei-agent)"
 TIMEOUT_SECONDS = 15
 # 1回に読む大きさの上限。フィードは全文入りのもの（Vercel など）があるので大きめ
 MAX_BYTES = 10 * 1024 * 1024
@@ -30,11 +37,11 @@ ARTICLE_CHARS = 6000
 SUMMARY_CHARS = 400
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_TIMEOUT_SECONDS = 30
-# arXiv は混んでいるときや立て続けに読んだときに、しばらく断る（406・429・5xx。本文は空）。
-# 朝に1テーマ1回しか読まないので、間をだんだん長くあけて、やり直す（秒）。断る時間は数分続くことがあり、
-# 5・15・45秒では足りなかった（2026-09-27）。合わせて約5分待っても、朝の Daily（08:00）には間に合う
+# arXiv は混んでいるときや立て続けに読んだときに、しばらく断る（429・5xx）。朝に1テーマ1回しか読まないので、
+# 間をだんだん長くあけて、やり直す（秒）。合わせて約5分待っても、朝の Daily（08:00）には間に合う。
+# 406 は待っても通らないので、やり直さずに理由を返す
 ARXIV_WAITS = (30.0, 90.0, 180.0)
-_BUSY_CODES = {406, 429, 500, 502, 503, 504}
+_BUSY_CODES = {429, 500, 502, 503, 504}
 ATOM = "{http://www.w3.org/2005/Atom}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
 # 情報源の書き方（「収集」ページ）: `zenn: llm, ai` と `qiita: llm` はトピック・タグごとのフィード
@@ -112,17 +119,23 @@ def expand_sources(lines: list[str]) -> list[Source]:
     return list(found.values())
 
 
-def fetch(url: str, timeout: float = TIMEOUT_SECONDS, limit: int = MAX_BYTES, waits: tuple[float, ...] = ()) -> bytes:
-    """http(s) のページを、上限の大きさまで読む。waits は、一時的に読めなかったときに、やり直すまで待つ秒数。"""
+def fetch(url: str, timeout: float = TIMEOUT_SECONDS, limit: int = MAX_BYTES, waits: tuple[float, ...] = (),
+          *, user_agent: str = USER_AGENT, curl: bool = False) -> bytes:
+    """http(s) のページを、上限の大きさまで読む。waits は、一時的に読めなかったときに、やり直すまで待つ秒数。
+    curl なら、Python ではなく curl で読む（arXiv 用）。"""
     if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         raise FetchError(f"http(s) ではありません: {url}")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+
+    def read() -> bytes:
+        return _read_curl(url, timeout, limit, user_agent) if curl else _read(request, timeout, limit)
+
     for wait in waits:
         try:
-            return _read(request, timeout, limit)
+            return read()
         except _Busy:
             time.sleep(wait)
-    return _read(request, timeout, limit)
+    return read()
 
 
 def _read(request: urllib.request.Request, timeout: float, limit: int) -> bytes:
@@ -139,6 +152,25 @@ def _read(request: urllib.request.Request, timeout: float, limit: int) -> bytes:
     if len(data) > limit:
         raise FetchError(f"{url} が大きすぎます")
     return data
+
+
+def _read_curl(url: str, timeout: float, limit: int, user_agent: str) -> bytes:
+    """curl で読む。HTTP の状態は標準エラーの最後に書かせて受け取る。"""
+    command = [CURL, "-sS", "--max-time", str(int(timeout)), "--max-filesize", str(limit), "-A", user_agent,
+               "-w", "%{stderr}%{http_code}", url]
+    try:
+        proc = subprocess.run(command, capture_output=True, timeout=timeout + 10, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise _Busy(f"{url} を読めません: {e}") from None
+    status = proc.stderr.decode("utf-8", errors="replace").strip()[-3:]
+    if proc.returncode == 63 or len(proc.stdout) > limit:
+        raise FetchError(f"{url} が大きすぎます")
+    if proc.returncode != 0 or not status.isdigit():
+        raise _Busy(f"{url} を読めません: curl が止まりました（{proc.returncode}）")
+    code = int(status)
+    if code != 200:
+        raise (_Busy if code in _BUSY_CODES else FetchError)(f"{url} を読めません: HTTP Error {code}")
+    return proc.stdout
 
 
 def _text(value: str | None, limit: int = SUMMARY_CHARS) -> str:
@@ -191,7 +223,8 @@ def parse_feed(data: bytes, source: Source) -> list[Entry]:
 
 def arxiv_papers(keywords: list[str], limit: int = 50) -> list[Paper]:
     """キーワードのどれかを含む新しい論文（読めなければ FetchError）。"""
-    return parse_arxiv(fetch(arxiv_url(keywords, limit), timeout=ARXIV_TIMEOUT_SECONDS, waits=ARXIV_WAITS))
+    return parse_arxiv(fetch(arxiv_url(keywords, limit), timeout=ARXIV_TIMEOUT_SECONDS, waits=ARXIV_WAITS,
+                             user_agent=ARXIV_USER_AGENT, curl=True))
 
 
 def arxiv_url(keywords: list[str], limit: int = 50) -> str:

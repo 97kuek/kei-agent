@@ -7,6 +7,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -28,12 +30,28 @@ def _get(url: str, headers: dict[str, str] | None = None, retries: int = 4) -> b
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
-            # arXiv は混んでいるときや立て続けに読んだときに、406 でしばらく断る
-            if e.code in (406, 429, 500, 502, 503, 504) and attempt < retries - 1:
+            if e.code in (429, 500, 502, 503, 504) and attempt < retries - 1:
                 time.sleep(delay)
                 delay *= 2
                 continue
             raise
+    raise RuntimeError("unreachable")
+
+
+def _get_arxiv(url: str, retries: int = 4) -> bytes:
+    """arXiv は curl で読む（Python から頼むと、キャッシュに無い問い合わせを 406 で断られ、待っても通らない）。"""
+    delay = 2.0
+    for attempt in range(retries):
+        proc = subprocess.run([shutil.which("curl") or "/usr/bin/curl", "-sS", "--max-time", "30", "-A", USER_AGENT,
+                               "-w", "%{stderr}%{http_code}", url], capture_output=True, check=False)
+        status = proc.stderr.decode("utf-8", errors="replace").strip()[-3:]
+        if proc.returncode == 0 and status == "200":
+            return proc.stdout
+        if (proc.returncode != 0 or status in ("429", "500", "502", "503", "504")) and attempt < retries - 1:
+            time.sleep(delay)
+            delay *= 2
+            continue
+        raise RuntimeError(f"arXiv を読めません（curl {proc.returncode}、HTTP {status}）")
     raise RuntimeError("unreachable")
 
 
@@ -57,7 +75,7 @@ def search_arxiv(query: str, limit: int, sort: str) -> list[dict]:
         "sortBy": {"relevance": "relevance", "date": "submittedDate"}[sort],
         "sortOrder": "descending",
     }
-    root = ET.fromstring(_get("https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)))
+    root = ET.fromstring(_get_arxiv("https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params)))
     papers = []
     for entry in root.findall(f"{ATOM}entry"):
         abs_url = entry.findtext(f"{ATOM}id", "")
