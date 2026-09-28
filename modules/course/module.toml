@@ -38,7 +38,7 @@ codex = { model = "gpt-6-luna", effort = "medium" }
 
 [use_cases.course_requirements]
 claude = { model = "claude-sonnet-5", effort = "high" }
-codex = { model = "gpt-6-luna", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "medium" }
 
 [use_cases.course_compare]
 claude = { model = "claude-sonnet-5", effort = "high" }

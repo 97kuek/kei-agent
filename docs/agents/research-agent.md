@@ -49,8 +49,8 @@
 | 用途 | 使うとき | Claude | Codex |
 |---|---|---|---|
 | `research_extract` | 書誌・固定項目・ログの抜き出し | haiku-4-5 | luna / low |
-| `research_screen` | はっきりした基準での仕分け | haiku-4-5 | luna / medium |
-| `research_compare` | 比較・結果の分析 | sonnet-5 / medium | sol / medium |
+| `research_screen` | はっきりした基準での仕分け | haiku-4-5 | luna / low |
+| `research_compare` | 比較・結果の分析 | sonnet-5 / high | sol / medium |
 | `research_execute`（既定） | 実験コード・データ処理・ふつうの調査 | sonnet-5 / high | sol / high |
 | `research_design` | 仮説・実験計画・手法選び・厳しいレビュー | opus-5 / high | sol / xhigh |
 | `manual_fable` | `[[manual-fable]]` と書いたときだけ | fable-5 / high | — |

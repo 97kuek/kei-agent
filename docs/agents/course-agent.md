@@ -38,7 +38,7 @@
 | 用途 | 使うとき | Claude | Codex |
 |---|---|---|---|
 | `course_explain`（既定） | 1つの資料の説明 | sonnet-5 / medium | luna / medium |
-| `course_requirements` | 課題の要件・評価基準の整理 | sonnet-5 / high | luna / high |
+| `course_requirements` | 課題の要件・評価基準の整理 | sonnet-5 / high | sol / medium |
 | `course_compare` | 複数の資料・試験範囲の比較 | sonnet-5 / high | sol / medium |
 | `course_degree_plan` | 履修・卒業の計画 | opus-5 / high | sol / xhigh |
 

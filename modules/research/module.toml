@@ -24,10 +24,10 @@ codex = { model = "gpt-6-luna", effort = "low" }
 
 [use_cases.research_screen]
 claude = { model = "claude-haiku-4-5" }
-codex = { model = "gpt-6-luna", effort = "medium" }
+codex = { model = "gpt-6-luna", effort = "low" }
 
 [use_cases.research_compare]
-claude = { model = "claude-sonnet-5", effort = "medium" }
+claude = { model = "claude-sonnet-5", effort = "high" }
 codex = { model = "gpt-6-sol", effort = "medium" }
 
 [use_cases.research_execute]
