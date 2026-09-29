@@ -110,6 +110,22 @@ def test_commit_message_falls_back_to_the_request():
     assert message.splitlines()[0] == "ログが読みにくい"
 
 
+def test_commit_all_does_not_pick_up_pytest_temp_folders(repo):
+    """テストが worktree の中に作る pytest-of-*/ を、コミットに拾わないようにする。"""
+    (repo / ".gitignore").write_text((Path(__file__).resolve().parents[1] / ".gitignore").read_text())
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "gitignore を足す")
+    (repo / "pytest-of-keitaro" / "pytest-1").mkdir(parents=True)
+    (repo / "pytest-of-keitaro" / "pytest-1" / "config.toml").write_text("x = 1\n")
+    (repo / "src" / "app.py").write_text("x = 2\n")
+
+    improve_repo.commit_all(repo, "直す")
+
+    committed = git(repo, "show", "--name-only", "--pretty=format:", "HEAD").splitlines()
+    assert "src/app.py" in committed
+    assert not any("pytest-of-keitaro" in f for f in committed)
+
+
 # やりとりから着手まで
 
 async def test_new_request_becomes_a_public_issue_and_plans_without_writing_code(env, fake_github, monkeypatch):
