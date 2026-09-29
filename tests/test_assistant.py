@@ -1074,6 +1074,16 @@ async def test_long_finished_run_mentions(env, monkeypatch):
     assert len(_mentions(slack)) == 1 and "終わった" in _mentions(slack)[0]
 
 
+async def test_long_status_answer_does_not_say_finished(env, monkeypatch):
+    """様子を聞かれて答えただけの回は、長くかかっても「終わったよ」を送らない（何かが終わったわけではない）。"""
+    from kei_agent import assistant as mod
+    assistant, slack, claude, _ = env
+    monkeypatch.setattr(mod, "NOTIFY_AFTER_SECONDS", -1)
+    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 今どんな感じ"})
+    await settle(assistant)
+    assert _mentions(slack) == []
+
+
 # 再起動で途中で止まった依頼のやり直し
 
 

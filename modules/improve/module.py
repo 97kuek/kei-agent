@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +47,9 @@ CLOSABLE = ("planning", "review", "failed")
 # 直さずに終わったときの detail（issue に添える言葉を選ぶのに使う）
 RESOLVED = "直さずに解決"
 DROPPED = "見送り"
+# 直している途中に書かれた依頼者の返信の頭に付ける。相談の AI は、裏の直しの様子を知らない
+WORKING_NOTE = ("（Kei Agent 本体から: この要望の直しは、合意した案で裏で進んでいる。終わると本体が差分をこのスレッドに出す。"
+                "あなたは直さない（コードを書き換えない・テストを回さない・リポジトリを写さない）。聞かれたことに答えるだけにする）\n\n")
 # 案を出したまま動きのない相談の作業用のフォルダを、残しておく日数
 TALK_KEEP_DAYS = 7
 
@@ -94,6 +98,16 @@ class Module:
             if fix.issue_number is None and not is_status_inquiry(fix.request):
                 # issue にするのは裏で進め、案を考えるのを待たせない（様子を聞いただけの一言は、要望ではないので issue にしない）
                 self.core.spawn(self.file_issue(req, fix.request))
+        fix = self.fixes.get(req.thread_ts)
+        if fix is not None and fix.status == "working":
+            # 直しは裏（worktree）で進んでいて、相談の AI はそれを知らない。様子を聞かれたら記録から答え、
+            # それ以外は直しが進んでいることを添えて、相談の AI が同じ直しを自分で始めないようにする
+            if req.trigger == "message" and is_status_inquiry(req.text):
+                minutes = max(1, int((time.time() - fix.updated_at) // 60))
+                await self.core.reply(req, f"まだ直しているところだよ（始めて{minutes}分）。"
+                                           "終わったら差分をここに出して知らせるね。")
+                return
+            req = replace(req, text=WORKING_NOTE + req.text)
         answer = await self.core.work(req, folder=self.talks / req.thread_ts, hide=HIDDEN)
         # 合図は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。ジョブの完了や接続の許可で自動で再開した回と、
         # 様子を聞かれただけの回（読むだけで動く）の返事では動かない

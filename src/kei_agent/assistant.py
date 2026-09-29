@@ -1212,10 +1212,11 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
 
     async def _notify_end(self, req: Request, started: float, awaiting: bool, failed: bool) -> None:
         """回の終わりを、依頼者へのメンションで知らせる。返事がほしいときはいつも、待っていないはずの回は、
-        終わった・止まったことを（すぐ終わった回には送らない）。"""
+        終わった・止まったことを（すぐ終わった回には送らない）。様子を聞かれて答えただけの回は、何かが終わったわけでは
+        ないので「終わったよ」を送らない。"""
         if awaiting:
             await self.notify_owner(req, "返事がほしいよ")
-        elif self._unattended(req, started):
+        elif self._unattended(req, started) and not (req.trigger in ("message", "voice") and is_status_inquiry(req.text)):
             await self.notify_owner(req, "止まったよ" if failed else "終わったよ")
 
     def _unattended(self, req: Request, started: float) -> bool:

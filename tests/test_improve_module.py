@@ -270,6 +270,35 @@ async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
     assert upload["file_uploads"][0]["filename"] == "change.diff"
 
 
+async def working(assistant, slack, claude):
+    """案に合意して、裏で直している途中のスレッドにする（直しの AI はまだ答えていない）。"""
+    await agreed(assistant, slack, claude)
+    assistant.modules["improve"].fixes.start("C9", "20.1", "直して", branch="kei-agent/improve-20-1")
+    claude.calls.clear()
+
+
+async def test_a_status_question_while_fixing_is_answered_without_the_ai(env):
+    """直している途中に様子を聞かれたら、相談の AI に聞かず（AI は裏の直しを知らない）、記録から答える。"""
+    assistant, slack, claude, cfg = env
+    await working(assistant, slack, claude)
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.5", "thread_ts": "20.1", "text": "直った？"})
+    await settle(assistant)
+    assert claude.calls == []
+    assert "まだ直しているところだよ" in slack.texts()[-1]
+    assert fix_of(assistant).status == "working"
+
+
+async def test_a_reply_while_fixing_tells_the_ai_not_to_fix_it_again(env):
+    """直している途中の返信では、相談の AI に直しが裏で進んでいることを伝え、同じ直しを自分で始めさせない。"""
+    assistant, slack, claude, cfg = env
+    await working(assistant, slack, claude)
+    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.5", "thread_ts": "20.1", "text": "おけ"})
+    await settle(assistant)
+    call, = claude.calls
+    assert "裏で進んでいる" in call["prompt"] and "あなたは直さない" in call["prompt"]
+    assert call["prompt"].rstrip().endswith("おけ")
+
+
 async def test_start_marker_from_an_automatic_run_is_ignored(env):
     """ジョブの完了などで自動で再開した回の返事に着手の行があっても、動かない。"""
     assistant, slack, claude, cfg = env
