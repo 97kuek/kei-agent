@@ -6,7 +6,8 @@ Kei Agent のチャンネル（#00_kei-agent。module.toml の core_channels）�
 - 直さずに済んだら（もう直っていた・やらないと決まった）、AI が「✅ 解決済み」「🗑 見送り」と書き、要望を終わりにして
   issue を閉じる（見送りは not planned）
 - 直し方を相談する（AI は Kei Agent のコードを読むだけで、書けるのは相談の作業用のフォルダだけ）
-- 案に2回「いいよ」をもらい、AI が「🛠 着手」と書いたら、worktree で直す。差分を添付して、取り込んでいいか聞く
+- 案に2回「いいよ」をもらい、AI が「🛠 着手」と書いたら、worktree で直す。AI の作業場では全体のテストが通らないので、
+  本体が外で回し、落ちたら1回だけ直させる。通ったら差分を添付して、取り込んでいいか聞く
 - 直したものに「いいよ」をもらい、AI が「📦 取り込み」と書いたら、テストを回し、柵を確かめて main に取り込み、push して、
   作業が終わってから新しい版で起動し直す（起動できなければ、本体が前の版に戻す）
 - 起動したとき（on_start）: 途中で止まった直しを「中断」にし、入れ替えの結果を取り込みのスレッドに知らせる
@@ -161,28 +162,61 @@ class Module:
                 self.fixes.update(req.thread_ts, status="failed", detail=detail)
 
     async def _run_fix(self, req: Request, worktree: Path, base: str) -> None:
-        prompt = repo.FIX_PROMPT + await self.core.thread_history(req.channel, req.thread_ts)
-        try:
-            async with self.core.progress(req, "改善中…"):
-                text = await self.core.run_ai("improve_fix", prompt, folder=worktree)
-        except AIError as e:
-            reason = str(e)[:500]
-            await self._failed(req, reason, f"直している途中で止まったよ: {reason}")
+        history = await self.core.thread_history(req.channel, req.thread_ts)
+        summary = await self._ask_fix(req, worktree, repo.FIX_PROMPT + history)
+        if summary is None:
             return
-        summary = final_answer(text) or text
         fix = self.fixes.get(req.thread_ts)
-        request = fix.request if fix is not None else req.text
-        if await self.core.to_thread(repo.commit_all, worktree, repo.commit_message(request, summary)) is None:
+        message = repo.commit_message(summary, fix.issue_number if fix is not None else None)
+        if await self.core.to_thread(repo.commit_all, worktree, message) is None:
             await self._failed(req, "変更なし", "変わったファイルがなかったよ。")
             return
         if not await self._fence(req, worktree, base):
             return
+        # AI の作業場では全体のテストが通らない（ソケットなどが使えない）ので、見てもらう前に外で回す。
+        # 通らなければ結果を渡して1回だけ直させる
+        checks = await self._checks(req, worktree)
+        if not checks.ok:
+            again = await self._ask_fix(req, worktree, repo.RECHECK_PROMPT + checks.output[:3000] + "\n\n" + history)
+            if again is None:
+                return
+            summary = again
+            await self.core.to_thread(repo.commit_all, worktree, repo.commit_message(
+                summary, fix.issue_number if fix is not None else None))
+            if not await self._fence(req, worktree, base):
+                return
+            checks = await self._checks(req, worktree)
+            if not checks.ok:
+                await self._failed(req, "確認が通らない",
+                                   f"直したけど、全体のテストが通らなかったよ:\n```\n{checks.output[:2000]}\n```")
+                return
         self.fixes.update(req.thread_ts, status="review")
         await self._upload_diff(req, worktree, base)
         await self.core.post(req.channel, repo.review_summary(worktree, base, summary), thread_ts=req.thread_ts,
                              markdown=True)
         # 直している間、依頼者は待っていない。取り込んでいいか見てもらえるよう、メンションで知らせる
         await self._post(req, self.core.mention("直したよ。取り込んでいいか見てね"))
+
+    async def _ask_fix(self, req: Request, worktree: Path, prompt: str) -> str | None:
+        """worktree で AI に直させ、答えのうち Slack に出す部分を返す。動かせなければ失敗として知らせて None。
+
+        終わったあと、AI が裏で流したまま残した処理（固まったテストなど）を止める。
+        """
+        try:
+            async with self.core.progress(req, "改善中…"):
+                text = await self.core.run_ai("improve_fix", prompt, folder=worktree)
+        except AIError as e:
+            reason = str(e)[:500]
+            await self._failed(req, reason, f"直している途中で止まったよ: {reason}")
+            return None
+        finally:
+            if stopped := await self.core.to_thread(repo.stop_leftovers, worktree):
+                log.info("直しの作業場に残っていた処理を止めました: %s", stopped)
+        return final_answer(text) or text
+
+    async def _checks(self, req: Request, worktree: Path) -> repo.CommandResult:
+        async with self.core.progress(req, "全体のテストを確認中…"):
+            return await self.core.to_thread(repo.run_checks, worktree)
 
     async def _fence(self, req: Request, worktree: Path, base: str) -> bool:
         """柵に触れていないか、秘密情報が入っていないかを本体に確かめてもらう。だめなら失敗として知らせる。"""

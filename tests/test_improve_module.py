@@ -56,6 +56,8 @@ def env(config, store, repo, monkeypatch):
     slack = FakeSlack({"C9": "00_kei-agent", "C1": "vlm"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
+    # 本体が外で回す全体のテスト（本物はこのテスト自身を回してしまう）
+    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(True, "テストは通った"))
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
     return assistant, slack, claude, config
 
@@ -99,15 +101,36 @@ async def second_yes(assistant, ts="20.5"):
 
 def test_commit_message_uses_the_subject_claude_wrote():
     summary = "**やったこと**\n\nログの進捗行を間引いた。\n\n📝 件名: ジョブのログから進捗の行を間引く"
-    message = improve_repo.commit_message("ログが読みにくい（とても長い要望の文が続く）", summary)
+    message = improve_repo.commit_message(summary, 3)
     assert message.splitlines()[0] == "ジョブのログから進捗の行を間引く"
     assert "件名:" not in message and "ログの進捗行を間引いた。" in message
     assert message.splitlines()[1] == "" and "**やったこと**" in message   # 空行を残す
 
 
-def test_commit_message_falls_back_to_the_request():
-    message = improve_repo.commit_message("ログが読みにくい", "直したよ")
-    assert message.splitlines()[0] == "ログが読みにくい"
+def test_commit_message_never_uses_the_request_text():
+    """リポジトリは公開なので、AI が件名を書かなくても要望の原文は使わない（issue の番号で書く）。"""
+    assert improve_repo.commit_message("直したよ", 13).splitlines()[0] == "#00_kei-agent の要望 #13 を直す"
+    assert improve_repo.commit_message("直したよ").splitlines()[0] == "#00_kei-agent の要望を直す"
+
+
+def test_fix_prompt_keeps_the_full_suite_out_of_the_sandbox():
+    """AI の作業場では全体のテストが通らない（固まる）ので、関係するテストだけを前面で回させる。"""
+    assert "全体のテストは" in improve_repo.FIX_PROMPT and "裏で流したまま終えない" in improve_repo.FIX_PROMPT
+    assert "`uv run --frozen --group agents pytest -q` と" not in improve_repo.FIX_PROMPT
+
+
+def test_stop_leftovers_stops_only_processes_inside_the_worktree(tmp_path):
+    inside, outside = tmp_path / "wt", tmp_path / "other"
+    inside.mkdir()
+    outside.mkdir()
+    procs = [subprocess.Popen(["sleep", "30"], cwd=folder) for folder in (inside, outside)]
+    try:
+        assert improve_repo.stop_leftovers(inside) == [procs[0].pid]
+        assert procs[0].wait(5) != 0 and procs[1].poll() is None
+    finally:
+        for proc in procs:
+            proc.kill()
+            proc.wait()
 
 
 def test_commit_all_does_not_pick_up_pytest_temp_folders(repo):
@@ -297,6 +320,35 @@ async def test_a_reply_while_fixing_tells_the_ai_not_to_fix_it_again(env):
     call, = claude.calls
     assert "裏で進んでいる" in call["prompt"] and "あなたは直さない" in call["prompt"]
     assert call["prompt"].rstrip().endswith("おけ")
+
+
+async def test_failing_full_checks_are_handed_back_once_before_review(env, monkeypatch):
+    """外で回した全体のテストが落ちたら、結果を渡して1回だけ直させ、通ってから見てもらう。"""
+    assistant, slack, claude, cfg = env
+    results = [improve_repo.CommandResult(False, "FAILED tests/test_schedule.py::test_old"),
+               improve_repo.CommandResult(True, "通った")]
+    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: results.pop(0))
+    await agreed(assistant, slack, claude)
+    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()},
+                        {"text": "古いテストも直した", "side_effect": edits_code("y = 3\n")}]
+    await second_yes(assistant)
+
+    assert "FAILED tests/test_schedule.py::test_old" in claude.prompts()[-1]
+    assert fix_of(assistant).status == "review"
+    assert "<@UME> 直したよ。取り込んでいいか見てね" in slack.texts()
+
+
+async def test_checks_that_still_fail_are_not_offered_for_review(env, monkeypatch):
+    assistant, slack, claude, cfg = env
+    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(False, "1 failed"))
+    await agreed(assistant, slack, claude)
+    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()},
+                        {"text": "まだ", "side_effect": edits_code("y = 3\n")}]
+    await second_yes(assistant)
+
+    assert fix_of(assistant).status == "failed"
+    assert any("全体のテストが通らなかった" in t for t in slack.texts())
+    assert not any("取り込んでいいか見てね" in t for t in slack.texts())
 
 
 async def test_start_marker_from_an_automatic_run_is_ignored(env):

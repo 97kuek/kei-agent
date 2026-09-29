@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import shutil
+import signal
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -142,6 +145,24 @@ def run_checks(worktree: Path) -> CommandResult:
     return CommandResult(True, "\n\n".join(outputs))
 
 
+def stop_leftovers(worktree: Path) -> list[int]:
+    """作業場の中で動き続けている処理（AI が裏で流したまま終えたテストなど）を止める。止めた処理の番号を返す。
+
+    AI の実行が終わっても、裏で流した処理は残り、固まると何時間も動き続ける。今いる場所（cwd）で見分ける。
+    """
+    proc = subprocess.run(["lsof", "-a", "-d", "cwd", "-F", "pn"], capture_output=True, text=True)
+    root = str(worktree.resolve())
+    stopped, pid = [], None
+    for line in proc.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None and (line[1:] == root or line[1:].startswith(root + "/")):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGTERM)
+                stopped.append(pid)
+    return stopped
+
+
 class PushError(RuntimeError):
     """取り込んだが push できなかった。`undone` は手元の main を元に戻せたか。"""
 
@@ -197,7 +218,10 @@ FIX_PROMPT = """\
 
 - いまのディレクトリは、この作業のための git worktree です。ここの中だけを書き換えます
 - `src/kei_agent/guard.py`、`config.example.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
-- 直したら `uv run --frozen --group agents pytest -q` と `uvx ruff check src tests modules` を通してください
+- 直したら、直したところに関係するテストのファイル（`uv run --frozen --group agents pytest -q tests/test_<…>.py`）と
+  `uvx ruff check src tests modules` を通してください。全体のテストは、この作業場ではソケットなどが使えず通らないので
+  回さないでください（終わったあとに Kei Agent 本体が外で回します）
+- テストは前面で回して、結果を見てから終えてください。裏で流したまま終えないでください
 - テストのないところを直すときは、先に落ちるテストを書いてから直してください
 - コミットはしないでください（Kei Agent 本体がまとめてコミットします）
 - 最後に、何をどう変えたかと、テストの結果を短くまとめてください
@@ -207,8 +231,16 @@ FIX_PROMPT = """\
 """
 
 
+RECHECK_PROMPT = """\
+[Kei Agent からの自動メッセージ] 直してもらった差分で、Kei Agent 本体が全体のテストと ruff を回したら、通らなかった。
+下の結果を見て、同じ直し方のまま、通るように直してください（決まった直し方の外には広げないでください）。
+ほかの約束（柵・コミットしない・関係するテストだけを前面で回す・最後の `📝 件名:` の行）は、はじめの頼みと同じです。
+
+本体で回した結果:
+"""
+
 def subject_from(text: str, fallback: str) -> str:
-    """AI が書いた `📝 件名:` の行。なければ要望の先頭を使う。"""
+    """AI が書いた `📝 件名:` の行。なければ fallback を使う。"""
     for line in reversed(text.splitlines()):
         line = line.strip()
         if line.startswith(SUBJECT_MARKER):
@@ -218,8 +250,12 @@ def subject_from(text: str, fallback: str) -> str:
     return " ".join(fallback.split())[:50]
 
 
-def commit_message(request: str, summary: str) -> str:
-    """Kei Agent 自身を直したときのコミットメッセージ。件名は AI が書いた1行、本文は変えた内容の要約。"""
+def commit_message(summary: str, issue_number: int | None = None) -> str:
+    """Kei Agent 自身を直したときのコミットメッセージ。件名は AI が書いた1行、本文は変えた内容の要約。
+
+    リポジトリは公開なので、AI が件名を書かなくても要望の原文は使わない（issue の番号で書く）。
+    """
     body = [line for line in summary.strip().splitlines() if not line.strip().startswith(SUBJECT_MARKER)]
     text = "\n".join(body).strip()[:1500]
-    return f"{subject_from(summary, request)}\n\n{text}\n\n#00_kei-agent の要望から、Kei Agent 自身が直した。"
+    fallback = f"#00_kei-agent の要望 #{issue_number} を直す" if issue_number else "#00_kei-agent の要望を直す"
+    return f"{subject_from(summary, fallback)}\n\n{text}\n\n#00_kei-agent の要望から、Kei Agent 自身が直した。"
