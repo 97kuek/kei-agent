@@ -784,8 +784,8 @@ async def test_scheduled_sync_announces_new_and_changed_assignments(env):
 
     post = slack.posted()[-1]
     assert post["channel"] == "C7"
-    assert post["text"] == ("📚 Moodle の課題\n• 新しい: 10/26 00:00 情報 / Assignment A\n"
-                            "• 締切が変わった: 11/02 00:00 情報 / Assignment B")
+    assert post["text"] == ("📚 Moodle の課題（新着 1件・締切変更 1件）\n• 10/26 00:00 情報 / Assignment A\n"
+                            "• :repeat: 11/02 00:00 情報 / Assignment B")
 
 
 async def test_scheduled_sync_stays_quiet_without_changes(env):

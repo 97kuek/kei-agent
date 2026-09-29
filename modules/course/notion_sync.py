@@ -38,6 +38,10 @@ MAX_WRITES = 50
 TITLE_LIMIT = 200
 REQUIRED_DATABASES = frozenset({"courses", "assignments", "grades", "requirements", "gpa"})
 _QUOTED_DUE = re.compile(r"^「(?P<title>.+)」の提出期限$")
+# 通知の行だけで落とす、Moodle の言い回し（Notion のページ名には残す）
+_NOTICE_SUFFIX = re.compile(r"\s*の\s*(?:受験可能期間\s*の?\s*(?:開始|終了)|提出期限)\s*$")
+# 課題名の末尾に付く受付時刻の幅（例: `(14:20-14:50)`）。あれば日付側の表示に寄せる
+_NOTICE_TIME_RANGE = re.compile(r"\s*\((\d{1,2}:\d{2}-\d{1,2}:\d{2})\)\s*$")
 _ASSIGNMENT_SECTIONS = ("やること", "提出物", "進捗メモ", "資料・リンク")
 
 
@@ -295,8 +299,15 @@ class CourseNotion:
         return bool(course_id) and course_id not in related
 
     def _label(self, event: Event) -> str:
+        """通知に出す1行。Moodle の言い回しを落とし、時刻の幅があれば日付側の囲みに寄せる。"""
+        title = _NOTICE_SUFFIX.sub("", assignment_title(event.summary)).rstrip()
+        if range_match := _NOTICE_TIME_RANGE.search(title):
+            clock = range_match.group(1)
+            title = _NOTICE_TIME_RANGE.sub("", title).rstrip()
+        else:
+            clock = f"{event.starts_at:%H:%M}"
         head = f"{event.course_name} / " if event.course_name else ""
-        return f"{event.starts_at:%m/%d %H:%M} {head}{event.summary}"
+        return f"`{event.starts_at:%m/%d} {clock}` {head}{title}"
 
 
 def _client(state: dict | None = None, school: School | None = None) -> CourseNotion:

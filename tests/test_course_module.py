@@ -26,16 +26,18 @@ class FakeCourseAgent:
     """大学の担当の代わり。取り込みの結果だけを返す。"""
     base_url = "http://127.0.0.1:8787"
 
-    def __init__(self, ok=True):
+    def __init__(self, ok=True, added=(), updated=()):
         self.ok = ok
+        self.added = list(added)
+        self.updated = list(updated)
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
         from kei_agent import a2a
         self.asked.append(skill)
         return a2a.TaskResult(state="TASK_STATE_COMPLETED" if self.ok else "TASK_STATE_FAILED", text=json.dumps(
-            {"ok": self.ok, "text": "済", "data": {"added": [], "updated": []}, "limit_reset_at": None,
-             "cost_usd": None}))
+            {"ok": self.ok, "text": "済", "data": {"added": self.added, "updated": self.updated},
+             "limit_reset_at": None, "cost_usd": None}))
 
 
 async def test_joining_the_course_channel_introduces_the_module(env, config):
@@ -62,6 +64,34 @@ async def test_the_morning_says_when_assignments_were_not_copied_to_the_calendar
     # 取り込めなかったことも伝える
     assistant.agents["course"] = FakeCourseAgent(ok=False)
     assert await module.prepare("review", "2026-09-28") == ["課題の取り込み"]
+
+
+async def test_new_and_changed_assignments_are_posted_with_a_count_heading(env):
+    """見出しに件数をまとめ、行頭のラベルは締切変更だけに :repeat: を付ける。"""
+    scheduler, assistant, slack = env
+    assistant.agents["course"] = FakeCourseAgent(
+        added=["`10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1"],
+        updated=["`10/05 23:59` データベース / 第3回レポート"])
+    module = assistant.modules["course"]
+
+    assert await module.sync_assignments() is True
+
+    text, = slack.texts()
+    assert text == (
+        "📚 Moodle の課題（新着 1件・締切変更 1件）\n"
+        "• `10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1\n"
+        "• :repeat: `10/05 23:59` データベース / 第3回レポート")
+
+
+async def test_only_changed_assignments_do_not_show_zero_new(env):
+    """締切変更だけの回は、見出しに「新着 0件」を出さない。"""
+    scheduler, assistant, slack = env
+    assistant.agents["course"] = FakeCourseAgent(updated=["`10/05 23:59` データベース / 第3回レポート"])
+
+    assert await assistant.modules["course"].sync_assignments() is True
+
+    text, = slack.texts()
+    assert text.splitlines()[0] == "📚 Moodle の課題（締切変更 1件）"
 
 
 async def test_the_course_module_ticks_hourly(env, monkeypatch):

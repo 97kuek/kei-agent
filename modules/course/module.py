@@ -281,11 +281,14 @@ class Module:
         reply = await self.core.ask_agent(SYNC_ASSIGNMENTS, {})
         if not reply.ok:
             return False
-        changes = ([f"• 新しい: {escape(str(title))}" for title in reply.data.get("added") or []]
-                   + [f"• 締切が変わった: {escape(str(title))}" for title in reply.data.get("updated") or []])
-        channel = await self.course_channel() if changes else None
+        added = [escape(str(title)) for title in reply.data.get("added") or []]
+        updated = [escape(str(title)) for title in reply.data.get("updated") or []]
+        channel = await self.course_channel() if (added or updated) else None
         if channel:
-            await self.core.post(channel, "\n".join(["📚 Moodle の課題", *changes]))
+            count = "・".join(f"{label} {len(items)}件" for label, items in (("新着", added), ("締切変更", updated))
+                             if items)
+            lines = [f"• {t}" for t in added] + [f"• :repeat: {t}" for t in updated]
+            await self.core.post(channel, "\n".join([f"📚 Moodle の課題（{count}）", *lines]))
         return True
 
     # 見回り

@@ -24,6 +24,9 @@ REPORT = Event(uid="2345678@moodle", summary="第3回レポート の 提出期�
                starts_at=datetime(2026, 9, 25, 23, 59), course="データベース(2019ZZ26)",
                url="https://wsdmoodle.waseda.jp/mod/assign/view.php?id=12345")
 
+QUIZ = Event(uid="q1@moodle", summary="Short test 1 (14:20-14:50) の受験可能期間の終了",
+             starts_at=datetime(2026, 10, 2, 14, 50), course="マルチメディア工学Ｂ(2019ZZ1B)")
+
 
 def _title(text):
     return {"title": [{"plain_text": text}]}
@@ -115,6 +118,21 @@ def test_a_new_deadline_becomes_a_row():
     assert props["科目"]["relation"] == [{"id": "page-db"}]
     assert props["状態"]["status"]["name"] == "未着手"
     assert len(result.added) == 1 and result.unchanged == 0
+
+
+def test_the_notification_label_drops_moodle_wording_and_moves_the_time_range():
+    """通知の行は、Moodle の言い回しを落とし、末尾の時刻幅を日付側の囲みに寄せる。"""
+    notion = FakeNotion(courses=[*COURSE_ROWS, {"id": "page-mm", "properties": {"科目名": _title("マルチメディア工学Ｂ")}}])
+    result = _sync(notion, [QUIZ])
+
+    assert result.added == ["`10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1"]
+
+
+def test_the_notification_label_keeps_the_due_clock_without_a_time_range():
+    notion = FakeNotion(courses=COURSE_ROWS)
+    result = _sync(notion, [REPORT])
+
+    assert result.added == ["`09/25 23:59` データベース / 第3回レポート"]
 
 
 def test_assignment_title_removes_only_quoted_submission_suffix():
