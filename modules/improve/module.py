@@ -389,8 +389,7 @@ class Module:
             log.exception("要望を GitHub の issue にできません")
             await self.core.notify_trouble(f"要望を GitHub の issue にできませんでした: {type(e).__name__}: {e}")
             return
-        await self._post(req, f"要望を要約して、公開の GitHub issue <{issue.url}|#{issue.number}> にしたよ"
-                              "（元の文は載せていない）。")
+        await self._post(req, f"要望を要約して、公開の GitHub issue <{issue.url}|#{issue.number}> にしたよ。")
 
     async def _close_issue(self, fix: Fix, *, notify: bool = True) -> bool:
         """終わった要望の issue を閉じる。閉じたら True。issue にしていない要望と、もう閉じたものは何もしない。
