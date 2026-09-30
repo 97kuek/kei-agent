@@ -98,8 +98,22 @@ def test_calendar_assignment_snapshot_reads_all_notion_rows_including_manual():
     assert len(snapshot["items"]) == 22
     assert next(item for item in snapshot["items"] if item["id"] == "manual") == {
         "id": "manual", "title": "手入力の課題", "due": "2026-10-01T23:59:00+09:00",
-        "status": "未着手", "url": "https://notion.example/manual"}
+        "status": "未着手", "url": "https://notion.example/manual",
+        "course": "", "moodle": "", "moodle_id": ""}
     assert notion.calls == []
+
+
+def test_calendar_assignment_snapshot_includes_the_course_name_moodle_link_and_a_clean_title():
+    """締切のまとめ知らせが科目名と Moodle のリンクを出せるように、課題名は Moodle の言い回しを落として返す。"""
+    notion = FakeNotion(courses=COURSE_ROWS, assignments=[_row(REPORT)])
+
+    snapshot = notion_sync.CourseNotion(notion, STATE).calendar_assignments(days=30, today=date(2026, 9, 24))
+
+    item, = snapshot["items"]
+    assert item["title"] == "第3回レポート"
+    assert item["course"] == "データベース"
+    assert item["moodle"] == REPORT.url
+    assert item["moodle_id"] == REPORT.uid
 
 
 def test_a_new_deadline_becomes_a_row():

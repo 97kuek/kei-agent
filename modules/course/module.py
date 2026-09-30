@@ -50,12 +50,13 @@ NO_DUE = "締切の近い課題はないよ。"
 NEAREST_DAYS = 400
 # 「一番近い」「次の締切」のように、1件を聞かれたときの言い方（振り分け係が件数を拾えなかったときの当て）
 ONE = re.compile(r"(一番|いちばん|最も|もっとも)[^。？?]{0,8}近い|直近の|次の(締切|締め切り|課題)")
-# 個別に知らせる締切までの時間と、それを見に行く間隔（秒）
+# まとめて知らせる締切までの時間と、それを見に行く間隔（秒）
 SOON_HOURS = 24
 DUE_CHECK_SECONDS = 3600
 # 締切まで何日を切っても「未着手」なら知らせるか（24時間前の知らせより先に気づけるように）
 EARLY_DAYS = 3
 UNSTARTED = "未着手"
+SUBMITTED = "提出済み"
 
 
 # 予定カレンダーに写すのは毎朝この時刻から。写せなかったら、この間隔でやり直す（秒）。課題はこれからの全部
@@ -133,45 +134,53 @@ def nearest_text(items: list[dict], days: int, now: datetime) -> str:
                       *(_line(item, now=now) for item in first_items(items, 1))])
 
 
-def soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS) -> list[dict]:
-    """あと hours 時間以内に締切のもの（過ぎたものは入れない）。"""
-    limit = now + timedelta(hours=hours)
-    return [item for item in items if now <= parse_time(item.get("at")) <= limit]
+def due_soon_items(items: list[dict], now: datetime, hours: int = SOON_HOURS, days: int = EARLY_DAYS) -> list[dict]:
+    """まとめて知らせる課題（Notion の課題）。近い順に並べる。過ぎたものは入れない。
 
-
-def soon_text(item: dict, now: datetime) -> str:
-    """締切が近いものを1件ずつ知らせる文。"""
-    at = parse_time(item.get("at"))
-    course = f"{escape(item['course'])} / " if item.get("course") else ""
-    url = f"\n{str(item['url']).split('|')[0]}" if item.get("url") else ""
-    return (f"⏰ {_left(at, now)}で締切: {course}{escape(item.get('title', ''))}\n"
-            f"{day_label(due_day(at))} {due_clock(at)} まで{url}")
-
-
-def unstarted_items(items: list[dict], now: datetime, days: int = EARLY_DAYS) -> list[dict]:
-    """あと days 日以内に締切で、まだ「未着手」の課題（Notion の課題。過ぎたものは入れない）。"""
-    limit = now + timedelta(days=days)
+    あと hours 時間以内で提出済みでないもの、または、あと days 日以内で「未着手」のもの。
+    """
+    soon_limit = now + timedelta(hours=hours)
+    early_limit = now + timedelta(days=days)
     found = []
     for item in items:
-        try:
-            at = datetime.fromisoformat(str(item.get("due"))).replace(tzinfo=None)
-        except ValueError:
+        at = parse_time(item.get("due"))
+        if at is None or at < now:
             continue
-        if item.get("status") == UNSTARTED and now <= at <= limit:
+        status = item.get("status")
+        if (status != SUBMITTED and at <= soon_limit) or (status == UNSTARTED and at <= early_limit):
             found.append(item)
+    found.sort(key=lambda item: parse_time(item.get("due")))
     return found
 
 
-def early_text(item: dict, now: datetime) -> str:
-    """締切が近いのに、まだ手をつけていない課題を知らせる文。"""
-    at = datetime.fromisoformat(str(item["due"])).replace(tzinfo=None)
-    url = f"\n{item['url']}" if item.get("url") else ""
-    return (f"📚 {_left(at, now)}で締切、まだ未着手: {escape(item.get('title', ''))}\n"
-            f"{day_label(due_day(at))} {due_clock(at)} まで{url}")
+def _due_soon_label(at: datetime, now: datetime) -> str:
+    """締切までの言い方。今日締切なら `~ HH:MM`、それ以外は `あと N 日`。"""
+    day = due_day(at)
+    if day <= now.date():
+        return f"~ {due_clock(at)}"
+    return f"あと{(day - now.date()).days}日"
 
 
-def early_notice_key(item: dict) -> str:
-    """同じ課題を二度知らせないための目印（締切が動いたら、また知らせる）。"""
+def due_soon_line(item: dict, now: datetime) -> str:
+    """まとめて知らせる締切の1行（科目／課題名（Moodle のリンク））。"""
+    at = parse_time(item["due"])
+    course = f"{escape(item['course'])}／" if item.get("course") else ""
+    url = f"（{item['moodle']}）" if item.get("moodle") else ""
+    return f"• {_due_soon_label(at, now)}：{course}{escape(item.get('title', ''))}{url}"
+
+
+def due_soon_text(items: list[dict], now: datetime) -> str:
+    """締切が近い課題を1通にまとめて知らせる文。締切が増えたら、この一覧を全部出し直す。"""
+    return "\n".join(["締切の課題", *(due_soon_line(item, now) for item in items)])
+
+
+def due_soon_key(item: dict) -> str:
+    """同じ課題を二度知らせないための目印（締切が動いたら、また知らせる）。
+
+    Moodle 由来の課題は、朝の一覧の締切（notice_key）と同じ形にする。朝すでに出したものを、ここでまた知らせない。
+    """
+    if item.get("moodle_id"):
+        return f"due:{item['moodle_id']}:{item.get('due', '')}"
     return f"early:{item.get('id', '')}:{item.get('due', '')}"
 
 
@@ -298,37 +307,27 @@ class Module:
         await self.sync_calendar(now)
 
     async def notify_due_soon(self, now: datetime) -> None:
-        """締切まで24時間を切った課題を、1件ずつ1回だけ知らせる（1時間に1回見る）。"""
+        """締切が近い課題（24時間以内・3日以内で未着手）を、1通にまとめて知らせる。
+
+        締切が増えたら、その時点の一覧を全部出し直す（1時間に1回見る）。
+        """
         if now.timestamp() - self._due_checked < DUE_CHECK_SECONDS:
             return
         channel = await self.course_channel()
         if channel is None:
             return
-        items = await self.dues(2)
-        if items is None:
+        reply = await self.core.ask_agent(LIST_CALENDAR_ASSIGNMENTS, {"days": EARLY_DAYS + 1})
+        if not reply.ok:
             # 取れなかったときは時計を進めない（1時間待たずに、次の見回りで取り直す）
             return
         self._due_checked = now.timestamp()
-        for item in soon_items(items, now):
-            key = notice_key(item)
-            if self.core.noticed(key):
-                continue
-            await self.core.post(channel, soon_text(item, now))
-            self.core.emit("due", title=item.get("title"), at=item.get("at"))
-            self.core.mark_noticed(key)
-        await self.notify_unstarted(channel, now)
-
-    async def notify_unstarted(self, channel: str, now: datetime) -> None:
-        """締切まで3日を切っても「未着手」の課題を、1件ずつ1回だけ知らせる（授業ホームの課題の状態を見る）。"""
-        reply = await self.core.ask_agent(LIST_CALENDAR_ASSIGNMENTS, {"days": EARLY_DAYS + 1})
-        if not reply.ok:
+        items = due_soon_items(reply.data.get("items") or [], now)
+        if not items or all(self.core.noticed(due_soon_key(item)) for item in items):
             return
-        for item in unstarted_items(reply.data.get("items") or [], now):
-            key = early_notice_key(item)
-            if self.core.noticed(key):
-                continue
-            await self.core.post(channel, early_text(item, now))
-            self.core.mark_noticed(key)
+        await self.core.post(channel, due_soon_text(items, now))
+        for item in items:
+            self.core.emit("due", title=item.get("title"), at=item.get("due"))
+            self.core.mark_noticed(due_soon_key(item))
 
     async def sync_calendar(self, now: datetime) -> None:
         """毎朝8時を過ぎたら、授業ホームの課題（これからの全部）を共通ホームの予定カレンダーに写す。

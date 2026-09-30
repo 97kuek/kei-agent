@@ -63,7 +63,7 @@ SKILLS = [
         id=LIST_CALENDAR_ASSIGNMENTS,
         name="課題カレンダー用の全件取得",
         description="授業ホームの課題 DB から指定期間の締切を省略せず読み取る。"
-                    "data.complete/items: id/title/due/status/url。書き込みはしない",
+                    "data.complete/items: id/title/due/status/url/course/moodle/moodle_id。書き込みはしない",
         tags=["notion", "calendar", "read-only"],
         examples=[],
     ),

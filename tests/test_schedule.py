@@ -613,11 +613,14 @@ async def test_morning_text_works_without_the_agents(env):
 
 
 async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
-    """朝のまとめに出した締切は、そのあとの24時間前の知らせで繰り返さない。"""
+    """朝のまとめに出した締切は、そのあとのまとめ知らせ（締切の課題）で繰り返さない。"""
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "20_course"
     soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
-    assistant.agents["course"] = FakeCourseAgent([due_item(soon)])
+    assistant.agents["course"] = FakeCourseAgent([due_item(soon)], assignments=[
+        {"id": "notion-1", "title": "第3回レポート", "due": soon, "status": "未着手",
+         "url": "https://notion.so/x", "course": "データベース", "moodle": "https://moodle/x",
+         "moodle_id": "1@moodle"}])
 
     _, _, notices = await scheduler.morning_text(datetime.now())
     assert notices and all(key.startswith("module.course.due:") for key in notices)
@@ -631,17 +634,19 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
 
 async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypatch):
     """一時的に一覧を取れなくても、1時間待たず次の tick で取り直す。"""
+    from kei_agent.agents import Reply
+
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "20_course"
     calls = 0
 
-    async def dues(days):
+    async def ask_agent(skill, payload):
         nonlocal calls
         calls += 1
-        return None if calls == 1 else []
+        return Reply.broken("だめ") if calls == 1 else Reply(ok=True, data={"items": []})
 
     module = assistant.modules["course"]
-    monkeypatch.setattr(module, "dues", dues)
+    monkeypatch.setattr(module.core, "ask_agent", ask_agent)
     now = datetime.now()
 
     await module.notify_due_soon(now)
@@ -802,12 +807,13 @@ async def test_scheduled_sync_stays_quiet_without_changes(env):
 
 
 async def test_unstarted_assignments_are_noticed_three_days_ahead_once(env):
+    """3日以内で未着手の課題は「締切の課題」に1回だけまとめて出す。提出済みは出ない。"""
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "20_course"
     now = datetime(2026, 10, 23, 12, 0)
     assistant.agents["course"] = FakeCourseAgent([], assignments=[
         {"id": "a", "title": "Assignment A", "due": "2026-10-26T00:00:00.000+09:00", "status": "未着手",
-         "url": "https://notion.so/a"},
+         "url": "https://notion.so/a", "course": "データベース", "moodle": "https://moodle.example/a"},
         {"id": "b", "title": "もう出した", "due": "2026-10-25T12:00:00.000+09:00", "status": "提出済み"},
         {"id": "c", "title": "まだ先", "due": "2026-10-30T12:00:00.000+09:00", "status": "未着手"},
     ])
@@ -817,8 +823,8 @@ async def test_unstarted_assignments_are_noticed_three_days_ahead_once(env):
     module._due_checked = 0.0
     await module.notify_due_soon(now)
 
-    early = [p["text"] for p in slack.posted() if p.get("text", "").startswith("📚")]
-    assert early == ["📚 あと 2 日で締切、まだ未着手: Assignment A\n10/25（日） 24:00 まで\nhttps://notion.so/a"]
+    posts = [p["text"] for p in slack.posted() if p.get("text", "").startswith("締切の課題")]
+    assert posts == ["締切の課題\n• あと2日：データベース／Assignment A（https://moodle.example/a）"]
 
 
 async def test_the_morning_says_what_went_wrong_since_the_last_daily(env):

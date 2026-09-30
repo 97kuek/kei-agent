@@ -96,23 +96,25 @@ async def test_only_changed_assignments_do_not_show_zero_new(env):
 
 async def test_the_course_module_ticks_hourly(env, monkeypatch):
     """見回りは毎分呼ばれるが、締切を見に行くのは1時間に1回。"""
+    from kei_agent.agents import Reply
+
     scheduler, assistant, slack = env
     module = assistant.modules["course"]
     calls = []
 
-    async def dues(days):
-        calls.append(days)
-        return []
+    async def ask_agent(skill, payload):
+        calls.append(payload.get("days"))
+        return Reply(ok=True, data={"items": []})
 
-    async def unstarted(channel, now):
+    async def sync_calendar(now):
         return None
 
-    monkeypatch.setattr(module, "dues", dues)
-    monkeypatch.setattr(module, "notify_unstarted", unstarted)
+    monkeypatch.setattr(module.core, "ask_agent", ask_agent)
+    monkeypatch.setattr(module, "sync_calendar", sync_calendar)
     await scheduler.module_ticks(datetime(2026, 9, 28, 9, 0))
     await scheduler.module_ticks(datetime(2026, 9, 28, 9, 1))
     await scheduler.module_ticks(datetime(2026, 9, 28, 10, 1))
-    assert calls == [2, 2]
+    assert calls == [4, 4]
 
 
 def test_old_deadline_notices_move_to_the_course_module(tmp_path):

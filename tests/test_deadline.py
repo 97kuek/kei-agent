@@ -28,6 +28,13 @@ def test_reminders_and_later_lines_use_the_previous_day():
     now = datetime(2026, 10, 24, 12, 0)
     item = {"id": "a", "at": "2026-10-26T00:00:00+09:00", "title": "Assignment A", "course": "情報"}
 
-    assert "10/25（日） 24:00 まで" in course.soon_text(item, now)
     assert morning.later([item], now) == "このあとの締切: 10/25 Assignment A"
     assert "`10/25（日） 24:00` 情報 Assignment A" in morning.soon_deadlines([item], now, 2)
+
+
+def test_the_merged_due_notice_also_uses_the_previous_day():
+    """締切の課題の1行も、日付の振り分けは 0:00 ちょうどを前の日の 24:00 として扱う。"""
+    now = datetime(2026, 10, 25, 20, 0)                        # 「前の日」＝今日ぶんとして扱われる時刻
+    item = {"id": "a", "due": "2026-10-26T00:00:00+09:00", "title": "Assignment A", "course": "情報"}
+
+    assert course.due_soon_line(item, now) == "• ~ 24:00：情報／Assignment A"

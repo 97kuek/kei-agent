@@ -55,6 +55,19 @@ def assignment_title(summary: str) -> str:
     return match.group("title") if match else summary
 
 
+def _strip_notice_wording(summary: str) -> tuple[str, str]:
+    """Moodle の言い回しを落とす。末尾に受付時刻の幅があれば (課題名, 時刻の幅) で返す（無ければ時刻の幅は空文字）。"""
+    title = _NOTICE_SUFFIX.sub("", assignment_title(summary)).rstrip()
+    if match := _NOTICE_TIME_RANGE.search(title):
+        return _NOTICE_TIME_RANGE.sub("", title).rstrip(), match.group(1)
+    return title, ""
+
+
+def notice_title(summary: str) -> str:
+    """通知に出す課題名。Moodle の言い回しと、末尾の受付時刻の幅を落とす（Notion のページ名はそのまま）。"""
+    return _strip_notice_wording(summary)[0]
+
+
 def assignment_template_blocks() -> list[dict]:
     """新規かつ空の課題ページだけに置く、課題ごとの整理見出し。"""
     return [{
@@ -137,6 +150,10 @@ class CourseNotion:
     def _rows(self, data_source_id: str) -> list[dict]:
         return self.notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
 
+    def _course_names(self) -> dict[str, str]:
+        """「授業」のページ ID → 科目名（表示用。normalize_course_name は通さない）。"""
+        return {row["id"]: plain(row["properties"].get("科目名")) for row in self._rows(self.courses)}
+
     def calendar_assignments(self, days: int, today: date) -> dict:
         """課題 DB の締切を全件読む。Moodle ICS の件数上限や同期は通さない。"""
         if not 1 <= days <= 400:
@@ -149,6 +166,7 @@ class CourseNotion:
             ]},
             "page_size": 100,
         })
+        course_names = self._course_names()
         seen = set()
         items = []
         for row in rows:
@@ -170,9 +188,13 @@ class CourseNotion:
             url = row.get("url")
             if not title or not url:
                 raise SyncError(f"課題 {page_id} の名前または URL がありません")
-            items.append({"id": page_id, "title": title, "due": due,
+            related = [r.get("id") for r in (props.get("科目") or {}).get("relation") or []]
+            course = next((course_names[rid] for rid in related if rid in course_names), "")
+            items.append({"id": page_id, "title": notice_title(title), "due": due,
                           "status": ((props.get("状態") or {}).get("status") or {}).get("name") or "",
-                          "url": url})
+                          "url": url, "course": course,
+                          "moodle": (props.get("Moodle") or {}).get("url") or "",
+                          "moodle_id": plain(props.get("Moodle ID"))})
         items.sort(key=lambda item: (item["due"], item["title"], item["id"]))
         return {"complete": True, "items": items}
 
@@ -300,12 +322,8 @@ class CourseNotion:
 
     def _label(self, event: Event) -> str:
         """通知に出す1行。Moodle の言い回しを落とし、時刻の幅があれば日付側の囲みに寄せる。"""
-        title = _NOTICE_SUFFIX.sub("", assignment_title(event.summary)).rstrip()
-        if range_match := _NOTICE_TIME_RANGE.search(title):
-            clock = range_match.group(1)
-            title = _NOTICE_TIME_RANGE.sub("", title).rstrip()
-        else:
-            clock = f"{event.starts_at:%H:%M}"
+        title, clock_range = _strip_notice_wording(event.summary)
+        clock = clock_range or f"{event.starts_at:%H:%M}"
         head = f"{event.course_name} / " if event.course_name else ""
         return f"`{event.starts_at:%m/%d} {clock}` {head}{title}"
 
