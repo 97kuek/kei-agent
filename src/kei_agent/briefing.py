@@ -1,7 +1,7 @@
 """朝の一覧（今日の予定を時刻順に1通）を組み立てる。本体の窓口 core.morning と、本体の定期処理から使う。
 
 集めるもの: モジュールの取り込み（prepare）、予定（agenda）。前回の Daily からうまくいかなかった定期処理は、
-一覧には載せず #00_kei-agent に知らせる。会議は出典ごとに共通ホームの予定カレンダーにも写し、声のレイヤには1週間ぶんの予定を
+一覧には載せず #0-kei-agent に知らせる。会議は出典ごとに共通ホームの予定カレンダーにも写し、声のレイヤには1週間ぶんの予定を
 出来事（schedule）で渡す。文の組み立ては morning.py。
 """
 
@@ -68,7 +68,7 @@ def failure_note(assistant: Assistant, now: datetime, failed_now: list[str] | No
 
 
 async def build(assistant: Assistant, now: datetime) -> Morning:
-    """朝の一覧（今日の時系列）。集められなかったものは飛ばし、うまくいかなかったことは #00_kei-agent に知らせる。"""
+    """朝の一覧（今日の時系列）。集められなかったものは飛ばし、うまくいかなかったことは #0-kei-agent に知らせる。"""
     detail: dict = {}
     classes: list[dict] = []
     dues: list[dict] = []

@@ -51,7 +51,7 @@ def repo(tmp_path):
 @pytest.fixture
 def env(config, store, repo, monkeypatch):
     config = replace(config, repo_root=repo)
-    slack = FakeSlack({"C9": "00_kei-agent", "C1": "vlm"})
+    slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     # 本体が外で回す全体のテスト（本物はこのテスト自身を回してしまう）
@@ -103,8 +103,8 @@ def test_commit_message_uses_the_subject_claude_wrote():
 
 def test_commit_message_never_uses_the_request_text():
     """リポジトリは公開なので、AI が件名を書かなくても要望の原文は使わない（issue の番号で書く）。"""
-    assert improve_repo.commit_message("直したよ", 13).splitlines()[0] == "#00_kei-agent の要望 #13 を直す"
-    assert improve_repo.commit_message("直したよ").splitlines()[0] == "#00_kei-agent の要望を直す"
+    assert improve_repo.commit_message("直したよ", 13).splitlines()[0] == "#0-kei-agent の要望 #13 を直す"
+    assert improve_repo.commit_message("直したよ").splitlines()[0] == "#0-kei-agent の要望を直す"
 
 
 def test_fix_prompt_keeps_the_full_suite_out_of_the_sandbox():
@@ -356,7 +356,7 @@ async def test_start_marker_from_an_automatic_run_is_ignored(env):
     assistant, slack, claude, cfg = env
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}]
-    await assistant.submit(Request("C9", "00_kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
+    await assistant.submit(Request("C9", "0-kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
     await settle(assistant)
     assert fix_of(assistant).status == "planning"   # 案のまま
 
@@ -634,7 +634,7 @@ async def test_closing_marker_from_an_automatic_run_is_ignored(env, fake_github)
     assistant, slack, claude, cfg = env
     await asked(assistant, slack, claude)
     claude.behaviors = [{"text": "✅ 解決済み"}]
-    await assistant.submit(Request("C9", "00_kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
+    await assistant.submit(Request("C9", "0-kei-agent", "20.1", None, "ジョブが終わった", trigger="job"))
     await settle(assistant)
 
     assert fix_of(assistant).status == "planning"

@@ -51,7 +51,7 @@ def final(text: str) -> str:
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",

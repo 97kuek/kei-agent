@@ -1,6 +1,6 @@
 """時間記録のモジュールの、手で動かすコマンド（`kei-agent-module time <コマンド>`）。
 
-- cards … Kei Agent がいる、時間を測るチャンネル（設定の prefixes。既定は 10_・20_・30_）に、固定する時間記録カードを
+- cards … Kei Agent がいる、時間を測るチャンネル（設定の prefixes。既定は 1-・2-・3-）に、固定する時間記録カードを
   投稿する。カードがもうあるチャンネルには置かない。投稿したら、Slack で各カードを手で固定する。
   Slack の鍵（SLACK_BOT_TOKEN）は ~/.config/kei-agent/secrets/kei-agent.zsh を source してから渡す
 """

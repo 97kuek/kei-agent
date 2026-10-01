@@ -2,11 +2,11 @@
 
 - 仕事のプロジェクトのチャンネル（`#work-<名前>`）ごとの作業場で、コードを書き、コマンドとテストを動かす
 - 会社のアカウントで動く（秘密情報は仕事のもの `kei-agent-work.zsh` を読む。`module.toml` の `[process] secrets = "work"`）
-- Outlook・Teams・SharePoint は読まない（メールなどの外の文と、コマンド・Web を1回の実行に揃えないため）。それは [仕事](work-agent.md) の `#30_work`
+- Outlook・Teams・SharePoint は読まない（メールなどの外の文と、コマンド・Web を1回の実行に揃えないため）。それは [仕事](work-agent.md) の `#3-work`
 
 | 項目 | 中身 |
 |---|---|
-| チャンネル | `#work-<名前>`（番号は付けてよい。`#31_work-billing` も同じ） |
+| チャンネル | `#work-<名前>`（番号は付けてよい。`#3-work-billing` も同じ） |
 | 作業場 | `~/work/<名前>`（置き場所は `agents.csv` の workdev の行の `folder`） |
 | 番地 | 8793 |
 | フォルダ | `modules/workdev/`（指示書 `workdev.md`） |

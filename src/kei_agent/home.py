@@ -149,7 +149,7 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     for theme in theme_names:
         allowed = domains.get(theme, [])
         # テーマ名は先頭の番号を外したもの（themes.theme_name）。`#` を付けると
-        # `#10_amr-query` というチャンネル名とずれて、別のものに見えてしまう
+        # `#1-amr-query` というチャンネル名とずれて、別のものに見えてしまう
         block = _mrkdwn(f"*{theme}*  " + ("、".join(f"`{domain}`" for domain in allowed) if allowed else "なし"))
         if allowed:
             block["accessory"] = {"type": "static_select", "action_id": REMOVE_DOMAIN_ACTION,

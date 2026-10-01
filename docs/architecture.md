@@ -57,9 +57,9 @@
 |---|---|
 | 研究テーマ | 研究 |
 | `#work-<名前>`（頭が一致するチャンネル。`[channels]` に `"work-*"`） | 仕事の開発。作業場は担当のフォルダの下の `<名前>` |
-| `#20_course`・`#30_work`・`#40_knowledge` など | そのモジュールの `on_message`。担当のスキルか `ask` に頼む |
-| `#01_overview` | 軽いモデルが、名刺のスキル一覧から相手と仕事を選ぶ |
-| `#00_kei-agent` | 自己改善。オフなら、困りごとを知らせるだけの場所 |
+| `#2-course`・`#3-work`・`#4-knowledge` など | そのモジュールの `on_message`。担当のスキルか `ask` に頼む |
+| `#0-overview` | 軽いモデルが、名刺のスキル一覧から相手と仕事を選ぶ |
+| `#0-kei-agent` | 自己改善。オフなら、困りごとを知らせるだけの場所 |
 
 - A2A v1.0: 名刺は `/.well-known/agent-card.json`、JSON-RPC の `SendMessage` / `GetTask`、長い仕事は `SendStreamingMessage`
 - 合言葉は `KEI_AGENT_A2A_TOKEN`（Bearer）。全プロセスで同じ値

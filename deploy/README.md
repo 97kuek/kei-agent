@@ -5,7 +5,7 @@
 
 ## 1. Slack App
 
-1. 自分用のワークスペースに、チャンネルを作る（`#00_kei-agent`・`#01_overview`・`#10_<テーマ>`・`#20_course`・`#30_work`・`#40_knowledge`）
+1. 自分用のワークスペースに、チャンネルを作る（`#0-kei-agent`・`#0-overview`・`#10_<テーマ>`・`#2-course`・`#3-work`・`#4-knowledge`）
 2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** に、`uv run kei-agent manifest` の出力を貼る
 3. **Install App** で入れ、Bot User OAuth Token（`xoxb-`）を控える
 4. **Basic Information** → **App-Level Tokens** で、scope `connections:write` のトークン（`xapp-`）を作る

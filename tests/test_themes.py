@@ -9,8 +9,8 @@ from kei_agent.themes import ChannelKind
 
 
 def test_resolve_kinds(config):
-    assert themes.resolve(config, "00_kei-agent").kind is ChannelKind.IMPROVE
-    assert themes.resolve(config, "00_kei-agent").cwd is None
+    assert themes.resolve(config, "0-kei-agent").kind is ChannelKind.IMPROVE
+    assert themes.resolve(config, "0-kei-agent").cwd is None
 
     overview = themes.resolve(config, "research-overview")
     assert overview.kind is ChannelKind.OVERVIEW
@@ -175,23 +175,25 @@ def test_agent_workspaces_are_stable_places_for_sessions(config):
 
 
 def test_theme_name_drops_the_sorting_number():
-    assert themes.theme_name("10_amr-query") == "amr-query"
-    assert themes.theme_name("00_kei-agent") == "kei-agent"
+    assert themes.theme_name("1-amr-query") == "amr-query"
+    assert themes.theme_name("0-kei-agent") == "kei-agent"
     assert themes.theme_name("amr-query") == "amr-query"       # 番号なしはそのまま
-    assert themes.theme_name("2026_survey") == "survey"        # 4桁でも番号として外す
-    assert themes.theme_name("a10_x") == "a10_x"               # 先頭が数字でなければ名前の一部
+    assert themes.theme_name("3-work-billing") == "work-billing"
+    assert themes.theme_name("2026-plan") == "2026-plan"       # 番号は1〜2桁と - だけ。年などは名前の一部
+    assert themes.theme_name("10_amr-query") == "10_amr-query"  # 前の形（10_）は、もう番号として外さない
+    assert themes.theme_name("a1-x") == "a1-x"                 # 先頭が数字でなければ名前の一部
 
 
 def test_numbered_channel_uses_the_same_directory(config):
     plain = themes.resolve(config, "amr-query")
-    numbered = themes.resolve(config, "10_amr-query")
+    numbered = themes.resolve(config, "1-amr-query")
     assert numbered.cwd == plain.cwd and numbered.channel_name == "amr-query"
 
 
 def test_course_channel_points_at_the_course_workspace(config):
     """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
     はじめて使うときに、モジュールのフォルダのひな形（AGENTS.template.md）から AGENTS.md を作る。"""
-    ws = themes.resolve(config, "20_course")
+    ws = themes.resolve(config, "2-course")
     assert (ws.kind, ws.module, ws.cwd) == (themes.ChannelKind.MODULE, "course", None)
     agent = themes.agent_workspace(config, "course")
     assert agent.cwd == config.course_root
@@ -200,10 +202,10 @@ def test_course_channel_points_at_the_course_workspace(config):
 
 def test_module_channel_belongs_to_its_module(config):
     """モジュールのチャンネル（module.toml の [channels]）は、研究テーマではなく、そのモジュールのもの。"""
-    ws = themes.resolve(config, "40_knowledge")
+    ws = themes.resolve(config, "4-knowledge")
     assert (ws.kind, ws.module, ws.cwd) == (ChannelKind.MODULE, "knowledge", None)
     assert [themes.actor_of(themes.resolve(config, name)) for name in (
-        "40_knowledge", "20_course", "30_work", "00_kei-agent", "vlm", "01_overview")] == [
+        "4-knowledge", "2-course", "3-work", "0-kei-agent", "vlm", "0-overview")] == [
         "knowledge", "course", "work", "improve", "research", "research"]
     assert themes.agent_workspace(config, "knowledge").cwd == config.state_dir / "agents" / "knowledge"
     # 設定の [channels] で名前を変えたら、その名前がモジュールのもの。モジュールを外せば、ただのテーマ

@@ -1,6 +1,6 @@
 """自己改善のモジュールの、本体（オーケストレーター）側の動き。コアには kei_agent.api の窓口でだけ触れる。
 
-Kei Agent のチャンネル（#00_kei-agent。module.toml の core_channels）で要望を聞き、Kei Agent 自身を直す。
+Kei Agent のチャンネル（#0-kei-agent。module.toml の core_channels）で要望を聞き、Kei Agent 自身を直す。
 
 - 新しい要望は、要約して公開の GitHub issue にする（原文は Slack に残す。issues.py）。取り込めたら閉じる
 - 直さずに済んだら（もう直っていた・やらないと決まった）、AI が「✅ 解決済み」「🗑 見送り」と書き、要望を終わりにして

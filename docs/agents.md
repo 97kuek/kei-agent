@@ -9,10 +9,10 @@
 | 担当 | 番地 | チャンネル | 詳しく |
 |---|---|---|---|
 | 研究 | 8788 | `#10_<テーマ>`（ほかのどれでもないチャンネル） | [research-agent.md](agents/research-agent.md) |
-| 大学 | 8787 | `#20_course` | [course-agent.md](agents/course-agent.md) |
-| 仕事 | 8789 | `#30_work` | [work-agent.md](agents/work-agent.md) |
+| 大学 | 8787 | `#2-course` | [course-agent.md](agents/course-agent.md) |
+| 仕事 | 8789 | `#3-work` | [work-agent.md](agents/work-agent.md) |
 | 仕事の開発 | 8793 | `#work-<名前>` | [workdev-agent.md](agents/workdev-agent.md) |
-| 知識 | 8792 | `#40_knowledge` | [knowledge-agent.md](agents/knowledge-agent.md) |
+| 知識 | 8792 | `#4-knowledge` | [knowledge-agent.md](agents/knowledge-agent.md) |
 
 ## 触れる範囲（制限の表）
 
@@ -37,7 +37,7 @@
 | 会話 | 1スレッド = 1会話。AI と指示書の版が同じ間は続け、変われば Slack の履歴から始め直す |
 | 上限 | 利用上限に当たったら、明けてから本体がやり直す。明ける前に書かれたものは ⏳ を付けて待たせ、明けたらその続きとしてやる |
 | 様子の確認 | 「進捗は？」など様子を聞かれただけの回は、読むだけで動かす（作業は始まらない） |
-| ログイン切れ | スレッドにそう書き、`#00_kei-agent` に入り直し方を1回だけ知らせる |
+| ログイン切れ | スレッドにそう書き、`#0-kei-agent` に入り直し方を1回だけ知らせる |
 | 持たないもの | Slack への投稿、スレッドと会話の対応、ほかの担当の鍵、ほかの担当への連絡 |
 
 `ask` の依頼と、全部の担当に共通の返事の形:

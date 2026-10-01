@@ -193,7 +193,7 @@ class Config:
     repo_root: Path
     allowed_user_id: str
     overview_channels: tuple[str, ...] = ("overview", "research-overview")
-    # `#00_kei-agent`。先頭の番号は外して照合する（themes.theme_name）
+    # `#0-kei-agent`。先頭の番号は外して照合する（themes.theme_name）
     improve_channels: tuple[str, ...] = ("kei-agent",)
     # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
     # 仕事エージェントに取り次ぐチャンネル

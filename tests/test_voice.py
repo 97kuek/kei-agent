@@ -235,7 +235,7 @@ def test_a_job_is_not_handed_over_until_it_was_confirmed(config):
     """1回の思い違いで作業が動き出さないように、下書きと渡すのを分ける。"""
 
     tools = _tools(config)
-    spoken = tools.propose_request("10_amr-query", "学習曲線を描いて")
+    spoken = tools.propose_request("1-amr-query", "学習曲線を描いて")
 
     assert "amr-query に、学習曲線を描いて、って頼むよ。いい？" in spoken
     assert pending_asks(config) == []      # 下書きだけでは何も動かない
@@ -243,7 +243,7 @@ def test_a_job_is_not_handed_over_until_it_was_confirmed(config):
     assert "渡した" in tools.send_request()
     pending = pending_asks(config)
     assert len(pending) == 1
-    assert pending[0][1]["theme"] == "10_amr-query"
+    assert pending[0][1]["theme"] == "1-amr-query"
 
     # 2回続けて渡そうとしても、下書きは1回で消える
     assert "渡すものが無い" in tools.send_request()

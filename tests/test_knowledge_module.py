@@ -15,7 +15,7 @@ from kei_agent.schedule import Scheduler
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent", "C40": "40_knowledge"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C40": "4-knowledge"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -213,7 +213,7 @@ async def test_reading_without_the_channel_or_settings_asks_nothing(env):
 # 招待
 
 async def test_joining_the_knowledge_channel_is_not_a_theme(env, config):
-    """#40_knowledge は研究テーマではない。テーマとして登録せず、作業用のディレクトリも作らない。"""
+    """#4-knowledge は研究テーマではない。テーマとして登録せず、作業用のディレクトリも作らない。"""
     scheduler, assistant, slack, claude = env
     await assistant.on_member_joined({"user": "UBOT", "channel": "C40"})
     assert assistant.notion.themes == {}

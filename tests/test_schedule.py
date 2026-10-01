@@ -18,7 +18,7 @@ from kei_agent.schedule import Scheduler, due_day
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -615,7 +615,7 @@ async def test_morning_text_works_without_the_agents(env):
 async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
     """朝のまとめに出した締切は、そのあとのまとめ知らせ（締切の課題）で繰り返さない。"""
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     soon = (datetime.now() + timedelta(hours=5)).astimezone().isoformat()
     assistant.agents["course"] = FakeCourseAgent([due_item(soon)], assignments=[
         {"id": "notion-1", "title": "第3回レポート", "due": soon, "status": "未着手",
@@ -637,7 +637,7 @@ async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypa
     from kei_agent.agents import Reply
 
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     calls = 0
 
     async def ask_agent(skill, payload):
@@ -781,7 +781,7 @@ async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
 
 async def test_scheduled_sync_announces_new_and_changed_assignments(env):
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = FakeCourseAgent([], synced={
         "added": ["10/26 00:00 情報 / Assignment A"], "updated": ["11/02 00:00 情報 / Assignment B"]})
 
@@ -795,7 +795,7 @@ async def test_scheduled_sync_announces_new_and_changed_assignments(env):
 
 async def test_scheduled_sync_stays_quiet_without_changes(env):
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = FakeCourseAgent([])
     before = len(slack.posted())
 
@@ -809,7 +809,7 @@ async def test_scheduled_sync_stays_quiet_without_changes(env):
 async def test_unstarted_assignments_are_noticed_three_days_ahead_once(env):
     """3日以内で未着手の課題は「締切の課題」に1回だけまとめて出す。提出済みは出ない。"""
     scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     now = datetime(2026, 10, 23, 12, 0)
     assistant.agents["course"] = FakeCourseAgent([], assignments=[
         {"id": "a", "title": "Assignment A", "due": "2026-10-26T00:00:00.000+09:00", "status": "未着手",

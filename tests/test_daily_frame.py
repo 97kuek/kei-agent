@@ -94,7 +94,7 @@ def env(config, store, tmp_path, monkeypatch):
     # 組み込みの Daily・振り返りは外す（本体の定期処理を受け持てるのは1つだけ）
     config = replace(config, modules=(*[name for name in config.modules if name != "daily"], "brief"),
                      agent_profiles={**config.agent_profiles, "brief": config.agent_profiles["work"]})
-    slack = FakeSlack({"C5": "01_overview", "C9": "00_kei-agent"})
+    slack = FakeSlack({"C5": "0-overview", "C9": "0-kei-agent"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",

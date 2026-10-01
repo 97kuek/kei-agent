@@ -67,7 +67,7 @@ def env(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(root)
     config = replace(config, modules=(*config.modules, "memo"),
                      module_channels={**config.module_channels, "memo": ("memo",)})
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent", "C50": "50_memo"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C50": "5-memo"})
     monkeypatch.setattr(runner, "run_model", FakeClaude())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())

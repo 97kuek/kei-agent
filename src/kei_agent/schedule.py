@@ -339,7 +339,7 @@ class Scheduler:
         return found.text, found.detail, list(found.notices)
 
     def failure_note(self, now: datetime, failed_now: list[str] | None = None) -> str:
-        """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で（briefing.py。#00_kei-agent に知らせる）。"""
+        """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で（briefing.py。#0-kei-agent に知らせる）。"""
         return briefing.failure_note(self.assistant, now, failed_now)
 
     async def notify_unrestarted(self, now: datetime) -> None:

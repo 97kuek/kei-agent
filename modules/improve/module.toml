@@ -3,7 +3,7 @@ api = 1
 name = "improve"
 label = "自己改善"
 description = "Kei Agent のチャンネルで要望を聞いて直し方を相談し、Kei Agent 自身のコードを直して取り込む。要望は要約して公開の GitHub issue にする"
-# Kei Agent のチャンネル（#00_kei-agent。名前は agents.csv の improve の行の channels）の会話を受け持つ。困りごとの知らせは本体が出す
+# Kei Agent のチャンネル（#0-kei-agent。名前は agents.csv の improve の行の channels）の会話を受け持つ。困りごとの知らせは本体が出す
 core_channels = ["improve"]
 
 # AI の実行役（provider は agents.csv の engine）。本体の中で動かす（プロセスは持たない）。

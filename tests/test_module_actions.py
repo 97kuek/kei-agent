@@ -69,7 +69,7 @@ def _stamp(root, toml=STAMP_TOML, code=STAMP_CODE):
 def env(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(_stamp(tmp_path / "user-modules").parent)
     config = replace(config, modules=(*config.modules, "stamp"))
-    slack = FakeSlack({"C1": "10_vlm"})
+    slack = FakeSlack({"C1": "1-vlm"})
     monkeypatch.setattr(runner, "run_model", FakeClaude())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
     return assistant, slack
@@ -78,7 +78,7 @@ def env(config, store, tmp_path, monkeypatch):
 async def test_a_module_answers_its_slash_command_and_its_buttons(env):
     assistant, slack = env
     reply = await assistant.module_slash("stamp", {"user_id": "UME", "channel_id": "C1"})
-    assert reply == "/stamp を受け付けたよ（10_vlm）"
+    assert reply == "/stamp を受け付けたよ（1-vlm）"
     button = slack.posted()[-1]["blocks"][0]["elements"][0]
     assert button["action_id"] == "kei_agent_module:stamp:press"
 

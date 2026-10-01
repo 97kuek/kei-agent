@@ -22,7 +22,7 @@ default = "22:00"
 [settings]
 # 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域）。領域は research（研究）・course（大学）・work（仕事）で、
 # 共通ホームの「時間記録」の領域と、Toggl のプロジェクト名の頭（研究 / テーマ名）になる
-prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
+prefixes = { "1-" = "research", "2-" = "course", "3-" = "work" }
 # 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
 pick_course = ["course"]
 

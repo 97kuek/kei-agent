@@ -31,8 +31,8 @@ STOP = "kei_agent_module:time:stop"
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "10_vlm", "C2": "20_course", "C3": "30_work", "C4": "20_linear-algebra",
-                       "C9": "00_kei-agent"})
+    slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C3": "3-work", "C4": "2-linear-algebra",
+                       "C9": "0-kei-agent"})
     monkeypatch.setattr(runner, "run_model", FakeClaude())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           team_url="https://example.slack.com/", hub=FakeHub())
@@ -52,13 +52,13 @@ async def settle(assistant):
         await asyncio.sleep(0)
 
 
-def press(action_id, value="start", channel="C1", name="10_vlm", user="UME"):
+def press(action_id, value="start", channel="C1", name="1-vlm", user="UME"):
     where = {"id": channel, "name": name} if name else {"id": channel}
     return {"user": {"id": user}, "trigger_id": "trig", "channel": where,
             "actions": [{"action_id": action_id, "value": value}]}
 
 
-def toggl_command(text="", channel="C1", name="10_vlm", user="UME"):
+def toggl_command(text="", channel="C1", name="1-vlm", user="UME"):
     return {"user_id": user, "channel_id": channel, "channel_name": name, "text": text, "trigger_id": "trig"}
 
 
@@ -170,7 +170,7 @@ async def test_toggl_in_another_channel_switches_the_timer(env):
     assistant, module, slack = env
     await assistant.module_slash("toggl", toggl_command())
     first = module.entries.active("UME")
-    reply = await assistant.module_slash("toggl", toggl_command(channel="C3", name="30_work"))
+    reply = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
     await settle(assistant)
     now = module.entries.active("UME")
     assert (now.channel, now.domain) == ("C3", "work") and "研究 / vlm は止めた" in reply
@@ -192,7 +192,7 @@ async def test_toggl_start_and_stop_words(env):
 
 async def test_toggl_refuses_other_channels_and_people(env):
     assistant, module, slack = env
-    assert "10_・20_・30_" in await assistant.module_slash("toggl", toggl_command(channel="C9", name="00_kei-agent"))
+    assert "1-・2-・3-" in await assistant.module_slash("toggl", toggl_command(channel="C9", name="0-kei-agent"))
     assert "利用できません" in await assistant.module_slash("toggl", toggl_command(user="USOMEONE"))
     # 非公開のチャンネルは privategroup と届くので、Slack に名前を聞く
     await assistant.module_slash("toggl", toggl_command(channel="C3", name="privategroup"))
@@ -215,7 +215,7 @@ async def test_the_course_channel_asks_which_course(env, monkeypatch):
     slack.views_open = views_open
     monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
 
-    reply = await assistant.module_slash("toggl", toggl_command(channel="C2", name="20_course"))
+    reply = await assistant.module_slash("toggl", toggl_command(channel="C2", name="2-course"))
     await settle(assistant)
     assert "科目" in reply and asked == ["list-current-courses"] and module.entries.active("UME") is None
     (_, update), = [(n, kw) for n, kw in slack.calls if n == "views_update"]
@@ -237,7 +237,7 @@ async def test_the_course_channel_asks_which_course(env, monkeypatch):
 async def test_other_course_channels_start_right_away(env):
     """授業ごとのチャンネル（pick_course に無いもの）は、チャンネルの名前で測る。"""
     assistant, module, slack = env
-    await assistant.module_slash("toggl", toggl_command(channel="C4", name="20_linear-algebra"))
+    await assistant.module_slash("toggl", toggl_command(channel="C4", name="2-linear-algebra"))
     entry = module.entries.active("UME")
     assert (entry.domain, entry.description) == ("course", "大学 / linear-algebra")
 
@@ -253,7 +253,7 @@ async def test_when_courses_cannot_be_read_the_view_says_so(env, monkeypatch):
 
     slack.views_open = views_open
     monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
-    await assistant.module_action(press(START, channel="C2", name="20_course"))
+    await assistant.module_action(press(START, channel="C2", name="2-course"))
     await settle(assistant)
     (_, update), = [(n, kw) for n, kw in slack.calls if n == "views_update"]
     assert "読み出せなかった" in str(update["view"]) and "submit" not in update["view"]
@@ -443,21 +443,21 @@ def test_the_channel_prefixes_can_be_changed_and_are_checked(config, store):
     custom = replace(config, module_settings={**config.module_settings,
                                               "time": {"prefixes": {"5_": "research"}, "pick_course": []}})
     module = Assistant(custom, store, slack, JobManager(custom, store, FakePueue()), "x", "UBOT").modules["time"]
-    assert module.domain("5_lab") == "research" and module.domain("10_vlm") == ""
+    assert module.domain("5_lab") == "research" and module.domain("1-vlm") == ""
 
     with pytest.raises(ValueError, match="research / course / work"):
-        entries.prefixes_of({"10_": "hobby"})
+        entries.prefixes_of({"1-": "hobby"})
     with pytest.raises(ValueError, match="表にしてください"):
         entries.prefixes_of([])
     # 長い頭から見る
-    assert entries.domain_of(entries.prefixes_of({"1": "work", "10_": "research"}), "10_vlm") == "research"
+    assert entries.domain_of(entries.prefixes_of({"1": "work", "1-": "research"}), "1-vlm") == "research"
 
 
 def test_the_module_is_on_by_default_with_its_command_and_schedule(config):
     spec = modules.builtin()["time"]
     assert "time" in config.modules and set(spec.slash_commands) == {"toggl"}
     assert [(s.name, s.default) for s in spec.schedules] == [("toggl_import", "22:00")]
-    assert config.settings("time")["prefixes"] == {"10_": "research", "20_": "course", "30_": "work"}
+    assert config.settings("time")["prefixes"] == {"1-": "research", "2-": "course", "3-": "work"}
 
 
 # Toggl で直接測った記録の取り込み（定期処理 toggl_import）
@@ -596,7 +596,7 @@ async def test_the_material_shows_this_weeks_time(env):
 # カードを置くコマンド（kei-agent-module time cards）
 
 async def test_the_cards_command_posts_only_where_cards_are_missing(config, store):
-    slack = FakeSlack({"C1": "10_vlm", "C2": "20_course", "C5": "01_overview", "C9": "00_kei-agent"})
+    slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C5": "0-overview", "C9": "0-kei-agent"})
     Entries(modules_records(store)).set_card("C2", "22.2", "kei_agent_module:time:")
 
     assert await commands.post_cards(config, slack) == 1

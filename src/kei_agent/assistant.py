@@ -304,7 +304,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             )
             for c in resp.get("channels", []):
                 if c.get("is_member"):
-                    # 番号つきの名前（`10_amr-query`）でも、テーマ名（`amr-query`）でも引けるようにする
+                    # 番号つきの名前（`1-amr-query`）でも、テーマ名（`amr-query`）でも引けるようにする
                     ids[c["name"]] = ids[themes.theme_name(c["name"])] = c["id"]
                     self.channel_names[c["id"]] = themes.theme_name(c["name"])
             cursor = (resp.get("response_metadata") or {}).get("next_cursor")

@@ -136,7 +136,7 @@ def env(config, store, tmp_path, monkeypatch):
     config = replace(config, modules=(*config.modules, "calendar"),
                      module_channels={**config.module_channels, "calendar": ("calendar",)},
                      agent_profiles={**config.agent_profiles, "calendar": config.agent_profiles["work"]})
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C9": "00_kei-agent", "C60": "60_calendar"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C60": "6-calendar"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
@@ -301,7 +301,7 @@ async def test_an_unreadable_agenda_is_told_and_never_marks_the_calendar(env):
 
     assert detail["agenda"] == {"synced": {}, "unread": ["予定"]}
     assert assistant.hub.calendar[0]["同期状態"] == "確認済み"          # 読めなかった日に「要確認」にしない
-    # 読めなかったことは、朝の一覧ではなく #00_kei-agent に知らせる
+    # 読めなかったことは、朝の一覧ではなく #0-kei-agent に知らせる
     assert "予定の予定の読み取り" not in text and any("予定の予定の読み取り" in t for t in told)
 
 

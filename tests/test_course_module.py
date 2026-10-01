@@ -14,7 +14,7 @@ from kei_agent.schedule import Scheduler
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "01_overview", "C7": "20_course", "C9": "00_kei-agent"})
+    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C7": "2-course", "C9": "0-kei-agent"})
     monkeypatch.setattr(runner, "run_model", FakeClaude())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
@@ -40,7 +40,7 @@ class FakeCourseAgent:
 
 
 async def test_joining_the_course_channel_introduces_the_module(env, config):
-    """#20_course に招かれたら、大学のモジュールの案内を出す（研究テーマにはしない）。"""
+    """#2-course に招かれたら、大学のモジュールの案内を出す（研究テーマにはしない）。"""
     scheduler, assistant, slack = env
     await assistant.on_member_joined({"user": "UBOT", "channel": "C7"})
     text, = slack.texts()

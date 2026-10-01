@@ -114,14 +114,14 @@ class Workspace:
 
 # Slack のチャンネル名は日本語も使えるので、パスとして危ない形だけを弾く
 _SAFE_NAME = re.compile(r"^[^./_\\\x00][^/\\\x00]{0,79}$")
-# チャンネル名の先頭の番号（`10_amr-query` の `10_`）。並び順のためのもので、名前の一部として扱わない
-_NUMBER_PREFIX = re.compile(r"^\d{2,}_")
+# チャンネル名の先頭の番号（`1-amr-query` の `1-`。1〜2桁と -）。並び順のためのもので、名前の一部として扱わない
+_NUMBER_PREFIX = re.compile(r"^\d{1,2}-")
 
 
 def theme_name(channel_name: str) -> str:
     """チャンネル名から、テーマの名前（フォルダ名、Notion のテーマ名）を作る。
 
-    Slack では並び順のために `10_amr-query` のような番号を付ける。番号を変えても
+    Slack では並び順のために `1-amr-query` のような番号を付ける。番号を変えても
     同じテーマを指し続けられるよう、先頭の番号は外して扱う。
     """
     return _NUMBER_PREFIX.sub("", channel_name)

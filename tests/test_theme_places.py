@@ -37,8 +37,8 @@ def _repo(tmp_path, name="amr-repo", claude_md=None):
 
 def test_a_theme_can_use_an_existing_folder(home, tmp_path):
     folder = _repo(tmp_path)
-    themes.save_place(home, "10_amr-query", folder)
-    ws = themes.resolve(home, "10_amr-query")
+    themes.save_place(home, "1-amr-query", folder)
+    ws = themes.resolve(home, "1-amr-query")
     assert (ws.kind, ws.cwd, ws.external) == (ChannelKind.THEME, folder.resolve(), True)
     assert themes.all_themes(home) == {"amr-query": folder.resolve()}
     # 書いていないテーマは、今までどおり既定の場所
@@ -126,7 +126,7 @@ def test_icloud_folders_get_a_warning(tmp_path, monkeypatch):
 def test_the_overview_reads_existing_theme_folders_too(home, tmp_path):
     folder = _repo(tmp_path)
     themes.save_place(home, "amr", folder)
-    roots = guard.read_roots(home, themes.resolve(home, "01_overview"))
+    roots = guard.read_roots(home, themes.resolve(home, "0-overview"))
     assert folder.resolve() in roots and home.research_root in roots
 
 

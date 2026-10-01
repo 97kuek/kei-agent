@@ -127,10 +127,10 @@ def test_one_module_can_take_every_unclaimed_channel(tmp_path):
     home = _home(tmp_path, 'modules = ["course", "lab"]\n')
     _lab(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    ws = themes.resolve(config, "10_vlm-counting")
+    ws = themes.resolve(config, "1-vlm-counting")
     assert (ws.kind, ws.module, themes.actor_of(ws)) == (themes.ChannelKind.THEME, "lab", "lab")
     assert ws.cwd == config.research_root / "vlm-counting"
-    course = themes.resolve(config, "20_course")
+    course = themes.resolve(config, "2-course")
     assert (course.kind, course.module) == (themes.ChannelKind.MODULE, "course")
     # 受け持つモジュールが無ければ、研究テーマには担当がいない（そのチャンネルでは答えない）
     plain = themes.resolve(replace(config, modules=("course",)), "vlm")

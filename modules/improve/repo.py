@@ -257,5 +257,5 @@ def commit_message(summary: str, issue_number: int | None = None) -> str:
     """
     body = [line for line in summary.strip().splitlines() if not line.strip().startswith(SUBJECT_MARKER)]
     text = "\n".join(body).strip()[:1500]
-    fallback = f"#00_kei-agent の要望 #{issue_number} を直す" if issue_number else "#00_kei-agent の要望を直す"
-    return f"{subject_from(summary, fallback)}\n\n{text}\n\n#00_kei-agent の要望から、Kei Agent 自身が直した。"
+    fallback = f"#0-kei-agent の要望 #{issue_number} を直す" if issue_number else "#0-kei-agent の要望を直す"
+    return f"{subject_from(summary, fallback)}\n\n{text}\n\n#0-kei-agent の要望から、Kei Agent 自身が直した。"

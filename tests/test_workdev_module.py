@@ -24,11 +24,11 @@ def _config(tmp_path, folder=""):
 
 def test_a_work_dash_channel_is_a_project_under_the_workdev_folder(tmp_path):
     config = _config(tmp_path, folder=str(tmp_path / "work"))
-    ws = themes.resolve(config, "31_work-billing")
+    ws = themes.resolve(config, "3-work-billing")
     assert (ws.kind, ws.module, ws.channel_name) == (ChannelKind.PROJECT, "workdev", "work-billing")
     assert ws.cwd == (tmp_path / "work").resolve() / "billing"
-    # #30_work は今までどおり、仕事のモジュール（読むだけ）のチャンネル。ほかは研究テーマ
-    assert themes.resolve(config, "30_work").kind is ChannelKind.MODULE
+    # #3-work は今までどおり、仕事のモジュール（読むだけ）のチャンネル。ほかは研究テーマ
+    assert themes.resolve(config, "3-work").kind is ChannelKind.MODULE
     assert themes.resolve(config, "work-").kind is ChannelKind.THEME
     assert themes.resolve(config, "vlm").module == "research"
     # 既存のリポジトリを選んだプロジェクト（themes.toml）は、研究テーマの一覧に入れない

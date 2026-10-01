@@ -98,7 +98,7 @@ def env(config, store, tmp_path, monkeypatch):
     # 組み込みの自己改善は外す（Kei Agent のチャンネルを受け持てるのは1つだけ）
     config = replace(config, modules=(*[name for name in config.modules if name != "improve"], "fixer"),
                      agent_profiles={**config.agent_profiles, "fixer": config.agent_profiles["work"]})
-    slack = FakeSlack({"C9": "00_kei-agent", "C1": "vlm"})
+    slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
@@ -121,7 +121,7 @@ def test_a_module_takes_the_kei_agent_channel(tmp_path):
     home = _home(tmp_path, 'modules = ["fixer"]\n')
     _fixer(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    ws = themes.resolve(config, "00_kei-agent")
+    ws = themes.resolve(config, "0-kei-agent")
     assert (ws.kind, ws.module, themes.actor_of(ws)) == (ChannelKind.IMPROVE, "fixer", "fixer")
     # 受け持つモジュールが無ければ、担当はいない（困りごとの知らせだけの場所になる）
     plain = themes.resolve(replace(config, modules=()), "kei-agent")

@@ -31,9 +31,9 @@ handoff_after_turns = 8
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
 enabled = true
 literature = "07:00"  # 先行研究の新着（知識のモジュール。テーマごとに選び、各テーマのチャンネルと先行研究 DB へ）
-reading = "07:00"     # 読みもの（知識のモジュール。興味のある技術記事を #40_knowledge へ）
-daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#01_overview）。締切24時間前の知らせは1時間ごと
-review = "21:00"      # Retro & Planning（#01_overview）
+reading = "07:00"     # 読みもの（知識のモジュール。興味のある技術記事を #4-knowledge へ）
+daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#0-overview）。締切24時間前の知らせは1時間ごと
+review = "21:00"      # Retro & Planning（#0-overview）
 night = "00:00"       # 🌙 をつけた Task
 # Mac のスリープなどで逃した処理を、何時間後まで実行するか
 catch_up_hours = 3
@@ -90,7 +90,7 @@ school = ""
 [time]
 # 時間記録のモジュールの設定（書けるものは modules/time/module.toml の [settings]）
 # 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域。領域は research・course・work）
-# prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
+# prefixes = { "1-" = "research", "2-" = "course", "3-" = "work" }
 # 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
 # pick_course = ["course"]
 

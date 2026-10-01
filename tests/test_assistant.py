@@ -35,7 +35,7 @@ def _streaming(agent_cls):
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "00_kei-agent", "C5": "research-overview"})
+    slack = FakeSlack({"C1": "vlm", "C9": "0-kei-agent", "C5": "research-overview"})
     claude = FakeClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     pueue = FakePueue()
@@ -1349,7 +1349,7 @@ async def test_status_question_in_an_idle_thread_runs_read_only(env, store):
     assert [call["read_only"] for call in claude.calls] == [False, True, False]
 
 
-# 大学のチャンネル（#20_course）
+# 大学のチャンネル（#2-course）
 
 
 async def test_course_channel_asks_the_university_agent(env):
@@ -1357,7 +1357,7 @@ async def test_course_channel_asks_the_university_agent(env):
     from kei_agent import a2a
 
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     @_streaming
@@ -1384,7 +1384,7 @@ async def test_course_channel_hides_a2a_failure_details(env):
     from kei_agent import a2a
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
 
     @_streaming
     class _Agent:
@@ -1417,7 +1417,7 @@ async def test_course_channel_hides_invalid_a2a_success_text(env):
             return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="RuntimeError: /private/secret")
 
     assistant.agents["course"] = _Agent()
-    await assistant.modules["course"].on_message(Request("C7", "20_course", "11.1", "11.1", "取り込んで"),
+    await assistant.modules["course"].on_message(Request("C7", "2-course", "11.1", "11.1", "取り込んで"),
                                                  skill="sync-assignments", params={})
 
     shown = "\n".join(slack.texts())
@@ -1430,7 +1430,7 @@ async def test_work_channel_hides_a2a_failure_details(env):
     from kei_agent import a2a
 
     assistant, slack, _, _ = env
-    slack.channels["C8"] = "30_work"
+    slack.channels["C8"] = "3-work"
 
     class _Agent:
         base_url = "http://127.0.0.1:8788"
@@ -1440,7 +1440,7 @@ async def test_work_channel_hides_a2a_failure_details(env):
 
     assistant.agents["work"] = _Agent()
 
-    await assistant.modules["work"].on_message(Request("C8", "30_work", "11.1", "11.1", "今日の予定は？"),
+    await assistant.modules["work"].on_message(Request("C8", "3-work", "11.1", "11.1", "今日の予定は？"),
                                                skill="list-events", params={})
 
     shown = "\n".join(slack.texts())
@@ -1455,7 +1455,7 @@ async def test_course_channel_sends_free_questions_to_ask(env, store):
     from kei_agent import a2a
 
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     class _Agent:
@@ -1510,7 +1510,7 @@ def _course_agent(answer: str):
 async def test_course_answer_that_asks_back_mentions_the_owner(env):
     """大学・仕事・知識のスレッドでも、返事がほしいときは研究と同じくメンションで知らせる。"""
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = _course_agent("どの科目の過去問？\n❓ 確認: 情報セキュリティAとBのどちら？")
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 過去問ある？"})
     await settle(assistant)
@@ -1524,7 +1524,7 @@ async def test_course_error_is_not_left_waiting_for_a_reply(env, store):
     from kei_agent import a2a
 
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
 
     class _Agent:
         base_url = "http://127.0.0.1:8787"
@@ -1545,7 +1545,7 @@ async def test_course_error_is_not_left_waiting_for_a_reply(env, store):
 
 async def test_quick_course_answer_has_no_mention(env):
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = _course_agent("過去問は Box にあるよ")
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 過去問ある？"})
     await settle(assistant)
@@ -1557,7 +1557,7 @@ async def test_long_course_answer_mentions_the_owner(env, monkeypatch):
 
     assistant, slack, claude, _ = env
     monkeypatch.setattr(mod, "NOTIFY_AFTER_SECONDS", -1)
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = _course_agent("過去問は Box にあるよ")
     await assistant.on_mention({"channel": "C7", "user": "UME", "ts": "11.2", "text": "<@UBOT> 過去問ある？"})
     await settle(assistant)
@@ -1570,7 +1570,7 @@ async def test_course_thread_rebuilds_context_from_history_when_the_provider_cha
     from kei_agent import a2a, settings
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     class _Agent:
@@ -1628,7 +1628,7 @@ class _AskAgent:
 ANSWER = "<<kei-agent-final>>\n答えだよ\n<<kei-agent-final-end>>"
 
 
-@pytest.mark.parametrize(("channel", "name", "actor"), [("C7", "20_course", "course"), ("C8", "30_work", "work")])
+@pytest.mark.parametrize(("channel", "name", "actor"), [("C7", "2-course", "course"), ("C8", "3-work", "work")])
 async def test_course_and_work_threads_resume_the_agents_session_like_research(env, channel, name, actor):
     """大学・仕事の続きの質問は、Slack の履歴を貼り直さず、前回の会話をそのまま再開する。"""
     assistant, slack, _, _ = env
@@ -1653,7 +1653,7 @@ async def test_course_and_work_threads_resume_the_agents_session_like_research(e
 async def test_course_limit_is_deferred_and_retried_like_research(env, store):
     """大学・仕事でも、上限に当たったら明ける時刻をスレッドに書き、明けてから自動でやり直す。"""
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     agent = _AskAgent("http://127.0.0.1:8787", [
         {"is_error": True, "limit_reset_at": time.time() + 3600, "provider": "claude"}])
     assistant.agents["course"] = agent
@@ -1672,7 +1672,7 @@ async def test_every_agent_request_starts_with_todays_date(env, monkeypatch):
 
     monkeypatch.setattr(assistant_module, "today_line", auto_messages.today_line)
     assistant, slack, claude, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     agent = _AskAgent("http://127.0.0.1:8787", [{"text": ANSWER, "session_id": "c-1"}])
     assistant.agents["course"] = agent
 
@@ -1698,7 +1698,7 @@ async def test_improve_without_a_provider_says_to_choose_one(env, store):
         **assistant.config.agent_profiles, "improve": AgentProfile(provider="")})
     assert settings.selected_provider(assistant.config, store, "improve") == ""
 
-    result = await assistant.run_agent(themes.resolve(assistant.config, "00_kei-agent"), "直して")
+    result = await assistant.run_agent(themes.resolve(assistant.config, "0-kei-agent"), "直して")
 
     assert result.is_error and assistant.render_reply(result)[0].startswith("⚠️ 使う AI")
     assert claude.calls == []
@@ -1711,7 +1711,7 @@ async def test_course_thread_takes_replies_without_a_mention(env, store):
     from kei_agent import a2a
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     @_streaming
@@ -1786,7 +1786,7 @@ async def test_course_channel_formats_the_deadlines(env):
     from kei_agent import a2a
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     @_streaming
@@ -1848,7 +1848,7 @@ async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(env, m
     from kei_agent import router
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     agent = _DueAgent({14: [], 400: DUES})
     assistant.agents["course"] = agent
 
@@ -1875,7 +1875,7 @@ async def test_course_channel_answers_the_nearest_deadline_alone(env, monkeypatc
     from kei_agent import router
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     assistant.agents["course"] = _DueAgent({365: DUES})
 
     async def fake_pick(config, skills, text, *, store=None):
@@ -1899,7 +1899,7 @@ def test_first_items_keep_deadlines_at_the_same_time():
 async def test_an_expired_login_says_so_and_tells_the_improve_channel_once(env):
     """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ（2026-09-27）。"""
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     how = runner.login_help("claude", {"CLAUDE_CONFIG_DIR": "/Users/me/.claude-personal"})
     failed = {"is_error": True, "failure_kind": "login", "provider": "claude",
               "errors": [how, "Failed to authenticate: OAuth session expired and could not be refreshed"]}
@@ -1917,11 +1917,11 @@ async def test_an_expired_login_says_so_and_tells_the_improve_channel_once(env):
 
 
 async def test_course_channel_tells_when_the_agent_is_down(env):
-    """大学エージェントにつながらないときは、スレッドに言って `#00_kei-agent` にも知らせる。"""
+    """大学エージェントにつながらないときは、スレッドに言って `#0-kei-agent` にも知らせる。"""
     from kei_agent import a2a
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
 
     @_streaming
     class _Agent:
@@ -1947,7 +1947,7 @@ async def test_course_channel_waits_out_a_restart_instead_of_failing(env, monkey
     from kei_agent import a2a, agents
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     monkeypatch.setattr(agents, "RETRY_WAIT", 0)
     tries = []
 
@@ -2046,7 +2046,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
     from kei_agent import a2a, router
 
     assistant, slack, _, _ = env
-    slack.channels["C7"] = "20_course"
+    slack.channels["C7"] = "2-course"
     asked = []
 
     @_streaming
@@ -2078,7 +2078,7 @@ async def test_course_channel_uses_the_router_choice(env, monkeypatch):
     assert "作業している…" in slack.thinking()
 
 
-# 仕事のチャンネル（#30_work）
+# 仕事のチャンネル（#3-work）
 
 
 async def test_work_thread_rebuilds_context_from_history_when_the_provider_changes(env, store):
@@ -2087,7 +2087,7 @@ async def test_work_thread_rebuilds_context_from_history_when_the_provider_chang
     from kei_agent import a2a, settings
 
     assistant, slack, _, _ = env
-    slack.channels["C8"] = "30_work"
+    slack.channels["C8"] = "3-work"
     asked = []
 
     class _Agent:
@@ -2131,7 +2131,7 @@ async def test_work_channel_asks_the_work_agent(env, monkeypatch, question, expe
     from kei_agent import a2a, router
 
     assistant, slack, claude, _ = env
-    slack.channels["C8"] = "30_work"
+    slack.channels["C8"] = "3-work"
     asked = []
 
     class _Agent:
@@ -2401,9 +2401,9 @@ async def test_unselected_provider_tells_where_to_choose(env, config):
 
 
 async def test_knowledge_channel_and_paper_threads_go_to_the_knowledge_agent(env, store):
-    """#40_knowledge は知識の担当へ。テーマのチャンネルでも、朝の論文の新着のスレッドだけは知識の担当が答える。"""
+    """#4-knowledge は知識の担当へ。テーマのチャンネルでも、朝の論文の新着のスレッドだけは知識の担当が答える。"""
     assistant, slack, claude, _ = env
-    slack.channels["C40"] = "40_knowledge"
+    slack.channels["C40"] = "4-knowledge"
     agent = _AskAgent("http://127.0.0.1:8792", [{"text": ANSWER, "session_id": "k-1"},
                                                  {"text": ANSWER, "session_id": "k-2"},
                                                  {"text": ANSWER, "session_id": "k-3"}])

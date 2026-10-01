@@ -48,7 +48,7 @@ _URL = re.compile(r"://|www\.|slack\.com", re.IGNORECASE)
 _LOCAL_PATHS = ("/Users/", "~/")
 # Slack のメンション・チャンネル（`<@U…>` `<#C…>` `<!here>`）と、GitHub で人に届く `@name`・メールアドレス
 _MENTION = re.compile(r"[@＠]|<[#!]")
-# `#00_kei-agent` のようなチャンネル名（全角の＃も）
+# `#0-kei-agent` のようなチャンネル名（全角の＃も）
 _CHANNEL = re.compile(r"[#＃][^\s#＃]")
 # ひらがな・カタカナ・漢字
 _JAPANESE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
