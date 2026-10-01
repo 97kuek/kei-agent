@@ -18,9 +18,9 @@ from kei_agent import modules, runner
 from kei_agent.agents import Reply
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
-from kei_agent.notion import NotionError
-from kei_agent.records import Records
-from kei_agent.store import Store
+from kei_agent.storage.notion import NotionError
+from kei_agent.storage.records import Records
+from kei_agent.storage.store import Store
 from kei_agent.testing.kit import settle
 from kei_agent.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent_modules.time import commands, entries, importer

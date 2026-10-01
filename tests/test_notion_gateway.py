@@ -18,9 +18,9 @@ import httpx
 import pytest
 from fakes import FakeNotionAPI
 
-from kei_agent import notion as notion_module
 from kei_agent.configuration.config import NotionConfig, notion_id
-from kei_agent.notion import Notion, NotionError, gateway_client_token
+from kei_agent.storage import notion as notion_module
+from kei_agent.storage.notion import Notion, NotionError, gateway_client_token
 from kei_agent_modules.notion.clients import Tokens, client_roots
 from kei_agent_modules.notion.config import load_gateway_config
 from kei_agent_modules.notion.gateway import Gateway
@@ -141,7 +141,7 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
 
 
 def test_a_module_without_a_home_is_told_where_to_write_it(config):
-    from kei_agent.notion import gateway_notion
+    from kei_agent.storage.notion import gateway_notion
 
     with pytest.raises(NotionError, match=r"\[notion.homes\] に weather"):
         gateway_notion("weather", env={"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER}, config=config)
@@ -529,7 +529,7 @@ def served(app):
 
 @pytest.fixture
 def via(served, monkeypatch):
-    """client の合言葉でゲートウェイを呼ぶ Notion（kei_agent.notion.gateway_notion と同じ作り）。"""
+    """client の合言葉でゲートウェイを呼ぶ Notion（kei_agent.storage.notion.gateway_notion と同じ作り）。"""
     monkeypatch.setattr(notion_module, "MIN_INTERVAL_SECONDS", 0)
     return lambda client: Notion(gateway_client_token(MASTER, client), base_url=f"{served}/notion/v1")
 
@@ -555,8 +555,8 @@ def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
 
 def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_path):
     """--apply を付けないときは読むだけで、作るもの・足すものを並べる。作ったあとは何も出ない。"""
-    from kei_agent.notion import Setup, safe_to_resend
-    from kei_agent.notion_store import NotionStore
+    from kei_agent.storage.notion import Setup, safe_to_resend
+    from kei_agent.storage.notion_store import NotionStore
 
     kei = via("kei-agent")
     state = tmp_path / "notion.json"
@@ -582,8 +582,8 @@ def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_p
 
 def test_papers_are_filed_once_and_every_theme_page_shows_its_own(via, api, world, tmp_path):
     """同じ論文は1行に、関係するテーマを並べる。テーマのページには、そのテーマの論文だけの表を1つ置く。"""
-    from kei_agent.notion import THEME_PAPERS_VIEW, Setup
-    from kei_agent.notion_store import NotionStore
+    from kei_agent.storage.notion import THEME_PAPERS_VIEW, Setup
+    from kei_agent.storage.notion_store import NotionStore
 
     kei = via("kei-agent")
     state = tmp_path / "notion.json"

@@ -1,6 +1,6 @@
 """provider 別 session の migration と切替境界。"""
 
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 
 def test_provider_switch_cannot_resume_old_provider_session(store):
@@ -29,7 +29,7 @@ def test_sessions_and_limits_survive_restart_per_provider(store):
 def test_nightly_pruning_drops_old_records_but_keeps_what_aggregation_needs(store):
     import time as _time
 
-    from kei_agent.store import RUNS_MIN_DAYS
+    from kei_agent.storage.store import RUNS_MIN_DAYS
 
     now = _time.time()
     old = now - 100 * 86400

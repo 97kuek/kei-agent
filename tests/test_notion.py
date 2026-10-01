@@ -8,8 +8,8 @@ import urllib.error
 import pytest
 from fakes import check_notion_body
 
-from kei_agent import notion as notion_mod
-from kei_agent.notion import Notion, NotionError, append_blocks
+from kei_agent.storage import notion as notion_mod
+from kei_agent.storage.notion import Notion, NotionError, append_blocks
 
 
 @pytest.fixture(autouse=True)
@@ -168,7 +168,7 @@ def test_gateway_notion_uses_the_client_token_never_the_master(config):
     from dataclasses import replace
 
     from kei_agent.configuration.config import NotionConfig
-    from kei_agent.notion import gateway_client_token, gateway_notion
+    from kei_agent.storage.notion import gateway_client_token, gateway_notion
 
     config = replace(config, notion=NotionConfig(course_home="abc"))
     notion = gateway_notion("course", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)

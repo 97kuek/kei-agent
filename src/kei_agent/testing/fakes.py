@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 
 from kei_agent import runner
-from kei_agent.notion import NotionError
-from kei_agent.notion_store import Note, Task
+from kei_agent.storage.notion import NotionError
+from kei_agent.storage.notion_store import Note, Task
 
 # Notion API 2026-03-11 で消えたキー。送ったら落として気づけるようにする
 _LEGACY_NOTION_KEYS = {"after": "position.after_block", "archived": "in_trash"}
@@ -344,7 +344,7 @@ class FakeNotion:
 
 
 class FakeNotionAPI:
-    """ゲートウェイの後ろに置く、手元だけの Notion（`kei_agent.notion.Notion` と同じ forward / request を持つ）。
+    """ゲートウェイの後ろに置く、手元だけの Notion（`kei_agent.storage.notion.Notion` と同じ forward / request を持つ）。
 
     ページ・ブロック・データベース・データソース・ビューを親つきで持つ。ゲートウェイが中継した要求は
     `forwarded`、届く範囲を確かめるための読み取りは `lookups` に残す。本物の Notion には届かない。
@@ -459,7 +459,7 @@ class FakeNotionAPI:
 
     def _block_view(self, item: dict) -> dict:
         """ブロックの API から見た形（ページは child_page、データベースは child_database）。"""
-        from kei_agent.notion_store import plain_text
+        from kei_agent.storage.notion_store import plain_text
 
         if item["object"] == "page":
             title = next((plain_text(p.get("title") or []) for p in item["properties"].values()
@@ -528,7 +528,7 @@ class FakeNotionAPI:
         return self._error(400, "invalid_request_url", "Invalid request URL.")
 
     def _title(self, item: dict) -> str:
-        from kei_agent.notion_store import plain_text
+        from kei_agent.storage.notion_store import plain_text
 
         if isinstance(item.get("title"), list):
             return plain_text(item["title"])
@@ -616,7 +616,7 @@ class FakeNotionAPI:
     def _databases(self, method, item_id, body):
         if method == "POST":
             parent = body["parent"]["page_id"]
-            from kei_agent.notion_store import plain_text
+            from kei_agent.storage.notion_store import plain_text
 
             db_id, _ = self.add_database(parent, plain_text(body.get("title") or []),
                                          (body.get("initial_data_source") or {}).get("properties"))
@@ -689,7 +689,7 @@ class FakeNotionAPI:
 
     def _matches(self, props: dict, flt: dict | None) -> bool:
         """データソースの絞り込み（equals と日付の比較だけ。ほかの条件は通す）。"""
-        from kei_agent.notion_store import plain_text
+        from kei_agent.storage.notion_store import plain_text
 
         if not flt:
             return True

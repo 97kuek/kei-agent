@@ -18,10 +18,10 @@ from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import load_config
 from kei_agent.jobs import JobManager
-from kei_agent.notion_hub import load_hub
-from kei_agent.notion_store import load_notion
 from kei_agent.schedule import Scheduler
-from kei_agent.store import Store
+from kei_agent.storage.notion_hub import load_hub
+from kei_agent.storage.notion_store import load_notion
+from kei_agent.storage.store import Store
 
 log = logging.getLogger("kei_agent")
 

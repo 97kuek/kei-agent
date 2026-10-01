@@ -309,7 +309,7 @@ def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):
     import os
     from pathlib import Path
 
-    from kei_agent.notion import gateway_client_token
+    from kei_agent.storage.notion import gateway_client_token
 
     (Path(os.environ["KEI_AGENT_HOME"]) / "config.toml").write_text('[notion]\ncourse_home = "abc"\n', encoding="utf-8")
     monkeypatch.setenv("KEI_AGENT_NOTION_GATEWAY_TOKEN", "master")
@@ -319,7 +319,7 @@ def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):
 
 
 def test_course_notion_without_the_gateway_password_is_a_notion_error():
-    from kei_agent.notion import NotionError
+    from kei_agent.storage.notion import NotionError
 
     with pytest.raises(NotionError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
         notion_sync.courses_on("月", state=STATE)

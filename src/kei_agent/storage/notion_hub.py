@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from kei_agent.configuration.config import notion_id
-from kei_agent.notion import (
+from kei_agent.storage.notion import (
     BLOCKS_PER_REQUEST,
     GATEWAY_TOKEN_ENV,
     Notion,
@@ -23,7 +23,14 @@ from kei_agent.notion import (
     gateway_notion,
     write_json_atomic,
 )
-from kei_agent.notion_store import Note, blocks_to_markdown, markdown_to_blocks, plain_text, rich_text, summarize
+from kei_agent.storage.notion_store import (
+    Note,
+    blocks_to_markdown,
+    markdown_to_blocks,
+    plain_text,
+    rich_text,
+    summarize,
+)
 
 log = logging.getLogger(__name__)
 

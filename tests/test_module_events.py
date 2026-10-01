@@ -164,7 +164,7 @@ def _bell(root, code=BELL_CODE):
 async def test_a_module_process_keeps_its_background_work_running(tmp_path, config, store):
     """background は担当と同じプロセスで、起動のときに始まり、止めるときに止まる。本体と同じ記録を読める。"""
     pytest.importorskip("a2a", reason="担当プロセスは a2a-sdk で動く")
-    from kei_agent.records import Records
+    from kei_agent.storage.records import Records
     from kei_agent_a2a import launch
 
     spec = modules.load_spec(_bell(tmp_path))

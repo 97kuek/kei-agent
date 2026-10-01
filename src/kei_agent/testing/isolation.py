@@ -13,7 +13,7 @@ from pathlib import Path
 
 from kei_agent import model_classifier, modules, updates
 from kei_agent.configuration import config as config_module
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 # これらで始まる名前と、モジュールの module.toml の [secrets] に書いてある名前は、テストのあいだ環境変数から外す
 SECRET_PREFIXES = ("TOGGL_", "NOTION_", "SLACK_", "KEI_AGENT_", "BOX_", "WANDB_", "OPENAI_", "ANTHROPIC_")

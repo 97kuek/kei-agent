@@ -6,9 +6,9 @@ from datetime import date, datetime
 import pytest
 from fakes import check_notion_body
 
-from kei_agent.notion import NotionError
-from kei_agent.notion_hub import HubSetup, HubState, HubStore, load_hub
-from kei_agent.notion_store import plain_text
+from kei_agent.storage.notion import NotionError
+from kei_agent.storage.notion_hub import HubSetup, HubState, HubStore, load_hub
+from kei_agent.storage.notion_store import plain_text
 
 
 def test_corrupt_hub_state_disables_only_hub(config):
@@ -34,7 +34,7 @@ def test_hub_schema_check_reads_only_own_home_and_sources():
                                        for name, spec in required.items()}}
             raise AssertionError(path)
 
-    from kei_agent.notion_hub import CALENDAR_ADDITIONS, CALENDAR_REQUIRED, DAILY_PROPERTIES
+    from kei_agent.storage.notion_hub import CALENDAR_ADDITIONS, CALENDAR_REQUIRED, DAILY_PROPERTIES
     hub = HubStore(SchemaNotion(), HubState("home", "calendar-ds", "daily-ds"))
     assert hub.schema_problems() == []
     assert "/pages/home" in paths
@@ -225,7 +225,7 @@ def test_setup_problems_are_rejected_before_any_write(fake_notion, tmp_path, bre
 
 def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path):
     """二度目の setup では何も書かない。日別・時間・読みもの・集め方のページは1つずつで、正本の親は動かさない。"""
-    from kei_agent.notion_hub import COLLECT_TITLE
+    from kei_agent.storage.notion_hub import COLLECT_TITLE
 
     hub_setup = setup(fake_notion, tmp_path)
     first = hub_setup.run()
@@ -530,7 +530,7 @@ def test_setup_matches_ids_with_and_without_dashes(fake_notion, tmp_path):
 
 def test_day_row_properties_are_bounded_and_have_no_local_file_columns(day_hub):
     """要約は Notion の上限に収め、まだない区画は空のまま。手元にファイルを残さないので、ファイルの列は作らない。"""
-    from kei_agent.notion_hub import DAILY_PROPERTIES
+    from kei_agent.storage.notion_hub import DAILY_PROPERTIES
 
     day_hub.upsert_day("Daily", "2026-09-24", "Daily", "a" * 2200, "https://slack.example/1")
     props = day_hub.notion.rows[0]["properties"]
@@ -543,7 +543,7 @@ def test_day_row_properties_are_bounded_and_have_no_local_file_columns(day_hub):
 
 
 def test_collect_lines_accept_full_width_colons_and_titled_links():
-    from kei_agent.notion_hub import parse_collect
+    from kei_agent.storage.notion_hub import parse_collect
 
     def bullet(text, href=None):
         return {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [

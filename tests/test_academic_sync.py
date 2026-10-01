@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from kei_agent.notion import NotionError
+from kei_agent.storage.notion import NotionError
 from kei_agent_modules.course import academic_sync, school
 from kei_agent_modules.course.academic_record import AcademicRecord, GPAEntry, Grade, Requirement
 from kei_agent_modules.course.academic_sync import AcademicSync, grade_key

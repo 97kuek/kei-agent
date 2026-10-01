@@ -564,7 +564,7 @@ class Setup:
 
     def note_templates(self) -> None:
         """ノートのテンプレートに名前・種類・本文を書く。空のテンプレートが足りなければ知らせる。"""
-        from kei_agent.notion_store import markdown_to_blocks
+        from kei_agent.storage.notion_store import markdown_to_blocks
 
         templates = self.templates(self.state["databases"]["notes"])
         names = {t["name"] for t in templates}

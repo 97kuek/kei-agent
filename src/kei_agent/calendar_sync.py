@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from kei_agent.notion_hub import HubStore
+from kei_agent.storage.notion_hub import HubStore
 
 log = logging.getLogger(__name__)
 

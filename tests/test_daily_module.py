@@ -14,8 +14,8 @@ from test_schedule import FakeCourseAgent, due_item
 from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
-from kei_agent.notion_store import Note
 from kei_agent.schedule import Scheduler, task_names
+from kei_agent.storage.notion_store import Note
 from kei_agent_modules.daily import texts
 from kei_agent_modules.daily.module import daily_answer, review_answer
 

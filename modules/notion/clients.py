@@ -1,7 +1,7 @@
 """ゲートウェイの利用者（client）と、それぞれが届くホーム。
 
 合言葉は、親の合言葉（MAIN_CLIENT_NOTION_GATEWAY_TOKEN）から client ごとに作ったもの
-（`kei_agent.notion.gateway_client_token`）だけを受け付ける。親の合言葉そのものは通さない。
+（`kei_agent.storage.notion.gateway_client_token`）だけを受け付ける。親の合言葉そのものは通さない。
 
 | client | 届くホーム | 使える口 |
 |---|---|---|

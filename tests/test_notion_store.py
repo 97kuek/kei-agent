@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from kei_agent.notion import Notion, NotionError
-from kei_agent.notion_store import (
+from kei_agent.storage.notion import Notion, NotionError
+from kei_agent.storage.notion_store import (
     NotionStore,
     blocks_to_markdown,
     load_notion,
@@ -146,7 +146,7 @@ class _SchemaApi:
         self.change = change
 
     def request(self, method, path, body=None):
-        from kei_agent.notion import SPECS
+        from kei_agent.storage.notion import SPECS
 
         key = path.split("/")[2].removeprefix("ds-")
         live = {}
@@ -161,7 +161,7 @@ class _SchemaApi:
 
 def test_schema_problems_reports_renamed_options_and_missing_columns_and_databases():
     """Notion の画面で「Kei Agent」を別名にすると、夜間 Task の絞り込みが落ちる。それを起動のときに先に知らせる。"""
-    from kei_agent.notion import SPECS, schema_problems
+    from kei_agent.storage.notion import SPECS, schema_problems
 
     state = {"databases": {k: {"data_source_id": f"ds-{k}"} for k in SPECS}}
     assert schema_problems(_SchemaApi(), state) == []

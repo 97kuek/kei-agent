@@ -20,7 +20,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 log = logging.getLogger(__name__)
 

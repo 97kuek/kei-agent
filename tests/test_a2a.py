@@ -140,7 +140,7 @@ async def test_moodle_skills_say_what_is_missing_without_the_calendar_url(server
 
 
 async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, monkeypatch):
-    from kei_agent.notion import NotionError
+    from kei_agent.storage.notion import NotionError
     from kei_agent_modules.course import notion_sync
 
     def broken_snapshot(days, today):

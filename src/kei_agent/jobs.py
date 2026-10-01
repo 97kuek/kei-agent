@@ -19,7 +19,7 @@ from pathlib import Path
 
 from kei_agent import themes
 from kei_agent.configuration.config import Config, path_without_venv
-from kei_agent.store import Job, Store, dumps
+from kei_agent.storage.store import Job, Store, dumps
 
 log = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ from kei_agent import modules
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
 from kei_agent.slack_text import format_duration
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
 REFRESH_ACTION = "kei_agent_home_refresh"

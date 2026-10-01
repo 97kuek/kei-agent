@@ -64,9 +64,7 @@ from kei_agent.auto_messages import history_prompt
 from kei_agent.briefing import Morning
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.configuration import settings
-from kei_agent.notion import NotionError
 from kei_agent.one_shot import AIError
-from kei_agent.records import Records
 from kei_agent.request import Request
 from kei_agent.response_output import (
     OutputError,
@@ -77,6 +75,8 @@ from kei_agent.response_output import (
 )
 from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.slack_text import is_status_inquiry as _is_status_inquiry
+from kei_agent.storage.notion import NotionError
+from kei_agent.storage.records import Records
 from kei_agent.theme_files import append_thread_log
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.updates import Update
@@ -220,12 +220,12 @@ class Core:
 
     @property
     def hub(self):
-        """共通ホーム（kei_agent.notion_hub.HubStore）。"""
+        """共通ホーム（kei_agent.storage.notion_hub.HubStore）。"""
         return self._assistant.hub
 
     @property
     def notion(self):
-        """研究ホーム（kei_agent.notion_store.NotionStore）。"""
+        """研究ホーム（kei_agent.storage.notion_store.NotionStore）。"""
         return self._assistant.notion
 
     # Slack

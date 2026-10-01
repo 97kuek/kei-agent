@@ -178,7 +178,7 @@ def test_settings_stay_when_the_module_is_turned_off(tmp_path):
 
 
 def _store(config):
-    from kei_agent.store import Store
+    from kei_agent.storage.store import Store
     return Store(config.db_path)
 
 

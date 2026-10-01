@@ -19,7 +19,7 @@ from pathlib import Path
 
 from kei_agent import themes
 from kei_agent.configuration.config import Config
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 STATE_DIR = "state"
 # GitHub が受け付けない大きさ。これより大きいファイルはコミットしない

@@ -9,7 +9,7 @@ from kei_agent.configuration import settings
 from kei_agent.configuration.agents_table import TableError, parse, with_enabled
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.model_policy import resolve
-from kei_agent.store import Store
+from kei_agent.storage.store import Store
 
 HEADER = "module,enabled,channels,engine,model,effort\n"
 

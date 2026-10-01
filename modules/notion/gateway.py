@@ -139,7 +139,7 @@ class Gateway:
 
 
 class ClientNotion:
-    """1つの client として Gateway を呼ぶ窓口。`kei_agent.notion.Notion` と同じ呼び方にそろえる。"""
+    """1つの client として Gateway を呼ぶ窓口。`kei_agent.storage.notion.Notion` と同じ呼び方にそろえる。"""
 
     def __init__(self, gateway: Gateway, client: str):
         self.gateway = gateway

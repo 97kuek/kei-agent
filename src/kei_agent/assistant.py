@@ -41,9 +41,6 @@ from kei_agent.model_policy import (
     is_manual,
     resolve,
 )
-from kei_agent.notion import NotionError
-from kei_agent.notion_hub import HubStore
-from kei_agent.notion_store import NotionStore
 from kei_agent.request import Request
 from kei_agent.response_output import (
     OutputError,
@@ -66,7 +63,10 @@ from kei_agent.slack_text import (
     split_text,
     strip_lines,
 )
-from kei_agent.store import Store
+from kei_agent.storage.notion import NotionError
+from kei_agent.storage.notion_hub import HubStore
+from kei_agent.storage.notion_store import NotionStore
+from kei_agent.storage.store import Store
 from kei_agent.theme_files import (
     append_thread_log,
     changed_files,

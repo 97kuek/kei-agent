@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from kei_agent.configuration.config import Config
-from kei_agent.notion import (
+from kei_agent.storage.notion import (
     BLOCKS_PER_REQUEST,
     Notion,
     NotionError,

@@ -45,7 +45,8 @@ from kei_agent.configuration.config import MAIN_CLIENT, Config, NotionConfig, lo
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.jobs import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB, Pueue
 from kei_agent.model_json import json_list, json_object
-from kei_agent.notion import (
+from kei_agent.one_shot import AIError, run_once
+from kei_agent.storage.notion import (
     GATEWAY_TOKEN_ENV,
     Notion,
     NotionError,
@@ -55,10 +56,9 @@ from kei_agent.notion import (
     gateway_notion,
     safe_to_resend,
 )
-from kei_agent.notion_store import markdown_to_blocks, plain_text, rich_text
-from kei_agent.one_shot import AIError, run_once
-from kei_agent.records import Records
-from kei_agent.store import Store
+from kei_agent.storage.notion_store import markdown_to_blocks, plain_text, rich_text
+from kei_agent.storage.records import Records
+from kei_agent.storage.store import Store
 from kei_agent.themes import Workspace
 from kei_agent.timelog import Toggl, TogglError, load_toggl
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
