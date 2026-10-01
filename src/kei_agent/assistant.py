@@ -466,7 +466,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             state = "作りました" if created else "使います"
             text = (
                 f"Kei Agent です。このチャンネルのテーマ用に `{ws.cwd}` を{state}。"
-                "研究の前提を `CLAUDE.md` に書いておくと、依頼のたびに説明しなくて済みます。"
+                "研究の前提を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。"
             )
             welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
             if welcome is not None:

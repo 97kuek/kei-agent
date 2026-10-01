@@ -31,7 +31,7 @@ uv run kei-agent doctor                                 # 確かめる
 | `service.py` | A2A ではない常駐のプロセス（`serve(config, port)`） | `[process] kind = "service"` のとき |
 | `commands.py` | 手で動かすコマンド（`COMMANDS`） | 任意 |
 | `plugin/` | skill と、安全のフック（Claude Code の plugin） | `[actor] plugin = true` のとき |
-| `CLAUDE.template.md` | 作業場に最初に置く `CLAUDE.md` | 任意 |
+| `AGENTS.template.md` | 作業場に最初に置く前提のメモ `AGENTS.md`（`CLAUDE.md` はそれを読み込む1行） | 任意 |
 | `tests/` | テスト（`kei-agent module test <名前>`） | 任意（ひな形に入っている） |
 
 ## 決まりごと

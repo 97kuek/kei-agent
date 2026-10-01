@@ -29,7 +29,12 @@ ICLOUD_DRIVE = Path("~/Library/Mobile Documents").expanduser()
 # Kei Agent の記録の置き場所。既存のリポジトリでは .git/info/exclude に入れて、その人の Git に混ぜない
 STATE_DIR = ".kei-agent"
 
-CLAUDE_MD_TEMPLATE = """# テーマ: {name}
+# 作業場の前提のメモ。正本は AGENTS.md（Codex が読む）で、CLAUDE.md はそれを読み込む1行（Claude Code が読む）
+NOTES_FILE = "AGENTS.md"
+CLAUDE_FILE = "CLAUDE.md"
+CLAUDE_IMPORT = "@AGENTS.md\n"
+
+THEME_NOTES = """# テーマ: {name}
 
 Slack の #{name} チャンネルに対応する作業用ディレクトリ。Kei Agent（Slack Bot）がここで作業する。
 
@@ -54,7 +59,7 @@ Slack の #{name} チャンネルに対応する作業用ディレクトリ。Ke
 - それより短い処理は、その場で実行してよい
 """
 
-OVERVIEW_CLAUDE_MD = """# 研究全体・中長期の方針
+OVERVIEW_NOTES = """# 研究全体・中長期の方針
 
 Slack の研究全体と中長期の方針のチャンネルに対応する作業用ディレクトリ。
 各テーマのディレクトリ（`../<theme>/`）は読むだけにし、書き込みはこのディレクトリの中だけにする。
@@ -164,7 +169,7 @@ def actor_of(ws: Workspace) -> str:
 def agent_workspace(config: Config, agent: str) -> Workspace:
     """モジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
 
-    module.toml の [actor] workspace（大学は ~/course。前提のメモの CLAUDE.md を置く）か、状態の置き場の下
+    module.toml の [actor] workspace（大学は ~/course。前提のメモの AGENTS.md を置く）か、状態の置き場の下
     （`agents/<名前>`）。どれも手元のファイルは作業場を読むだけ（制限の表）。
     """
     spec = modules.known().get(agent)
@@ -320,11 +325,34 @@ def save_place(config: Config, name: str, folder: Path) -> None:
     _places.pop(path, None)
 
 
-def search_keywords(claude_md: Path) -> list[str]:
-    """テーマの CLAUDE.md の「## 検索キーワード」の箇条書きを読む。"""
-    if not claude_md.exists():
+def notes_file(folder: Path) -> Path:
+    """作業場の前提のメモ。AGENTS.md（無くて CLAUDE.md だけがある既存のフォルダなら、その CLAUDE.md）。"""
+    agents = folder / NOTES_FILE
+    return agents if agents.exists() or not (folder / CLAUDE_FILE).exists() else folder / CLAUDE_FILE
+
+
+def _ensure_notes(folder: Path, template: str | None, *, move: bool) -> None:
+    """前提のメモを AGENTS.md にそろえ、CLAUDE.md はそれを読み込む1行にする。
+
+    move なら、前からある CLAUDE.md を AGENTS.md に移す（Kei Agent が作った作業場だけ。既存のフォルダの
+    CLAUDE.md は、その人のものなので動かさない）。どちらも無ければ、template で AGENTS.md を作る。
+    """
+    agents, claude = folder / NOTES_FILE, folder / CLAUDE_FILE
+    if not agents.exists() and claude.exists():
+        if not move or claude.read_text(encoding="utf-8").strip() == CLAUDE_IMPORT.strip():
+            return
+        claude.rename(agents)
+    if not agents.exists() and template is not None:
+        agents.write_text(template, encoding="utf-8")
+    if agents.exists() and not claude.exists():
+        claude.write_text(CLAUDE_IMPORT, encoding="utf-8")
+
+
+def search_keywords(notes: Path) -> list[str]:
+    """テーマの前提のメモ（AGENTS.md）の「## 検索キーワード」の箇条書きを読む。"""
+    if not notes.exists():
         return []
-    text = re.sub(r"<!--.*?-->", "", claude_md.read_text(encoding="utf-8"), flags=re.DOTALL)
+    text = re.sub(r"<!--.*?-->", "", notes.read_text(encoding="utf-8"), flags=re.DOTALL)
     m = re.search(r"^## 検索キーワード\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
     if not m:
         return []
@@ -338,7 +366,6 @@ def ensure_workspace(ws: Workspace) -> bool:
         return False
     created = not ws.cwd.exists()
     ws.cwd.mkdir(parents=True, exist_ok=True)
-    claude_md = ws.cwd / "CLAUDE.md"
     if ws.kind is ChannelKind.THEME:
         if ws.external:
             # 既存のフォルダ: inputs/ などは使うときに作る。記録の置き場所は、その人の Git に混ぜない
@@ -347,18 +374,15 @@ def ensure_workspace(ws: Workspace) -> bool:
         else:
             for sub in THEME_SUBDIRS:
                 (ws.cwd / sub).mkdir(exist_ok=True)
-        if not claude_md.exists():
-            # CLAUDE.md があれば、そのまま前提として使う。無いときだけひな形を作る
-            claude_md.write_text(CLAUDE_MD_TEMPLATE.format(name=ws.channel_name), encoding="utf-8")
+        # 前提のメモがあれば、そのまま使う。無いときだけひな形を作る
+        _ensure_notes(ws.cwd, THEME_NOTES.format(name=ws.channel_name), move=not ws.external)
     elif ws.kind is ChannelKind.OVERVIEW:
         (ws.cwd / "outputs").mkdir(exist_ok=True)
-        if not claude_md.exists():
-            claude_md.write_text(OVERVIEW_CLAUDE_MD, encoding="utf-8")
-    elif ws.kind is ChannelKind.MODULE and ws.module and not claude_md.exists():
+        _ensure_notes(ws.cwd, OVERVIEW_NOTES, move=True)
+    elif ws.kind is ChannelKind.MODULE and ws.module:
         # モジュールの作業場のひな形（大学なら、履修の補足と覚えておいてほしいことを書く場所）
         template = modules.known()[ws.module].path / modules.WORKSPACE_TEMPLATE
-        if template.is_file():
-            claude_md.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        _ensure_notes(ws.cwd, template.read_text(encoding="utf-8") if template.is_file() else None, move=True)
     return created
 
 

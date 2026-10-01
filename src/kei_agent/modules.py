@@ -82,8 +82,8 @@ _SECRET_KEYS = {"description", "required", "generate", "own_file", "group"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace"}
-# 実行役の作業場に最初に置く CLAUDE.md のひな形（モジュールのフォルダにあれば使う）
-WORKSPACE_TEMPLATE = "CLAUDE.template.md"
+# 実行役の作業場に最初に置く前提のメモ（AGENTS.md）のひな形（モジュールのフォルダにあれば使う）
+WORKSPACE_TEMPLATE = "AGENTS.template.md"
 _CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
 _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 # skill と二の柵のフック（Claude Code の plugin）の置き場所。モジュールのフォルダの中

@@ -202,7 +202,7 @@ class Theme:
     """研究テーマ（研究がモジュールになるまでは、コアが持つ）。"""
     name: str
     path: Path
-    # テーマの CLAUDE.md の「## 検索キーワード」と、CLAUDE.md の本文（前提）
+    # テーマの前提のメモ（AGENTS.md）の「## 検索キーワード」と、その本文（前提）
     keywords: tuple[str, ...]
     premises: str
 
@@ -692,12 +692,12 @@ class Core:
         return json.loads(row["detail"] or "{}") or {}
 
     def themes(self) -> list[Theme]:
-        """研究テーマ（作業用のフォルダと、CLAUDE.md の検索キーワード・前提）。"""
+        """研究テーマ（作業用のフォルダと、前提のメモ AGENTS.md の検索キーワード・前提）。"""
         found = []
         for name, path in themes.all_themes(self._assistant.config).items():
-            claude_md = path / "CLAUDE.md"
-            premises = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
-            found.append(Theme(name, path, tuple(themes.search_keywords(claude_md)), premises))
+            notes = themes.notes_file(path)
+            premises = notes.read_text(encoding="utf-8") if notes.exists() else ""
+            found.append(Theme(name, path, tuple(themes.search_keywords(notes)), premises))
         return found
 
     async def to_thread(self, func, /, *args):

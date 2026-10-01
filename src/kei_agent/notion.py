@@ -226,7 +226,7 @@ def _options(*pairs: tuple[str, str]) -> list[dict]:
 
 THEMES = {
     "icon": "🗂",
-    "description": "1テーマ = Slack の1チャンネル = ~/research/<名前>/。前提と検索キーワードは CLAUDE.md が正。",
+    "description": "1テーマ = Slack の1チャンネル = ~/research/<名前>/。前提と検索キーワードは AGENTS.md が正。",
     "properties": {
         "名前": {"title": {}},
         "状態": {"select": {"options": _options(("進行中", "green"), ("保留", "yellow"), ("完了", "gray"))}},

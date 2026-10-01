@@ -53,7 +53,7 @@ def folder_modal(channel: str, message_ts: str) -> dict:
             "label": {"type": "plain_text", "text": "フォルダの場所"},
             "element": {"type": "plain_text_input", "action_id": FOLDER_BLOCK,
                         "placeholder": {"type": "plain_text", "text": "~/src/my-repo"}},
-            "hint": {"type": "plain_text", "text": "この Mac のフォルダ。CLAUDE.md があれば、そのまま前提として使う"},
+            "hint": {"type": "plain_text", "text": "この Mac のフォルダ。AGENTS.md か CLAUDE.md があれば、そのまま前提として使う"},
         }],
     }
 
@@ -107,7 +107,7 @@ class ThemeInvite:
 
     async def _settle_theme(self, channel: str, message_ts: str, ws: Workspace, done: str) -> None:
         """フォルダを用意して、テーマを登録し、選んだ結果を伝える（ボタンは消す）。"""
-        had_claude_md = ws.cwd is not None and (ws.cwd / "CLAUDE.md").exists()
+        had_notes = ws.cwd is not None and any((ws.cwd / name).exists() for name in (themes.NOTES_FILE, themes.CLAUDE_FILE))
         themes.ensure_workspace(ws)
         self.registered_themes.add(ws.channel_name)
         await self.register_theme(channel, ws)
@@ -116,6 +116,7 @@ class ThemeInvite:
                 await self.slack.chat_update(channel=channel, ts=message_ts, text=done, blocks=[])
             except Exception:
                 log.warning("置き場所の選び方の投稿を書き換えられませんでした", exc_info=True)
-        premise = ("前からある `CLAUDE.md` を、研究の前提として使うね。" if had_claude_md
-                   else "研究の前提を `CLAUDE.md` に書いておくと、依頼のたびに説明しなくて済みます。")
+        found = themes.notes_file(ws.cwd).name if ws.cwd is not None else themes.NOTES_FILE
+        premise = (f"前からある `{found}` を、研究の前提として使うね。" if had_notes
+                   else "研究の前提を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。")
         await self.slack.chat_postMessage(channel=channel, text=f"{done}\n{premise}")

@@ -33,7 +33,7 @@ python3 "$SKILL/scripts/lit.py" search "vision language model counting" --source
 | ID | `arXiv:2406.12345`、DOI、Semantic Scholar の ID のどれか（同じ論文を二度入れないための鍵） |
 | URL、著者、年、会場 | 分かる範囲で（プレプリントなら会場は空） |
 | 要点 | 何を問い、何をして、何が分かったか（3行程度） |
-| この研究との関係 | テーマの `CLAUDE.md` の前提に照らして、使える点・違う点 |
+| この研究との関係 | テーマの `AGENTS.md` の前提に照らして、使える点・違う点 |
 | 見つけた日 | 今日 |
 | 出どころ | 「依頼」 |
 | 状態 | 「未読」（読んだら「読んだ」、使うなら「使う」） |

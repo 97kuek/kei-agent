@@ -158,9 +158,9 @@ def test_due_day(now, hhmm, hours, expected):
 
 def test_search_keywords_ignores_template_comment(config):
     ws = make_theme(config, keywords=None)
-    assert themes.search_keywords(ws.cwd / "CLAUDE.md") == []
+    assert themes.search_keywords(ws.cwd / "AGENTS.md") == []
     ws = make_theme(config, name="other", keywords=["vlm counting", "object counting benchmark"])
-    assert themes.search_keywords(ws.cwd / "CLAUDE.md") == ["vlm counting", "object counting benchmark"]
+    assert themes.search_keywords(ws.cwd / "AGENTS.md") == ["vlm counting", "object counting benchmark"]
 
 
 async def test_tick_runs_each_task_once_per_day(env, monkeypatch):

@@ -36,12 +36,30 @@ def test_ensure_workspace_creates_template_once(config):
     assert themes.ensure_workspace(ws) is True
     for sub in themes.THEME_SUBDIRS:
         assert (ws.cwd / sub).is_dir()
-    claude_md = ws.cwd / "CLAUDE.md"
-    assert "# テーマ: vlm" in claude_md.read_text() and "#vlm" in claude_md.read_text()
+    notes = ws.cwd / "AGENTS.md"
+    assert "# テーマ: vlm" in notes.read_text() and "#vlm" in notes.read_text()
+    assert (ws.cwd / "CLAUDE.md").read_text() == "@AGENTS.md\n"     # Claude Code は AGENTS.md を読み込む
 
-    claude_md.write_text("編集済み")
+    notes.write_text("編集済み")
     assert themes.ensure_workspace(ws) is False
-    assert claude_md.read_text() == "編集済み"
+    assert notes.read_text() == "編集済み"
+
+
+def test_an_old_claude_md_moves_to_agents_md_but_not_in_someone_elses_folder(config, tmp_path):
+    """Kei Agent が作った作業場の CLAUDE.md は AGENTS.md に移す（Codex も読めるように）。既存のフォルダのものは動かさない。"""
+    ws = themes.resolve(config, "vlm")
+    ws.cwd.mkdir(parents=True)
+    (ws.cwd / "CLAUDE.md").write_text("# 前からの前提\n")
+    themes.ensure_workspace(ws)
+    assert (ws.cwd / "AGENTS.md").read_text() == "# 前からの前提\n"
+    assert (ws.cwd / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    assert themes.notes_file(ws.cwd).name == "AGENTS.md"
+
+    theirs = replace(ws, cwd=tmp_path / "theirs", external=True)
+    theirs.cwd.mkdir()
+    (theirs.cwd / "CLAUDE.md").write_text("# その人の前提\n")
+    themes.ensure_workspace(theirs)
+    assert not (theirs.cwd / "AGENTS.md").exists() and themes.notes_file(theirs.cwd).name == "CLAUDE.md"
 
 
 def test_ensure_workspace_overview(config):
@@ -172,12 +190,12 @@ def test_numbered_channel_uses_the_same_directory(config):
 
 def test_course_channel_points_at_the_course_workspace(config):
     """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
-    はじめて使うときに、モジュールのフォルダのひな形（CLAUDE.template.md）から CLAUDE.md を作る。"""
+    はじめて使うときに、モジュールのフォルダのひな形（AGENTS.template.md）から AGENTS.md を作る。"""
     ws = themes.resolve(config, "20_course")
     assert (ws.kind, ws.module, ws.cwd) == (themes.ChannelKind.MODULE, "course", None)
     agent = themes.agent_workspace(config, "course")
     assert agent.cwd == config.course_root
-    assert "授業と課題の資料は Box" in (agent.cwd / "CLAUDE.md").read_text()
+    assert "授業と課題の資料は Box" in (agent.cwd / "AGENTS.md").read_text()
 
 
 def test_module_channel_belongs_to_its_module(config):

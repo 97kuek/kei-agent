@@ -83,7 +83,7 @@ def test_existing_folders_are_touched_as_little_as_possible(home, tmp_path):
     bare.mkdir()
     themes.save_place(home, "bare", bare)
     themes.ensure_workspace(themes.resolve(home, "bare"))
-    assert "テーマ: bare" in (bare / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "テーマ: bare" in (bare / "AGENTS.md").read_text(encoding="utf-8")
 
 
 def test_places_that_cannot_be_used(home, tmp_path, monkeypatch):

@@ -76,7 +76,7 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
     ws = themes.resolve(config, name)
     themes.ensure_workspace(ws)
     if keywords is not None:
-        md = ws.cwd / "CLAUDE.md"
+        md = ws.cwd / "AGENTS.md"
         text = md.read_text().replace("## 検索キーワード\n", "## 検索キーワード\n\n" + "\n".join(f"- {k}" for k in keywords) + "\n", 1)
         md.write_text(text)
     return ws
