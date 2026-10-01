@@ -12,7 +12,7 @@ optional = ["course"]
 [slash_commands]
 toggl = { description = "時間記録を始める・止める", usage_hint = "[start|stop]" }
 
-# 定期処理（設定の [schedule] と App Home で時刻を変えられる。空文字で止める）
+# 定期処理（時刻とオンオフは schedules.csv で変えられる。default は書いていないときの時刻）
 [schedules.toggl_import]
 label = "Toggl の取り込み"
 short = "Toggl"

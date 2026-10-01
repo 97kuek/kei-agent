@@ -1,0 +1,8 @@
+name,enabled,time
+literature,true,07:00
+reading,true,07:00
+daily,true,08:00
+toggl_import,true,22:00
+maintenance,true,22:00
+review,true,21:00
+night,true,00:00

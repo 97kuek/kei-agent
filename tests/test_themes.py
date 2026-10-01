@@ -84,11 +84,24 @@ def test_wrong_config_is_refused_at_startup(tmp_path, text, match):
         load_config(path, env={})
 
 
-def test_empty_schedule_time_means_off_and_agents_csv_takes_only_ai_columns(tmp_path):
+def test_schedules_csv_turns_schedules_off_and_agents_csv_takes_only_ai_columns(tmp_path):
     from kei_agent.configuration.config import ConfigError, load_config
     path = tmp_path / "config.toml"
-    path.write_text('[schedule]\nreview = ""\n')
-    assert load_config(path, env={}).schedule.review == ""
+    path.write_text("")
+    (tmp_path / "schedules.csv").write_text("name,enabled,time\nreview,false,21:00\nreading,true,06:30\n"
+                                            "maintenance,false,22:00\n")
+    config = load_config(path, env={})
+    assert (config.schedule.review, config.schedule.module_times["reading"]) == ("", "06:30")
+    assert not config.maintenance.enabled and config.schedule.daily == "08:00"      # 書いていない処理は既定
+    for rows, said in (("daily,true,8:00\n", "HH:MM"), ("dayly,true,08:00\n", "知らない処理"),
+                       ("daily,true,\n", "time を書いて")):
+        (tmp_path / "schedules.csv").write_text("name,enabled,time\n" + rows)
+        with pytest.raises(ConfigError, match=said):
+            load_config(path, env={})
+    (tmp_path / "schedules.csv").unlink()
+    path.write_text('[schedule]\ndaily = "07:00"\n')
+    with pytest.raises(ConfigError, match="schedules.csv"):
+        load_config(path, env={})
     # 表にも、AI の列のほかは書けない
     write_config(path, "")
     (tmp_path / "agents.csv").write_text("module,enabled,channels,engine,model,effort,connectors\nresearch,true,,codex,,,wandb\n")

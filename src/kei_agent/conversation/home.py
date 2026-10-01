@@ -1,7 +1,7 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
 見出しと操作だけの1画面にする（説明文は置かない。2026-09-26）。置くのは、動いているもの、担当ごとの AI、
-定期実行の時刻とオン・オフ、モジュールの項目（class Module の home。声の「知らせる」「聞く」など）、
+モジュールの項目（class Module の home。声の「知らせる」「聞く」など）、
 テーマごとに許可した接続先だけ。
 基本の接続先など `config.toml` の柵は出さない。
 """
@@ -20,8 +20,6 @@ from kei_agent.storage.store import Store
 ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
 REFRESH_ACTION = "kei_agent_home_refresh"
 PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
-TIME_ACTION = "kei_agent_home_time"              # :<定期実行>
-SCHEDULES_ACTION = "kei_agent_home_schedules"
 MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
 REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
 ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
@@ -123,24 +121,6 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
             # 表（agents.csv）と違う AI で動いている。本体を起動し直すと表に戻る
             label += f"\n_agents.csv では {base.title() if base else '未選択'}（起動し直すと戻る）_"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": label}, "accessory": select})
-
-    names = settings.schedule_names(config)
-    running = {name for name in names if settings.schedule_setting(config, store, name)[1]}
-    blocks += [
-        {"type": "divider"},
-        _mrkdwn("*定期実行*"),
-        {"type": "actions", "elements": [
-            checkboxes(SCHEDULES_ACTION, {name: settings.schedule_label(config, name, short=True) for name in names},
-                        running)]},
-    ]
-    for name in names:
-        hhmm, _enabled = settings.schedule_setting(config, store, name)
-        picker = {"type": "timepicker", "action_id": f"{TIME_ACTION}:{name}",
-                  "placeholder": {"type": "plain_text", "text": "時刻"}}
-        if hhmm:
-            picker["initial_time"] = hhmm
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": settings.schedule_label(config, name)},
-                       "accessory": picker})
 
     for label, items in module_sections:
         blocks += [{"type": "divider"}, _mrkdwn(f"*{label}*"), *items]

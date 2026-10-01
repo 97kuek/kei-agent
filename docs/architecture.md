@@ -138,7 +138,7 @@
 ## 定期実行
 
 - 本体のスケジューラが毎分動く（`schedule.py`）
-- 時刻は `config.toml` の `[schedule]` が既定。App Home で変えたものは SQLite から読む
+- 時刻とオンオフは定期処理の表 `schedules.csv`（書いていない処理は既定の時刻）。App Home では変えない
 
 | 名前 | 既定 | 受け持ち |
 |---|---|---|

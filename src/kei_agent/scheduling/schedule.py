@@ -119,7 +119,7 @@ class Scheduler:
         for name in task_names(self.config):
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
             # Slack（App Home）で変えた時刻を毎回読み直す。止めている処理は空文字
-            hhmm = settings.schedule_time(self.config, self.store, name)
+            hhmm = settings.schedule_time(self.config, name)
             day = due_day(now, hhmm, catch_up)
             if day is None or self.store.schedule_ran(name, day) or (name, day) in pending:
                 continue

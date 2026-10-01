@@ -32,7 +32,7 @@ def channel_prefix(name: str) -> str:
 # 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は agents.csv）。
 # improve は Kei Agent のチャンネル（#0-kei-agent）。困りごとの知らせは、受け持つモジュールが無くても本体が出す
 CORE_CHANNELS = ("improve",)
-# 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は設定の [schedule] と App Home のまま、
+# 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は schedules.csv、
 # 順番も今のまま（夜間の Task → モジュールの定期処理 → Daily → 振り返り → 保守）
 CORE_SCHEDULES = ("daily", "review")
 

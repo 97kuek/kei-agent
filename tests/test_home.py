@@ -37,16 +37,15 @@ def _action(action_id, value="", user="UME", **extra):
     return {"user": {"id": user}, "trigger_id": "trig", "actions": [{"action_id": action_id, "value": value, **extra}]}
 
 
-def test_home_lists_theme_domains_and_schedule(config, store):
+def test_home_lists_theme_domains_but_not_schedules(config, store):
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     view = home.build_home(config, store, ["vlm"], is_owner=True)
     text = _texts(view)
     # テーマ名に `#` は付けない（`1-vlm` のようなチャンネル名とずれて見えるので）
     assert "*vlm*" in text and "#vlm" not in text and "`zenodo.org`" in text
-    assert "Daily" in text
     assert "export.arxiv.org" not in text  # 基本の接続先は出さない
-    pickers = [b["accessory"] for b in view["blocks"] if b.get("accessory", {}).get("type") == "timepicker"]
-    assert len(pickers) == len(settings.schedule_names(config))
+    # 定期処理の時刻とオンオフは schedules.csv だけで変える（App Home には出さない）
+    assert "定期実行" not in text and not any(b.get("accessory", {}).get("type") == "timepicker" for b in view["blocks"])
 
 
 def test_home_shows_agent_provider_controls(config, store):
@@ -110,21 +109,6 @@ async def test_someone_else_cannot_change_settings(env, store):
 
 def _checked(*values):
     return [{"value": value} for value in values]
-
-
-async def test_change_time_and_turn_schedules_on_and_off_from_home(env, config, store):
-    assistant, slack = env
-    others = [name for name in settings.schedule_names(config) if name != "daily"]
-    await assistant.on_home_action(_action("kei_agent_home_time:daily", selected_time="07:30"))
-    assert settings.schedule_time(config, store, "daily") == "07:30"
-    await assistant.on_home_action(_action(home.SCHEDULES_ACTION, selected_options=_checked(*others)))
-    assert settings.schedule_time(config, store, "daily") == ""
-    assert all(settings.schedule_time(config, store, name) for name in others)
-    await assistant.on_home_action(_action(home.SCHEDULES_ACTION, selected_options=_checked(*settings.schedule_names(config))))
-    assert settings.schedule_time(config, store, "daily") == "07:30"
-    boxes, = [e for b in _published(slack)["view"]["blocks"] for e in b.get("elements", [])
-              if e.get("action_id") == home.SCHEDULES_ACTION]
-    assert {o["value"] for o in boxes["initial_options"]} == set(settings.schedule_names(config))
 
 
 async def test_voice_checkboxes_open_and_close_the_microphone(env, store, monkeypatch):

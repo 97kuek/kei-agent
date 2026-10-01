@@ -106,7 +106,7 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
     assert config.a2a.agents["knowledge"] == "http://127.0.0.1:8792"       # 書かなければ module.toml の番地
     # Daily と振り返りは、受け持つモジュール（daily）をオンにしたときだけ
     assert task_names(config) == ("night", "literature", "reading", "weather", "maintenance")
-    assert settings.schedule_time(config, _store(config), "weather") == "06:30"
+    assert settings.schedule_time(config, "weather") == "06:30"
     assert settings.schedule_label(config, "weather") == "天気と電車"
     assert home.agent_labels(config)["knowledge"] == "知識" and "weather" not in home.agent_labels(config)
 

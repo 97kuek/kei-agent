@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from kei_agent.configuration.schedules_table import SCHEDULES_FILE
 from kei_agent.framework import modules
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -372,7 +373,8 @@ def _section(cls, data: dict, name: str):
 
 def _schedule(data: dict, module_schedules: list[modules.ScheduleSpec]) -> ScheduleConfig:
     """[schedule] を読む。モジュールの定期処理の時刻は、書かなければ module.toml の既定。"""
-    names = {s.name for s in module_schedules}
+    # オフのモジュールの処理も表には書ける（使うのはオンのものだけ）
+    names = {s.name for spec in modules.known().values() for s in spec.schedules}
     core = {k: v for k, v in data.items() if k not in names}
     _check_keys(core, {f.name for f in fields(ScheduleConfig)} - {"module_times"}, "[schedule]")
     return ScheduleConfig(**core, module_times={s.name: str(data.get(s.name, s.default)) for s in module_schedules})
@@ -555,8 +557,36 @@ def _with_table(data: dict, table: Path | None) -> dict:
         raise ConfigError(str(e)) from None
 
 
+def _with_schedules(data: dict, table: Path) -> dict:
+    """定期処理の表（schedules.csv）の時刻とオンオフを、[schedule] の時刻と [maintenance] の time・enabled として重ねる。
+
+    時刻は表だけに書く。config.toml に残っていれば、移すよう知らせて止める。
+    """
+    from kei_agent.configuration import schedules_table
+
+    schedule, maintenance = dict(data.get("schedule", {})), dict(data.get("maintenance", {}))
+    known = schedules_table.known_names()
+    old = [f"[schedule] {key}" for key in schedule if key in known]
+    old += [f"[maintenance] {key}" for key in ("time", "enabled") if key in maintenance]
+    if old:
+        raise ConfigError(f"config.toml の {'・'.join(old)} は、定期処理の表（{SCHEDULES_FILE}）に移してください"
+                          f"（1行に1つ: name,enabled,time。例は schedules.example.csv）")
+    if not table.is_file():
+        return data
+    try:
+        times = schedules_table.load(table)
+    except schedules_table.TableError as e:
+        raise ConfigError(str(e)) from None
+    for name, time in times.items():
+        if name == "maintenance":
+            maintenance.update(time=time or schedules_table.CORE_TIMES["maintenance"], enabled=bool(time))
+        else:
+            schedule[name] = time
+    return {**data, "schedule": schedule, "maintenance": maintenance}
+
+
 def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
-                agents_csv: Path | None = None) -> Config:
+                agents_csv: Path | None = None, schedules_csv: Path | None = None) -> Config:
     """設定を読む。場所は path、環境変数 KEI_AGENT_CONFIG、利用者のフォルダの config.toml の順に探す。
 
     利用者のフォルダは KEI_AGENT_HOME か、設定ファイルのあるフォルダ（path を渡したとき）か、~/.config/kei-agent。
@@ -586,6 +616,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     table = agents_csv or home / AGENTS_FILE
     table = table if table.is_file() else None
     data = _with_table(data, table)
+    data = _with_schedules(data, schedules_csv or home / SCHEDULES_FILE)
     where = table.name if table is not None else AGENTS_FILE
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})

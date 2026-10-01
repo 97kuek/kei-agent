@@ -69,11 +69,6 @@ def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
     return failed
 
 
-def _known_schedule(name: str) -> bool:
-    """本体か、知っているどれかのモジュールの定期処理か（Slack のボタンから届いた名前を確かめる）。"""
-    return name in CORE_SCHEDULES or any(s.name == name for spec in modules.known().values() for s in spec.schedules)
-
-
 
 # テーマごとの接続先
 
@@ -143,30 +138,13 @@ def _config_time(config: Config, name: str) -> str:
     return getattr(config.schedule, name)
 
 
-def schedule_setting(config: Config, store: Store, name: str) -> tuple[str, bool]:
-    """(時刻, 動かすか)。Slack で変えていなければ config.toml の値。"""
-    base = _config_time(config, name)
-    hhmm = _get(store, f"schedule.{name}.time")
-    enabled = _get(store, f"schedule.{name}.enabled")
-    return (hhmm if hhmm is not None else base,
-            enabled == "1" if enabled is not None else bool(base))
-
-
-def schedule_time(config: Config, store: Store, name: str) -> str:
-    """いま使う時刻。止めているときは空文字（その処理を行わない）。"""
-    if name == "maintenance" and not config.maintenance.enabled:
-        return ""
-    hhmm, enabled = schedule_setting(config, store, name)
-    return hhmm if enabled and HHMM.match(hhmm or "") else ""
-
-
-def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
-    if not _known_schedule(name):
-        raise ValueError(f"知らない処理です: {name}")
-    if not HHMM.match(hhmm):
-        raise ValueError(f"時刻は HH:MM で指定してください: {hhmm}")
-    _set(store, f"schedule.{name}.time", hhmm)
-    _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
+def schedule_time(config: Config, name: str) -> str:
+    """いま使う時刻（定期処理の表 schedules.csv。無ければ既定）。止めているときは空文字（その処理を行わない）。"""
+    if name == "maintenance":
+        hhmm = config.maintenance.time if config.maintenance.enabled else ""
+    else:
+        hhmm = _config_time(config, name)
+    return hhmm if HHMM.match(hhmm or "") else ""
 
 
 # actor ごとの provider。正は担当の表（agents.csv）の engine。App Home の値は表を書き換えず、

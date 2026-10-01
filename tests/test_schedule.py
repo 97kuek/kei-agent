@@ -48,8 +48,6 @@ def record_runs(monkeypatch, scheduler, ran, status="done"):
     monkeypatch.setattr(scheduler, "run_task", fake_run)
 
 
-
-
 async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypatch, caplog):
     """ネットにつながらない間は、毎分の長いエラーの代わりに、始めと戻りを1行ずつ。ほかの失敗は今までどおり。"""
     scheduler, *_ = env
@@ -178,19 +176,6 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
 
     await scheduler.tick(datetime.fromisoformat("2026-09-18 22:10"))
     assert ran[-2:] == [("review", "2026-09-18"), ("maintenance", "2026-09-18")]
-
-
-async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
-    """App Home で変えた時刻は、再起動なしで次の tick から効く。止めた処理は動かさない。"""
-    scheduler, *_ = env
-    from kei_agent.storage import settings
-    ran = []
-    record_runs(monkeypatch, scheduler, ran)
-    settings.set_schedule(scheduler.store, "daily", "07:30", True)
-    settings.set_schedule(scheduler.store, "literature", "07:00", False)
-    await scheduler.tick(datetime.fromisoformat("2026-09-18 07:35"))
-    names = [name for name, _ in ran]
-    assert "daily" in names and "literature" not in names
 
 
 # 🌙 の夜間 Task

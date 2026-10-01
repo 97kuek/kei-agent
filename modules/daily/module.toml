@@ -3,7 +3,7 @@ api = 1
 name = "daily"
 label = "Daily・振り返り"
 description = "朝に今日の予定の一覧と Daily を、夜に振り返り（今日の成果と未完了）を研究全体のチャンネルに出し、共通ホームの日別記録に残す"
-# 本体の定期処理 daily（朝）と review（夜）を受け持つ。時刻は設定の [schedule] daily / review と App Home のまま。
+# 本体の定期処理 daily（朝）と review（夜）を受け持つ。時刻は schedules.csv の daily / review の行。
 # 朝の一覧と材料を集めるのは本体の枠（core.morning・core.digest）で、ここは書いて出して残す
 core_schedules = ["daily", "review"]
 

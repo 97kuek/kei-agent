@@ -42,7 +42,7 @@ port = 8792
 [channels]
 knowledge = ["knowledge"]
 
-# 定期処理（設定の [schedule] と App Home で時刻を変えられる。空文字で止める）。
+# 定期処理（時刻とオンオフは schedules.csv で変えられる。default は書いていないときの時刻）。
 # 同じ時刻のときは、夜間の Task のあと、Daily の前に動く（朝の一覧に件数を載せるため）
 [schedules.literature]
 label = "先行研究の新着"

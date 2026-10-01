@@ -20,13 +20,15 @@
 mkdir -p ~/.config/kei-agent/secrets && chmod 700 ~/.config/kei-agent/secrets
 cp config.example.toml ~/.config/kei-agent/config.toml
 cp agents.example.csv ~/.config/kei-agent/agents.csv
+cp schedules.example.csv ~/.config/kei-agent/schedules.csv   # 時刻を変えないなら要らない
 cp profile.example.md ~/.config/kei-agent/profile.md
 ```
 
 | ファイル | 中身 |
 |---|---|
-| `config.toml` | Notion のホーム・時刻・sandbox など。場所は `KEI_AGENT_HOME`・`KEI_AGENT_CONFIG` で変えられる |
-| `agents.csv` | 担当の表。モジュールのオンオフ・チャンネル・AI（下の「担当の表」）。無ければ組み込みを全部使い、AI は未選択 |
+| `config.toml` | 全体で1つの設定（状態の置き場所・同時に動かす数・sandbox・保守・秘密情報の置き場所・モジュールの設定）。場所は `KEI_AGENT_HOME`・`KEI_AGENT_CONFIG` で変えられる |
+| `agents.csv` | 担当の表。モジュールのオンオフ・チャンネル・作業場・Notion のホーム・AI・アカウント（下の「担当の表」）。無ければ組み込みを全部使い、AI は未選択 |
+| `schedules.csv` | 定期処理の表。時刻とオンオフ（下の「定期処理の表」）。無ければ既定の時刻 |
 | `profile.md` | 話し方・所属・興味。会話する担当の指示書に足す |
 | `prompts/<名前>` | 指示書を丸ごと差し替えるとき |
 
@@ -49,6 +51,12 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 - `config.toml` に `modules`・`[channels]`・`[agents]`（前の書き方）があると、起動しない（書く場所を1つにする）
 - 変えたら `deploy/restart-all.sh` で起動し直す。書き間違いは起動と `kei-agent doctor` が行を示して知らせる
 - App Home で AI を切り替えると、本体を起動し直すまでの一時的なものになる（App Home に表の値を出す）
+
+### 定期処理の表（`schedules.csv`）
+
+- 1行に1つの処理。列は `name,enabled,time`（例 `reading,true,07:00`）。`enabled` を `false` にすると、その処理を行わない
+- 書ける名前は、本体の `night`・`daily`・`review`・`maintenance` と、モジュールの `module.toml` の `[schedules]`（`literature`・`reading`・`toggl_import` など）
+- 書いていない処理は既定の時刻で動く。App Home では変えない。変えたら `deploy/restart-all.sh` で起動し直す
 
 ## 3. 秘密情報
 

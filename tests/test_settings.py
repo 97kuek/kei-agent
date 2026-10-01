@@ -61,20 +61,13 @@ def test_domain_request_is_resolved_once(store):
     assert settings.get_request(store, req_id)["status"] == "allowed"
 
 
-def test_schedule_time_can_be_overridden(config, store):
-    config = replace(config, schedule=ScheduleConfig(daily="08:00"), maintenance=MaintenanceConfig(time="22:00"))
-    assert settings.schedule_time(config, store, "daily") == "08:00"
-    assert settings.schedule_time(config, store, "maintenance") == "22:00"
-
-    settings.set_schedule(store, "daily", "07:30", True)
-    assert settings.schedule_time(config, store, "daily") == "07:30"
-
-    settings.set_schedule(store, "daily", "07:30", False)  # 止めても時刻は覚えておく
-    assert settings.schedule_time(config, store, "daily") == ""
-    assert settings.schedule_setting(config, store, "daily") == ("07:30", False)
-    # 設定で止めた片づけは、止まったまま
+def test_schedule_time_comes_from_the_config(config):
+    """時刻は設定（schedules.csv から読んだもの）だけ。空文字と、止めた保守は「行わない」。"""
+    config = replace(config, schedule=ScheduleConfig(daily="08:00", review=""), maintenance=MaintenanceConfig(time="22:00"))
+    assert settings.schedule_time(config, "daily") == "08:00" and settings.schedule_time(config, "review") == ""
+    assert settings.schedule_time(config, "maintenance") == "22:00"
     config = replace(config, maintenance=MaintenanceConfig(enabled=False, time="22:00"))
-    assert settings.schedule_time(config, store, "maintenance") == ""
+    assert settings.schedule_time(config, "maintenance") == ""
 
 
 def test_home_provider_changes_only_the_named_agents_provider(config, store):

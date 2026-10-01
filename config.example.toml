@@ -28,13 +28,9 @@ handoff_after_turns = 8
 # （例は agents.example.csv。kei-agent setup が作る。書き方は deploy/README.md の「担当の表」）
 
 [schedule]
-# 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
+# 決まった時刻の処理の時刻とオンオフは、定期処理の表 schedules.csv に書く（例は schedules.example.csv）。
+# ここは全体のスイッチ（false にすると、どの処理も行わない）と、決まった時刻の処理に共通の値
 enabled = true
-literature = "07:00"  # 先行研究の新着（知識のモジュール。テーマごとに選び、各テーマのチャンネルと先行研究 DB へ）
-reading = "07:00"     # 読みもの（知識のモジュール。興味のある技術記事を #4-knowledge へ）
-daily = "08:00"       # 朝のまとめ（今日の時系列）と Daily（#0-overview）。締切24時間前の知らせは1時間ごと
-review = "21:00"      # Retro & Planning（#0-overview）
-night = "00:00"       # 🌙 をつけた Task
 # Mac のスリープなどで逃した処理を、何時間後まで実行するか
 catch_up_hours = 3
 night_max_tasks = 5
@@ -44,9 +40,8 @@ stall_days = 3
 unanswered_hours = 24
 
 [maintenance]
-# 毎晩の保守。古いファイルを整理してから、~/research を非公開の Git リポジトリに push する
-enabled = true
-time = "22:00"
+# 毎晩の保守（時刻とオンオフは schedules.csv の maintenance の行）。古いファイルを整理してから、~/research を
+# 非公開の Git リポジトリに push する
 backup = true
 session_retention_days = 90
 

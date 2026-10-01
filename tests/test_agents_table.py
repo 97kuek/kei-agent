@@ -204,7 +204,9 @@ def test_init_moves_the_config_into_the_table(tmp_path, capsys):
     toml = (home / "config.toml").read_text()
     assert "research_root" not in toml
     assert "modules" not in toml and "[agents" not in toml and "[channels]" not in toml
-    assert 'daily = "07:30"' in toml and "handoff_after_turns = 5" in toml
+    assert 'daily = "07:30"' not in toml and "handoff_after_turns = 5" in toml
+    # 定期処理の時刻は schedules.csv に移る
+    assert after.schedule.daily == "07:30" and "daily,true,07:30" in (home / "schedules.csv").read_text()
     assert (home / "config.toml.bak").read_text() == config_text
     # もう表があれば、何もしない
     assert agents_command.init(env=env) == 0

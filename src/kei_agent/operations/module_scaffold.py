@@ -34,7 +34,7 @@ ${name} = ["${name}"]
 # 頼るモジュール（requires は必須、optional はあれば使う）
 # [depends]
 # requires = ["notion"]
-# 定期処理（時刻は設定の [schedule] と App Home で変えられる）
+# 定期処理（時刻とオンオフは schedules.csv で変えられる）
 # [schedules.${ident}_daily]
 # label = "${label}の見回り"
 # default = "07:30"

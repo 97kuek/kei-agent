@@ -93,13 +93,29 @@ def write_config(path: Path, text: str) -> Path:
 
     # 利用者のモジュール（同じフォルダの modules/）も、表の行にできるように読んでおく
     modules.register_user_modules(path.parent / "modules")
+    from kei_agent.configuration import schedules_table
+
     try:
-        moved = any(key in tomllib.loads(text) for key in agents_table.REPLACED_KEYS)
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
-        moved = False
-    if moved:
+        data = {}
+    if any(key in data for key in agents_table.REPLACED_KEYS):
         text, table = agents_command.split(text)
         (path.parent / agents_table.AGENTS_FILE).write_text(table, encoding="utf-8")
+    # 定期処理の時刻とオンオフは schedules.csv に（[schedule] の時刻と [maintenance] の time・enabled）
+    known = schedules_table.known_names()
+    schedule, maintenance = data.get("schedule", {}), data.get("maintenance", {})
+    times = {key: value for key, value in schedule.items() if key in known}
+    if times or {"time", "enabled"} & set(maintenance):
+        rows = [f"{name},{'true' if value else 'false'},{value}" for name, value in times.items()]
+        if {"time", "enabled"} & set(maintenance):
+            time = maintenance.get("time", schedules_table.CORE_TIMES["maintenance"])
+            on = maintenance.get("enabled", True) and bool(time)
+            rows.append(f"maintenance,{'true' if on else 'false'},{time}")
+        (path.parent / schedules_table.SCHEDULES_FILE).write_text("name,enabled,time\n" + "\n".join(rows) + "\n",
+                                                                  encoding="utf-8")
+        text = agents_command.without_keys(text, {"schedule": set(times), "maintenance": {"time", "enabled"}})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
