@@ -110,7 +110,7 @@ def test_the_same_things_cannot_also_be_in_config_toml(tmp_path):
 
 
 def test_without_a_table_every_builtin_module_is_on_and_no_ai_is_chosen(tmp_path):
-    from kei_agent import modules
+    from kei_agent.framework import modules
 
     config = _load(_home(tmp_path, None))
     assert config.agents_table is None and set(config.modules) == set(modules.builtin())
@@ -220,8 +220,8 @@ def test_the_command_dispatches(monkeypatch):
 
 
 def test_the_example_table_lists_every_builtin_module(tmp_path):
-    from kei_agent import modules
     from kei_agent.configuration.config import REPO_ROOT
+    from kei_agent.framework import modules
 
     home = _home(tmp_path, (REPO_ROOT / "agents.example.csv").read_text(encoding="utf-8"))
     config = _load(home)

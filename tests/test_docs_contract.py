@@ -2,7 +2,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from kei_agent import modules
+from kei_agent.framework import modules
 
 DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/architecture.md", "docs/modules.md",
         "docs/extensibility.md", "docs/agents.md", *(str(p) for p in sorted(Path("docs/agents").glob("*.md"))))

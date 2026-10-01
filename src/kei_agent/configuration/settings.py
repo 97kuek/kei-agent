@@ -13,8 +13,8 @@ import sqlite3
 from dataclasses import replace
 from datetime import datetime
 
-from kei_agent import modules
 from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_actors
+from kei_agent.framework import modules
 from kei_agent.guard import valid_domain
 from kei_agent.storage.store import Store
 

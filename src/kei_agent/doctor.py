@@ -19,8 +19,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import deploy_check, home, modules, version
+from kei_agent import deploy_check, home
 from kei_agent.configuration.config import Config, ConfigError, load_config
+from kei_agent.framework import modules, version
 
 OK, WARN, ERROR = "ok", "warn", "error"
 MARKS = {OK: "✅", WARN: "⚠️", ERROR: "❌"}

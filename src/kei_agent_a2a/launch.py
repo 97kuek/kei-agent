@@ -20,8 +20,8 @@ from a2a.server.agent_execution import AgentExecutor
 from a2a.types import AgentCard
 from starlette.applications import Starlette
 
-from kei_agent import modules
 from kei_agent.configuration.config import load_config
+from kei_agent.framework import modules
 from kei_agent_a2a import server
 from kei_agent_a2a.card import RPC_PATH, agent_card
 

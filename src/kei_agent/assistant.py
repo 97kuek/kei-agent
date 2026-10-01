@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, agents, api, ask, guard, modules, router, runner, themes, updates, version
+from kei_agent import a2a, agents, api, ask, guard, router, runner, themes, updates
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -30,6 +30,7 @@ from kei_agent.auto_messages import (
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
 from kei_agent.execution_contract import prompt_version
+from kei_agent.framework import modules, version
 from kei_agent.handoff import Handoff, strip_handoff
 from kei_agent.home import agent_labels
 from kei_agent.jobs import JobManager, missing_outputs

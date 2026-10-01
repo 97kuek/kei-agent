@@ -3,9 +3,10 @@
 import pytest
 from fakes import write_config
 
-from kei_agent import home, modules
+from kei_agent import home
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import ConfigError, load_config
+from kei_agent.framework import modules
 from kei_agent.schedule import task_names
 
 WEATHER = '''api = 1

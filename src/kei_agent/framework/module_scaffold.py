@@ -14,8 +14,8 @@ import subprocess
 import sys
 from string import Template
 
-from kei_agent import modules
 from kei_agent.configuration.config import config_home
+from kei_agent.framework import modules
 
 # 利用者のモジュールの担当プロセスの番地は、ここから空いているものを使う（組み込みは 8786〜8792）
 FIRST_PORT = 8800

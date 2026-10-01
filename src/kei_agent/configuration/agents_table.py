@@ -22,7 +22,7 @@ import csv
 import io
 from pathlib import Path
 
-from kei_agent import modules
+from kei_agent.framework import modules
 
 AGENTS_FILE = "agents.csv"
 COLUMNS = ("module", "enabled", "channels", "folder", "engine", "model", "effort")

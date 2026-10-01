@@ -14,9 +14,10 @@ import pytest
 from fakes import FakeClaude, FakeHub, FakePueue, FakeSlack
 from slack_sdk.errors import SlackApiError
 
-from kei_agent import modules, runner
+from kei_agent import runner
 from kei_agent.agents import Reply
 from kei_agent.assistant import Assistant
+from kei_agent.framework import modules
 from kei_agent.jobs import JobManager
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records

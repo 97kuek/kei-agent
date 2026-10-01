@@ -11,8 +11,8 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from kei_agent import modules
 from kei_agent.configuration.config import AGENT_PLUGINS, ConfigError, model_actors
+from kei_agent.framework import modules
 
 PROVIDERS = frozenset({"codex", "claude"})
 

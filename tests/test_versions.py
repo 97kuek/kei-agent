@@ -6,8 +6,9 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
 from kei_agent import assistant as assistant_module
-from kei_agent import runner, updates, version
+from kei_agent import runner, updates
 from kei_agent.assistant import Assistant
+from kei_agent.framework import version
 from kei_agent.jobs import JobManager
 
 

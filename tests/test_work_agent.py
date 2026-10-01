@@ -59,7 +59,7 @@ async def server(config, monkeypatch):
     """仕事エージェントを立てる（会社の連携は偽物）。"""
     import uvicorn
 
-    from kei_agent import modules
+    from kei_agent.framework import modules
     from kei_agent_a2a import launch
     from kei_agent_modules.work import connector
     from kei_agent_modules.work.agent import Executor

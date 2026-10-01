@@ -380,7 +380,7 @@ def _free_port() -> int:
 async def server(config, store):
     import uvicorn
 
-    from kei_agent import modules
+    from kei_agent.framework import modules
     from kei_agent_a2a import launch
     from kei_agent_modules.knowledge.agent import Executor
 

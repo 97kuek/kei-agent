@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
-from kei_agent import version
+from kei_agent.framework import version
 
 # JSON-RPC の窓口（Agent Card の supported_interfaces に載せる）
 RPC_PATH = "/a2a"

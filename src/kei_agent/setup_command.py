@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import doctor, module_command, modules
+from kei_agent import doctor, module_command
 from kei_agent.configuration import agents_table
 from kei_agent.configuration.config import (
     EXAMPLE_CONFIG,
@@ -44,6 +44,7 @@ from kei_agent.configuration.config import (
     load_config,
     model_actors,
 )
+from kei_agent.framework import modules
 
 EXAMPLE_PROFILE = REPO_ROOT / "profile.example.md"
 DEFAULT_TONE = "一人称は「私」。です・ます調で、短く"

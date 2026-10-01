@@ -12,8 +12,9 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import agents, jobs, modules, runner
+from kei_agent import agents, jobs, runner
 from kei_agent.a2a import Agent
+from kei_agent.framework import modules
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 pytest.importorskip("uvicorn")

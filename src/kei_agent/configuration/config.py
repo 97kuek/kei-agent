@@ -15,7 +15,7 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from kei_agent import modules
+from kei_agent.framework import modules
 from kei_agent.guard import DEFAULT_DENY_READ
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

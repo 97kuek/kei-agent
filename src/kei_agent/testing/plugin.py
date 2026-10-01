@@ -9,7 +9,7 @@
 
 import pytest
 
-from kei_agent import modules
+from kei_agent.framework import modules
 from kei_agent.testing import isolation
 from kei_agent.testing.kit import ModuleKit
 

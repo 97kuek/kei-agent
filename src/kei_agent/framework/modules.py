@@ -75,7 +75,7 @@ COMMANDS_FILE = "commands.py"
 ACTION_PREFIX = "kei_agent_module:"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
 PACKAGE = "kei_agent_modules"
-BUILTIN_DIR = Path(__file__).resolve().parents[2] / "modules"
+BUILTIN_DIR = Path(__file__).resolve().parents[3] / "modules"
 PROVIDERS = ("claude", "codex")
 ACCESS = ("none", "read", "write")
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")

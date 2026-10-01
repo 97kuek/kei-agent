@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from kei_agent import modules
+from kei_agent.framework import modules
 from kei_agent.model_policy import UseCase
 
 # Notion ゲートウェイの MCP の名前（全エージェント共通）。どのホームに届くかは、合言葉でゲートウェイが決める

@@ -74,7 +74,7 @@ def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
 
 def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
     """指示書か skill が変わったら、古い会話を再開しない（会話の版が変わる）。"""
-    from kei_agent import modules
+    from kei_agent.framework import modules
 
     folder = tmp_path / "modules" / "lab"
     (folder / "plugin" / ".claude-plugin").mkdir(parents=True)

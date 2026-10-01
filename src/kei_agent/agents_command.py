@@ -13,7 +13,6 @@ import os
 import re
 import tomllib
 
-from kei_agent import modules
 from kei_agent.configuration import agents_table
 from kei_agent.configuration.config import (
     DEFAULT_PATHS,
@@ -24,6 +23,7 @@ from kei_agent.configuration.config import (
     config_path,
     load_config,
 )
+from kei_agent.framework import modules
 
 _TABLE = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]")
 _MODULES = re.compile(r"^\s*(modules|research_root|course_root)\s*=")

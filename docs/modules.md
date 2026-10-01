@@ -50,7 +50,7 @@ uv run kei-agent doctor                                 # 確かめる
 ## module.toml
 
 - 見本は `modules/knowledge/module.toml`
-- 知らないキーや形の違いは、読むときに断る（`src/kei_agent/modules.py`）
+- 知らないキーや形の違いは、読むときに断る（`src/kei_agent/framework/modules.py`）
 
 ```toml
 api = 1                         # 枠の版

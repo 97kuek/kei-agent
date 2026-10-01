@@ -11,9 +11,9 @@ from __future__ import annotations
 import time
 from datetime import datetime
 
-from kei_agent import modules
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
+from kei_agent.framework import modules
 from kei_agent.slack_text import format_duration
 from kei_agent.storage.store import Store
 

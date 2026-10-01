@@ -19,7 +19,7 @@ TOKEN = "test-token"
 
 def build_app(base_url: str, token: str):
     """大学のモジュールの担当（共通の起動コマンドが作るのと同じアプリ）。"""
-    from kei_agent import modules
+    from kei_agent.framework import modules
     from kei_agent_a2a import launch
 
     return launch.build_app(modules.builtin()["course"], base_url, token)

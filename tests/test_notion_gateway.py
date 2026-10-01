@@ -116,7 +116,7 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
 
     シェルを使える AI の実行役がいなければ、Python から /notion/v1 も使える（研究は MCP だけ）。
     """
-    from kei_agent import modules
+    from kei_agent.framework import modules
     from kei_agent_modules.notion.clients import proxy_clients
 
     for name, actor in (("weather", ""), ("diary", '[actor]\nprompt = "diary.md"\nshell = true\n'

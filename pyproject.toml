@@ -62,5 +62,5 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF100"]
 ignore = ["E501", "ASYNC240", "ASYNC109"]
 
 [tool.ruff.lint.isort]
-# モジュールのフォルダ（modules/<名前>/）は、起動のときに kei_agent_modules.<名前> として読む（kei_agent.modules.package）
+# モジュールのフォルダ（modules/<名前>/）は、起動のときに kei_agent_modules.<名前> として読む（kei_agent.framework.modules.package）
 known-first-party = ["kei_agent_modules"]

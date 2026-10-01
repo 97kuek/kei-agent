@@ -6,8 +6,9 @@ from datetime import datetime
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import modules, runner
+from kei_agent import runner
 from kei_agent.assistant import Assistant
+from kei_agent.framework import modules
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
 

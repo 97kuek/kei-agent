@@ -705,7 +705,7 @@ async def test_finished_worktrees_and_old_talks_are_cleaned_once_a_day(env):
 
 
 def test_the_improve_module_takes_the_kei_agent_channel():
-    from kei_agent import modules
+    from kei_agent.framework import modules
 
     spec = modules.builtin()["improve"]
     assert spec.core_channels == ("improve",) and spec.port is None
