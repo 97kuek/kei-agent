@@ -78,19 +78,15 @@ def edits_code(text="y = 2\n"):
 
 
 async def agreed(assistant, slack, claude, request="直して"):
-    """依頼 → 案 →「いいよ」→「これで進めていい？」まで進めたスレッドにする。"""
-    claude.behaviors = [{"text": "こう直すつもり"}, {"text": "これで進めていい？"}]
+    """依頼 → 案（「こう直すけど、いい？」）まで進めたスレッドにする。"""
+    claude.behaviors = [{"text": "こう直すけど、いい？"}]
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": f"<@UBOT> {request}"})
     await settle(assistant)
     slack.replies = [{"user": "UME", "ts": "20.1", "text": request},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"}]
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.3", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
-    slack.replies += [{"user": "UME", "ts": "20.3", "text": "いいよ"},
-                      {"user": "UBOT", "bot_id": "B1", "ts": "20.4", "text": "これで進めていい？"}]
+                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すけど、いい？"}]
 
 
-async def second_yes(assistant, ts="20.5"):
+async def yes(assistant, ts="20.3"):
     await assistant.on_message({"channel": "C9", "user": "UME", "ts": ts, "thread_ts": "20.1", "text": "いいよ"})
     await settle(assistant)
 
@@ -270,25 +266,32 @@ async def test_improve_channel_intro_says_requests_become_public_issues(env):
     assert "公開の GitHub issue" in intro and "backlog" not in intro
 
 
-async def test_start_marker_creates_a_worktree_and_reports_the_change(env):
+async def test_one_yes_fixes_merges_pushes_and_restarts(env, monkeypatch, no_real_restarts):
+    """案への「いいよ」1回で、直す・テスト・取り込み・push・入れ替えまで進む（途中で確かめない）。"""
     assistant, slack, claude, cfg = env
+    monkeypatch.setattr(updates, "installed_services", lambda home=None: ["notion", "course"])
     await agreed(assistant, slack, claude)
     claude.behaviors = [
         {"text": "じゃあやるね\n🛠 着手"},
         {"text": "直したよ。テストは通った\n📝 件名: app.py の値を直す", "side_effect": edits_code()},
     ]
-    await second_yes(assistant)
+    await yes(assistant)
 
     fix = fix_of(assistant)
-    assert fix.status == "review" and fix.branch == "kei-agent/improve-20-1"
-    assert Path(fix.worktree).parent == cfg.module_state("improve") / "worktrees"
-    assert claude.calls[-1]["cwd"] == Path(fix.worktree).resolve()   # 最後の回が worktree での直し
-    assert git(Path(fix.worktree), "log", "-1", "--format=%s") == "app.py の値を直す"
+    assert fix.status == "restarting" and fix.issue_number == 1 and fix.branch == "kei-agent/improve-20-1"
+    assert claude.calls[-1]["cwd"].parent == cfg.module_state("improve").resolve() / "worktrees"
+    assert git(cfg.repo_root, "log", "-1", "--format=%s") == "app.py の値を直す"
+    assert (cfg.repo_root / "src" / "app.py").read_text() == "y = 2\n"           # main に入った
+    assert git(cfg.repo_root, "rev-parse", "main") == git(cfg.repo_root, "rev-parse", "origin/main")  # push した
+    assert updates.pending_path(cfg).read_text().split() == [fix.base_commit, "0", "20.1"]  # 戻せるようにしてある
+    assert not Path(fix.worktree).exists()                                         # worktree は片づけた
     texts = "\n".join(slack.texts())
-    assert "直し始めるね" in texts and "取り込んでいい？" in texts and "`src/app.py`" in texts
-    assert "<@UME> 直したよ。取り込んでいいか見てね" in slack.texts()   # 直している間は待っていないので知らせる
+    assert "直し始めるね" in texts and "`src/app.py`" in texts and "取り込んでいいか" not in texts
+    assert any(t.startswith("<@UME> 📦 直して、取り込んで GitHub に push したよ") for t in slack.texts())
     upload, = [kw for name, kw in slack.calls if name == "files_upload_v2"]
     assert upload["file_uploads"][0]["filename"] == "change.diff"
+    await asyncio.wait_for(assistant.restart_requested.wait(), 1)                 # 作業がないので終了へ
+    assert no_real_restarts == ["notion", "course"]                                # 担当も一緒に入れ替える
 
 
 async def working(assistant, slack, claude):
@@ -320,33 +323,32 @@ async def test_a_reply_while_fixing_tells_the_ai_not_to_fix_it_again(env):
     assert call["prompt"].rstrip().endswith("おけ")
 
 
-async def test_failing_full_checks_are_handed_back_once_before_review(env, monkeypatch):
-    """外で回した全体のテストが落ちたら、結果を渡して1回だけ直させ、通ってから見てもらう。"""
+async def test_failing_full_checks_are_handed_back_once_before_merging(env, monkeypatch):
+    """外で回した全体のテストが落ちたら、結果を渡して1回だけ直させ、通ってから取り込む。"""
     assistant, slack, claude, cfg = env
     results = [improve_repo.CommandResult(False, "FAILED tests/test_schedule.py::test_old"),
-               improve_repo.CommandResult(True, "通った")]
+               improve_repo.CommandResult(True, "通った"), improve_repo.CommandResult(True, "通った")]
     monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: results.pop(0))
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()},
                         {"text": "古いテストも直した", "side_effect": edits_code("y = 3\n")}]
-    await second_yes(assistant)
+    await yes(assistant)
 
     assert "FAILED tests/test_schedule.py::test_old" in claude.prompts()[-1]
-    assert fix_of(assistant).status == "review"
-    assert "<@UME> 直したよ。取り込んでいいか見てね" in slack.texts()
+    assert fix_of(assistant).status == "restarting"
 
 
-async def test_checks_that_still_fail_are_not_offered_for_review(env, monkeypatch):
+async def test_checks_that_still_fail_are_not_merged(env, monkeypatch):
     assistant, slack, claude, cfg = env
     monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(False, "1 failed"))
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()},
                         {"text": "まだ", "side_effect": edits_code("y = 3\n")}]
-    await second_yes(assistant)
+    await yes(assistant)
 
     assert fix_of(assistant).status == "failed"
     assert any("全体のテストが通らなかった" in t for t in slack.texts())
-    assert not any("取り込んでいいか見てね" in t for t in slack.texts())
+    assert not any("push したよ" in t for t in slack.texts())
 
 
 async def test_start_marker_from_an_automatic_run_is_ignored(env):
@@ -363,13 +365,12 @@ async def test_only_one_improvement_at_a_time(env):
     assistant, slack, claude, cfg = env
     await agreed(assistant, slack, claude, "1つめ")
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": edits_code()}, {"text": "🛠 着手"}]
-    await second_yes(assistant)
+    await yes(assistant)
     claude.behaviors = [{"text": "案だよ"}, {"text": "🛠 着手"}]
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "21.1", "text": "<@UBOT> 2つめ"})
     await settle(assistant)
     slack.replies = [{"user": "UME", "ts": "21.1", "text": "2つめ"},
-                     {"user": "UME", "ts": "21.2", "text": "いいよ"},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "21.3", "text": "これで進めていい？"}]
+                     {"user": "UBOT", "bot_id": "B1", "ts": "21.2", "text": "こう直すけど、いい？"}]
     await assistant.on_message({"channel": "C9", "user": "UME", "ts": "21.4", "thread_ts": "21.1", "text": "いいよ"})
     await settle(assistant)
     assert fix_of(assistant, "21.1").status == "planning"
@@ -378,66 +379,49 @@ async def test_only_one_improvement_at_a_time(env):
 
 # 取り込みと再起動
 
-async def prepared(env, monkeypatch):
+async def fixed(env, *, while_fixing=None):
+    """案に「いいよ」と言い、直させる（while_fixing は、直している間に起きること）。"""
     assistant, slack, claude, cfg = env
     await agreed(assistant, slack, claude)
-    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": edits_code()}]
-    await second_yes(assistant)
-    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(True, "テストは通った"))
-    claude.behaviors = [{"text": "じゃあ入れるね\n📦 取り込み"}]
+
+    def fix(cwd: Path):
+        edits_code()(cwd)
+        if while_fixing:
+            while_fixing()
+    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": fix}]
+    await yes(assistant)
     return assistant, slack, claude, cfg
 
 
-async def test_merge_marker_merges_pushes_and_asks_for_a_restart(env, monkeypatch, no_real_restarts):
-    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    monkeypatch.setattr(updates, "installed_services", lambda home=None: ["notion", "course"])
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
-
-    fix = fix_of(assistant)
-    assert fix.status == "restarting" and fix.issue_number == 1                   # 要望の issue を覚えたまま
-    assert (cfg.repo_root / "src" / "app.py").read_text() == "y = 2\n"           # main に入った
-    assert git(cfg.repo_root, "rev-parse", "main") == git(cfg.repo_root, "rev-parse", "origin/main")  # push した
-    assert updates.pending_path(cfg).read_text().split() == [fix.base_commit, "0", "20.1"]  # 戻せるようにしてある
-    assert not Path(fix.worktree).exists()                                         # worktree は片づけた
-    await asyncio.wait_for(assistant.restart_requested.wait(), 1)                 # 作業がないので終了へ
-    # 担当も一緒に入れ替える（テストでは本物の launchd には触らない）
-    assert no_real_restarts == ["notion", "course"]
-
-
-async def test_merge_stops_when_the_repository_has_uncommitted_changes(env, monkeypatch):
-    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    (cfg.repo_root / "src" / "app.py").write_text("人の書きかけ\n")
-
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
+async def test_merge_stops_when_the_repository_has_uncommitted_changes(env):
+    cfg = env[3]
+    assistant, slack, claude, cfg = await fixed(
+        env, while_fixing=lambda: (cfg.repo_root / "src" / "app.py").write_text("人の書きかけ\n"))
 
     assert fix_of(assistant).status == "review"
     assert "コミットしていない変更がある" in "\n".join(slack.texts())
     assert (cfg.repo_root / "src" / "app.py").read_text() == "人の書きかけ\n"
 
 
-async def test_merge_catches_up_when_main_moved_and_asks_again(env, monkeypatch):
-    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    (cfg.repo_root / "README.md").write_text("先に進んだ\n")
-    git(cfg.repo_root, "add", "-A")
-    git(cfg.repo_root, "commit", "-qm", "人が先に進めた")
+async def test_merge_catches_up_when_main_moved_and_goes_on(env):
+    """直している間に main が先に進んでいたら、その上に乗せ直して、確かめずにそのまま取り込む。"""
+    cfg = env[3]
 
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
+    def someone_commits():
+        (cfg.repo_root / "README.md").write_text("先に進んだ\n")
+        git(cfg.repo_root, "add", "-A")
+        git(cfg.repo_root, "commit", "-qm", "人が先に進めた")
+    assistant, slack, claude, cfg = await fixed(env, while_fixing=someone_commits)
 
-    fix = fix_of(assistant)
-    assert fix.status == "review" and fix.base_commit == git(cfg.repo_root, "rev-parse", "HEAD")
-    assert "乗せ直した" in "\n".join(slack.texts())
+    assert fix_of(assistant).status == "restarting"
+    assert (cfg.repo_root / "README.md").exists() and (cfg.repo_root / "src" / "app.py").read_text() == "y = 2\n"
 
 
-async def test_failed_checks_are_reported_and_nothing_is_merged(env, monkeypatch):
-    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
-    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(False, "1 failed"))
-    before = git(cfg.repo_root, "rev-parse", "main")
-
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
+async def test_failed_checks_before_merging_are_reported_and_nothing_is_merged(env, monkeypatch):
+    results = [improve_repo.CommandResult(True, "通った"), improve_repo.CommandResult(False, "1 failed")]
+    monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: results.pop(0))
+    before = git(env[3].repo_root, "rev-parse", "main")
+    assistant, slack, claude, cfg = await fixed(env)
 
     assert git(cfg.repo_root, "rev-parse", "main") == before
     notice, = [t for t in slack.texts() if "確認が通らなかった" in t]
@@ -452,7 +436,7 @@ async def test_protected_change_is_not_offered_for_review(env):
 
     await agreed(assistant, slack, claude, "柵を変えて")
     claude.behaviors = [{"text": "🛠 着手"}, {"text": "直した", "side_effect": touches_guard}]
-    await second_yes(assistant)
+    await yes(assistant)
 
     assert fix_of(assistant).status == "failed"
     assert "柵のファイルに触れています" in "\n".join(slack.texts())
@@ -555,21 +539,15 @@ async def test_an_update_asked_by_someone_else_is_left_alone(env, monkeypatch):
     assert slack.texts() == []
 
 
-async def test_a_status_question_does_not_count_as_a_yes(env):
-    """様子を聞いただけの返事は、着手の前の「いいよ」に数えない。"""
+async def test_the_first_answer_never_starts_a_fix(env):
+    """案を出す前（最初の依頼への返事）では着手しない。"""
     assistant, slack, claude, cfg = env
-    claude.behaviors = [{"text": "こう直すつもり"}]
+    claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}]
+    # 最初の依頼の回の返事に着手の合図があっても、まだ「いいよ」をもらっていないので動かない
     await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
     await settle(assistant)
-    slack.replies = [{"user": "UME", "ts": "20.1", "text": "直して"},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"},
-                     {"user": "UME", "ts": "20.3", "text": "進捗は？"}]
-    claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}]
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.4", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
-
     assert fix_of(assistant).status == "planning"
-    assert "この直し方で進めていい？" in "\n".join(slack.texts())
+    assert "こう直すけど、いい？" in "\n".join(slack.texts())
 
 
 async def test_a_status_question_opens_no_issue(env, fake_github):
@@ -592,27 +570,6 @@ async def test_markers_in_the_answer_to_a_status_question_are_ignored(env, fake_
     assert fix_of(assistant).status == "planning"
     assert fake_github.closed() == []
     assert claude.calls[-1]["read_only"] is True
-
-
-async def test_start_needs_a_second_yes(env):
-    """案への「いいよ」だけでは着手しない。「これで進めていい？」にもう一度答えてから。"""
-    assistant, slack, claude, cfg = env
-    claude.behaviors = [{"text": "こう直すつもり"}, {"text": "じゃあやるね\n🛠 着手"}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
-    await settle(assistant)
-    slack.replies = [{"user": "UME", "ts": "20.1", "text": "直して"},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すつもり"}]
-
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.3", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
-    assert fix_of(assistant).status == "planning"   # 1回目では着手しない
-    assert "この直し方で進めていい？" in "\n".join(slack.texts())
-
-    slack.replies += [{"user": "UME", "ts": "20.3", "text": "いいよ"},
-                      {"user": "UBOT", "bot_id": "B1", "ts": "20.4", "text": "これで進めていい？"}]
-    claude.behaviors = [{"text": "じゃあやるね\n🛠 着手"}, {"text": "直した", "side_effect": edits_code()}]
-    await second_yes(assistant)
-    assert fix_of(assistant).status == "review"
 
 
 def test_the_marks_are_hidden_but_nothing_else():
@@ -696,11 +653,10 @@ async def test_closing_while_fixing_is_refused(env, fake_github):
     assert "いま直している" in "\n".join(slack.texts())
 
 
-async def test_dropping_a_fix_waiting_for_review_removes_its_worktree(env, fake_github):
-    assistant, slack, claude, cfg = env
-    await agreed(assistant, slack, claude)
-    claude.behaviors = [{"text": "🛠 着手"}, {"text": "直したよ", "side_effect": edits_code()}]
-    await second_yes(assistant)
+async def test_dropping_a_fix_that_could_not_be_merged_removes_its_worktree(env, fake_github):
+    cfg = env[3]
+    assistant, slack, claude, cfg = await fixed(
+        env, while_fixing=lambda: (cfg.repo_root / "config.example.toml").write_text("# 書きかけ\n"))
     worktree = Path(fix_of(assistant).worktree)
     assert fix_of(assistant).status == "review" and worktree.exists()
 
@@ -762,7 +718,7 @@ async def test_unexpected_error_while_fixing_marks_the_improvement_failed(env, m
     def broken(worktree, message):
         raise RuntimeError("git が落ちた")
     monkeypatch.setattr(improve_repo, "commit_all", broken)
-    await second_yes(assistant)
+    await yes(assistant)
 
     fix = fix_of(assistant)
     assert fix.status == "failed" and "git が落ちた" in fix.detail
@@ -781,19 +737,24 @@ async def test_fix_left_working_by_a_restart_is_marked_interrupted(env):
     assert notice.startswith("<@UME> ⚠️")
 
 
-async def test_push_failure_undoes_the_local_merge_and_keeps_review(env, monkeypatch):
-    assistant, slack, claude, cfg = await prepared(env, monkeypatch)
+async def test_push_failure_undoes_the_local_merge_and_can_be_retried(env):
+    cfg = env[3]
     before = git(cfg.repo_root, "rev-parse", "main")
+    origin = git(cfg.repo_root, "remote", "get-url", "origin")
     git(cfg.repo_root, "remote", "set-url", "origin", str(cfg.repo_root.parent / "missing.git"))
-
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.2", "thread_ts": "20.1", "text": "いいよ"})
-    await settle(assistant)
+    assistant, slack, claude, cfg = await fixed(env)
 
     assert git(cfg.repo_root, "rev-parse", "main") == before                    # 手元の main は元のまま
-    assert fix_of(assistant).status == "review"                                # もう一度「いいよ」でやり直せる
+    assert fix_of(assistant).status == "review"                                # 「やり直して」でやり直せる
     assert not updates.pending_path(cfg).exists()
     assert not assistant.restart_requested.is_set()
     assert "push できなかった" in "\n".join(slack.texts())
+
+    git(cfg.repo_root, "remote", "set-url", "origin", origin)
+    claude.behaviors = [{"text": "もう一度入れるね\n📦 取り込み"}]
+    await reply(assistant, "やり直して", ts="20.6")
+    assert fix_of(assistant).status == "restarting"
+    assert git(cfg.repo_root, "rev-parse", "main") == git(cfg.repo_root, "rev-parse", "origin/main")
 
 
 # 片づけと、本体の表から写した記録

@@ -27,7 +27,7 @@ DROPPED_MARKER = "🗑 見送り"
 # 直したあと、コミットの件名として書いてもらう行
 SUBJECT_MARKER = "📝 件名:"
 # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回。これを数えてから着手する
-REPLIES_BEFORE_START = 2
+REPLIES_BEFORE_START = 1
 # 依存するライブラリの定義。変わるときは、取り込む前の文のいちばん上に出す
 DEPENDENCY_PATHS = ("pyproject.toml", "uv.lock")
 # エージェントのテストを飛ばさないために、確認で入れる依存のグループ

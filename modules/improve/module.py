@@ -6,10 +6,12 @@ Kei Agent のチャンネル（#00_kei-agent。module.toml の core_channels）�
 - 直さずに済んだら（もう直っていた・やらないと決まった）、AI が「✅ 解決済み」「🗑 見送り」と書き、要望を終わりにして
   issue を閉じる（見送りは not planned）
 - 直し方を相談する（AI は Kei Agent のコードを読むだけで、書けるのは相談の作業用のフォルダだけ）
-- 案に2回「いいよ」をもらい、AI が「🛠 着手」と書いたら、worktree で直す。AI の作業場では全体のテストが通らないので、
-  本体が外で回し、落ちたら1回だけ直させる。通ったら差分を添付して、取り込んでいいか聞く
-- 直したものに「いいよ」をもらい、AI が「📦 取り込み」と書いたら、テストを回し、柵を確かめて main に取り込み、push して、
-  作業が終わってから新しい版で起動し直す（起動できなければ、本体が前の版に戻す）
+- 案（「こう直すけど、いい？」）に「いいよ」をもらい、AI が「🛠 着手」と書いたら、worktree で直す。AI の作業場では
+  全体のテストが通らないので、本体が外で回し、落ちたら1回だけ直させる。通ったら差分を添付し、確かめずにそのまま
+  柵を確かめて main に取り込み、push して、作業が終わってから新しい版で起動し直す（起動できなければ、本体が前の版に戻す）。
+  依頼者が確かめるのは案の1回だけ（コードは Slack で見ない）
+- 取り込みに失敗して止まったもの（push できなかったなど）は、依頼者が「やり直して」と言い、AI が「📦 取り込み」と書いたら
+  もう一度取り込む
 - 起動したとき（on_start）: 途中で止まった直しを「中断」にし、入れ替えの結果を取り込みのスレッドに知らせる
 - 見回り（tick）: 1日に1回、使い終わった worktree と相談の作業用のフォルダを片づけ、閉じられなかった issue を閉じ直す
 
@@ -131,8 +133,8 @@ class Module:
         messages = await self.core.thread_messages(req.channel, req.thread_ts)
         if repo.owner_replies(messages, self.core.is_owner, req.thread_ts, req.message_ts,
                               skip=is_status_inquiry) < repo.REPLIES_BEFORE_START:
-            # 案への「いいよ」と、「これで進めていい？」への「いいよ」の2回をもらってから動く
-            await self._post(req, "念のため確認させて。この直し方で進めていい？")
+            # 最初の要望への返事では動かない（案に「いいよ」をもらってから）
+            await self._post(req, "こう直すけど、いい？")
             return
         if any(fix.thread_ts != req.thread_ts for fix in self.fixes.in_status(*ACTIVE)):
             await self._post(req, f"{FAILED_PREFIX} 先に進んでいる直しがあるので、それを取り込んでから着手するね。")
@@ -194,8 +196,8 @@ class Module:
         await self._upload_diff(req, worktree, base)
         await self.core.post(req.channel, repo.review_summary(worktree, base, summary), thread_ts=req.thread_ts,
                              markdown=True)
-        # 直している間、依頼者は待っていない。取り込んでいいか見てもらえるよう、メンションで知らせる
-        await self._post(req, self.core.mention("直したよ。取り込んでいいか見てね"))
+        # 案に「いいよ」をもらってあるので、確かめずにそのまま取り込んで入れ替える
+        await self.merge_fix(req)
 
     async def _ask_fix(self, req: Request, worktree: Path, prompt: str) -> str | None:
         """worktree で AI に直させ、答えのうち Slack に出す部分を返す。動かせなければ失敗として知らせて None。
@@ -236,7 +238,7 @@ class Module:
     # 取り込む
 
     async def merge_fix(self, req: Request) -> None:
-        """依頼者が「いいよ」と言った差分を、テストを回してから main に取り込み、push して起動し直す。"""
+        """直した差分を、テストを回してから main に取り込み、push して起動し直す（直し終わったときと、やり直しのとき）。"""
         if req.thread_ts in self._merging:
             return
         self._merging.add(req.thread_ts)
@@ -252,8 +254,8 @@ class Module:
             return
         root, worktree, branch, base = self.core.repo_root, Path(fix.worktree), fix.branch, fix.base_commit
         if await self.core.to_thread(repo.repo_dirty, root):
-            await self._post(req, f"{FAILED_PREFIX} 手元のリポジトリにコミットしていない変更があるよ。"
-                                  "先にコミットしてから、もう一度「いいよ」と言って。")
+            await self._post(req, self.core.mention(f"{FAILED_PREFIX} 手元のリポジトリにコミットしていない変更があるので、"
+                                                    "取り込まなかったよ。先にコミットしてから「やり直して」と言って。"))
             return
         if await self.core.to_thread(repo.head, root) != base:
             caught = await self.core.to_thread(repo.catch_up_with_main, worktree)
@@ -261,11 +263,9 @@ class Module:
                 await self._failed(req, caught.output[:500],
                                    f"main に合わせ直せなかったよ:\n```\n{caught.output[:1000]}\n```")
                 return
+            # main が先に進んでいたら、その上に乗せ直して続ける（このあとテストを回し直す）
             base = await self.core.to_thread(repo.head, root)
             self.fixes.update(req.thread_ts, base_commit=base)
-            await self._upload_diff(req, worktree, base)
-            await self._post(req, "main が先に進んでいたので、その上に乗せ直したよ。差分を見て、もう一度「いいよ」と言って。")
-            return
         async with self.core.progress(req, "取り込み中…"):
             checks = await self.core.to_thread(repo.run_checks, worktree)
         if not checks.ok:
@@ -278,8 +278,8 @@ class Module:
         except repo.PushError as e:
             if e.undone:
                 # 手元の main は元に戻した。worktree は残すので、もう一度「いいよ」でやり直せる
-                await self._post(req, f"{FAILED_PREFIX} GitHub に push できなかったので、取り込みを取り消したよ。"
-                                      f"もう一度「いいよ」と言えばやり直す。\n```\n{e.output[:1000]}\n```")
+                await self._post(req, self.core.mention(f"{FAILED_PREFIX} GitHub に push できなかったので、取り込みを取り消したよ。"
+                                                        f"「やり直して」と言えばやり直す。\n```\n{e.output[:1000]}\n```"))
             else:
                 await self._failed(req, "push できず、手元の main も戻せなかった",
                                    "GitHub に push できず、手元の main も戻せなかったよ。"
@@ -291,8 +291,8 @@ class Module:
             return
         self.fixes.update(req.thread_ts, status="restarting", merge_commit=merged)
         await self.core.to_thread(repo.remove_worktree, root, worktree, branch)
-        await self._post(req, f"📦 取り込んで GitHub に push したよ（`{merged[:7]}`）。"
-                              "動いている作業が終わったら、新しい版で起動し直す。")
+        await self._post(req, self.core.mention(f"📦 直して、取り込んで GitHub に push したよ（`{merged[:7]}`）。"
+                                                "動いている作業が終わったら、新しい版で起動し直す。"))
         # 新しい版で起動できなければ、本体が base に戻す。次の起動で、このスレッドに結果を知らせる（on_start）
         self.core.restart_for_update(base, req.thread_ts)
 
