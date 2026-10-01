@@ -25,11 +25,12 @@ from kei_agent.config import (
 )
 
 _TABLE = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]")
-_MODULES = re.compile(r"^\s*modules\s*=")
+_MODULES = re.compile(r"^\s*(modules|research_root|course_root)\s*=")
 
 
 def without_replaced(text: str) -> str:
-    """config.toml から modules の行と、[channels]・[agents]・[agents.<名前>] の表を消した中身。"""
+    """config.toml から modules・research_root・course_root の行と、[channels]・[agents]・[agents.<名前>] の表を
+    消した中身。"""
     out: list[str] = []
 
     skipping = False
@@ -45,9 +46,10 @@ def without_replaced(text: str) -> str:
             i += 1
             continue
         if _MODULES.match(row) and not any(_TABLE.match(r) for r in lines[:i]):
-            # 複数の行にまたがる配列は、閉じ括弧の行まで消す
-            while "]" not in lines[i].split("#", 1)[0] and i + 1 < len(lines):
-                i += 1
+            # 複数の行にまたがる配列（modules = [ …）は、閉じ括弧の行まで消す
+            if "[" in lines[i].split("#", 1)[0]:
+                while "]" not in lines[i].split("#", 1)[0] and i + 1 < len(lines):
+                    i += 1
             i += 1
             continue
         out.append(row)

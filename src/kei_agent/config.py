@@ -227,8 +227,10 @@ class Config:
     module_settings: dict[str, dict] = field(default_factory=dict)
     # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）を、研究テーマの置き場所に選べるか（既定は選べない）
     allow_protected_folders: bool = False
-    # 担当の表（agents.csv）を読んだときの場所。None なら config.toml の modules・[channels]・[agents] を使っている
+    # 担当の表（agents.csv）を読んだときの場所。None なら表が無い（組み込み全部・AI は未選択）
     agents_table: Path | None = None
+    # 表の folder 列で決めた、研究と大学のほかの担当の作業場（モジュールの名前 → フォルダ）
+    module_folders: dict[str, Path] = field(default_factory=dict)
 
     def settings(self, name: str) -> dict:
         """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねたもの）。
@@ -240,12 +242,13 @@ class Config:
         return copy.deepcopy({**defaults, **self.module_settings.get(name, {})})
 
     def module_workspace(self, name: str) -> Path:
-        """モジュールの実行役の作業場。module.toml の [actor] workspace（無ければ状態の置き場の agents/<名前>）。
-
-        大学の作業場は、以前からの書き方の course_root でも変えられる（書かなければ ~/course）。
+        """モジュールの実行役の作業場。担当の表の folder 列、無ければ module.toml の [actor] workspace（それも無ければ
+        状態の置き場の agents/<名前>）。大学は course_root（表の course の行の folder。書かなければ ~/course）。
         """
         if name == "course":
             return self.course_root
+        if name in self.module_folders:
+            return self.module_folders[name]
         spec = modules.known().get(name)
         workspace = spec.actor.workspace if spec is not None and spec.actor is not None else ""
         return _expand(workspace) if workspace else self.state_dir / "agents" / name
@@ -331,7 +334,7 @@ class ConfigError(ValueError):
 
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
-    "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
+    "agent_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "handoff_after_turns", "sandbox",
     "schedule", "maintenance", "a2a", "notion", "paths", "allow_protected_folders",
 }
@@ -459,7 +462,7 @@ def _module_settings(data: dict) -> dict[str, dict]:
     """
     found: dict[str, dict] = {}
     for name, spec in modules.known().items():
-        if name in TOP_LEVEL_KEYS or name in ("modules", "channels", "agents"):
+        if name in TOP_LEVEL_KEYS or name in ("modules", "channels", "agents", "folders"):
             if spec.settings:
                 raise ConfigError(f"モジュール「{name}」の設定が、config.toml の [{name}]（本体の設定）とぶつかります。"
                                   "モジュールの名前を変えてください")
@@ -532,6 +535,11 @@ def _with_table(data: dict, table: Path | None) -> dict:
     if old:
         raise ConfigError(f"config.toml の {'・'.join(old)} は、担当の表（{agents_table.AGENTS_FILE}）に移してください"
                           "（uv run kei-agent agents init が移す）")
+    if places := [key for key in agents_table.FOLDER_KEYS if key in data]:
+        rows = "・".join(agents_table.FOLDER_KEYS[key] for key in places)
+        how = "" if table is not None else "（表が無ければ uv run kei-agent agents init が移す）"
+        raise ConfigError(f"config.toml の {'・'.join(places)} は、{agents_table.AGENTS_FILE} の {rows} の行の "
+                          f"folder 列に移してください{how}")
     if table is None:
         return data
     try:
@@ -574,12 +582,14 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     where = table.name if table is not None else AGENTS_FILE
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
+    # 担当の作業場（表の folder 列。研究はテーマのフォルダを置く場所、大学は作業場）
+    folders = data.get("folders", {})
     sandbox = data.get("sandbox", {})
     enabled = _enabled_modules(data, where)
     # モジュールの設定は、そのモジュールの名前の表（[course] など）に書く
     module_settings = _module_settings(data)
     # modules・channels・agents は担当の表から来たもの（config.toml に書いたものは _with_table が断った）
-    _check_keys(data, TOP_LEVEL_KEYS | {"modules", "channels", "agents"}
+    _check_keys(data, TOP_LEVEL_KEYS | {"modules", "channels", "agents", "folders"}
                 | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
     # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
@@ -600,9 +610,10 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     if not isinstance(allow_protected, bool):
         raise ConfigError("config.toml の allow_protected_folders は true か false にしてください")
     config = Config(
-        research_root=_expand(data.get("research_root", DEFAULT_PATHS["research_root"])),
+        research_root=_expand(folders.get("research", DEFAULT_PATHS["research_root"])),
         agent_root=_expand(data.get("agent_root", DEFAULT_PATHS["agent_root"])),
-        course_root=_expand(data.get("course_root", DEFAULT_PATHS["course_root"])),
+        course_root=_expand(folders.get("course", DEFAULT_PATHS["course_root"])),
+        module_folders={name: _expand(path) for name, path in folders.items() if name not in ("research", "course")},
         state_dir=state_dir,
         repo_root=REPO_ROOT,
         allowed_user_id=env.get("KEI_AGENT_ALLOWED_USER_ID", ""),

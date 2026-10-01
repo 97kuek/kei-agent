@@ -40,6 +40,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 | `module` | モジュールの名前。本体の行は `router`（振り分けの AI）と `overview`（研究全体のチャンネル） |
 | `enabled` | `true` / `false` |
 | `channels` | 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら `module.toml` の既定 |
+| `folder` | その担当の作業場。research の行はテーマのフォルダを置く場所（既定 `~/research`）、course の行は大学の作業場（既定 `~/course`）。AI を使う担当の行だけ。`/tmp` の下には置かない（sandbox が一時フォルダへの書き込みを許すため） |
 | `engine` | `claude` / `codex`。空欄の担当は動かない |
 | `model` / `effort` | ふだんは空欄（用途ごとに軽いモデルと重いモデルを選び分ける）。書くと、その担当の用途をすべてそのモデルにする（`[[manual-fable]]` などの明示の用途は除く）。使えるモデルは [architecture.md](../docs/architecture.md#actor-とモデル) |
 

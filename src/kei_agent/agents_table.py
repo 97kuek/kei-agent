@@ -1,16 +1,19 @@
 """担当の表（利用者のフォルダの agents.csv）。モジュールのオンオフ・チャンネル・AI の実行器とモデルを1か所で変える。
 
-1行に1つ（モジュールか、本体の router・overview）。列は module, enabled, channels, engine, model, effort。
+1行に1つ（モジュールか、本体の router・overview）。列は module, enabled, channels, folder, engine, model, effort
+（folder は無くてもよい）。
 
 - enabled … true / false（大文字でもよい）。表に無いモジュールはオフ
 - channels … 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら module.toml の既定
+- folder … その担当の作業場（研究はテーマのフォルダを置く場所）。AI を持つ担当だけ。空欄なら既定
 - engine … claude / codex。空欄は「まだ選んでいない」
 - model / effort … 空欄なら module.toml の用途ごとの選び分け。書けば、その担当の用途をすべてそのモデルにする
   （依頼者が明示したときだけの用途は除く）。使えるモデルは model_policy の一覧の中だけ
 
 config.toml には modules・[channels]・[agents] を書かない（書いてあれば、kei-agent agents init で移すよう知らせて止める）。
+研究と大学の置き場所（前の research_root・course_root）も、この表の folder に書く。
 表が無ければ、組み込みのモジュールを全部使い、AI は未選択。
-読んだ中身は、config.toml と同じ形（modules・channels・agents）にして load_config に渡す。
+読んだ中身は、config.toml と同じ形（modules・channels・agents と、folders）にして load_config に渡す。
 """
 
 from __future__ import annotations
@@ -22,13 +25,17 @@ from pathlib import Path
 from kei_agent import modules
 
 AGENTS_FILE = "agents.csv"
-COLUMNS = ("module", "enabled", "channels", "engine", "model", "effort")
+COLUMNS = ("module", "enabled", "channels", "folder", "engine", "model", "effort")
+# 無くてもよい列（あとから足した列。前の表もそのまま読める）
+OPTIONAL_COLUMNS = ("folder",)
 # 本体の行。router は振り分けの AI、overview は研究全体のチャンネル
 ROUTER = "router"
 OVERVIEW = "overview"
 CORE_ROWS = (ROUTER, OVERVIEW)
-# この表があるときに config.toml に書けないもの
+# config.toml に書けないもの（この表に書く）
 REPLACED_KEYS = ("modules", "channels", "agents")
+# 前は config.toml にあった、研究と大学の置き場所（この表の folder に書く）
+FOLDER_KEYS = {"research_root": "research", "course_root": "course"}
 _TRUE = {"true": True, "false": False}
 
 
@@ -68,13 +75,14 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
     """
     reader = csv.DictReader(io.StringIO(text))
     header = [column.strip() for column in reader.fieldnames or ()]
-    if sorted(header) != sorted(COLUMNS):
+    if not set(COLUMNS) - set(OPTIONAL_COLUMNS) <= set(header) <= set(COLUMNS) or len(set(header)) != len(header):
         raise TableError(f"{name} の1行目（列の名前）は {','.join(COLUMNS)} にしてください（今は {','.join(header) or '空'}）")
     reader.fieldnames = header
     known = modules.known()
     enabled: list[str] = []
     channels: dict[str, list[str]] = {}
     agents: dict[str, dict[str, str]] = {}
+    folders: dict[str, str] = {}
     seen: set[str] = set()
     for line, raw in enumerate(reader, start=2):
         if None in raw:
@@ -91,7 +99,11 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
             raise TableError(f"{where}: 知らないモジュールです（知っているもの: {', '.join(sorted([*known, *CORE_ROWS]))}）")
         names = _channels(row["channels"])
         on = _bool(row["enabled"], where)
-        engine, model, effort = row["engine"], row["model"], row["effort"]
+        engine, model, effort, folder = row["engine"], row["model"], row["effort"], row.get("folder", "")
+        if folder and (module in CORE_ROWS or known[module].actor is None):
+            raise TableError(f"{where}: folder を書けるのは、AI を使う担当の行だけです")
+        if folder:
+            folders[module] = folder
         if module == OVERVIEW:
             if not on:
                 raise TableError(f"{where}: 研究全体のチャンネルはオフにできません（enabled は true）")
@@ -124,7 +136,7 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
         if effort and not model:
             raise TableError(f"{where}: effort を書くときは model も書いてください（空欄なら用途ごとの既定）")
         agents[module] = {"provider": engine, "model": model, "effort": effort}
-    return {"modules": enabled, "channels": channels, "agents": agents}
+    return {"modules": enabled, "channels": channels, "agents": agents, "folders": folders}
 
 
 def load(path: Path) -> dict:
@@ -151,7 +163,7 @@ def with_enabled(text: str, name: str, on: bool) -> str:
 
 
 def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
-    """config.toml の modules・[channels]・[agents] から、同じ中身の表を作る（移すとき）。
+    """config.toml の modules・[channels]・[agents]・research_root・course_root から、同じ中身の表を作る（移すとき）。
     providers は今使っている provider（App Home で選んだもの）。あれば [agents] より先に使う。"""
     providers = providers or {}
     known = modules.known()
@@ -162,9 +174,12 @@ def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(COLUMNS)
 
+    folders = {module: str(data[key]) for key, module in FOLDER_KEYS.items() if data.get(key)}
+
     def row(name: str, enabled: bool, names: object, actor: bool) -> None:
         provider = (providers.get(name) or str(agents.get(name, {}).get("provider", ""))) if actor else ""
-        writer.writerow([name, "true" if enabled else "false", " ".join(names or ()), provider, "", ""])
+        writer.writerow([name, "true" if enabled else "false", " ".join(names or ()), folders.get(name, ""),
+                         provider, "", ""])
 
     row(ROUTER, True, (), True)
     row(OVERVIEW, True, channels.get(OVERVIEW, ()), False)
@@ -172,7 +187,7 @@ def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
         spec = known.get(name)
         if spec is None:
             # 知らないモジュールも行にする（読むときに、どの行が違うかを知らせる）
-            writer.writerow([name, "true", "", "", "", ""])
+            writer.writerow([name, "true", "", "", "", "", ""])
             continue
         kind = channel_kind(spec)
         row(name, name in on, channels.get(kind, ()) if kind else (), spec.actor is not None)

@@ -3,15 +3,12 @@
 # kei-agent setup は、答えに合わせてこれを写す（使うモジュール・研究テーマの置き場所・Notion のホーム）。
 # プロフィールは profile.example.md を ~/.config/kei-agent/profile.md に写す。docs/extensibility.md も参照
 
-# テーマごとの作業用ディレクトリを置く場所。sandbox は一時フォルダへの書き込みを許すので、/tmp などの下には置かない。
+# 研究テーマのフォルダを置く場所と、大学の作業場は、担当の表 agents.csv の folder 列に書く。
 # 既存のフォルダやリポジトリをテーマに使うときは、~/.config/kei-agent/themes.toml に「テーマの名前 = フォルダ」
 # （Slack でテーマのチャンネルに招いたときに「既存のフォルダを使う」を選ぶと、書き足される）
-research_root = "~/research"
 # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）をテーマの置き場所に選べるようにする。
 # フルディスクアクセスの許可も要る（deploy/README.md の「4. 常駐（launchd）」）
 # allow_protected_folders = true
-# 授業の作業場（大学エージェントの claude が動くところ）。資料は Box に置いたまま読むので、ここには置かない
-course_root = "~/course"
 # SQLite などBotの状態を置く場所
 state_dir = "~/.local/state/kei-agent"
 

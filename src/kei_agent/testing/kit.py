@@ -40,7 +40,9 @@ from kei_agent.testing.isolation import (
 OWNER = "UME"
 BOT = "UBOT"
 # 置き場所（テストの一時フォルダの下に作る）
-PLACES = ("research_root", "agent_root", "course_root", "state_dir")
+PLACES = ("agent_root", "state_dir")
+# 研究と大学の置き場所（担当の表の folder 列に書く）
+FOLDERS = ("research_root", "course_root")
 
 
 async def settle(assistant: Assistant) -> None:
@@ -106,7 +108,7 @@ class ModuleKit:
         (home / "config.toml").write_text(self._config_text(settings, extra), encoding="utf-8")
         # モジュールのオンオフ・チャンネル・AI は担当の表に（AI はどれも claude）
         (home / agents_table.AGENTS_FILE).write_text(agents_table.from_config(
-            {"modules": names, "channels": extra.get("channels", {})},
+            {"modules": names, "channels": extra.get("channels", {}), **{key: str(self.tmp / key) for key in FOLDERS}},
             {actor: "claude" for actor in model_actors()}), encoding="utf-8")
         self.config = load_config(env={"KEI_AGENT_HOME": str(home), "KEI_AGENT_ALLOWED_USER_ID": OWNER})
         self.store = Store(self.config.db_path)

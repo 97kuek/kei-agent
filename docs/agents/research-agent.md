@@ -17,7 +17,7 @@
 - 招いたときに [既定の場所に作る] か [既存のフォルダを使う] を選ぶ
 
 ```text
-~/research/<テーマ>/     既定の置き場所（config.toml の research_root）
+~/research/<テーマ>/     既定の置き場所（agents.csv の research の行の folder）
 ├── AGENTS.md            前提・分野・## 検索キーワード・ジョブにする基準（Claude と Codex が読む）
 ├── CLAUDE.md            AGENTS.md を読み込む1行
 ├── inputs/              添付されたファイル
@@ -100,7 +100,7 @@
 
 | 名前 | 場所 | 中身 |
 |---|---|---|
-| `research_root` | `config.toml` | 作業場の既定の置き場所（既定 `~/research`） |
+| `folder`（research の行） | `agents.csv` | テーマのフォルダを置く場所（既定 `~/research`） |
 | `allow_protected_folders` | `config.toml` | 保護フォルダを選べるようにする |
 | `S2_API_KEY`（任意） | `kei-agent-research.zsh` | Semantic Scholar の鍵。論文を探す回数の上限が上がる |
 

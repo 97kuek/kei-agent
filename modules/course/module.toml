@@ -14,7 +14,7 @@ shell = false
 web = false
 notion = "write"
 timeout_minutes = 5
-# 作業場（前提のメモの CLAUDE.md を置く）。設定の course_root で変えられる
+# 作業場（前提のメモの AGENTS.md を置く）。agents.csv の course の行の folder で変えられる
 workspace = "~/course"
 default_use_case = "course_explain"
 classify = "1資料の説明は course_explain、課題要件・評価基準の整理は course_requirements、複数資料や試験範囲の比較は course_compare、履修・卒業計画の選択肢提案は course_degree_plan。"

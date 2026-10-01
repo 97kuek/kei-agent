@@ -240,13 +240,12 @@ def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str],
     else:
         names = choose_modules(asker, modules.known())
         engine = choose_engine(asker, which)
-        table_text = agents_table.from_config({"modules": names}, {actor: engine for actor in model_actors()})
+        where = {"research_root": asker.text("  研究テーマの作業場を置く場所", "~/research")} if "research" in names else {}
+        table_text = agents_table.from_config({"modules": names, **where}, {actor: engine for actor in model_actors()})
     if path.exists():
         print(f"  もうある: {path}（書き換えない）")
     else:
         answers: dict[tuple[str, str], str] = {}
-        if "research" in names:
-            answers[("", "research_root")] = asker.text("  研究テーマの作業場を置く場所", "~/research")
         if "notion" in names:
             print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから config.toml の [notion] に書いてもよい）")
             homes = [("hub_home", "共通ホーム（Daily・振り返り・予定・時間の記録）"),
