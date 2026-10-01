@@ -98,10 +98,14 @@ def test_actors_without_an_ai_and_missing_commands(config):
     assert found["codex のコマンドが見つからない"] == ERROR and found["claude がある"] == OK
 
 
-def test_the_ai_chosen_in_app_home_wins(config, store):
+def test_the_ai_chosen_in_app_home_wins_and_doctor_never_writes_the_state(config, store, tmp_path):
+    """点検は読むだけ（状態のデータベースが無ければ作らず、あっても読み取りだけで開く）。"""
     store.set_setting("agent.work.provider", "codex")
-    config = replace(config, agent_profiles={**config.agent_profiles, "work": AgentProfile(provider="")})
-    assert doctor.chosen_providers(config)["work"] == "codex"
+    chosen = replace(config, agent_profiles={**config.agent_profiles, "work": AgentProfile(provider="")})
+    assert doctor.chosen_providers(chosen)["work"] == "codex"
+    fresh = replace(config, state_dir=tmp_path / "no-state")
+    assert set(doctor.chosen_providers(fresh).values()) == {"claude"}      # config.toml の [agents] から
+    assert not fresh.db_path.exists()
 
 
 # 常駐と版
@@ -182,10 +186,3 @@ def test_the_command_runs_the_app_without_arguments(monkeypatch):
     with pytest.raises(SystemExit) as unknown:
         cli.main(["nothing"])
     assert unknown.value.code == 2
-
-
-def test_doctor_never_creates_or_writes_the_state(config, tmp_path):
-    """点検は読むだけ（状態のデータベースが無ければ作らず、あっても読み取りだけで開く）。"""
-    fresh = replace(config, state_dir=tmp_path / "no-state")
-    assert set(doctor.chosen_providers(fresh).values()) == {"claude"}      # config.toml の [agents] から
-    assert not fresh.db_path.exists()

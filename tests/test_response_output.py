@@ -13,41 +13,31 @@ HEADINGS = ("**今日のタスク**", "**夜間処理の結果**", "**確認待�
             "**今日考えるとよい問い**")
 
 
-def test_finalizer_keeps_only_the_marked_user_facing_answer():
-    raw = "まず材料を確認します。\n<<kei-agent-final>>\n僕が調べた結果、課題はないよ。\n<<kei-agent-final-end>>"
+def _final(text):
+    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
 
-    assert finalize_conversation(raw) == "僕が調べた結果、課題はないよ。"
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    # 印の外（作業の実況）は捨てる
+    ("まず材料を確認します。\n" + _final("僕が調べた結果、課題はないよ。"), "僕が調べた結果、課題はないよ。"),
+    # プロンプトは outputs/ のファイル名を書くよう頼んでいる。これで返答全体を捨てない
+    (_final("図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"),
+     "図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"),
+    # 手元の絶対パスは、答えを捨てずにファイル名だけにする
+    (_final("結果は /Users/kei/research/amr/outputs/fig.png と ~/notes/memo.md、file:///tmp/x.txt にあるよ"),
+     "結果は fig.png と memo.md、x.txt にあるよ"),
+    # 手順や道具の名前、ふつうの Web のリンクは通す
+    (_final("まず締切を確認するといいよ。Claude Code の話なら続けるね"),
+     "まず締切を確認するといいよ。Claude Code の話なら続けるね"),
+    (_final("資料は https://example.com/notes にあるよ。"), "資料は https://example.com/notes にあるよ。"),
+])
+def test_finalizer_keeps_the_marked_user_facing_answer(raw, expected):
+    assert finalize_conversation(raw) == expected
 
 
 def test_finalizer_rejects_missing_marker():
     with pytest.raises(OutputError):
         finalize_conversation("確認します")
-
-
-def test_finalizer_keeps_workspace_file_names():
-    # プロンプトは outputs/ のファイル名を書くよう頼んでいる。これで返答全体を捨てない
-    raw = "<<kei-agent-final>>\n図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ\n<<kei-agent-final-end>>"
-
-    assert finalize_conversation(raw) == "図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"
-
-
-def test_finalizer_hides_absolute_local_paths_instead_of_dropping_the_answer():
-    raw = ("<<kei-agent-final>>\n結果は /Users/kei/research/amr/outputs/fig.png と "
-           "~/notes/memo.md、file:///tmp/x.txt にあるよ\n<<kei-agent-final-end>>")
-
-    assert finalize_conversation(raw) == "結果は fig.png と memo.md、x.txt にあるよ"
-
-
-def test_finalizer_allows_ordinary_words_about_steps_and_tools():
-    raw = "<<kei-agent-final>>\nまず締切を確認するといいよ。Claude Code の話なら続けるね\n<<kei-agent-final-end>>"
-
-    assert finalize_conversation(raw) == "まず締切を確認するといいよ。Claude Code の話なら続けるね"
-
-
-def test_finalizer_allows_a_normal_web_link():
-    text = "<<kei-agent-final>>\n資料は https://example.com/notes にあるよ。\n<<kei-agent-final-end>>"
-
-    assert finalize_conversation(text) == "資料は https://example.com/notes にあるよ。"
 
 
 def test_structured_response_rejects_exception_details_and_local_paths():

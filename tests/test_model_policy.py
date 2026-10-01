@@ -5,58 +5,44 @@ import pytest
 from kei_agent.model_policy import ModelPolicyError, UseCase, explicit_use_case, is_manual, resolve
 
 
-def test_research_execution_uses_provider_specific_recipes():
+@pytest.mark.parametrize("actor, provider, use_case, model, effort", [
     # 研究の用途は、研究のモジュールの module.toml の [use_cases]
-    codex = resolve("research", "codex", "research_execute")
-    claude = resolve("research", "claude", "research_execute")
-
-    assert (codex.model, codex.reasoning_effort) == ("gpt-6-sol", "high")
-    assert (claude.model, claude.reasoning_effort) == ("claude-sonnet-5", "high")
-
-
-def test_router_uses_lightweight_recipe_without_claude_thinking():
-    claude = resolve("router", "claude", UseCase.ROUTING)
-
-    assert (claude.model, claude.reasoning_effort) == ("claude-haiku-4-5", "")
+    ("research", "codex", "research_execute", "gpt-6-sol", "high"),
+    ("research", "claude", "research_execute", "claude-sonnet-5", "high"),
+    ("router", "claude", UseCase.ROUTING, "claude-haiku-4-5", ""),     # 振り分けは軽く、考えさせない
+])
+def test_each_use_case_resolves_its_fixed_recipe(actor, provider, use_case, model, effort):
+    recipe = resolve(actor, provider, use_case)
+    assert (recipe.model, recipe.reasoning_effort) == (model, effort)
 
 
-def test_normal_use_cases_cannot_select_manual_top_model():
-    with pytest.raises(ModelPolicyError, match="手動指定"):
-        resolve("research", "codex", "manual_astra")
+@pytest.mark.parametrize("actor, provider, use_case, manual, match", [
+    ("research", "codex", "manual_astra", False, "手動指定"),     # ふつうの用途からは最上位を選べない
+    ("research", "", "research_execute", False, "provider"),
+    ("unknown", "codex", "research_execute", False, "actor"),
+    ("router", "codex", "research_execute", True, None),          # 担当の外の用途
+    ("work", "codex", "course_requirements", True, None),
+    ("course", "codex", "manual_astra", True, None),
+    ("research", "codex", "manual_fable", True, None),            # fable は研究の Claude だけ
+])
+def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_case, manual, match):
+    with pytest.raises(ModelPolicyError, match=match):
+        resolve(actor, provider, use_case, manual=manual)
 
 
-def test_owner_explicit_manual_label_can_select_the_exception(config, store):
+def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, store):
+    """選んだ provider の固定のレシピになる。持ち主が [[manual-astra]] と書いたときだけ例外の最上位を使う。"""
     from kei_agent import settings
     from kei_agent.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
-    use_case, prompt = explicit_use_case("research", "[[manual-astra]] 厳密な反証レビューをして")
+    recipe = resolve_selected(config, store, "research", "research_execute")
+    assert (recipe.provider, recipe.model, recipe.reasoning_effort) == ("codex", "gpt-6-sol", "high")
 
+    use_case, prompt = explicit_use_case("research", "[[manual-astra]] 厳密な反証レビューをして")
     recipe = resolve_selected(config, store, "research", use_case, manual=is_manual(use_case))
     assert prompt == "厳密な反証レビューをして"
     assert (recipe.model, recipe.reasoning_effort, recipe.manual_only) == ("gpt-6-astra", "xhigh", True)
-
-
-def test_unknown_actor_provider_or_use_case_is_rejected():
-    with pytest.raises(ModelPolicyError, match="provider"):
-        resolve("research", "", "research_execute")
-    with pytest.raises(ModelPolicyError, match="actor"):
-        resolve("unknown", "codex", "research_execute")
-
-
-@pytest.mark.parametrize(("actor", "case"), [
-    ("router", "research_execute"),
-    ("work", "course_requirements"),
-    ("course", "manual_astra"),
-])
-def test_resolve_rejects_use_case_outside_actor_policy(actor, case):
-    with pytest.raises(ModelPolicyError):
-        resolve(actor, "codex", case, manual=True)
-
-
-def test_manual_fable_requires_research_and_claude():
-    with pytest.raises(ModelPolicyError):
-        resolve("research", "codex", "manual_fable", manual=True)
 
 
 @pytest.mark.parametrize("provider, model", [
@@ -84,34 +70,24 @@ def test_config_without_a_table_leaves_every_provider_unselected(tmp_path):
     assert config.agent_profiles["router"].provider == ""
 
 
-def test_selected_provider_resolves_its_fixed_recipe(config, store):
-    from kei_agent import settings
-    from kei_agent.model_policy import resolve_selected
-
-    settings.set_agent_provider(store, "research", "codex")
-    recipe = resolve_selected(config, store, "research", "research_execute")
-
-    assert (recipe.provider, recipe.model, recipe.reasoning_effort) == ("codex", "gpt-6-sol", "high")
+# 大学と仕事のモジュールの用途（module.toml の [use_cases]）
+COURSE = frozenset({"course_explain", "course_requirements", "course_compare", "course_degree_plan"})
+WORK = frozenset({"work_single_source", "work_cross_source", "work_decide"})
+RESEARCH = frozenset({"research_extract", "research_design"})
 
 
-def test_lightweight_classifier_requires_valid_high_confidence_json():
+@pytest.mark.parametrize("answer, allowed, expected", [
+    ('{"use_case":"research_extract","confidence":0.9}', RESEARCH, "research_extract"),
+    ('{"use_case":"research_design","confidence":0.7}', RESEARCH, None),      # 自信が低い
+    ('{"use_case":"unknown","confidence":1}', RESEARCH, None),
+    ('{"use_case":"course_requirements","confidence":0.9}', COURSE, "course_requirements"),
+    ('{"use_case":"work_decide","confidence":0.9}', COURSE, None),            # ほかの担当の用途
+    ('{"use_case":"work_decide","confidence":0.9}', WORK, "work_decide"),
+])
+def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answer, allowed, expected):
     from kei_agent.model_classifier import parse
 
-    research = frozenset({"research_extract", "research_design"})
-    assert parse('{"use_case":"research_extract","confidence":0.9}', research) == "research_extract"
-    assert parse('{"use_case":"research_design","confidence":0.7}', research) is None
-    assert parse('{"use_case":"unknown","confidence":1}', research) is None
-
-
-def test_lightweight_classifier_restricts_each_actor_to_its_own_cases():
-    from kei_agent.model_classifier import parse
-
-    # 大学と仕事のモジュールの用途（module.toml の [use_cases]）
-    course = frozenset({"course_explain", "course_requirements", "course_compare", "course_degree_plan"})
-    work = frozenset({"work_single_source", "work_cross_source", "work_decide"})
-    assert parse('{"use_case":"course_requirements","confidence":0.9}', course) == "course_requirements"
-    assert parse('{"use_case":"work_decide","confidence":0.9}', course) is None
-    assert parse('{"use_case":"work_decide","confidence":0.9}', work) == "work_decide"
+    assert parse(answer, allowed) == expected
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):

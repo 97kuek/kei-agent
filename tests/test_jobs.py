@@ -25,36 +25,42 @@ def theme(config):
     return ws
 
 
+@pytest.fixture
+def pueue():
+    return FakePueue()
+
+
+@pytest.fixture
+def manager(config, store, theme, pueue):
+    store.upsert_thread("C1", "100.1", "vlm", None)
+    return JobManager(config, store, pueue)
+
+
+async def _submit(manager, theme, request_id, channel="C1", thread_ts="100.1", **extra):
+    write_request(theme.cwd, action="submit", request_id=request_id, channel=channel, thread_ts=thread_ts,
+                  name="sweep", script="scripts/sweep.py", **{"args": [], **extra})
+    return await manager.process_requests(theme.cwd)
+
+
 # build_job_command
 
 def test_command_runs_python_script_with_log(theme):
     cmd = build_job_command(theme.cwd, "scripts/sweep.py", ["--n", "3; rm -rf /"], 7)
     assert cmd == "mkdir -p logs && exec python3 scripts/sweep.py --n '3; rm -rf /' > logs/job-7.log 2>&1"
-
-
-def test_command_uses_uv_when_theme_has_pyproject(theme):
+    # テーマに pyproject.toml があれば uv で動かす
     (theme.cwd / "pyproject.toml").write_text("[project]\nname='x'\n")
     assert "exec uv run python scripts/sweep.py" in build_job_command(theme.cwd, "scripts/sweep.py", [], 1)
 
 
-@pytest.mark.parametrize("script", ["/etc/passwd", "../other/x.py", "", "scripts/missing.py"])
-def test_command_rejects_paths_outside_or_missing(theme, script):
-    with pytest.raises(JobRequestError):
-        build_job_command(theme.cwd, script, [], 1)
-
-
-def test_command_rejects_symlink_escape(theme, tmp_path):
+@pytest.mark.parametrize("script", ["/etc/passwd", "../other/x.py", "", "scripts/missing.py",
+                                    "scripts/link.py", "run.rb"])
+def test_command_rejects_paths_outside_missing_or_not_python(theme, tmp_path, script):
     outside = tmp_path / "evil.py"
     outside.write_text("")
-    os.symlink(outside, theme.cwd / "scripts" / "link.py")
-    with pytest.raises(JobRequestError):
-        build_job_command(theme.cwd, "scripts/link.py", [], 1)
-
-
-def test_command_rejects_other_suffix(theme):
+    os.symlink(outside, theme.cwd / "scripts" / "link.py")       # テーマの外へ逃げるリンク
     (theme.cwd / "run.rb").write_text("")
     with pytest.raises(JobRequestError):
-        build_job_command(theme.cwd, "run.rb", [], 1)
+        build_job_command(theme.cwd, script, [], 1)
 
 
 def test_job_env_drops_secrets_and_own_venv(config):
@@ -68,20 +74,20 @@ def test_job_env_drops_secrets_and_own_venv(config):
     assert env == {"PATH": "/bin", "HOME": "/h"}
 
 
-def test_parse_request_rejects_a_cancel_without_a_number():
-    """job_id が数字でない依頼でも、ジョブの仕組みごと壊れないようにする。"""
-    for bad in (None, "abc", [1], {}):
-        with pytest.raises(JobRequestError):
-            parse_request({"action": "cancel", "request_id": "r", "job_id": bad})
-    with pytest.raises(JobRequestError):
-        parse_request({"action": "cancel", "request_id": "r"})
+SUBMIT = {"action": "submit", "request_id": "r", "script": "scripts/sweep.py"}
 
 
-def test_parse_request_validates_args():
+@pytest.mark.parametrize("request_", [
+    # job_id が数字でない依頼でも、ジョブの仕組みごと壊れないようにする
+    *({"action": "cancel", "request_id": "r", "job_id": bad} for bad in (None, "abc", [1], {})),
+    {"action": "cancel", "request_id": "r"},
+    {"action": "delete", "request_id": "r"},
+    {**SUBMIT, "args": "not-a-list"},
+    *({**SUBMIT, "expects": bad} for bad in (["/etc/passwd"], ["../x.csv"], [""], "outputs/a.csv", [1], ["a"] * 11)),
+])
+def test_parse_request_refuses_broken_requests(request_):
     with pytest.raises(JobRequestError):
-        parse_request({"action": "submit", "request_id": "r", "args": "not-a-list"})
-    with pytest.raises(JobRequestError):
-        parse_request({"action": "delete", "request_id": "r"})
+        parse_request(request_)
 
 
 # pueue の状態
@@ -100,16 +106,10 @@ def test_interpret_pueue_status(status, expected):
 
 # JobManager
 
-async def test_submit_request_from_known_thread(config, store, theme):
-    store.upsert_thread("C1", "100.1", "vlm", None)
-    pueue = FakePueue()
-    manager = JobManager(config, store, pueue)
-    path = write_request(theme.cwd, action="submit", request_id="r1", channel="C1", thread_ts="100.1",
-                         name="sweep", script="scripts/sweep.py", args=["--n", "3"])
+async def test_submit_request_from_known_thread(manager, pueue, theme):
+    handled = await _submit(manager, theme, "r1", args=["--n", "3"])
 
-    handled = await manager.process_requests(theme.cwd)
-
-    assert not path.exists()
+    assert not (theme.cwd / ".kei-agent" / "requests" / "r1.json").exists()
     outcome, = handled
     job, error = outcome.job, outcome.error
     assert error is None and job.pueue_id == 0 and job.status == "queued"
@@ -118,32 +118,18 @@ async def test_submit_request_from_known_thread(config, store, theme):
     assert state["status"] == "queued" and state["log"] == f"logs/job-{job.id}.log"
 
     # 同じ依頼をもう一度置いても二重に投入しない
-    write_request(theme.cwd, action="submit", request_id="r1", channel="C1", thread_ts="100.1",
-                  name="sweep", script="scripts/sweep.py", args=[])
-    assert await manager.process_requests(theme.cwd) == []
+    assert await _submit(manager, theme, "r1") == []
     assert len(pueue.added) == 1
 
 
-async def test_submit_rejects_thread_of_another_theme(config, store, theme):
+async def test_submit_rejects_thread_of_another_theme(manager, pueue, store, theme):
     store.upsert_thread("C2", "200.1", "other", None)
-    pueue = FakePueue()
-    manager = JobManager(config, store, pueue)
-    write_request(theme.cwd, action="submit", request_id="r2", channel="C2", thread_ts="200.1",
-                  name="x", script="scripts/sweep.py", args=[])
-
-    outcome, = await manager.process_requests(theme.cwd)
-
+    outcome, = await _submit(manager, theme, "r2", channel="C2", thread_ts="200.1")
     assert outcome.error and outcome.job.status == "rejected" and pueue.added == []
 
 
-async def test_refresh_reports_finished_job_once(config, store, theme):
-    store.upsert_thread("C1", "100.1", "vlm", None)
-    pueue = FakePueue()
-    manager = JobManager(config, store, pueue)
-    write_request(theme.cwd, action="submit", request_id="r3", channel="C1", thread_ts="100.1",
-                  name="sweep", script="scripts/sweep.py", args=[])
-    job = (await manager.process_requests(theme.cwd))[0].job
-
+async def test_refresh_reports_finished_job_once_and_cancel_kills(manager, pueue, theme):
+    job = (await _submit(manager, theme, "r3"))[0].job
     assert await manager.refresh() == []
 
     pueue.task_status[job.pueue_id] = {"status": {"Done": {
@@ -155,24 +141,15 @@ async def test_refresh_reports_finished_job_once(config, store, theme):
     manager.mark_reported(finished)
     assert await manager.refresh() == []
 
-
-async def test_cancel_request_kills_running_job(config, store, theme):
-    store.upsert_thread("C1", "100.1", "vlm", None)
-    pueue = FakePueue()
-    manager = JobManager(config, store, pueue)
-    write_request(theme.cwd, action="submit", request_id="r4", channel="C1", thread_ts="100.1",
-                  name="sweep", script="scripts/sweep.py", args=[])
-    job = (await manager.process_requests(theme.cwd))[0].job
-
-    write_request(theme.cwd, action="cancel", request_id="c1", job_id=job.id)
+    # 取り消しの依頼は、動いているジョブを止める
+    running = (await _submit(manager, theme, "r4"))[0].job
+    write_request(theme.cwd, action="cancel", request_id="c1", job_id=running.id)
     await manager.process_requests(theme.cwd)
+    assert pueue.killed == [running.pueue_id]
 
-    assert pueue.killed == [job.pueue_id]
 
-
-async def test_unreadable_request_is_reported(config, store, theme):
+async def test_unreadable_request_is_reported(manager, theme):
     """読めない依頼を黙って捨てると、Claude は「投入した」と思ったまま待ち続ける。"""
-    manager = JobManager(config, store, FakePueue())
     path = theme.cwd / ".kei-agent" / "requests" / "broken.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"action": "cancel", "request_id": "c1", "job_id": null, "channel": "C1", "thread_ts": "1.1"}')
@@ -186,71 +163,37 @@ async def test_unreadable_request_is_reported(config, store, theme):
 
 # log_tail
 
-def test_log_tail_collapses_carriage_return_progress_lines(store, theme):
-    """curl の進捗表示は \r で同じ行を上書きするだけなので、末尾には最終状態の1行だけ残したい。"""
-    job = store.add_job("r5", "C1", "100.1", str(theme.cwd), "sweep", "", status="queued")
-    log_dir = theme.cwd / "logs"
-    log_dir.mkdir(exist_ok=True)
-    progress = "\r".join(f"{p}%" for p in range(0, 101, 10))
-    (log_dir / f"job-{job.id}.log").write_text(
-        f"start\n{progress}\ndone downloading\nTraceback (most recent call last):\nValueError: boom\n"
-    )
-
-    tail = log_tail(job, lines=10)
-
-    assert tail.splitlines() == [
-        "start",
-        "100%",
-        "done downloading",
-        "Traceback (most recent call last):",
-        "ValueError: boom",
-    ]
+_TRACE = 'Traceback (most recent call last):\n  File "train.py", line 3, in <module>\n    main()\nValueError: bad shape'
+_EPOCHS = "\n".join(f"Epoch {i}/100 - loss: 0.{i:02d}" for i in range(1, 101))
+_BARS = "\n".join(f" {p}%|{'█' * (p // 10)}| {p}/100 [00:01<00:01]" for p in range(0, 101, 5))
 
 
-def _write_log(theme, job, text: str, newline: str = "\n") -> None:
-    log_dir = theme.cwd / "logs"
-    log_dir.mkdir(exist_ok=True)
-    (log_dir / f"job-{job.id}.log").write_bytes(text.replace("\n", newline).encode())
+@pytest.mark.parametrize(("text", "lines", "expected"), [
+    # curl の進捗表示は \r で同じ行を上書きするだけなので、最終状態の1行だけ残す
+    ("start\n" + "\r".join(f"{p}%" for p in range(0, 101, 10))
+     + "\ndone downloading\nTraceback (most recent call last):\nValueError: boom\n", 10,
+     ["start", "100%", "done downloading", "Traceback (most recent call last):", "ValueError: boom"]),
+    # 1行ずつ出る進捗（tqdm の棒・Epoch n/m など）は、続いたところを最後の1行にまとめる。結果の行は残す
+    (f"start\n{_EPOCHS}\nTest accuracy: 91.2%\n{_BARS}\ndone\n", 10,
+     ["start", "Epoch 100/100 - loss: 0.100", "Test accuracy: 91.2%", " 100%|██████████| 100/100 [00:01<00:01]",
+      "done"]),
+    # 末尾がほかの行で埋まっても、その前の Traceback を前に足して AI に渡す
+    ("start\n" + _TRACE + "\n" + "\n".join(f"cleanup {i}" for i in range(30)) + "\n", 5,
+     [*_TRACE.splitlines(), "（中略）", *[f"cleanup {i}" for i in range(25, 30)]]),
+    # 末尾に見えている失敗は、繰り返さない
+    ("start\nRuntimeError: CUDA out of memory\nexit 1\n", 5, ["start", "RuntimeError: CUDA out of memory", "exit 1"]),
+    # Windows の改行でも読める
+    ("start\r\nloss 0.5\r\ndone\r\n", 5, ["start", "loss 0.5", "done"]),
+])
+def test_log_tail_keeps_what_the_ai_needs(store, theme, text, lines, expected):
+    job = store.add_job("r5", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
+    (theme.cwd / "logs").mkdir(exist_ok=True)
+    (theme.cwd / "logs" / f"job-{job.id}.log").write_bytes(text.encode())
+    assert log_tail(job, lines=lines).splitlines() == expected
 
 
-def test_log_tail_squeezes_progress_lines_printed_one_per_line(store, theme):
-    """1行ずつ出る進捗（tqdm の棒・Epoch n/m など）は、続いたところを最後の1行にまとめる。結果の行は残す。"""
-    job = store.add_job("r6", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
-    epochs = "\n".join(f"Epoch {i}/100 - loss: 0.{i:02d}" for i in range(1, 101))
-    bars = "\n".join(f" {p}%|{'█' * (p // 10)}| {p}/100 [00:01<00:01]" for p in range(0, 101, 5))
-    _write_log(theme, job, f"start\n{epochs}\nTest accuracy: 91.2%\n{bars}\ndone\n")
-
-    assert log_tail(job, lines=10).splitlines() == [
-        "start", "Epoch 100/100 - loss: 0.100", "Test accuracy: 91.2%", " 100%|██████████| 100/100 [00:01<00:01]", "done"]
-
-
-def test_log_tail_brings_back_an_error_the_tail_does_not_show(store, theme):
-    """末尾がほかの行で埋まっても、その前の Traceback を前に足して AI に渡す。"""
-    job = store.add_job("r7", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
-    trace = 'Traceback (most recent call last):\n  File "train.py", line 3, in <module>\n    main()\nValueError: bad shape'
-    later = "\n".join(f"cleanup {i}" for i in range(30))
-    _write_log(theme, job, f"start\n{trace}\n{later}\n")
-
-    tail = log_tail(job, lines=5).splitlines()
-    assert tail == [*trace.splitlines(), "（中略）", *[f"cleanup {i}" for i in range(25, 30)]]
-
-
-def test_log_tail_does_not_repeat_an_error_already_in_the_tail(store, theme):
-    job = store.add_job("r8", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
-    _write_log(theme, job, "start\nRuntimeError: CUDA out of memory\nexit 1\n")
-    assert log_tail(job, lines=5).splitlines() == ["start", "RuntimeError: CUDA out of memory", "exit 1"]
-
-
-def test_log_tail_reads_logs_with_windows_line_endings(store, theme):
-    job = store.add_job("r10", "C1", "100.1", str(theme.cwd), "train", "", status="queued")
-    _write_log(theme, job, "start\nloss 0.5\ndone\n", newline="\r\n")
-    assert log_tail(job, lines=5).splitlines() == ["start", "loss 0.5", "done"]
-
-
-async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
+async def test_job_being_submitted_is_not_marked_failed(manager, store, theme):
     """pueue に投入し終える前に状態を見に行っても、動いているジョブを失敗と決めつけない。"""
-    store.upsert_thread("C1", "100.1", "vlm", None)
-    manager = JobManager(config, store, FakePueue())
     job = store.add_job("r9", "C1", "100.1", str(theme.cwd), "sweep", "", status="queued")
     assert job.pueue_id is None
 
@@ -258,53 +201,38 @@ async def test_job_being_submitted_is_not_marked_failed(config, store, theme):
     assert store.get_job(job.id).status == "queued"
 
 
-async def test_job_left_without_pueue_id_is_adopted_from_its_label(config, store, theme):
-    """投入したあと pueue_id を書く前に落ちても、ラベルから拾い直す。"""
-    pueue = FakePueue()
-    manager = JobManager(config, store, pueue)
-    job = store.add_job("r10", "C1", "100.1", str(theme.cwd), "sweep", "scripts/sweep.py", status="queued")
-    task_id = await pueue.add(theme.cwd, "cmd", label=f"kei-agent-{job.id}")
+def _stale_job(store, theme, request_id):
+    job = store.add_job(request_id, "C1", "100.1", str(theme.cwd), "sweep", "scripts/sweep.py", status="queued")
     with store.conn:
         store.conn.execute("UPDATE jobs SET submitted_at = submitted_at - 3600 WHERE id = ?", (job.id,))
+    return job
+
+
+async def test_job_left_without_pueue_id_is_adopted_from_its_label(manager, pueue, store, theme):
+    """投入したあと pueue_id を書く前に落ちても、ラベルから拾い直す。"""
+    job = _stale_job(store, theme, "r10")
+    task_id = await pueue.add(theme.cwd, "cmd", label=f"kei-agent-{job.id}")
 
     assert await manager.refresh() == []
     assert store.get_job(job.id).pueue_id == task_id
     assert store.active_jobs()[0].id == job.id
 
 
-async def test_job_lost_before_reaching_pueue_is_reported_failed(config, store, theme):
-    manager = JobManager(config, store, FakePueue())
-    job = store.add_job("r11", "C1", "100.1", str(theme.cwd), "sweep", "scripts/sweep.py", status="queued")
-    with store.conn:
-        store.conn.execute("UPDATE jobs SET submitted_at = submitted_at - 3600 WHERE id = ?", (job.id,))
-
+async def test_job_lost_before_reaching_pueue_is_reported_failed(manager, store, theme):
+    job = _stale_job(store, theme, "r11")
     failed, = await manager.refresh()
     assert failed.id == job.id and failed.status == "failed" and "途中で" in failed.detail
 
 
 # できるはずのファイル（--expect）
 
-
-def test_parse_request_validates_expects():
-    base = {"action": "submit", "request_id": "r", "script": "scripts/sweep.py"}
-    assert parse_request({**base, "expects": ["outputs/a.csv"]}).expects == ["outputs/a.csv"]
-    assert parse_request(base).expects == []
-    for bad in (["/etc/passwd"], ["../x.csv"], [""], "outputs/a.csv", [1], ["a"] * 11):
-        with pytest.raises(JobRequestError):
-            parse_request({**base, "expects": bad})
-
-
-async def test_finished_job_reports_the_files_that_are_missing(config, store, theme):
+async def test_finished_job_reports_the_files_that_are_missing(manager, theme):
     """終了コードが成功でも、できるはずのファイルが無ければ、成功として扱わない。"""
     from kei_agent.auto_messages import expected_files_note
     from kei_agent.jobs import missing_outputs
 
-    store.upsert_thread("C1", "100.1", "vlm", None)
-    manager = JobManager(config, store, FakePueue())
-    write_request(theme.cwd, action="submit", request_id="r9", channel="C1", thread_ts="100.1",
-                  name="sweep", script="scripts/sweep.py", args=[],
-                  expects=["outputs/sweep.csv", "outputs/sweep.png"])
-    job = (await manager.process_requests(theme.cwd))[0].job
+    assert parse_request(SUBMIT).expects == []
+    job = (await _submit(manager, theme, "r9", expects=["outputs/sweep.csv", "outputs/sweep.png"]))[0].job
 
     assert job.expected_files == ["outputs/sweep.csv", "outputs/sweep.png"]
     state = json.loads((theme.cwd / ".kei-agent" / "jobs" / f"{job.id}.json").read_text())

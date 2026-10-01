@@ -8,20 +8,17 @@ from kei_agent import codex_apps
 from kei_agent.codex_apps import AppsUnavailable, app_ids, installed_apps, resolve_apps
 
 
-def test_resolve_apps_rejects_an_app_that_cannot_be_called():
-    installed = [{"id": "box-id", "runtimeName": "Box", "enabled": True, "callable": False}]
-    with pytest.raises(AppsUnavailable, match="Box"):
-        resolve_apps(installed, ["Box"])
-
-
-def test_resolve_apps_maps_names_to_current_ids():
+def test_resolve_apps_maps_names_to_current_ids_and_rejects_uncallable_ones():
     installed = [
         {"id": "calendar-id", "runtimeName": "Microsoft Outlook Calendar", "enabled": True, "callable": True},
         {"id": "mail-id", "runtimeName": "Microsoft Outlook Email", "enabled": True, "callable": True},
         {"id": "gmail-id", "runtimeName": "Gmail", "enabled": True, "callable": True},
+        {"id": "box-id", "runtimeName": "Box", "enabled": True, "callable": False},
     ]
     assert resolve_apps(installed, ["Microsoft Outlook Email", "Microsoft Outlook Calendar"]) == {
         "Microsoft Outlook Calendar": "calendar-id", "Microsoft Outlook Email": "mail-id"}
+    with pytest.raises(AppsUnavailable, match="Box"):
+        resolve_apps(installed, ["Box"])
 
 
 def _server(tmp_path, body: str):
@@ -66,11 +63,13 @@ async def test_silent_app_server_is_stopped_on_timeout(tmp_path):
     assert not _alive(int((tmp_path / "pid").read_text()))
 
 
-async def test_app_ids_reuses_the_list_for_a_while(monkeypatch):
+async def test_app_ids_reuses_the_list_for_a_while_and_says_when_it_cannot_be_read(monkeypatch):
     calls = []
 
     async def installed(codex_bin, timeout_seconds=30):
         calls.append(codex_bin)
+        if codex_bin == "broken":
+            raise OSError("codex がない")
         return [{"id": "box-id", "runtimeName": "Box", "enabled": True, "callable": True}]
 
     monkeypatch.setattr(codex_apps, "installed_apps", installed)
@@ -79,13 +78,5 @@ async def test_app_ids_reuses_the_list_for_a_while(monkeypatch):
     assert await app_ids("codex", ["Box"]) == {"Box": "box-id"}
     assert await app_ids("codex", []) == {}
     assert calls == ["codex"]
-
-
-async def test_app_ids_says_when_the_list_cannot_be_read(monkeypatch):
-    async def broken(codex_bin, timeout_seconds=30):
-        raise OSError("codex がない")
-
-    monkeypatch.setattr(codex_apps, "installed_apps", broken)
-    monkeypatch.setattr(codex_apps, "_cache", {})
     with pytest.raises(AppsUnavailable, match="一覧"):
-        await app_ids("codex", ["Box"])
+        await app_ids("broken", ["Box"])

@@ -20,6 +20,7 @@ def test_course_reads_box_and_writes_notion_only_through_the_gateway():
     assert [c.name for c in course.connectors] == ["box"]
     assert all("upload" not in tool and "move" not in tool for tool in course.connectors[0].claude_tools)
     # Codex の Box も、同じ読む道具だけ
+    assert [app.name for app in course.codex_apps] == ["Box"]
     assert course.codex_apps[0].tools == tuple(f"box.{tool}" for tool in course.connectors[0].claude_tools)
 
 
@@ -31,8 +32,9 @@ def test_work_has_no_notion_and_reads_outlook_teams_and_sharepoint():
     for tool in ("outlook_calendar_search", "chat_message_search", "teams_list_channel_messages",
                  "sharepoint_search", "read_resource"):
         assert f"mcp__claude_ai_Microsoft_365__{tool}" in names
-    writes = ("send", "create", "delete", "reply", "update", "move", "copy", "rename", "forward", "trash")
-    assert not any(word in name for name in names for word in writes)
+    writes = ("send", "create", "delete", "reply", "update", "move", "copy", "rename", "forward", "trash",
+              "upload", "post")
+    assert not any(word in name.lower() for name in names for word in writes)
     # Codex はメールと予定の App を読む（Teams・SharePoint の App は、道具の名前を確かめてから足す）
     assert [app.name for app in work.codex_apps] == ["Microsoft Outlook Email", "Microsoft Outlook Calendar"]
     codex_tools = [tool for app in work.codex_apps for tool in app.tools]
@@ -47,15 +49,12 @@ def test_read_only_drops_writing_and_commands_but_keeps_reading():
 
 
 def test_routing_use_case_gets_no_tools_whatever_the_actor():
+    assert policy_of("router").files == "read"
     for actor in ("research", "course", "work"):
         policy = policy_of(actor, UseCase.ROUTING)
         assert policy.name == "router"
         assert (policy.plugin, policy.shell, policy.web, policy.connectors) == (False, False, False, ())
         assert policy.notion_tools == ()
-
-
-def test_router_is_always_read_only():
-    assert policy_of("router").files == "read"
 
 
 def test_unknown_actor_is_rejected():

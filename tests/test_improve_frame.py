@@ -17,6 +17,7 @@ from kei_agent.assistant import Assistant
 from kei_agent.config import ConfigError, load_config
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
+from kei_agent.testing.kit import settle
 from kei_agent.themes import ChannelKind
 
 FIXER_TOML = '''api = 1
@@ -105,10 +106,6 @@ def env(config, store, tmp_path, monkeypatch):
     return assistant, slack, claude
 
 
-async def settle(assistant):
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 def req(text="直して", ts="20.1"):
@@ -168,9 +165,11 @@ async def test_joining_the_kei_agent_channel_shows_the_modules_welcome(env):
     assert "確認が必要なこと" in text and text.endswith("直したいことを書いてね。")
 
 
-async def test_the_folder_must_be_inside_the_modules_own_folder(env, tmp_path):
+async def test_the_folder_must_be_inside_the_modules_own_folder(env, config, tmp_path):
     assistant, slack, claude = env
     core = assistant.cores["fixer"]
+    assert core.state_dir == config.state_dir / "modules" / "fixer" and core.state_dir.is_dir()
+    assert core.repo_root == config.repo_root
     with pytest.raises(ValueError, match="core.state_dir"):
         await core.work(req(), folder=tmp_path / "elsewhere")
     with pytest.raises(ValueError, match="core.state_dir"):
@@ -212,25 +211,6 @@ async def test_run_ai_raises_when_the_ai_fails(env):
 
 def _git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
-
-
-async def test_check_change_uses_the_core_fence(env, tmp_path):
-    assistant, slack, claude = env
-    repo = tmp_path / "repo"
-    (repo / "src" / "kei_agent").mkdir(parents=True)
-    _git(tmp_path, "init", "-q", "-b", "main", str(repo))
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "user.name", "t")
-    (repo / "README.md").write_text("a\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "base")
-    base = _git(repo, "rev-parse", "HEAD")
-    (repo / "src" / "kei_agent" / "guard.py").write_text("# ゆるめる\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "change")
-
-    problems = await assistant.cores["fixer"].check_change(repo, base)
-    assert any("柵のファイル" in p for p in problems)
 
 
 def test_secrets_are_spotted_before_writing_in_public():
@@ -299,13 +279,6 @@ async def test_thread_helpers(env):
         assert "取り込み中…" in slack.thinking()
 
 
-def test_the_module_folder_is_under_the_state_folder(env, config):
-    assistant, slack, claude = env
-    core = assistant.cores["fixer"]
-    assert core.state_dir == config.state_dir / "modules" / "fixer" and core.state_dir.is_dir()
-    assert core.repo_root == config.repo_root
-
-
 # 本体の柵（guard.check_change）
 
 @pytest.fixture
@@ -324,20 +297,29 @@ def repo(tmp_path):
     return path
 
 
-def test_the_fence_rejects_protected_paths(repo):
-    (repo / "config.example.toml").write_text('research_root = "/tmp"\n')
-    _git(repo, "commit", "-qam", "柵を触る")
-    assert any("柵のファイル" in p for p in guard.check_change(repo, "main", "HEAD"))
-
-
-def test_the_fence_rejects_secrets(repo):
-    (repo / "src" / "app.py").write_text('TOKEN = "' + "xoxb" + '-1234567890-abcdefghij"\n')
-    _git(repo, "commit", "-qam", "鍵を書く")
+@pytest.mark.parametrize("path, text, problem", [
+    ("config.example.toml", 'research_root = "/tmp"\n', "柵のファイル"),
+    ("src/app.py", 'TOKEN = "' + "xoxb" + '-1234567890-abcdefghij"\n', "秘密情報"),
+    ("src/app.py", "x = 2\n", None),                                  # ふつうの直しは通す
+])
+def test_the_fence_rejects_protected_paths_and_secrets(repo, path, text, problem):
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "直す")
     problems = guard.check_change(repo, "main", "HEAD")
-    assert any("秘密情報" in p for p in problems), problems
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in p for p in problems), problems
 
 
-def test_the_fence_accepts_a_normal_fix(repo):
-    (repo / "src" / "app.py").write_text("x = 2\n")
-    _git(repo, "commit", "-qam", "直す")
-    assert guard.check_change(repo, "main", "HEAD") == []
+async def test_check_change_uses_the_core_fence(env, repo):
+    assistant, slack, claude = env
+    (repo / "src" / "kei_agent").mkdir()
+    (repo / "src" / "kei_agent" / "guard.py").write_text("# ゆるめる\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "change")
+
+    problems = await assistant.cores["fixer"].check_change(repo, "main")
+    assert any("柵のファイル" in p for p in problems)

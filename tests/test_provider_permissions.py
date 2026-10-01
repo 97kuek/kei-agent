@@ -36,12 +36,9 @@ def test_codex_profile_carves_out_secret_reads_and_scopes_writes(config):
     assert profile.network_domains == {"export.arxiv.org": "allow"}
     assert "features.network_proxy=true" in profile.config_overrides
     assert 'permissions.kei_agent_scoped.extends=":read-only"' in profile.config_overrides
-
-
-def test_read_only_contract_has_no_write_grants(config):
-    profile = preflight(config, _contract(config, read_only=True), "codex_cli")
-
-    assert "write" not in profile.filesystem.values()
+    assert "~/.codex" in DEFAULT_DENY_READ                         # Codex の認証の置き場所も既定で読ませない
+    # 読むだけの回は、どこにも書けない
+    assert "write" not in preflight(config, _contract(config, read_only=True), "codex_cli").filesystem.values()
 
 
 def test_codex_profile_rejects_disallowed_domain(config):
@@ -74,6 +71,3 @@ def test_only_agents_with_commands_get_network_domains(config):
                                       None, "C1", "1.1")
     assert preflight(config, resolve_contract(config, request), "codex_cli").network_domains == {}
 
-
-def test_default_secret_denials_cover_codex_auth():
-    assert "~/.codex" in DEFAULT_DENY_READ

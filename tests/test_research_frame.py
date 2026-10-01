@@ -4,7 +4,6 @@
 チャンネルの作業場での会話（core.work）。
 """
 
-import asyncio
 from dataclasses import replace
 
 import pytest
@@ -15,6 +14,7 @@ from kei_agent.assistant import Assistant
 from kei_agent.config import ConfigError, load_config
 from kei_agent.jobs import JobManager
 from kei_agent.model_policy import ModelPolicyError
+from kei_agent.testing.kit import settle
 
 LAB_TOML = '''api = 1
 name = "lab"
@@ -90,6 +90,7 @@ def test_a_manual_use_case_is_chosen_only_by_name(tmp_path):
     # 研究の今の書き方（[[research-design]]、[[manual-fable]]）も同じ規則で読む
     assert model_policy.explicit_use_case("research", "[[research-design]] 設計") == ("research_design", "設計")
     assert model_policy.explicit_use_case("research", "[[manual-fable]] 深く")[0] == "manual_fable"
+    assert model_policy.explicit_use_case("research", "[[not-a-case]] 実験") == (None, "[[not-a-case]] 実験")
     assert spec.actor.default_use_case == "lab_run"
 
 
@@ -112,8 +113,10 @@ async def test_the_classifier_never_picks_a_manual_use_case(tmp_path, config, st
 @pytest.mark.parametrize(("change", "message"), [
     (('[use_cases.lab_deep]\nmanual = true\n', '[use_cases.lab_deep]\n'), "manual = true"),
     (('default_use_case = "lab_run"', 'default_use_case = "lab_deep"'), "手動指定でない用途"),
+    # 「ほかのどれにも当たらない」の印は、それだけで書く
+    (('lab = ["*"]', 'lab = ["*", "vlm"]'), "それだけを書いて"),
 ])
-def test_manual_only_models_and_defaults_are_checked(tmp_path, change, message):
+def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, message):
     """いちばん強いモデル（fable・astra）は手動指定の用途でしか書けない。自由な質問の既定にも手動指定は使えない。"""
     home = _home(tmp_path, 'modules = ["lab"]\n')
     _lab(home / "modules", LAB_TOML.replace(*change))
@@ -151,12 +154,6 @@ def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
         load_config(env={"KEI_AGENT_HOME": str(home)})
 
 
-def test_the_catch_all_mark_stands_alone(tmp_path):
-    folder = _lab(tmp_path, LAB_TOML.replace('lab = ["*"]', 'lab = ["*", "vlm"]'))
-    with pytest.raises(modules.ModuleError, match="それだけを書いて"):
-        modules.load_spec(folder)
-
-
 # チャンネルの作業場での会話（core.work）
 
 class RecordingClaude(FakeClaude):
@@ -183,10 +180,6 @@ def lab(config, store, tmp_path, monkeypatch):
     return assistant, slack, claude
 
 
-async def settle(assistant):
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 async def test_a_module_answers_in_the_channel_workspace_like_research(lab, config):

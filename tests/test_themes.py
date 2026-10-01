@@ -4,25 +4,22 @@ import pytest
 from fakes import write_config
 
 from kei_agent import themes
-from kei_agent.agent_policy import policy_of
 from kei_agent.themes import ChannelKind
 
 
 def test_resolve_kinds(config):
-    assert themes.resolve(config, "0-kei-agent").kind is ChannelKind.IMPROVE
-    assert themes.resolve(config, "0-kei-agent").cwd is None
+    improve = themes.resolve(config, "0-kei-agent")
+    assert improve.kind is ChannelKind.IMPROVE and improve.cwd is None
 
     overview = themes.resolve(config, "research-overview")
-    assert overview.kind is ChannelKind.OVERVIEW
-    assert overview.cwd == config.overview_dir
+    assert overview.kind is ChannelKind.OVERVIEW and overview.cwd == config.overview_dir
 
     theme = themes.resolve(config, "vlm-counting")
-    assert theme.kind is ChannelKind.THEME
-    assert theme.cwd == config.research_root / "vlm-counting"
-
-
-def test_resolve_accepts_japanese_channel_names(config):
+    assert theme.kind is ChannelKind.THEME and theme.cwd == config.research_root / "vlm-counting"
     assert themes.resolve(config, "視覚言語モデル").cwd == config.research_root / "視覚言語モデル"
+    # 番号つきのチャンネルも、番号なしと同じ作業場
+    numbered = themes.resolve(config, "1-amr-query")
+    assert numbered.cwd == themes.resolve(config, "amr-query").cwd and numbered.channel_name == "amr-query"
 
 
 @pytest.mark.parametrize("name", ["..", "../etc", "a/b", ".hidden", "_overview", ""])
@@ -44,6 +41,10 @@ def test_ensure_workspace_creates_template_once(config):
     assert themes.ensure_workspace(ws) is False
     assert notes.read_text() == "編集済み"
 
+    overview = themes.resolve(config, "research-strategy")
+    themes.ensure_workspace(overview)
+    assert (overview.cwd / "CLAUDE.md").exists() and (overview.cwd / "outputs").is_dir()
+
 
 def test_an_old_claude_md_moves_to_agents_md_but_not_in_someone_elses_folder(config, tmp_path):
     """Kei Agent が作った作業場の CLAUDE.md は AGENTS.md に移す（Codex も読めるように）。既存のフォルダのものは動かさない。"""
@@ -62,52 +63,37 @@ def test_an_old_claude_md_moves_to_agents_md_but_not_in_someone_elses_folder(con
     assert not (theirs.cwd / "AGENTS.md").exists() and themes.notes_file(theirs.cwd).name == "CLAUDE.md"
 
 
-def test_ensure_workspace_overview(config):
-    ws = themes.resolve(config, "research-strategy")
-    themes.ensure_workspace(ws)
-    assert (ws.cwd / "CLAUDE.md").exists()
-    assert (ws.cwd / "outputs").is_dir()
-
-
-def test_unknown_config_key_is_reported(tmp_path):
+@pytest.mark.parametrize(("text", "match"), [
+    ('[schedule]\ndayly = "08:00"\n', "dayly"),
+    ('[sandbox]\nallowed_domain = ["example.com"]\n', "allowed_domain"),
+    ('reserch_root = "~/research"\n', "reserch_root"),
+    # `8:00` のような書き方は時刻として読めない。黙って「行わない」にせず、起動のときに断る
+    ('[schedule]\ndaily = "8:00"\n', r"\[schedule\] daily"),
+    ('[maintenance]\ntime = "22時"\n', r"\[maintenance\] time"),
+    ('[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\n', "model_recipes"),
+    # 連携は制限の表が決め、モジュール・チャンネル・AI は担当の表だけに書く。移し方を示す
+    ('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n', "kei-agent agents init"),
+    ('modules = ["research"]\n', "kei-agent agents init"),
+    ('[channels]\ntheme_prefix = "theme-"\n', "kei-agent agents init"),
+])
+def test_wrong_config_is_refused_at_startup(tmp_path, text, match):
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
-    path.write_text('[schedule]\ndayly = "08:00"\n')
-    with pytest.raises(ConfigError, match="dayly"):
+    path.write_text(text)
+    with pytest.raises(ConfigError, match=match):
         load_config(path, env={})
 
 
-def test_unknown_key_in_sandbox_is_reported(tmp_path):
+def test_empty_schedule_time_means_off_and_agents_csv_takes_only_ai_columns(tmp_path):
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
-    path.write_text('[sandbox]\nallowed_domain = ["example.com"]\n')
-    with pytest.raises(ConfigError, match="allowed_domain"):
-        load_config(path, env={})
-
-
-def test_unknown_top_level_key_is_reported(tmp_path):
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    path.write_text('reserch_root = "~/research"\n')
-    with pytest.raises(ConfigError, match="reserch_root"):
-        load_config(path, env={})
-
-
-def test_a_broken_schedule_time_is_reported(tmp_path):
-    """`8:00` のような書き方は時刻として読めない。黙って「行わない」にせず、起動のときに断る。"""
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    path.write_text('[schedule]\ndaily = "8:00"\n')
-    with pytest.raises(ConfigError, match=r"\[schedule\] daily"):
-        load_config(path, env={})
-
-    path.write_text('[maintenance]\ntime = "22時"\n')
-    with pytest.raises(ConfigError, match=r"\[maintenance\] time"):
-        load_config(path, env={})
-
-    # 空文字は「行わない」の意味なので通す
     path.write_text('[schedule]\nreview = ""\n')
     assert load_config(path, env={}).schedule.review == ""
+    # 表にも、AI の列のほかは書けない
+    write_config(path, "")
+    (tmp_path / "agents.csv").write_text("module,enabled,channels,engine,model,effort,connectors\nresearch,true,,codex,,,wandb\n")
+    with pytest.raises(ConfigError, match="1行目"):
+        load_config(path, env={})
 
 
 def test_example_config_in_repo_loads_without_personal_values(tmp_path):
@@ -128,41 +114,15 @@ def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path)
     assert config.agent_profiles["course"].provider == ""
 
 
-def test_old_model_recipe_configuration_is_rejected(tmp_path):
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    path.write_text(
-        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\nreasoning_effort = "low"\n')
-    with pytest.raises(ConfigError, match="model_recipes"):
-        load_config(path, env={})
-
-
-def test_connectors_and_modules_in_config_toml_are_refused_with_how_to_move(tmp_path):
-    """連携は制限の表が決め、モジュール・チャンネル・AI は担当の表だけに書く。config.toml に残っていれば、移し方を示す。"""
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    for text in ('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n', 'modules = ["research"]\n',
-                 '[channels]\ntheme_prefix = "theme-"\n'):
-        path.write_text(text)
-        with pytest.raises(ConfigError, match="kei-agent agents init"):
-            load_config(path, env={})
-    # 表にも、AI の列のほかは書けない
-    write_config(path, "")
-    (tmp_path / "agents.csv").write_text("module,enabled,channels,engine,model,effort,connectors\nresearch,true,,codex,,,wandb\n")
-    with pytest.raises(ConfigError, match="1行目"):
-        load_config(path, env={})
-
-
-def test_course_policy_reads_box_and_uses_notion_only_through_the_gateway():
-    policy = policy_of("course")
-    assert [app.name for app in policy.codex_apps] == ["Box"]
-    assert policy.notion == "write"
-
-
 def test_agent_workspaces_are_stable_places_for_sessions(config):
+    """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
+    はじめて使うときに、モジュールのフォルダのひな形（AGENTS.template.md）から AGENTS.md を作る。"""
+    ws = themes.resolve(config, "2-course")
+    assert (ws.kind, ws.module, ws.cwd) == (ChannelKind.MODULE, "course", None)
     course = themes.agent_workspace(config, "course")
     work = themes.agent_workspace(config, "work")
     assert (course.kind, course.module, course.cwd) == (ChannelKind.MODULE, "course", config.course_root)
+    assert "授業と課題の資料は Box" in (course.cwd / "AGENTS.md").read_text()
     # 仕事はモジュール。作業場は前と同じ場所（会話の続きが切れない）
     assert (work.kind, work.module) == (ChannelKind.MODULE, "work") and work.cwd == config.state_dir / "agents" / "work"
     assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
@@ -182,22 +142,6 @@ def test_theme_name_drops_the_sorting_number():
     assert themes.theme_name("2026-plan") == "2026-plan"       # 番号は1〜2桁と - だけ。年などは名前の一部
     assert themes.theme_name("10_amr-query") == "10_amr-query"  # 前の形（10_）は、もう番号として外さない
     assert themes.theme_name("a1-x") == "a1-x"                 # 先頭が数字でなければ名前の一部
-
-
-def test_numbered_channel_uses_the_same_directory(config):
-    plain = themes.resolve(config, "amr-query")
-    numbered = themes.resolve(config, "1-amr-query")
-    assert numbered.cwd == plain.cwd and numbered.channel_name == "amr-query"
-
-
-def test_course_channel_points_at_the_course_workspace(config):
-    """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
-    はじめて使うときに、モジュールのフォルダのひな形（AGENTS.template.md）から AGENTS.md を作る。"""
-    ws = themes.resolve(config, "2-course")
-    assert (ws.kind, ws.module, ws.cwd) == (themes.ChannelKind.MODULE, "course", None)
-    agent = themes.agent_workspace(config, "course")
-    assert agent.cwd == config.course_root
-    assert "授業と課題の資料は Box" in (agent.cwd / "AGENTS.md").read_text()
 
 
 def test_module_channel_belongs_to_its_module(config):

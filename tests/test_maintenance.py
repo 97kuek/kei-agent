@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -35,18 +36,8 @@ def test_cleanup_removes_only_old_files_of_research_dirs(config, tmp_path):
     assert removed == {"sessions": 1, "thread_logs": 0}
     assert not (theme_project / "old.jsonl").exists() and (theme_project / "new.jsonl").exists()
     assert (other_project / "old.jsonl").exists()  # ほかのプロジェクトには触らない
-
-
-def test_claude_project_dir_name_matches_claude_code():
+    # Claude Code の作るディレクトリ名と同じ（_ も - になる）
     assert maintenance.claude_project_dir_name(Path("/Users/k/research/_overview")) == "-Users-k-research--overview"
-
-
-def test_dump_state_writes_sql_and_notion_ids(config, store):
-    store.upsert_thread("C1", "1.1", "vlm", "sess")
-    (config.state_dir / "notion.json").write_text(json.dumps({"home_page_id": "p"}))
-    out = maintenance.dump_state(config)
-    assert "INSERT INTO \"threads\"" in (out / "kei-agent.sql").read_text()
-    assert json.loads((out / "notion.json").read_text()) == {"home_page_id": "p"}
 
 
 def test_exclude_large_files_rewrites_its_own_block(tmp_path):
@@ -67,20 +58,26 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
+def pushed_repo(path, remote, files):
+    """files を1回コミットして、裸の remote に push 済みの Git リポジトリ。"""
+    git(remote.parent, "init", "-q", "--bare", "-b", "main", str(remote))
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-q", "-b", "main")
+    git(path, "config", "user.name", "test")
+    git(path, "config", "user.email", "test@example.com")
+    git(path, "remote", "add", "origin", str(remote))
+    for name, text in files.items():
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_text(text)
+    git(path, "add", "-A")
+    git(path, "commit", "-q", "-m", "init")
+    git(path, "push", "-q", "-u", "origin", "main")
+    return remote
+
+
 async def test_backup_commits_and_pushes(config, store, tmp_path):
-    remote = tmp_path / "remote.git"
-    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
     root = config.research_root
-    root.mkdir(parents=True)
-    git(root, "init", "-q", "-b", "main")
-    git(root, "config", "user.name", "test")
-    git(root, "config", "user.email", "test@example.com")
-    git(root, "remote", "add", "origin", str(remote))
-    (root / "vlm").mkdir()
-    (root / "vlm" / "CLAUDE.md").write_text("# vlm")
-    git(root, "add", "-A")
-    git(root, "commit", "-q", "-m", "init")
-    git(root, "push", "-q", "-u", "origin", "main")
+    remote = pushed_repo(root, tmp_path / "remote.git", {"vlm/CLAUDE.md": "# vlm"})
 
     (root / "vlm" / "result.csv").write_text("a,b\n")
     detail = await maintenance.backup(config, "2026-09-18")
@@ -141,8 +138,6 @@ def test_repeated_slack_reconnect_failures_are_thinned_out():
 
 async def test_backup_untracks_a_file_that_grew_too_large(config, monkeypatch):
     """小さいうちにコミットしたファイルが育つと、exclude では止まらず push が通らなくなる。"""
-    from kei_agent import maintenance
-
     repo = config.research_root
     repo.mkdir(parents=True, exist_ok=True)
     (repo / ".git").mkdir(exist_ok=True)
@@ -165,10 +160,6 @@ async def test_backup_untracks_a_file_that_grew_too_large(config, monkeypatch):
 
 async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
     """端末のない launchd では、認証を聞かれると永久に止まり、定期処理ごと動かなくなる。"""
-    import asyncio
-
-    from kei_agent import maintenance
-
     repo = config.research_root
     repo.mkdir(parents=True, exist_ok=True)
     real = asyncio.create_subprocess_exec
@@ -181,34 +172,20 @@ async def test_git_gives_up_instead_of_waiting_forever(config, monkeypatch):
         await maintenance._git(repo, "push", "-q", timeout=0.3)
 
 
-async def test_dump_state_works_from_another_thread(config, store):
-    """毎晩の保守は別スレッドから呼ぶ。接続を作ったスレッド以外でも書き出せる。"""
-    import asyncio
-
+async def test_dump_state_writes_sql_and_notion_ids_from_another_thread(config, store):
+    """毎晩の保守は別スレッドから呼ぶ。接続を作ったスレッド以外でも、SQL と Notion の ID を書き出せる。"""
     store.upsert_thread("C1", "10.1", "vlm", "sess-1")
+    (config.state_dir / "notion.json").write_text(json.dumps({"home_page_id": "p"}))
     out = await asyncio.to_thread(maintenance.dump_state, config, store)
     sql = (out / "kei-agent.sql").read_text()
-    assert "CREATE TABLE" in sql and "sess-1" in sql
+    assert "CREATE TABLE" in sql and 'INSERT INTO "threads"' in sql and "sess-1" in sql
+    assert json.loads((out / "notion.json").read_text()) == {"home_page_id": "p"}
 
 
 async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
     """Kei Agent 自身のもの（overview の作業場と状態）は ~/research の外にあるので、別のリポジトリに保存する。"""
-    def repo(path, remote_name):
-        remote = tmp_path / remote_name
-        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
-        path.mkdir(parents=True, exist_ok=True)
-        git(path, "init", "-q", "-b", "main")
-        git(path, "config", "user.name", "test")
-        git(path, "config", "user.email", "test@example.com")
-        git(path, "remote", "add", "origin", str(remote))
-        (path / ".keep").write_text("")
-        git(path, "add", "-A")
-        git(path, "commit", "-q", "-m", "init")
-        git(path, "push", "-q", "-u", "origin", "main")
-        return remote
-
-    research_remote = repo(config.research_root, "research.git")
-    agent_remote = repo(config.agent_root, "agent.git")
+    research_remote = pushed_repo(config.research_root, tmp_path / "research.git", {".keep": ""})
+    agent_remote = pushed_repo(config.agent_root, tmp_path / "agent.git", {".keep": ""})
     config.overview_dir.mkdir(parents=True)
     (config.overview_dir / "CLAUDE.md").write_text("# 研究全体")
 
@@ -226,18 +203,7 @@ async def test_backup_saves_the_agent_side_too(config, store, tmp_path):
 
 async def test_agent_root_without_a_remote_is_reported_not_raised(config, store, tmp_path):
     """push 先が無くても保守そのものは止めない。ただし理由は必ず返す。"""
-    remote = tmp_path / "research.git"
-    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
-    config.research_root.mkdir(parents=True)
-    git(config.research_root, "init", "-q", "-b", "main")
-    git(config.research_root, "config", "user.name", "test")
-    git(config.research_root, "config", "user.email", "test@example.com")
-    git(config.research_root, "remote", "add", "origin", str(remote))
-    (config.research_root / "vlm").mkdir()
-    (config.research_root / "vlm" / "CLAUDE.md").write_text("# vlm")
-    git(config.research_root, "add", "-A")
-    git(config.research_root, "commit", "-q", "-m", "init")
-    git(config.research_root, "push", "-q", "-u", "origin", "main")
+    pushed_repo(config.research_root, tmp_path / "research.git", {"vlm/CLAUDE.md": "# vlm"})
     # Kei Agent 側は Git にしたが、origin をまだ登録していない
     config.agent_root.mkdir(parents=True, exist_ok=True)
     git(config.agent_root, "init", "-q", "-b", "main")

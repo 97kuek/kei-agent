@@ -5,6 +5,7 @@ claude そのものは動かさず、偽の runner に差し替える。
 """
 
 import asyncio
+import contextlib
 import json
 import socket
 from dataclasses import replace
@@ -20,23 +21,29 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
-def test_research_use_case_label_wins_and_is_removed_from_prompt():
-    from kei_agent.model_policy import explicit_use_case
+@contextlib.asynccontextmanager
+async def _serve(executor):
+    """研究エージェントを 127.0.0.1 の空いている番地に立てて、住所を返す。"""
+    import uvicorn
 
-    assert explicit_use_case("research", "[[research-design]] 仮説の検証計画を作って") == (
-        "research_design", "仮説の検証計画を作って")
+    from kei_agent_a2a import launch
 
-
-def test_research_unknown_label_is_left_for_the_classifier():
-    from kei_agent.model_policy import explicit_use_case
-
-    assert explicit_use_case("research", "[[not-a-case]] 実験を回して") == (None, "[[not-a-case]] 実験を回して")
-
-
-def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        port = s.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=executor)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    for _ in range(100):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+    try:
+        yield base
+    finally:
+        server.should_exit = True
+        await task
 
 
 class FakeClaude:
@@ -59,29 +66,14 @@ class FakeClaude:
 @pytest.fixture
 async def server(config, monkeypatch):
     """研究エージェントを立てて、(住所, 偽の claude) を返す。"""
-    import uvicorn
-
-    from kei_agent_a2a import launch
     from kei_agent_modules.research.agent import Executor
 
     claude = FakeClaude(runner.RunResult(
         session_id="sess-9", text="できたよ", cost_usd=0.12,
         requested_domains=[("example.com", "データを取るため")]))
     monkeypatch.setattr(runner, "run_model", claude)
-
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=Executor(config))
-    uv_config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
-    server = uvicorn.Server(uv_config)
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield base, claude
-    server.should_exit = True
-    await task
+    async with _serve(Executor(config)) as base:
+        yield base, claude
 
 
 async def test_card_says_it_runs_claude_and_holds_the_jobs(server):
@@ -116,32 +108,20 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     # tool activity だけを流す。モデルの途中 text はオーケストレーターへも渡さない
     assert activities == ["Bash: テスト"]
 
-
-async def test_remote_research_honors_an_explicit_manual_recipe(server, config):
-    from kei_agent import themes
-
-    base, claude = server
-    await agents.run_in_workspace(
-        Agent(base, TOKEN, timeout=30), themes.resolve(config, "vlm"), "難問を設計して", None, "", "",
-        "manual_fable",
-    )
-
+    # 手動指定の用途（manual_fable）も、そのまま担当側で使われる
+    await agents.run_in_workspace(Agent(base, TOKEN, timeout=30), ws, "難問を設計して", None, "", "", "manual_fable")
     assert claude.calls[-1]["recipe"].model == "claude-fable-5"
 
 
-async def test_a_channel_without_a_directory_is_refused(server, config):
-    """作業用ディレクトリのないチャンネル（Kei Agent の改善）は断る。"""
+async def test_a_broken_request_or_a_channel_without_a_directory_is_refused(server):
+    """作業用ディレクトリのないチャンネル（Kei Agent の改善）や、読めない依頼は断る。"""
     base, claude = server
     agent = Agent(base, TOKEN, timeout=30)
     task = await agent.ask("ask", json.dumps({"channel_name": "0-kei-agent", "prompt": "やって"}))
     assert not task.ok and "作業用ディレクトリがありません" in json.loads(task.answer)["text"]
-    assert claude.calls == []
-
-
-async def test_a_broken_request_is_refused(server):
-    base, _ = server
-    task = await Agent(base, TOKEN, timeout=30).ask("ask", "これは JSON ではない")
+    task = await agent.ask("ask", "これは JSON ではない")
     assert not task.ok and "prompt が要ります" in json.loads(task.answer)["text"]
+    assert claude.calls == []
 
 
 def test_to_result_keeps_only_what_it_knows():
@@ -196,26 +176,13 @@ class FakePueue:
 
 
 @pytest.fixture
-async def job_server(config, monkeypatch):
+async def job_server(config):
     """ジョブを受け取る研究エージェント（pueue は偽物）。"""
-    import uvicorn
-
-    from kei_agent_a2a import launch
     from kei_agent_modules.research.agent import Executor
 
     pueue = FakePueue()
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=Executor(config, pueue=pueue))
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield base, pueue
-    server.should_exit = True
-    await task
+    async with _serve(Executor(config, pueue=pueue)) as base:
+        yield base, pueue
 
 
 async def test_jobs_go_through_the_agent(job_server, config):

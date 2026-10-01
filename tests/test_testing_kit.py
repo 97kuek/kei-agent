@@ -123,8 +123,17 @@ def _module(root, name, files):
     return folder
 
 
+def _memo(tmp_path):
+    return _module(tmp_path / "mine", "memo", {"module.toml": MEMO_TOML, "module.py": MEMO_CODE})
+
+
+def _echo(tmp_path):
+    return _module(tmp_path / "mine", "echo", {"module.toml": ECHO_TOML, "module.py": ECHO_CODE,
+                                               "agent.py": ECHO_AGENT})
+
+
 async def test_a_module_answers_its_channel_its_command_its_button_and_its_schedule(tmp_path, module_kit):
-    kit = module_kit(_module(tmp_path / "mine", "memo", {"module.toml": MEMO_TOML, "module.py": MEMO_CODE}))
+    kit = module_kit(_memo(tmp_path))
     await kit.invite()
     assert kit.texts()[-1].endswith("ここに書いたことをメモするよ。")
 
@@ -158,9 +167,7 @@ async def test_the_ai_answers_what_was_queued_and_remembers_how_it_was_asked(tmp
 
 async def test_a_module_process_runs_in_the_same_process(tmp_path, module_kit):
     pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
-    folder = _module(tmp_path / "mine", "echo", {"module.toml": ECHO_TOML, "module.py": ECHO_CODE,
-                                                 "agent.py": ECHO_AGENT})
-    kit = module_kit(folder)
+    kit = module_kit(_echo(tmp_path))
     assert isinstance(kit.agent, LocalAgent)
     ts = await kit.message("やっほー")
     assert kit.thread(ts) == ["やっほー！"]
@@ -174,9 +181,7 @@ async def test_a_module_process_runs_in_the_same_process(tmp_path, module_kit):
 
 
 async def test_a_fake_process_answers_what_was_queued(tmp_path, module_kit):
-    folder = _module(tmp_path / "mine", "echo", {"module.toml": ECHO_TOML, "module.py": ECHO_CODE,
-                                                 "agent.py": ECHO_AGENT})
-    kit = module_kit(folder, local_agent=False)
+    kit = module_kit(_echo(tmp_path), local_agent=False)
     assert isinstance(kit.agent, FakeAgent)
     kit.agent.reply("shout", "偽物の返事")
     assert kit.thread(await kit.message("やっほー")) == ["偽物の返事"]
@@ -202,8 +207,7 @@ def test_the_kit_keeps_real_things_away_while_it_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-real")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-real")
     monkeypatch.setenv("KEI_AGENT_HOME", "/real/home")
-    folder = _module(tmp_path / "mine", "memo", {"module.toml": MEMO_TOML, "module.py": MEMO_CODE})
-    with ModuleKit(folder, tmp_path / "kit") as kit:
+    with ModuleKit(_memo(tmp_path), tmp_path / "kit") as kit:
         assert "SLACK_BOT_TOKEN" not in os.environ and "OPENAI_API_KEY" not in os.environ
         assert os.environ["KEI_AGENT_HOME"] == str(tmp_path / "kit" / "home")
         assert kit.config.state_dir.is_relative_to(tmp_path) and kit.config.research_root.is_relative_to(tmp_path)
@@ -215,7 +219,7 @@ def test_the_kit_keeps_real_things_away_while_it_runs(tmp_path, monkeypatch):
 def test_unknown_modules_and_channels_say_so(tmp_path, module_kit):
     with pytest.raises(ValueError, match="知らないモジュール"):
         module_kit("nothing")
-    kit = module_kit(_module(tmp_path / "mine", "memo", {"module.toml": MEMO_TOML, "module.py": MEMO_CODE}))
+    kit = module_kit(_memo(tmp_path))
     with pytest.raises(KeyError, match="kit.add_channel"):
         kit.channel("lab")
     assert kit.channel(kit.add_channel("lab")) == kit.channel("lab")

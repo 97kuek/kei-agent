@@ -191,23 +191,19 @@ async def test_a_thumbs_up_without_the_reading_db_is_still_remembered(env, store
     assert not any(name == "reactions_add" and kw["name"] == "memo" for name, kw in slack.calls)
 
 
-async def test_reading_stays_quiet_without_new_articles(env):
+async def test_reading_posts_nothing_without_settings_channel_or_new_articles(env):
+    """「収集」が空・チャンネルが無いなら担当に頼まない。新着が無ければ黙る。"""
     scheduler, assistant, slack, _ = env
+    agent = FakeKnowledgeAgent({"items": [], "failed_sources": ["Zenn llm"]})
+    assistant.agents["knowledge"] = agent
+    assert (await scheduler.run_task("reading", "2026-09-26"))["status"] == "no_settings"
     assistant.hub.collect = ([{"name": "AI", "keywords": ["LLM"]}], ["zenn: llm"])
-    assistant.agents["knowledge"] = FakeKnowledgeAgent({"items": [], "failed_sources": ["Zenn llm"]})
-
+    channel = slack.channels.pop("C40")
+    assert (await scheduler.run_task("reading", "2026-09-26"))["status"] == "no_channel"
+    assert agent.asked == []
+    slack.channels["C40"] = channel
     assert (await scheduler.run_task("reading", "2026-09-26"))["status"] == "no_new"
     assert slack.posted() == []
-
-
-async def test_reading_without_the_channel_or_settings_asks_nothing(env):
-    scheduler, assistant, slack, _ = env
-    agent = FakeKnowledgeAgent()
-    assistant.agents["knowledge"] = agent
-    assert (await scheduler.run_task("reading", "2026-09-26"))["status"] == "no_settings"   # 「収集」が空
-    del slack.channels["C40"]
-    assert (await scheduler.run_task("reading", "2026-09-26"))["status"] == "no_channel"
-    assert agent.asked == [] and slack.posted() == []
 
 
 # 招待

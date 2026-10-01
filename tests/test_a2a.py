@@ -25,14 +25,10 @@ def build_app(base_url: str, token: str):
     return launch.build_app(modules.builtin()["course"], base_url, token)
 
 
-def test_a2a_app_refuses_to_start_without_a_password():
+@pytest.mark.parametrize("token", ["", "   "])
+def test_a2a_app_refuses_to_start_without_a_password(token):
     with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
-        build_app("http://127.0.0.1:8787", "")
-
-
-def test_a2a_app_refuses_a_blank_password():
-    with pytest.raises(RuntimeError, match="KEI_AGENT_A2A_TOKEN"):
-        build_app("http://127.0.0.1:8787", "   ")
+        build_app("http://127.0.0.1:8787", token)
 
 
 def _free_port() -> int:
@@ -41,29 +37,32 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture
-async def server():
-    """大学エージェントを立てて、住所を返す。"""
+async def _serving(app, port):
+    """app を 127.0.0.1:port に立てて、立ち上がったら住所を渡す。"""
     import uvicorn
 
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    config = uvicorn.Config(build_app(base, TOKEN), host="127.0.0.1", port=port, log_level="error")
-    server = uvicorn.Server(config)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     for _ in range(100):  # 立ち上がるまで待つ
         if server.started:
             break
         await asyncio.sleep(0.05)
-    yield base
+    yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     await task
 
 
 @pytest.fixture
+async def server():
+    """大学エージェントを立てて、住所を返す。"""
+    port = _free_port()
+    async for base in _serving(build_app(f"http://127.0.0.1:{port}", TOKEN), port):
+        yield base
+
+
+@pytest.fixture
 async def stranger():
     """同じポートで待っている、A2A ではない誰か（JSON を返さない）。"""
-    import uvicorn
     from starlette.applications import Starlette
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route
@@ -80,15 +79,8 @@ async def stranger():
 
     app = Starlette(routes=[Route("/.well-known/agent-card.json", card),
                             Route("/{path:path}", hello, methods=["GET", "POST"])])
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    await task
+    async for base in _serving(app, port):
+        yield base
 
 
 async def test_a_reply_that_is_not_json_is_an_a2a_error(stranger):
@@ -110,11 +102,8 @@ async def test_card_tells_what_the_agent_can_do(server):
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
 
 
-async def test_card_is_readable_without_the_password(server):
+async def test_card_is_public_but_work_needs_the_password(server):
     assert (await Agent(server).card())["name"].startswith("Kei Agent")
-
-
-async def test_work_needs_the_password(server):
     with pytest.raises(A2AError):
         await Agent(server, "違う合言葉").ask("list-due")
 
@@ -143,15 +132,10 @@ async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
     assert item["at"].startswith("2026-09-25T23:59")
 
 
-async def test_sync_says_what_is_missing_without_the_calendar_url(server, monkeypatch):
+@pytest.mark.parametrize("skill", ["sync-assignments", "list-due"])
+async def test_moodle_skills_say_what_is_missing_without_the_calendar_url(server, monkeypatch, skill):
     monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
-    result = await Agent(server, TOKEN).ask("sync-assignments")
-    assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
-
-
-async def test_list_due_says_what_is_missing_without_the_calendar_url(server, monkeypatch):
-    monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
-    result = await Agent(server, TOKEN).ask("list-due")
+    result = await Agent(server, TOKEN).ask(skill)
     assert not result.ok and "カレンダーをエクスポート" in json.loads(result.answer)["text"]
 
 

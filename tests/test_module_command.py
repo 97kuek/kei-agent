@@ -32,15 +32,20 @@ def _on(home):
     return agents_table.load(home / "agents.csv")["modules"]
 
 
+def _change(home, name, on, calls=None, **kw):
+    """`kei-agent module add/remove` を、その home で動かす。calls を渡すと launchd の登録を記録するだけにする。"""
+    if calls is not None:
+        kw["installer"] = lambda module, remove: calls.append((module, remove)) or True
+    return module_command.change(name, on, env={"KEI_AGENT_HOME": str(home)}, **kw)
+
+
 def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["research"]\n')
     before = (home / "agents.csv").read_text(encoding="utf-8")
     _stamp(home)
     calls = []
-    code = module_command.change("stamp", True, env={"KEI_AGENT_HOME": str(home)},
-                                 installer=lambda name, remove: calls.append((name, remove)) or True)
+    assert _change(home, "stamp", True, calls) == 0
     out = capsys.readouterr().out
-    assert code == 0
     assert _on(home) == ["research", "stamp"]
     assert (home / "agents.csv.bak").read_text(encoding="utf-8") == before
     assert calls == []                                  # 常駐を持たないモジュールは launchd に触らない
@@ -51,8 +56,7 @@ def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
 def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
     home = _home(tmp_path, "")                          # 表が無い = 組み込みを全部使う
     calls = []
-    assert module_command.change("voice", False, env={"KEI_AGENT_HOME": str(home)},
-                                 installer=lambda name, remove: calls.append((name, remove)) or True) == 0
+    assert _change(home, "voice", False, calls) == 0
     names = _on(home)
     assert "voice" not in names and "research" in names and not (home / "agents.csv.bak").exists()
     out = capsys.readouterr().out
@@ -61,11 +65,10 @@ def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
 
 def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["course", "work"]\n')
-    env = {"KEI_AGENT_HOME": str(home)}
-    assert module_command.change("research", True, env=env, launchd=False) == 0
+    assert _change(home, "research", True, launchd=False) == 0
     assert "deploy/install.sh research" in capsys.readouterr().out     # 登録は自分で
     assert set(_on(home)) == {"course", "research", "work"}
-    assert module_command.change("voice", True, env=env, installer=lambda name, remove: False) == 0
+    assert _change(home, "voice", True, installer=lambda name, remove: False) == 0
     assert "deploy/install.sh voice" in capsys.readouterr().out         # 登録を変えられなかったとき
     assert "voice" in _on(home)
 
@@ -74,7 +77,7 @@ def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["notion", "stamp"]\n')
     _stamp(home, requires='"notion"')
     before = (home / "agents.csv").read_text(encoding="utf-8")
-    assert module_command.change("notion", False, env={"KEI_AGENT_HOME": str(home)}) == 1
+    assert _change(home, "notion", False) == 1
     assert "notion が要ります" in capsys.readouterr().out
     assert (home / "agents.csv").read_text(encoding="utf-8") == before and not (home / "agents.csv.bak").exists()
 
@@ -82,18 +85,17 @@ def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
 def test_a_broken_table_is_left_alone(tmp_path, capsys):
     home = _home(tmp_path, "")
     (home / "agents.csv").write_text("module,on\nresearch,true\n", encoding="utf-8")
-    assert module_command.change("work", False, env={"KEI_AGENT_HOME": str(home)}) == 1
+    assert _change(home, "work", False) == 1
     assert "1行目" in capsys.readouterr().out
     assert (home / "agents.csv").read_text(encoding="utf-8") == "module,on\nresearch,true\n"
 
 
 def test_dry_run_unknown_and_already_on(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["research"]\n')
-    env = {"KEI_AGENT_HOME": str(home)}
-    assert module_command.change("work", True, env=env, dry_run=True) == 0
+    assert _change(home, "work", True, dry_run=True) == 0
     assert _on(home) == ["research"]
-    assert module_command.change("nothing", True, env=env) == 1
-    assert module_command.change("research", True, env=env) == 0
+    assert _change(home, "nothing", True) == 1
+    assert _change(home, "research", True) == 0
     out = capsys.readouterr().out
     assert "--dry-run なので" in out and "知らないモジュール" in out and "もうオン" in out
 

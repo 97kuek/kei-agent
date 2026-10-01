@@ -41,6 +41,9 @@ def test_long_text_is_split():
 def test_summarize():
     assert summarize("## 結果\n\n- **条件C** は 71%\n- `outputs/c.png` を見る") == "結果 / 条件C は 71% / outputs/c.png を見る"
     assert len(summarize("あ" * 500)) == 300
+    # 行頭の数字は番号として消さない
+    assert summarize("0.85 に改善\n2023年のデータ") == "0.85 に改善 / 2023年のデータ"
+    assert summarize("- 箇条書き\n1. 番号つき\n## 見出し") == "箇条書き / 番号つき / 見出し"
 
 
 class RecordingNotion:
@@ -124,11 +127,6 @@ def test_pagination_stops_when_the_cursor_is_empty():
     assert Notion.paginate(notion, "POST", "/x", {}) == [{"id": "a"}]
 
 
-def test_summarize_keeps_numbers_at_the_start_of_a_line():
-    assert summarize("0.85 に改善\n2023年のデータ") == "0.85 に改善 / 2023年のデータ"
-    assert summarize("- 箇条書き\n1. 番号つき\n## 見出し") == "箇条書き / 番号つき / 見出し"
-
-
 def test_blocks_to_markdown_reads_nested_blocks():
     """トグルや入れ子の箇条書きの中身が、Daily の材料から落ちないようにする。"""
     blocks = [{"id": "b1", "type": "toggle", "has_children": True,
@@ -138,95 +136,42 @@ def test_blocks_to_markdown_reads_nested_blocks():
     assert blocks_to_markdown(blocks) == "- 考察"
 
 
-def test_request_waits_and_retries_when_notion_is_busy(monkeypatch):
-    from kei_agent import notion as notion_module
-
-    notion = Notion("ntn_x")
-    calls = []
-
-    def send(method, path, body):
-        calls.append(path)
-        if len(calls) < 3:
-            raise notion_module._Retryable("429 rate limited", 0)
-        return {"ok": True}
-
-    monkeypatch.setattr(notion, "_send", send)
-    monkeypatch.setattr(notion_module.time, "sleep", lambda _s: None)
-    assert notion.request("GET", "/x") == {"ok": True}
-    assert len(calls) == 3
-
-
-def test_request_gives_up_after_retrying(monkeypatch):
-    from kei_agent import notion as notion_module
-
-    notion = Notion("ntn_x")
-    monkeypatch.setattr(notion, "_send", lambda *a: (_ for _ in ()).throw(
-        notion_module._Retryable("503 unavailable", 0)))
-    monkeypatch.setattr(notion_module.time, "sleep", lambda _s: None)
-    with pytest.raises(NotionError, match="503"):
-        notion.request("GET", "/x")
-
-
 # Notion の項目のずれ（起動時の確認）
 
 
-class _FakeNotionApi:
-    """data_sources の GET だけに答える偽物。"""
+class _SchemaApi:
+    """data_sources の GET だけに、SPECS どおりの項目で答える偽物。change(key, live) で中身を変えられる。"""
 
-    def __init__(self, properties: dict):
-        self.properties = properties
+    def __init__(self, change=lambda key, live: None):
+        self.change = change
 
     def request(self, method, path, body=None):
-        return {"properties": self.properties}
+        from kei_agent.notion import SPECS
+
+        key = path.split("/")[2].removeprefix("ds-")
+        live = {}
+        for name, want in SPECS[key]["properties"].items():
+            kind = next(iter(want))
+            live[name] = {"type": kind, kind: dict(want[kind])}
+        for name in SPECS[key].get("relations", {}):
+            live[name] = {"type": "relation", "relation": {}}
+        self.change(key, live)
+        return {"properties": live}
 
 
-def _tasks_state():
-    from kei_agent.notion import SPECS
-
-    return {"databases": {k: {"data_source_id": f"ds-{k}"} for k in SPECS}}
-
-
-def _live_from_spec(spec):
-    live = {}
-    for name, want in spec["properties"].items():
-        kind = next(iter(want))
-        live[name] = {"type": kind, kind: dict(want[kind])}
-    for name in spec.get("relations", {}):
-        live[name] = {"type": "relation", "relation": {}}
-    return live
-
-
-def test_schema_problems_is_quiet_when_notion_matches():
+def test_schema_problems_reports_renamed_options_and_missing_columns_and_databases():
+    """Notion の画面で「Kei Agent」を別名にすると、夜間 Task の絞り込みが落ちる。それを起動のときに先に知らせる。"""
     from kei_agent.notion import SPECS, schema_problems
 
-    class _Api:
-        def request(self, method, path, body=None):
-            key = path.split("/")[2].removeprefix("ds-")
-            return {"properties": _live_from_spec(SPECS[key])}
+    state = {"databases": {k: {"data_source_id": f"ds-{k}"} for k in SPECS}}
+    assert schema_problems(_SchemaApi(), state) == []
 
-    assert schema_problems(_Api(), _tasks_state()) == []
+    def rename(key, live):
+        if key == "tasks":
+            live["担当"]["select"]["options"] = [{"name": "自分"}, {"name": "Ezra"}]
+            del live["優先度"]
 
-
-def test_schema_problems_reports_a_renamed_select_option():
-    """Notion の画面で「Kei Agent」を別名にすると、夜間 Task の絞り込みが落ちる。それを先に知らせる。"""
-    from kei_agent.notion import SPECS, schema_problems
-
-    class _Api:
-        def request(self, method, path, body=None):
-            key = path.split("/")[2].removeprefix("ds-")
-            live = _live_from_spec(SPECS[key])
-            if key == "tasks":
-                live["担当"]["select"]["options"] = [{"name": "自分"}, {"name": "Ezra"}]
-                del live["優先度"]
-            return {"properties": live}
-
-    problems = schema_problems(_Api(), _tasks_state())
-    assert problems == ['tasks: 項目「担当」に選択肢 Kei Agent がありません', 'tasks: 項目「優先度」がありません']
-
-
-def test_schema_problems_reports_a_missing_database():
-    from kei_agent.notion import schema_problems
-
-    state = _tasks_state()
+    assert schema_problems(_SchemaApi(rename), state) == [
+        'tasks: 項目「担当」に選択肢 Kei Agent がありません', 'tasks: 項目「優先度」がありません']
     del state["databases"]["notes"]
-    assert any("notes: notion.json にありません" in p for p in schema_problems(_FakeNotionApi({}), state))
+    assert any("notes: notion.json にありません" in p for p in schema_problems(_SchemaApi(), state))

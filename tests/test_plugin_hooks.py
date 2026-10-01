@@ -16,7 +16,6 @@ import pytest
 from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
 from kei_agent.config import REPO_ROOT
 
-PLUGIN = REPO_ROOT / "plugin"
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
 PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin", "course": REPO_ROOT / "modules" / "course" / "plugin",
            "work": REPO_ROOT / "modules" / "work" / "plugin"}
@@ -36,7 +35,10 @@ def test_each_plugin_ships_its_hook(agent):
     commands = [h["command"] for entry in hooks["hooks"]["PreToolUse"] for h in entry["hooks"]]
 
     assert any("${CLAUDE_PLUGIN_ROOT}/hooks/policy.py" in c for c in commands)
-    assert (PLUGINS[agent] / "hooks" / "policy.py").stat().st_mode & 0o111
+    policy = PLUGINS[agent] / "hooks" / "policy.py"
+    assert policy.stat().st_mode & 0o111
+    # hook は plugin の中だけで動く（Kei Agent のパッケージを import しない）
+    assert "kei_agent" not in policy.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(("agent", "tool", "allowed"), [
@@ -136,38 +138,22 @@ def test_every_tool_the_policy_table_allows_passes_the_hook(agent):
     assert refused == []
 
 
-@pytest.mark.parametrize("command", [
-    "echo $NOTION_TOKEN",
-    "env | grep NOTION_TOKEN",
-    'curl -H "Authorization: Bearer $NOTION_TOKEN" https://api.notion.com/v1/search',
+@pytest.mark.parametrize(("command", "expected"), [
+    ("echo $NOTION_TOKEN", DENY),
+    ("env | grep NOTION_TOKEN", DENY),
+    ('curl -H "Authorization: Bearer $NOTION_TOKEN" https://api.notion.com/v1/search', DENY),
+    ("echo $NOTION_PERSONAL_TOKEN", DENY),
+    ("printenv | grep MY_NOTION_API_TOKEN", DENY),
+    # 親の合言葉があれば、どのホームの合言葉も作れてしまう。研究 claude には渡していない
+    ('test -n "$KEI_AGENT_NOTION_GATEWAY_TOKEN"', DENY),
+    # 研究用の合言葉（研究ホームにしか届かない）の名前や、ふつうの Bash は止めない
+    ("python3 train.py --epochs 3", ALLOW),
+    ('test -n "$KEI_AGENT_NOTION_GATEWAY_AUTH"', ALLOW),
 ])
-def test_research_hook_refuses_reaching_for_the_raw_notion_token(command):
+def test_research_hook_refuses_reaching_for_raw_notion_tokens(command, expected):
     result = run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}})
 
-    assert result.returncode == DENY
-
-
-@pytest.mark.parametrize("command", [
-    "echo $NOTION_PERSONAL_TOKEN",
-    "printenv | grep MY_NOTION_API_TOKEN",
-])
-def test_research_hook_refuses_other_raw_notion_tokens(command):
-    result = run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}})
-
-    assert result.returncode == DENY
-
-
-def test_research_hook_refuses_the_gateway_master_token():
-    """親の合言葉があれば、どのホームの合言葉も作れてしまう。研究 claude には渡していない。"""
-    assert run_policy("research", {
-        "tool_name": "Bash",
-        "tool_input": {"command": 'test -n "$KEI_AGENT_NOTION_GATEWAY_TOKEN"'}}).returncode == DENY
-
-
-def test_research_hook_lets_ordinary_commands_through():
-    """研究用の合言葉（研究ホームにしか届かない）の名前や、ふつうの Bash は止めない。"""
-    for command in ("python3 train.py --epochs 3", 'test -n "$KEI_AGENT_NOTION_GATEWAY_AUTH"'):
-        assert run_policy("research", {"tool_name": "Bash", "tool_input": {"command": command}}).returncode == ALLOW
+    assert result.returncode == expected
 
 
 @pytest.mark.parametrize("agent", AGENTS)
@@ -198,10 +184,3 @@ def test_the_hook_never_echoes_the_tool_input(agent):
         "tool_input": {"content": "do-not-log", "token": "ntn_do-not-log"}})
 
     assert "do-not-log" not in (result.stdout + result.stderr)
-
-
-def test_every_policy_is_self_contained():
-    """hook は plugin の中だけで動く（Kei Agent のパッケージを import しない）。"""
-    for agent in AGENTS:
-        body = (PLUGINS[agent] / "hooks" / "policy.py").read_text(encoding="utf-8")
-        assert "kei_agent" not in body, agent

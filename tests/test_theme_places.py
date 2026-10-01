@@ -46,24 +46,19 @@ def test_a_theme_can_use_an_existing_folder(home, tmp_path):
     assert (other.cwd, other.external) == (home.research_root / "vlm", False)
 
 
-def test_themes_toml_is_read_again_when_it_changes(home, tmp_path):
-    """本体も担当プロセスも、起動し直さずに新しい置き場所を使う。"""
-    first, second = _repo(tmp_path, "one"), _repo(tmp_path, "two")
+def test_saving_keeps_the_other_themes_and_the_file_is_read_again_when_it_changes(home, tmp_path):
+    """名前は引用して書き、ほかのテーマは残す。本体も担当プロセスも、起動し直さずに新しい置き場所を使う。"""
+    first, second, third = _repo(tmp_path, "one"), _repo(tmp_path, 'odd "name"'), _repo(tmp_path, "three")
     themes.save_place(home, "amr", first)
     assert themes.places(home)["amr"] == first.resolve()
-    path = home.user_dir / "themes.toml"
-    path.write_text(f'amr = "{second}"\n', encoding="utf-8")
-    later = path.stat().st_mtime + 5
-    os.utime(path, (later, later))
-    assert themes.places(home)["amr"] == second.resolve()
-
-
-def test_saving_keeps_the_other_themes_and_quotes_names(home, tmp_path):
-    first, second = _repo(tmp_path, "one"), _repo(tmp_path, 'odd "name"')
-    themes.save_place(home, "amr", first)
     themes.save_place(home, "vlm", second)
     themes.save_place(home, "amr", second)
     assert themes.places(home) == {"amr": second.resolve(), "vlm": second.resolve()}
+    path = home.user_dir / "themes.toml"
+    path.write_text(f'amr = "{third}"\n', encoding="utf-8")
+    later = path.stat().st_mtime + 5
+    os.utime(path, (later, later))
+    assert themes.places(home) == {"amr": third.resolve()}
 
 
 def test_existing_folders_are_touched_as_little_as_possible(home, tmp_path):

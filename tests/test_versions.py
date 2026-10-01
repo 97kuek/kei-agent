@@ -44,31 +44,25 @@ def test_versions_differ_only_when_both_are_known():
     assert not version.differs("", "new")
 
 
-async def test_a_stale_agent_is_restarted_at_startup(assistant, monkeypatch):
-    restarted = []
-    monkeypatch.setattr(updates, "restart_service", lambda name: restarted.append(name) or True)
-    assistant.agents = {"course": _Agent("old", "new"), "work": _Agent("new")}
+@pytest.mark.parametrize(("course", "restarted", "reported"), [
+    (("old", "new"), ["course"], False),   # 起動のときに古い担当を入れ直す
+    (("old",), ["course"], True),          # 入れ直しても古いままなら、直し方を添えて知らせる
+])
+async def test_a_stale_agent_is_restarted_and_reported_if_it_stays_old(assistant, monkeypatch, course, restarted,
+                                                                         reported):
+    import asyncio
+
+    done = []
+    monkeypatch.setattr(updates, "restart_service", lambda name: done.append(name) or True)
+    assistant.agents = {"course": _Agent(*course), "work": _Agent("new")}
 
     await assistant.check_agents()
     while assistant.tasks:
-        import asyncio
         await asyncio.gather(*list(assistant.tasks))
 
-    assert restarted == ["course"]
-    assert assistant.troubles == []
-
-
-async def test_an_agent_that_stays_old_is_reported(assistant, monkeypatch):
-    monkeypatch.setattr(updates, "restart_service", lambda name: True)
-    assistant.agents = {"course": _Agent("old")}
-
-    await assistant.check_agents()
-    while assistant.tasks:
-        import asyncio
-        await asyncio.gather(*list(assistant.tasks))
-
-    trouble, = assistant.troubles
-    assert "course" in trouble and "deploy/restart-all.sh" in trouble
+    assert done == restarted
+    assert len(assistant.troubles) == int(reported)
+    assert all("course" in trouble and "deploy/restart-all.sh" in trouble for trouble in assistant.troubles)
 
 
 def test_installed_services_restart_the_gateway_first_and_leave_the_main_process(tmp_path):

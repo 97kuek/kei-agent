@@ -1,6 +1,5 @@
 """モジュールの差し込み口と窓口（kei_agent.api）。利用者が作ったモジュールが、コアを直さずに動くこと。"""
 
-import asyncio
 import json
 from dataclasses import replace
 
@@ -11,6 +10,7 @@ from kei_agent import a2a, modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, task_names
+from kei_agent.testing.kit import settle
 
 MEMO_TOML = '''api = 1
 name = "memo"
@@ -74,11 +74,23 @@ def env(config, store, tmp_path, monkeypatch):
     return Scheduler(config, store, assistant), assistant, slack
 
 
-async def settle(assistant):
-    """裏で動かした仕事が全部終わるまで待つ（終わった仕事を1つずつ待つと、集合から外れる前に空回りすることがある）。"""
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
+
+
+async def post_memo(assistant, text="牛乳を買う"):
+    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": f"<@UBOT> {text}"})
+    await settle(assistant)
+
+
+class FakeAgent:
+    """担当プロセスの代わり。頼まれた中身を seen に残し、決めた返事を返す。"""
+    base_url = "http://fake-agent/memo"
+
+    def __init__(self, state, reply):
+        self.state, self.reply, self.seen = state, reply, []
+
+    async def stream(self, skill, text="", params=None, on_progress=None):
+        self.seen.append((skill, params, json.loads(text)))
+        return a2a.TaskResult(state=self.state, text=json.dumps(self.reply))
 
 
 async def test_a_user_module_answers_in_its_channel_and_is_introduced(env, config):
@@ -88,8 +100,7 @@ async def test_a_user_module_answers_in_its_channel_and_is_introduced(env, confi
                              "ここに書いたことをメモするよ。"]
     assert not (config.research_root / "memo").exists()         # 研究テーマにはしない
 
-    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> 牛乳を買う"})
-    await settle(assistant)
+    await post_memo(assistant)
 
     pinned, answer = slack.posted()[1:]
     assert (pinned["channel"], pinned["text"], pinned["unfurl_links"]) == ("C50", "📌 牛乳を買う", False)
@@ -101,26 +112,20 @@ async def test_a_user_module_answers_in_its_channel_and_is_introduced(env, confi
 
 async def test_a_broken_module_says_so_instead_of_staying_silent(env, store):
     scheduler, assistant, slack = env
-    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> こわして"})
-    await settle(assistant)
+    await post_memo(assistant, "こわして")
     assert any(kw.get("name") == "warning" for name, kw in slack.calls if name == "reactions_add")
     assert any("#memo の依頼の処理が落ちました" in text for text in slack.texts())
 
 
-async def test_a_user_module_runs_its_schedule_in_order(env, config):
+async def test_a_user_module_runs_its_schedule_and_owns_its_reactions(env, store):
+    """利用者のモジュールの定期処理は決まった順に並び、自分の投稿へのリアクションは自分に届く。"""
     scheduler, assistant, slack = env
-    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> 牛乳を買う"})
-    await settle(assistant)
+    await post_memo(assistant)
 
     assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily", "review",
                                            "maintenance")
     assert await scheduler.run_task("tidy", "2026-09-27") == {"status": "done", "count": 1}
 
-
-async def test_reactions_go_to_the_module_that_owns_the_post(env, store):
-    scheduler, assistant, slack = env
-    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> 牛乳を買う"})
-    await settle(assistant)
     memo_ts = next(row["key"] for row in store.module_records("memo", "memo"))
 
     event = {"reaction": "pushpin", "user": "UME", "item_user": "UBOT",
@@ -134,33 +139,16 @@ async def test_reactions_go_to_the_module_that_owns_the_post(env, store):
 async def test_a_module_without_an_ai_can_ask_its_process(env):
     """AI の実行役（[actor]）を持たないモジュールも、担当プロセスに頼める（AI を選ばないので provider を渡さない）。"""
     scheduler, assistant, slack = env
-    seen = []
-
-    class Agent:
-        base_url = "http://fake-agent/memo"
-
-        async def stream(self, skill, text="", params=None, on_progress=None):
-            seen.append((skill, params, json.loads(text)))
-            return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps({"ok": True, "text": "はい", "data": {}}))
-
-    assistant.agents["memo"] = Agent()
+    agent = assistant.agents["memo"] = FakeAgent("TASK_STATE_COMPLETED", {"ok": True, "text": "はい", "data": {}})
     reply = await assistant.cores["memo"].ask_agent("count", {"n": 1})
-    assert (reply.ok, reply.text, seen) == (True, "はい", [("count", {}, {"n": 1})])
+    assert (reply.ok, reply.text, agent.seen) == (True, "はい", [("count", {}, {"n": 1})])
 
 
 async def test_the_reason_an_agent_gave_reaches_the_trouble_channel(env):
     """担当が断った理由の頭が、改善のチャンネルの1行に残る（URL や細かい中身はログだけ）。"""
     scheduler, assistant, slack = env
-
-    class Agent:
-        base_url = "http://fake-agent/memo"
-
-        async def stream(self, skill, text="", params=None, on_progress=None):
-            body = json.dumps({"ok": False, "text": "arXiv を読めません: https://export.arxiv.org/api/query?x を読めません: "
-                                                    "HTTP Error 406: Not Acceptable", "data": {}})
-            return a2a.TaskResult(state="TASK_STATE_FAILED", text=body)
-
-    assistant.agents["memo"] = Agent()
+    assistant.agents["memo"] = FakeAgent("TASK_STATE_FAILED", {"ok": False, "data": {}, "text": (
+        "arXiv を読めません: https://export.arxiv.org/api/query?x を読めません: HTTP Error 406: Not Acceptable")})
     assert not (await assistant.cores["memo"].ask_agent("count", {})).ok
     notice = slack.texts()[-1]
     assert notice.endswith("メモの担当の count がうまくいかなかった（arXiv を読めません、HTTP 406）")
@@ -168,6 +156,7 @@ async def test_the_reason_an_agent_gave_reaches_the_trouble_channel(env):
 
 
 async def test_one_broken_reaction_hook_does_not_stop_the_others(env, monkeypatch):
+    """あるモジュールのリアクションの処理が落ちても、ほかのモジュールには届き、落ちたことは知らせる。"""
     scheduler, assistant, slack = env
 
     async def broken(event, added):

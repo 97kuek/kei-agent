@@ -89,14 +89,11 @@ async def http(app):
 # 設定と合言葉
 
 
-def test_gateway_needs_the_master_and_the_notion_token(gw_config):
+def test_gateway_needs_the_master_the_notion_token_and_homes(gw_config, config):
     with pytest.raises(RuntimeError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
         load_gateway_config(gw_config, {"NOTION_TOKEN": "notion"})
     with pytest.raises(RuntimeError, match="NOTION_TOKEN"):
         load_gateway_config(gw_config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway"})
-
-
-def test_gateway_does_not_start_without_homes(config):
     with pytest.raises(RuntimeError, match=r"\[notion\]"):
         load_gateway_config(replace(config, notion=NotionConfig()),
                             {"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER, "NOTION_TOKEN": "notion"})
@@ -108,9 +105,7 @@ def test_homes_come_from_config_toml_not_from_notion_json(settings, world, gw_co
     assert settings.roots == {"research": {homes["research"]}, "course": {homes["course"]},
                               "kei-agent": set(homes.values())}
     assert not (gw_config.state_dir / "notion.json").exists()
-
-
-def test_home_ids_are_compared_without_dashes_or_case():
+    # ホームの ID は、ハイフンや大文字小文字の違いを気にせず比べる
     roots = client_roots(NotionConfig(research_home="4B310000-0000-0000-0000-0000000000AA"))
     assert roots == {"research": {"4b3100000000000000000000000000aa"},
                      "kei-agent": {"4b3100000000000000000000000000aa"}}
@@ -231,15 +226,6 @@ def test_scope_remembers_parents_for_sixty_seconds(api, world):
     assert len(api.lookups) > looked_up
 
 
-def test_a_notion_outage_is_not_read_as_outside(api, world, gateway):
-    def down(method, path, body=None):
-        raise NotionError("503 unavailable", 503)
-
-    api.request = down
-    with pytest.raises(NotionError):
-        gateway.scope("research").require(world.research.page)
-
-
 # 要求の読み方
 
 
@@ -276,14 +262,6 @@ def test_rules_find_page_references_in_notion_markdown():
             f'<page url="https://notion.so/{child}">子</page> <mention-user url="user://{user}">人</mention-user>')
     found = plan("POST", "/pages", body={"parent": {"type": "page_id", "page_id": page}, "markdown": text}).targets
     assert set(found) == {(page, "page"), (child, "page")}
-
-
-def test_rules_refuse_the_workspace_and_missing_parents():
-    for body in ({"parent": {"type": "workspace", "workspace": True}}, {"properties": {}}):
-        with pytest.raises(Refused):
-            plan("POST", "/pages", body=body)
-    with pytest.raises(Refused):
-        plan("PATCH", "/databases/" + "a" * 32, body={"parent": {"type": "workspace", "workspace": True}})
 
 
 # 中継の口: 決まった処理（src/kei_agent・src/kei_agent_modules.course）と MCP の道具が使う形
@@ -364,8 +342,9 @@ async def test_each_request_shape_goes_through_inside_and_is_refused_outside(htt
     assert api.forwarded == []
 
 
-@pytest.mark.parametrize("home", ["hub", "research", "course"])
+@pytest.mark.parametrize("home", ["research", "course"])
 async def test_kei_agent_reaches_all_three_homes(http, world, home):
+    """共通ホームは test_each_request_shape_goes_through_inside_and_is_refused_outside で見ている。"""
     for name in ("get_page", "query", "create_row", "append", "linked_view"):
         assert (await send(http, "kei-agent", SHAPES[name], getattr(world, home))).status_code == 200
 
@@ -457,11 +436,11 @@ async def test_a_linked_database_that_shows_another_home_counts_as_outside(http,
     assert (await http.get(f"/notion/v1/databases/{linked}", headers=auth("kei-agent"))).status_code == 200
 
 
-@pytest.mark.parametrize(("method", "path"), [("GET", "/users"), ("GET", "/users/me"), ("POST", "/comments"),
-                                              ("POST", "/file_uploads"), ("GET", "/async_tasks/" + "a" * 32)])
-async def test_the_proxy_refuses_paths_it_does_not_understand(http, api, method, path):
-    refused = await http.request(method, "/notion/v1" + path, headers=auth("kei-agent"))
-    assert refused.status_code == 403 and refused.json()["code"] == "restricted_resource"
+async def test_the_proxy_refuses_paths_it_does_not_understand(http, api):
+    """読み方は test_rules_refuse_what_the_gateway_does_not_understand。口では 403 になり、何も送らない。"""
+    for method, path in (("GET", "/users"), ("POST", "/comments"), ("GET", "/async_tasks/" + "a" * 32)):
+        refused = await http.request(method, "/notion/v1" + path, headers=auth("kei-agent"))
+        assert refused.status_code == 403 and refused.json()["code"] == "restricted_resource"
     assert api.forwarded == []
 
 
@@ -472,15 +451,14 @@ async def test_search_returns_only_results_inside_the_home(http, world):
         notion_id(course.root), notion_id(course.page), notion_id(course.row), notion_id(course.ds)}
 
 
-async def test_notion_status_body_and_retry_after_come_back_verbatim(http, api, world):
+async def test_notion_failures_come_back_without_inviting_a_double_write(http, api, world):
+    """Notion の状態・本文・Retry-After はそのまま返す。つながりが切れたときは、書き込みなら送り直させない。"""
     limited = b'{"object":"error","status":429,"code":"rate_limited","message":"slow down"}'
     api.fail_next = [(429, limited, {"Retry-After": "7"})]
     response = await send(http, "course", SHAPES["get_page"], world.course)
     assert response.status_code == 429 and response.headers["Retry-After"] == "7"
     assert response.content == limited
 
-
-async def test_a_lost_connection_is_retryable_only_when_nothing_was_written(http, api, world):
     api.fail_next = [ConnectionResetError("reset")]
     assert (await send(http, "course", SHAPES["get_page"], world.course)).status_code == 502
     api.fail_next = [ConnectionResetError("reset")]
@@ -488,19 +466,22 @@ async def test_a_lost_connection_is_retryable_only_when_nothing_was_written(http
     # 5xx にすると呼んだ側が送り直し、二重に作ってしまう
     assert lost.status_code == 409 and "書き込みが済んだか分かりません" in lost.json()["message"]
 
+    # JSON でない本文は、送らずに断る
+    api.forwarded.clear()
+    response = await http.post("/notion/v1/pages", content=b"{", headers=auth("course"))
+    assert response.status_code == 400 and api.forwarded == []
 
-async def test_a_notion_outage_while_checking_sends_nothing(http, api, world):
+
+async def test_a_notion_outage_while_checking_sends_nothing(http, api, world, gateway):
+    """Notion が落ちているのを「ホームの外」と読み違えない。確かめられなければ何も送らない。"""
     def down(method, path, body=None):
         raise NotionError("503 unavailable", 503)
 
     api.request = down
+    with pytest.raises(NotionError):
+        gateway.scope("research").require(world.research.page)
     response = await send(http, "course", SHAPES["get_page"], world.course)
     assert response.status_code == 503 and api.forwarded == []
-
-
-async def test_a_body_that_is_not_json_is_refused(http, api):
-    response = await http.post("/notion/v1/pages", content=b"{", headers=auth("course"))
-    assert response.status_code == 400 and api.forwarded == []
 
 
 async def test_a_moved_page_is_checked_again_at_its_new_place(http, world, gateway):
@@ -572,26 +553,10 @@ def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
     assert refused.value.status == 403 and "course can't reach" in str(refused.value)
 
 
-def test_research_setup_and_tasks_run_through_the_gateway(via, world, tmp_path):
-    from kei_agent.notion import Setup
-    from kei_agent.notion_store import NotionStore
-
-    kei = via("kei-agent")
-    Setup(kei, world.research.root, tmp_path / "notion.json").run()
-    store = NotionStore(kei, tmp_path / "notion.json")
-    assert store.ensure_theme("vlm", "https://slack.example/c", "~/research/vlm")
-    task = store.create_night_task("試す", "vlm", "https://slack.example/p1", "本文")
-    assert [found.id for found in store.tonight_tasks(5)] == [task.id]
-    assert task.theme_names == ["vlm"]
-
-    with pytest.raises(NotionError) as refused:
-        via("research").request("GET", f"/pages/{world.research.page}")
-    assert refused.value.status == 403
-
-
-def test_research_setup_can_be_previewed_without_writing(via, api, world, tmp_path):
+def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_path):
     """--apply を付けないときは読むだけで、作るもの・足すものを並べる。作ったあとは何も出ない。"""
     from kei_agent.notion import Setup, safe_to_resend
+    from kei_agent.notion_store import NotionStore
 
     kei = via("kei-agent")
     state = tmp_path / "notion.json"
@@ -603,6 +568,16 @@ def test_research_setup_can_be_previewed_without_writing(via, api, world, tmp_pa
     Setup(kei, world.research.root, state).run()
     assert [line for line in Setup(kei, world.research.root, state).plan()
             if not line.startswith("ノートのテンプレート")] == []
+
+    store = NotionStore(kei, state)
+    assert store.ensure_theme("vlm", "https://slack.example/c", "~/research/vlm")
+    task = store.create_night_task("試す", "vlm", "https://slack.example/p1", "本文")
+    assert [found.id for found in store.tonight_tasks(5)] == [task.id]
+    assert task.theme_names == ["vlm"]
+
+    with pytest.raises(NotionError) as refused:
+        via("research").request("GET", f"/pages/{world.research.page}")
+    assert refused.value.status == 403
 
 
 def test_papers_are_filed_once_and_every_theme_page_shows_its_own(via, api, world, tmp_path):

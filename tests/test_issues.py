@@ -161,7 +161,9 @@ async def test_repo_slug_reads_the_origin_of_the_repository(tmp_path):
     assert await issues.repo_slug(tmp_path) == "97kuek/kei-agent"
 
 
-async def test_gh_works_on_the_origin_repository(config, monkeypatch):
+@pytest.mark.parametrize("slug", ["97kuek/kei-agent", None])
+async def test_gh_works_only_on_the_github_origin(config, monkeypatch, slug):
+    """origin の repo に --repo を付けて動かす。GitHub にない repo では gh を呼ばずに止める。"""
     seen = []
 
     async def run_gh(*args):
@@ -170,29 +172,17 @@ async def test_gh_works_on_the_origin_repository(config, monkeypatch):
 
     async def repo_slug(root):
         assert root == config.repo_root
-        return "97kuek/kei-agent"
+        return slug
 
     monkeypatch.setattr(issues, "run_gh", run_gh)
     monkeypatch.setattr(issues, "repo_slug", repo_slug)
-    assert await GH(config.repo_root, "issue", "close", "3") == "done"
-    assert seen == [("issue", "close", "3", "--repo", "97kuek/kei-agent")]
-
-
-async def test_gh_refuses_a_repository_that_is_not_on_github(config, monkeypatch):
-    seen = []
-
-    async def run_gh(*args):
-        seen.append(args)
-        return ""
-
-    async def repo_slug(root):
-        return None
-
-    monkeypatch.setattr(issues, "run_gh", run_gh)
-    monkeypatch.setattr(issues, "repo_slug", repo_slug)
-    with pytest.raises(issues.IssueError):
-        await GH(config.repo_root, "issue", "list")
-    assert seen == []
+    if slug is None:
+        with pytest.raises(issues.IssueError):
+            await GH(config.repo_root, "issue", "list")
+        assert seen == []
+    else:
+        assert await GH(config.repo_root, "issue", "close", "3") == "done"
+        assert seen == [("issue", "close", "3", "--repo", slug)]
 
 
 async def test_run_gh_returns_the_output_and_keeps_errors_for_the_log(tmp_path, monkeypatch):
@@ -209,18 +199,14 @@ async def test_run_gh_returns_the_output_and_keeps_errors_for_the_log(tmp_path, 
     assert "Bad credentials" in raised.value.detail and "Bad credentials" not in raised.value.reason
 
 
-async def test_run_gh_without_gh_installed(tmp_path, monkeypatch):
+@pytest.mark.parametrize("script_mode", [None, 0o644])
+async def test_run_gh_that_is_missing_or_cannot_be_started(tmp_path, monkeypatch, script_mode):
+    if script_mode is not None:
+        fake = tmp_path / "gh"
+        fake.write_text("#!/bin/sh\necho x\n")
+        fake.chmod(script_mode)                         # 実行できない
     monkeypatch.setenv("PATH", str(tmp_path))
-    with pytest.raises(issues.IssueError, match="gh が見つかりません"):
-        await issues.run_gh("issue", "list")
-
-
-async def test_run_gh_that_cannot_be_started(tmp_path, monkeypatch):
-    fake = tmp_path / "gh"
-    fake.write_text("#!/bin/sh\necho x\n")
-    fake.chmod(0o644)                                   # 実行できない
-    monkeypatch.setenv("PATH", str(tmp_path))
-    with pytest.raises(issues.IssueError):
+    with pytest.raises(issues.IssueError, match="gh が見つかりません" if script_mode is None else None):
         await issues.run_gh("issue", "list")
 
 
@@ -234,13 +220,12 @@ async def test_create_opens_a_labelled_issue_with_only_the_summary(config, fake_
     assert fake_github.created() == [{"title": GOOD.title, "body": GOOD.body, "label": "kei-agent-request"}]
 
 
-async def test_create_accepts_a_label_that_already_exists(config, fake_github):
+async def test_create_accepts_an_existing_label_but_stops_on_other_label_errors(config, fake_github):
     fake_github.fail["label create"] = issues.IssueError(
         "gh が失敗しました", 'label with name "kei-agent-request" already exists; use `--force` to update')
     assert (await issues.create(config.repo_root, GOOD)).number == 1
 
-
-async def test_create_stops_when_the_label_cannot_be_made(config, fake_github):
+    fake_github.calls.clear()
     fake_github.fail["label create"] = issues.IssueError("gh が失敗しました", "HTTP 403: Resource not accessible")
     with pytest.raises(issues.IssueError):
         await issues.create(config.repo_root, GOOD)
@@ -256,13 +241,10 @@ async def test_create_needs_the_number_of_the_new_issue(config, monkeypatch):
         await issues.create(config.repo_root, GOOD)
 
 
-async def test_close_leaves_the_short_sha_of_the_merge(config, fake_github):
-    await issues.close(config.repo_root, 12, commit="abcdef1234567890")
-    assert fake_github.closed() == [("12", "abcdef1 で取り込みました。", "completed")]
-
-
-async def test_close_says_so_when_nothing_was_merged(config, fake_github):
+async def test_close_leaves_the_short_sha_or_says_nothing_was_merged(config, fake_github):
+    await issues.close(config.repo_root, 11, commit="abcdef1234567890")
     await issues.close(config.repo_root, 12)
     await issues.close(config.repo_root, 13, reason=issues.NOT_PLANNED)
-    assert fake_github.closed() == [("12", "直さずに解決しました。", "completed"),
+    assert fake_github.closed() == [("11", "abcdef1 で取り込みました。", "completed"),
+                                    ("12", "直さずに解決しました。", "completed"),
                                     ("13", "見送ることにしました。", "not planned")]

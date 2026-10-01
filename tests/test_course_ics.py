@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
-from kei_agent_modules.course import ics
+from kei_agent_modules.course import ics, moodle, notion_setup, school
 
 SAMPLE = """BEGIN:VCALENDAR
 VERSION:2.0
@@ -59,40 +59,29 @@ def test_unfold_joins_wrapped_lines():
 
 
 def test_parse_reads_the_fields_we_use():
-    first = ics.parse(SAMPLE)[0]
+    events = ics.parse(SAMPLE)
+    first = events[0]
     assert first.summary == "第3回レポート の 提出期限"
     assert first.course == "情報理論"
     assert first.description == "PDF で提出すること\n提出先は Moodle"   # \\n は改行に戻す
     assert first.url.endswith("id=12345")
     # 書き出しは UTC。手元の時刻（JST）に直して読む
     assert first.starts_at == datetime(2026, 9, 25, 23, 59)
-
-
-def test_date_only_events_land_at_the_end_of_that_day():
-    quiz = ics.parse(SAMPLE)[1]
-    assert quiz.starts_at == datetime(2026, 9, 30, 23, 59)
-
-
-def test_due_events_drops_the_past_and_the_not_due():
-    found = ics.due_events(SAMPLE, since=date(2026, 9, 20))
-    assert [e.summary for e in found] == [
-        "第3回レポート の 提出期限", "【ミニテスト】著作権 の受験可能期間終了", "小テスト の 終了日時"]
-    # ガイダンス（締切ではない）、受付の開始、4月の課題（過ぎている）は落とす
-
-
-def test_kind_tells_deadlines_from_openings():
-    kinds = {e.summary: e.kind for e in ics.parse(SAMPLE)}
+    # 日付だけの予定は、その日の終わり
+    assert events[1].starts_at == datetime(2026, 9, 30, 23, 59)
+    # 科目名から履修のコードを外す
+    assert next(e for e in events if e.uid.startswith("4444")).course_name == "新入生セミナー"
+    kinds = {e.summary: e.kind for e in events}
     assert kinds["【ミニテスト】著作権 の受験可能期間開始"] == "start"
     assert kinds["【ミニテスト】著作権 の受験可能期間終了"] == "due"
     assert kinds["学部ガイダンス"] == "other"
 
 
-def test_course_name_drops_the_enrolment_code():
-    event = next(e for e in ics.parse(SAMPLE) if e.uid.startswith("4444"))
-    assert event.course_name == "新入生セミナー"
-
-
-def test_due_events_respects_the_window():
+def test_due_events_drops_the_past_and_the_not_due_and_respects_the_window():
+    found = ics.due_events(SAMPLE, since=date(2026, 9, 20))
+    # ガイダンス（締切ではない）、受付の開始、4月の課題（過ぎている）は落とす
+    assert [e.summary for e in found] == [
+        "第3回レポート の 提出期限", "【ミニテスト】著作権 の受験可能期間終了", "小テスト の 終了日時"]
     assert ics.due_events(SAMPLE, since=date(2026, 9, 20), days=4) == []      # 9/24 まで
     assert len(ics.due_events(SAMPLE, since=date(2026, 9, 20), days=6)) == 1  # 9/26 まで
 
@@ -100,27 +89,27 @@ def test_due_events_respects_the_window():
 # カレンダーの取得（Moodle）
 
 
+class _Resp:
+    def __init__(self, body):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 def test_fetch_rejects_a_page_that_is_not_a_calendar(monkeypatch):
-    from kei_agent_modules.course import moodle
-
-    class _Resp:
-        def read(self):
-            return b"<html>login</html>"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(moodle.urllib.request, "urlopen", lambda *a, **kw: _Resp())
+    monkeypatch.setattr(moodle.urllib.request, "urlopen", lambda *a, **kw: _Resp(b"<html>login</html>"))
     with pytest.raises(moodle.MoodleError, match="ics ではありません"):
         moodle.fetch("https://example.invalid/calendar.ics")
 
 
 def test_due_reads_the_calendar(monkeypatch):
-    from kei_agent_modules.course import moodle
-
     monkeypatch.setattr(moodle, "fetch", lambda url, timeout=30: SAMPLE)
     found = moodle.due("https://example.invalid/calendar.ics", since=date(2026, 9, 20))
     assert [e.course_name for e in found] == ["情報理論", "新入生セミナー", "自然言語処理"]
@@ -131,8 +120,6 @@ def test_due_reads_the_calendar(monkeypatch):
 
 def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
     """授業ホームの正本6 DBを作り、科目・成績を中心に relation を張る。"""
-    from kei_agent_modules.course import notion_setup
-
     calls = []
 
     class _Notion:
@@ -221,30 +208,15 @@ def test_due_events_without_since_starts_from_now(monkeypatch):
 
 def test_fetch_unfolds_before_decoding_so_a_split_character_survives(monkeypatch):
     """折り返しは75バイトごと。日本語の1文字の途中で折り返されても、文字化けさせない。"""
-    from kei_agent_modules.course import moodle
-
     word = "課題".encode()
     body = (b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:1\r\nSUMMARY:" + word[:2] + b"\r\n " + word[2:]
             + b"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-
-    class _Resp:
-        def read(self):
-            return body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(moodle.urllib.request, "urlopen", lambda *a, **kw: _Resp())
+    monkeypatch.setattr(moodle.urllib.request, "urlopen", lambda *a, **kw: _Resp(body))
     assert ics.parse(moodle.fetch("https://example.invalid/calendar.ics"))[0].summary == "課題"
 
 
 def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeypatch):
     """年度が無いと、次の年も「履修中」の科目として出てしまう。履修科目は、自分のフォルダのファイルから入れる。"""
-    from kei_agent_modules.course import notion_setup, school
-
     posts = []
 
     class _Notion:
@@ -297,8 +269,6 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     ('[[courses]]\nweekday = "月"\n', "1 件目"),
 ])
 def test_a_broken_seed_file_says_what_is_wrong(tmp_path, text, message):
-    from kei_agent_modules.course import notion_setup
-
     seed = tmp_path / "courses.toml"
     seed.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match=message):
@@ -306,16 +276,12 @@ def test_a_broken_seed_file_says_what_is_wrong(tmp_path, text, message):
 
 
 def test_the_example_seed_file_can_be_read():
-    from kei_agent_modules.course import notion_setup
-
     year, courses = notion_setup.read_seed(notion_setup.Path(notion_setup.__file__).parent / "courses.example.toml")
     assert year == 2026 and courses[0] == notion_setup.Course("データベース", "月", 2, "秋学期")
     assert courses[-1].term == "秋ク"
 
 
 def test_course_setup_without_the_gateway_password_says_so(tmp_path, monkeypatch, config):
-    from kei_agent_modules.course import notion_setup
-
     monkeypatch.setattr(notion_setup, "load_config", lambda: config)
     with pytest.raises(SystemExit, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
         notion_setup.main(["course-home"])

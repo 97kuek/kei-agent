@@ -95,14 +95,6 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
-def test_two_modules_cannot_share_a_schedule(tmp_path):
-    home_dir = _config(tmp_path)
-    _module(home_dir / "modules", "news", 'api = 1\nname = "news"\n[schedules.reading]\ndefault = "07:00"\n',
-            SCHEDULE_ONLY)
-    with pytest.raises(ConfigError, match="定期処理「reading」がぶつかっています"):
-        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
-
-
 def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_path):
     home_dir = _config(tmp_path, 'modules = ["knowledge", "weather"]\n')
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
@@ -124,12 +116,22 @@ def test_turning_a_module_off_removes_what_it_brings(tmp_path):
     assert "knowledge" not in home.agent_labels(config)
 
 
-def test_modules_in_the_config_must_exist_and_bring_what_they_require(tmp_path):
-    with pytest.raises(ConfigError, match="知らないモジュール"):
-        load_config(env={"KEI_AGENT_HOME": str(_config(tmp_path, 'modules = ["nothing"]\n'))})
-    home_dir = _config(tmp_path, 'modules = ["digest"]\n')
-    _module(home_dir / "modules", "digest", 'api = 1\nname = "digest"\n[depends]\nrequires = ["knowledge"]\n')
-    with pytest.raises(ConfigError, match="knowledge が要ります"):
+@pytest.mark.parametrize(("text", "name", "toml", "message"), [
+    ('modules = ["nothing"]\n', None, None, "知らないモジュール"),
+    ('modules = ["digest"]\n', "digest", '[depends]\nrequires = ["knowledge"]\n', "knowledge が要ります"),
+    ("", "news", '[schedules.reading]\ndefault = "07:00"\n', "定期処理「reading」がぶつかっています"),
+    ("", "paths", '[settings]\nroot = "~"\n', "本体の設定"),
+    # モデルは本体の一覧からしか選べない
+    ('modules = ["cheap"]\n', "cheap", '[actor]\nprompt = "cheap.md"\n'
+     '[use_cases.cheap_answer]\nclaude = { model = "claude-2" }\n', "claude のモデル claude-2 は使えません"),
+])
+def test_a_config_whose_modules_do_not_fit_is_refused(tmp_path, text, name, toml, message):
+    home_dir = _config(tmp_path, text)
+    if name:
+        folder = _module(home_dir / "modules", name, f'api = 1\nname = "{name}"\n{toml}',
+                         SCHEDULE_ONLY if "[schedules" in toml else None)
+        (folder / f"{name}.md").write_text("#\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
@@ -172,22 +174,6 @@ def test_settings_stay_when_the_module_is_turned_off(tmp_path):
     # オフのモジュールのチャンネルの名前も、表に書いたまま残せる（使うのはオンのものだけ）
     assert config.module_channels == {}
     assert "work,false,office" in (home_dir / "agents.csv").read_text()
-
-
-def test_a_module_with_settings_cannot_take_the_name_of_a_core_table(tmp_path):
-    home_dir = _config(tmp_path)
-    _module(home_dir / "modules", "paths", 'api = 1\nname = "paths"\n[settings]\nroot = "~"\n')
-    with pytest.raises(ConfigError, match="本体の設定"):
-        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
-
-
-def test_a_module_can_only_pick_models_from_the_core_list(tmp_path):
-    home_dir = _config(tmp_path, 'modules = ["cheap"]\n')
-    folder = _module(home_dir / "modules", "cheap", 'api = 1\nname = "cheap"\n[actor]\nprompt = "cheap.md"\n'
-                                                    '[use_cases.cheap_answer]\nclaude = { model = "claude-2" }\n')
-    (folder / "cheap.md").write_text("# 安い担当\n", encoding="utf-8")
-    with pytest.raises(ConfigError, match="claude のモデル claude-2 は使えません"):
-        load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
 def _store(config):
@@ -351,15 +337,18 @@ def test_a_broken_service_is_refused(tmp_path, text, code, message):
         modules.load_service(modules.load_spec(folder))
 
 
-def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch):
-    """手で動かすコマンド（setup など）は commands.py に置き、共通のコマンドから動かす（pyproject.toml を触らない）。"""
+def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch, capsys):
+    """手で動かすコマンド（setup など）は commands.py に置き、共通のコマンドから動かす（pyproject.toml を触らない）。
+    `kei-agent-module <名前> <コマンド> --help` は、そのコマンドの説明を出す。"""
     pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
     from kei_agent_a2a import launch
 
     home_dir = _config(tmp_path)
     folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
     (folder / "commands.py").write_text(
-        "RAN = []\n\n\ndef setup(argv):\n    RAN.append(argv)\n\n\nCOMMANDS = {\"setup\": setup}\n", encoding="utf-8")
+        "import argparse\n\nRAN = []\n\n\ndef setup(argv):\n    RAN.append(argv)\n\n\n"
+        "def forecast(argv):\n    argparse.ArgumentParser(prog='forecast', description='明日の天気')"
+        ".parse_args(argv)\n\n\nCOMMANDS = {\"setup\": setup, \"forecast\": forecast}\n", encoding="utf-8")
     monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
 
     launch.main(["weather", "setup", "--apply"])
@@ -367,22 +356,9 @@ def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch):
     code = __import__(f"{modules.package(modules.known()['weather'])}.commands", fromlist=["RAN"])
     assert code.RAN == [["--apply"]]
     with pytest.raises(SystemExit):
+        launch.main(["weather", "forecast", "--help"])
+    assert "明日の天気" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
         launch.main(["weather", "nothing"])                 # 無いコマンド
     with pytest.raises(SystemExit):
         launch.main(["weather"])                            # 担当プロセスを持たない（コマンドだけのモジュール）
-
-
-def test_a_command_gets_its_own_help(tmp_path, monkeypatch, capsys):
-    """`kei-agent-module <名前> <コマンド> --help` は、共通のコマンドではなく、そのコマンドの説明を出す。"""
-    pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
-    from kei_agent_a2a import launch
-
-    home_dir = _config(tmp_path)
-    folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
-    (folder / "commands.py").write_text(
-        "import argparse\n\n\ndef forecast(argv):\n    argparse.ArgumentParser(prog='forecast', description='明日の天気')"
-        ".parse_args(argv)\n\n\nCOMMANDS = {\"forecast\": forecast}\n", encoding="utf-8")
-    monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
-    with pytest.raises(SystemExit):
-        launch.main(["weather", "forecast", "--help"])
-    assert "明日の天気" in capsys.readouterr().out

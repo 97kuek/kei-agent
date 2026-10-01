@@ -35,17 +35,14 @@ def test_totals_adds_up_by_course_and_task():
 
 
 def test_only_the_courses_in_notion_are_counted():
-    """アルバイトや個人開発のプロジェクトは数えない（「授業」にある科目だけ）。"""
+    """アルバイトや個人開発のプロジェクトは数えない（「授業」にある科目だけ）。
+    「大学 / 」の頭や、全角・半角だけの違いがあっても、同じ科目として数える。"""
     by_course = toggl_report.totals(ENTRIES, courses={"データベース", "情報セキュリティB"})
     assert set(by_course) == {"データベース", "情報セキュリティB"}
-
-
-def test_totals_normalizes_a_university_project_prefix():
-    entries = [{"duration": 1800, "type": "activity", "project": {"name": "大学 / データベース"}}]
-
-    by_course = toggl_report.totals(entries, courses={"データベース"})
-
-    assert by_course == {"データベース": {toggl_report.NO_NAME: 1800.0}}
+    prefixed = [{"duration": 1800, "type": "activity", "project": {"name": "大学 / データベース"}}]
+    assert toggl_report.totals(prefixed, courses={"データベース"}) == {"データベース": {toggl_report.NO_NAME: 1800.0}}
+    wide = toggl_report.totals([entry("情報セキュリティＢ", "小テスト", 1)], courses={"情報セキュリティB"})
+    assert set(wide) == {"情報セキュリティＢ"}
 
 
 def test_lines_put_the_longest_course_first():
@@ -56,9 +53,7 @@ def test_lines_put_the_longest_course_first():
     assert text.splitlines()[1] == "• データベース: 3.5 時間"
     assert "    - 第3回レポート: 3.0 時間" in text
     assert text.splitlines()[-1] == "合計: 4.5 時間"
-
-
-def test_lines_say_what_to_do_when_there_is_nothing():
+    # 記録が無ければ、何をすればよいかを言う
     text = "\n".join(toggl_report.lines({}, date(2026, 9, 14), date(2026, 9, 20)))
     assert "記録がなかったよ" in text and "プロジェクト名" in text
 
@@ -84,8 +79,3 @@ def test_report_without_the_keys_says_so(monkeypatch):
     with pytest.raises(TogglError, match="TOGGL_API_TOKEN"):
         toggl_report.report(days=7, today=date(2026, 9, 20))
 
-
-def test_course_names_are_matched_across_full_and_half_width():
-    """Toggl と「授業」で全角・半角だけが違う科目名も、同じ科目として数える。"""
-    by_course = toggl_report.totals([entry("情報セキュリティＢ", "小テスト", 1)], courses={"情報セキュリティB"})
-    assert set(by_course) == {"情報セキュリティＢ"}

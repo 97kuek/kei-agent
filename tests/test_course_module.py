@@ -65,32 +65,21 @@ async def test_the_morning_says_when_assignments_were_not_copied_to_the_calendar
     assert await module.prepare("review", "2026-09-28") == ["課題の取り込み"]
 
 
-async def test_new_and_changed_assignments_are_posted_with_a_count_heading(env):
+MM = "`10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1"
+DB = "`10/05 23:59` データベース / 第3回レポート"
+
+
+@pytest.mark.parametrize(("added", "updated", "text"), [
+    ([MM], [DB], f"📚 Moodle の課題（新着 1件・締切変更 1件）\n• {MM}\n• :repeat: {DB}"),
+    ([], [DB], f"📚 Moodle の課題（締切変更 1件）\n• :repeat: {DB}"),   # 「新着 0件」は出さない
+])
+async def test_new_and_changed_assignments_are_posted_with_a_count_heading(env, added, updated, text):
     """見出しに件数をまとめ、行頭のラベルは締切変更だけに :repeat: を付ける。"""
     scheduler, assistant, slack = env
-    assistant.agents["course"] = FakeCourseAgent(
-        added=["`10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1"],
-        updated=["`10/05 23:59` データベース / 第3回レポート"])
-    module = assistant.modules["course"]
-
-    assert await module.sync_assignments() is True
-
-    text, = slack.texts()
-    assert text == (
-        "📚 Moodle の課題（新着 1件・締切変更 1件）\n"
-        "• `10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1\n"
-        "• :repeat: `10/05 23:59` データベース / 第3回レポート")
-
-
-async def test_only_changed_assignments_do_not_show_zero_new(env):
-    """締切変更だけの回は、見出しに「新着 0件」を出さない。"""
-    scheduler, assistant, slack = env
-    assistant.agents["course"] = FakeCourseAgent(updated=["`10/05 23:59` データベース / 第3回レポート"])
+    assistant.agents["course"] = FakeCourseAgent(added=added, updated=updated)
 
     assert await assistant.modules["course"].sync_assignments() is True
-
-    text, = slack.texts()
-    assert text.splitlines()[0] == "📚 Moodle の課題（締切変更 1件）"
+    assert slack.texts() == [text]
 
 
 async def test_the_course_module_ticks_hourly(env, monkeypatch):

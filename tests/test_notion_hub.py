@@ -194,64 +194,50 @@ def setup(fake_notion, tmp_path):
                     research_home_id="research-home", course_home_id="course-home")
 
 
-def test_duplicate_calendar_is_rejected_before_any_write(fake_notion, tmp_path):
-    fake_notion.blocks["home"].append(fake_notion.child_db("calendar-duplicate", "今月の予定"))
-    with pytest.raises(NotionError, match="重複"):
-        setup(fake_notion, tmp_path).run()
-    assert fake_notion.writes == []
-
-
-def test_missing_hub_access_is_rejected_before_any_write(fake_notion, tmp_path):
-    del fake_notion.pages["home"]
-    with pytest.raises(NotionError, match="共有|アクセス"):
-        setup(fake_notion, tmp_path).run()
-    assert fake_notion.writes == []
-
-
-def test_existing_daily_without_state_stops_before_creating_duplicate_views(fake_notion, tmp_path):
-    fake_notion.blocks["home"].append(fake_notion.child_db("daily-db", "日別記録"))
-    fake_notion.databases["daily-db"] = {
+def add_existing_daily(notion, tmp_path, with_state=False, extra_view=False):
+    notion.blocks["home"].append(notion.child_db("daily-db", "日別記録"))
+    notion.databases["daily-db"] = {
         "id": "daily-db", "parent": {"type": "page_id", "page_id": "home"},
         "data_sources": [{"id": "daily-ds"}]}
-    fake_notion.sources["daily-ds"] = fake_notion.ds("daily-ds", {"日付": "title"})
-    with pytest.raises(NotionError, match="状態ファイル|既存の日別"):
+    notion.sources["daily-ds"] = notion.ds("daily-ds", {"日付": "title"})
+    if extra_view:
+        notion.daily_view_ids.append("another-view")
+    if with_state:
+        state = HubState("home", "calendar-ds", "daily-ds", "calendar-db", "daily-db")
+        (tmp_path / "hub.json").write_text(json.dumps(state.__dict__), encoding="utf-8")
+
+
+@pytest.mark.parametrize(("breaks", "match"), [
+    (lambda n, _: n.blocks["home"].append(n.child_db("calendar-duplicate", "今月の予定")), "重複"),
+    (lambda n, _: n.pages.pop("home"), "共有|アクセス"),
+    (lambda n, _: n.databases["tasks-db"]["parent"].update(page_id="other"), "正本|親"),
+    # 状態ファイルのない既存の日別記録に、ビューを二重に作らない
+    (lambda n, t: add_existing_daily(n, t), "状態ファイル|既存の日別"),
+    (lambda n, t: add_existing_daily(n, t, with_state=True, extra_view=True), "ビュー.*一意"),
+], ids=["duplicate-calendar", "no-access", "source-parent", "daily-without-state", "ambiguous-view"])
+def test_setup_problems_are_rejected_before_any_write(fake_notion, tmp_path, breaks, match):
+    """共通ホームの形がおかしいときは、何か書く前に止める（重複や他人のページを作り変えない）。"""
+    breaks(fake_notion, tmp_path)
+    with pytest.raises(NotionError, match=match):
         setup(fake_notion, tmp_path).run()
     assert fake_notion.writes == []
 
 
-def test_existing_daily_with_ambiguous_view_stops_before_schema_writes(fake_notion, tmp_path):
-    fake_notion.blocks["home"].append(fake_notion.child_db("daily-db", "日別記録"))
-    fake_notion.databases["daily-db"] = {
-        "id": "daily-db", "parent": {"type": "page_id", "page_id": "home"},
-        "data_sources": [{"id": "daily-ds"}]}
-    fake_notion.sources["daily-ds"] = fake_notion.ds("daily-ds", {"日付": "title"})
-    fake_notion.daily_view_ids.append("another-view")
-    state = HubState("home", "calendar-ds", "daily-ds", "calendar-db", "daily-db")
-    (tmp_path / "hub.json").write_text(json.dumps(state.__dict__), encoding="utf-8")
-    with pytest.raises(NotionError, match="ビュー.*一意"):
-        setup(fake_notion, tmp_path).run()
-    assert fake_notion.writes == []
+def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path):
+    """二度目の setup では何も書かない。日別・時間・読みもの・集め方のページは1つずつで、正本の親は動かさない。"""
+    from kei_agent.notion_hub import COLLECT_TITLE
 
-
-def test_source_parent_mismatch_is_rejected_before_any_write(fake_notion, tmp_path):
-    fake_notion.databases["tasks-db"]["parent"]["page_id"] = "other"
-    with pytest.raises(NotionError, match="正本|親"):
-        setup(fake_notion, tmp_path).run()
-    assert fake_notion.writes == []
-
-
-def test_run_creates_schema_and_linked_views_only_once(fake_notion, tmp_path):
     hub_setup = setup(fake_notion, tmp_path)
     first = hub_setup.run()
     writes_after_first = len(fake_notion.writes)
     fake_notion.hide_request_fields = True  # Notion の GET は POST の create_database を返さない
-    second = hub_setup.run()
-    assert first == second
+    assert hub_setup.run() == first
     assert len(fake_notion.writes) == writes_after_first
-    assert first.calendar_ds_id == "calendar-ds"
-    assert first.daily_ds_id == "daily-ds"
-    assert [b["child_database"]["title"] for b in fake_notion.blocks["home"]
-            if b["type"] == "child_database"].count("日別記録") == 1
+    assert (first.calendar_ds_id, first.daily_ds_id) == ("calendar-ds", "daily-ds")
+    titles = [b["child_database"]["title"] for b in fake_notion.blocks["home"] if b["type"] == "child_database"]
+    assert titles.count("日別記録") == 1 and titles.count("読みもの") == 1
+    assert [b["child_page"]["title"] for b in fake_notion.blocks["home"]
+            if b["type"] == "child_page"].count(COLLECT_TITLE) == 1
     assert [view["name"] for view in fake_notion.views] == ["研究 Task", "授業課題", "週ごとの時間"]
     visible = [prop["property_id"] for prop in fake_notion.daily_view["configuration"]["properties"]
                if prop["visible"]]
@@ -263,35 +249,52 @@ def test_run_creates_schema_and_linked_views_only_once(fake_notion, tmp_path):
         assert view["sorts"][0]["direction"] == "ascending"
     assert fake_notion.databases["tasks-db"]["parent"]["page_id"] == "research-home"
     assert fake_notion.databases["assignments-db"]["parent"]["page_id"] == "course-home"
-    assert tmp_path.joinpath("hub.json").exists()
+
+    # 時間記録と週ごとのグラフ
+    assert (first.time_db_id, first.time_ds_id) == ("time-db", "time-ds")
+    assert {name: prop["type"] for name, prop in fake_notion.sources["time-ds"]["properties"].items()} == {
+        "名前": "title", "領域": "select", "テーマ": "rich_text", "開始": "date", "分": "number",
+        "メモ": "rich_text", "Slack": "url", "記録 ID": "rich_text", "出典": "select"}
+    chart = fake_notion.views[-1]
+    assert first.time_chart_view_id == chart["id"]
+    assert chart["database_id"] == "time-db" and chart["data_source_id"] == "time-ds"
+    config = chart["configuration"]
+    assert config["chart_type"] == "column"
+    assert config["x_axis"] == {"type": "date", "property_id": "開始", "group_by": "week",
+                                "sort": {"type": "ascending"}}
+    assert config["y_axis"] == {"aggregator": "sum", "property_id": "分"}
+    assert config["stack_by"]["property_id"] == "領域"
+    assert json.loads((tmp_path / "hub.json").read_text())["time_ds_id"] == "time-ds"
+
+    # 👍 した記事の入れ先
+    assert (first.reading_db_id, first.reading_ds_id) == ("reading-db", "reading-ds")
+    assert {name: prop["type"] for name, prop in fake_notion.sources["reading-ds"]["properties"].items()} == {
+        "名前": "title", "URL": "url", "出どころ": "select", "興味": "multi_select", "要約": "rich_text",
+        "日付": "date", "状態": "select"}
+
+    # 集め方のページは、朝の読みもの（schedule.run_reading）と同じ呼び方で読み返せる
+    interests, sources = HubStore(fake_notion, HubState("home", "calendar-ds", "daily-ds")).collect_settings()
+    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
+    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
 
 
-def test_old_this_week_views_are_widened_once(fake_notion, tmp_path):
-    """前の絞り込み（締切が今週だけ）の表は、次の setup で一度だけ直す。"""
+def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, tmp_path):
+    """前の絞り込み（締切が今週だけ）の表は次の setup で一度だけ直す。状態ファイルがあっても重複した表は見つけて止める。"""
     hub_setup = setup(fake_notion, tmp_path)
     hub_setup.run()
     for view in fake_notion.views[:2]:
         view["filter"] = {"and": [{"property": "締切", "date": {"this_week": {}}}]}
         view.pop("sorts")
     writes_before = len(fake_notion.writes)
-
     hub_setup.run()
-    patched = len(fake_notion.writes) - writes_before
     hub_setup.run()
-
-    assert patched == 2 and len(fake_notion.writes) == writes_before + 2
+    assert len(fake_notion.writes) == writes_before + 2
     assert all("past_year" in str(view["filter"]) for view in fake_notion.views[:2])
 
-
-def test_duplicate_linked_view_is_detected_even_with_saved_state(fake_notion, tmp_path):
-    hub_setup = setup(fake_notion, tmp_path)
-    hub_setup.run()
-    duplicate = dict(fake_notion.views[0], id="duplicate-view")
-    fake_notion.views.append(duplicate)
-    writes_before = len(fake_notion.writes)
+    fake_notion.views.append(dict(fake_notion.views[0], id="duplicate-view"))
     with pytest.raises(NotionError, match="重複"):
         hub_setup.run()
-    assert len(fake_notion.writes) == writes_before
+    assert len(fake_notion.writes) == writes_before + 2
 
 
 def test_inspect_reports_existing_sources_without_writes(fake_notion, tmp_path):
@@ -361,17 +364,30 @@ def day_hub():
     return HubStore(notion, HubState("home", "calendar-ds", "daily-ds"))
 
 
-def test_daily_and_review_share_one_row_and_keep_conclusion(day_hub):
-    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "元の振り返り", None)
-    day_hub.append_review_conclusion(row.id, "決めたこと", datetime(2026, 9, 24, 21))
+def test_daily_and_review_share_one_row_and_reruns_keep_what_the_owner_added(day_hub):
+    """Daily と振り返りは同じ日の1行。作り直しても、自分の結論と手書きの追記は消さない。"""
+    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "最初の本文", None)
+    stamp = datetime(2026, 9, 24, 21)
+    # 同じ分に貼られた別の結論は両方残し、同じ結論を二度貼っても1つにする
+    day_hub.append_review_conclusion(row.id, "自分の結論", stamp, "123.001")
+    day_hub.append_review_conclusion(row.id, "結論その二", stamp, "123.002")
+    day_hub.append_review_conclusion(row.id, "自分の結論", stamp, "123.001")
+    day_hub.notion.blocks[row.id].append({"id": "manual", "type": "paragraph",
+                                          "paragraph": {"rich_text": [{"plain_text": "手書きの追記"}]}})
     day_hub.upsert_day("Daily", "2026-09-24", "Daily", "朝の内容", None)
     day_hub.upsert_day("Daily", "2026-09-24", "Daily", "修正した朝の内容", None)
+    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "再生成した本文", None)
     body = day_hub.day_body("2026-09-24")
     assert len(day_hub.notion.rows) == 1
-    assert "修正した朝の内容" in body
-    assert "\n朝の内容\n" not in body
-    assert "元の振り返り" in body
-    assert "決めたこと" in body
+    assert "修正した朝の内容" in body and "\n朝の内容\n" not in body
+    assert "最初の本文" not in body and "再生成した本文" in body
+    assert body.count("自分の結論") == 1 and body.count("結論その二") == 1 and "手書きの追記" in body
+    # 読み返すときは、区画ごと・結論つきで、本文の区切りの印は出さない
+    assert day_hub.section_text("2026-09-24", "Daily") == "修正した朝の内容"
+    text = day_hub.review_text("2026-09-24")
+    assert "再生成した本文" in text and "自分の結論" in text
+    assert "Kei Agent の本文ここまで" not in text
+    assert day_hub.review_text("2026-09-25") == "" and day_hub.section_text("2026-09-25", "Daily") == ""
 
 
 def test_upsert_refuses_duplicate_day_before_write(day_hub):
@@ -383,76 +399,8 @@ def test_upsert_refuses_duplicate_day_before_write(day_hub):
     assert len(day_hub.notion.writes) == before
 
 
-def test_summary_is_bounded_and_missing_section_stays_empty(day_hub):
-    day_hub.upsert_day("Daily", "2026-09-24", "Daily", "a" * 2200, None)
-    props = day_hub.notion.rows[0]["properties"]
-    assert len(props["Daily"]["rich_text"][0]["text"]["content"]) <= 2000
-    assert props["レトプラ"]["rich_text"] == []
-
-
-def test_review_rerun_keeps_user_conclusion(day_hub):
-    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "最初の本文", None)
-    day_hub.append_review_conclusion(row.id, "自分の結論", datetime(2026, 9, 24, 21))
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "再生成した本文", None)
-    body = day_hub.day_body("2026-09-24")
-    assert "最初の本文" not in body
-    assert body.count("自分の結論") == 1
-    assert "再生成した本文" in body
-
-
-def test_two_distinct_conclusions_in_one_minute_are_both_kept(day_hub):
-    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "本文", None)
-    stamp = datetime(2026, 9, 24, 21, 0)
-    day_hub.append_review_conclusion(row.id, "結論その一", stamp, "123.001")
-    day_hub.append_review_conclusion(row.id, "結論その二", stamp, "123.002")
-    day_hub.append_review_conclusion(row.id, "結論その一", stamp, "123.001")
-    body = day_hub.day_body("2026-09-24")
-    assert body.count("結論その一") == 1
-    assert body.count("結論その二") == 1
-
-
-def test_review_rerun_preserves_arbitrary_manual_append(day_hub):
-    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "最初の本文", None)
-    day_hub.notion.blocks[row.id].append({"id": "manual", "type": "paragraph",
-                                          "paragraph": {"rich_text": [{"plain_text": "手書きの追記"}]}})
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "再生成した本文", None)
-    body = day_hub.day_body("2026-09-24")
-    assert "最初の本文" not in body
-    assert "再生成した本文" in body
-    assert "手書きの追記" in body
-
-
-def test_run_creates_time_db_with_weekly_chart(fake_notion, tmp_path):
-    state = setup(fake_notion, tmp_path).run()
-    assert (state.time_db_id, state.time_ds_id) == ("time-db", "time-ds")
-    props = fake_notion.sources["time-ds"]["properties"]
-    assert {name: prop["type"] for name, prop in props.items()} == {
-        "名前": "title", "領域": "select", "テーマ": "rich_text", "開始": "date", "分": "number",
-        "メモ": "rich_text", "Slack": "url", "記録 ID": "rich_text", "出典": "select"}
-    chart = fake_notion.views[-1]
-    assert state.time_chart_view_id == chart["id"]
-    assert chart["database_id"] == "time-db" and chart["data_source_id"] == "time-ds"
-    config = chart["configuration"]
-    assert config["chart_type"] == "column"
-    assert config["x_axis"] == {"type": "date", "property_id": "開始", "group_by": "week",
-                                "sort": {"type": "ascending"}}
-    assert config["y_axis"] == {"aggregator": "sum", "property_id": "分"}
-    assert config["stack_by"]["property_id"] == "領域"
-    assert json.loads((tmp_path / "hub.json").read_text())["time_ds_id"] == "time-ds"
-
-
-def test_run_creates_the_reading_db_once_and_likes_are_written_to_it(fake_notion, tmp_path):
-    """👍 した記事の入れ先。setup は1回だけ作り、記事は「気になる」で入る。選択肢にカンマは使えない。"""
-    hub_setup = setup(fake_notion, tmp_path)
-    state = hub_setup.run()
-    hub_setup.run()
-    assert [b["child_database"]["title"] for b in fake_notion.blocks["home"]
-            if b["type"] == "child_database"].count("読みもの") == 1
-    assert (state.reading_db_id, state.reading_ds_id) == ("reading-db", "reading-ds")
-    assert {name: prop["type"] for name, prop in fake_notion.sources["reading-ds"]["properties"].items()} == {
-        "名前": "title", "URL": "url", "出どころ": "select", "興味": "multi_select", "要約": "rich_text",
-        "日付": "date", "状態": "select"}
-
+def test_likes_are_written_to_the_reading_db():
+    """👍 した記事は「気になる」で入る。選択肢にカンマは使えない。"""
     class Pages:
         def __init__(self):
             self.sent = []
@@ -538,12 +486,9 @@ def test_record_time_is_idempotent_on_entry_id(time_hub):
     assert props["記録 ID"]["rich_text"][0]["text"]["content"] == "e1"
 
 
-def test_record_time_rejects_unknown_domain(time_hub):
+def test_record_time_rejects_unknown_domain_and_missing_time_db(time_hub):
     with pytest.raises(ValueError):
         time_hub.record_time("e1", "hobby", "x", "2026-09-21T10:00:00+09:00", 5)
-
-
-def test_record_time_without_time_db_says_so(time_hub):
     hub = HubStore(FakeTimeNotion(), HubState("home", "calendar-ds", "daily-ds"))
     # has_time_db は値として読む（assistant・schedule は `not hub.has_time_db` で見る）
     assert hub.has_time_db is False and time_hub.has_time_db is True
@@ -559,23 +504,6 @@ def test_week_minutes_are_summed_per_domain(time_hub):
     assert time_hub.time_minutes_by_domain(date(2026, 9, 21)) == {"研究": 45, "大学": 45}
     assert time_hub.time_ids_since(date(2026, 9, 23)) == {"c", "d"}
     assert time_hub.time_url() == "https://www.notion.so/timedb"
-
-
-def test_review_text_includes_conclusions_but_not_boundary(day_hub):
-    row = day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "元の振り返り", None)
-    day_hub.append_review_conclusion(row.id, "決めたこと", datetime(2026, 9, 24, 21))
-    text = day_hub.review_text("2026-09-24")
-    assert "元の振り返り" in text and "決めたこと" in text
-    assert "Kei Agent の本文ここまで" not in text
-    assert day_hub.review_text("2026-09-25") == ""
-
-
-def test_section_text_reads_the_whole_daily_section(day_hub):
-    day_hub.upsert_day("Daily", "2026-09-24", "Daily", "朝の内容", None)
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "夜の内容", None)
-    assert day_hub.section_text("2026-09-24", "Daily") == "朝の内容"
-    assert day_hub.section_text("2026-09-24", "振り返り") == "夜の内容"
-    assert day_hub.section_text("2026-09-25", "Daily") == ""
 
 
 def test_headings_inside_a_section_do_not_break_the_day_row(day_hub):
@@ -600,31 +528,18 @@ def test_setup_matches_ids_with_and_without_dashes(fake_notion, tmp_path):
     assert state.calendar_ds_id and state.daily_ds_id and state.time_ds_id
 
 
-def test_day_row_has_no_local_file_columns(day_hub):
-    """手元にファイルを残さないので、日別記録にファイルの列は作らず、書きもしない。"""
+def test_day_row_properties_are_bounded_and_have_no_local_file_columns(day_hub):
+    """要約は Notion の上限に収め、まだない区画は空のまま。手元にファイルを残さないので、ファイルの列は作らない。"""
     from kei_agent.notion_hub import DAILY_PROPERTIES
 
-    day_hub.upsert_day("Daily", "2026-09-24", "Daily", "朝", "https://slack.example/1")
-    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "夜", None)
-
+    day_hub.upsert_day("Daily", "2026-09-24", "Daily", "a" * 2200, "https://slack.example/1")
     props = day_hub.notion.rows[0]["properties"]
+    assert len(props["Daily"]["rich_text"][0]["text"]["content"]) <= 2000
+    assert props["レトプラ"]["rich_text"] == []
+    day_hub.upsert_day("振り返り", "2026-09-24", "Retro", "夜", None)
+    assert day_hub.section_text("2026-09-24", "振り返り") == "夜"
     assert not any("ファイル" in name for name in (*DAILY_PROPERTIES, *props))
     assert props["Daily Slack"] == {"url": "https://slack.example/1"}
-
-
-def test_collect_page_is_made_once_and_read_back(fake_notion, tmp_path):
-    from kei_agent.notion_hub import COLLECT_TITLE
-
-    hub_setup = setup(fake_notion, tmp_path)
-    hub_setup.run()
-    hub_setup.run()
-    pages = [b for b in fake_notion.blocks["home"]
-             if b["type"] == "child_page" and b["child_page"]["title"] == COLLECT_TITLE]
-    assert len(pages) == 1
-    # 朝の読みもの（schedule.run_reading）と同じ呼び方で読む
-    interests, sources = HubStore(fake_notion, HubState("home", "calendar-ds", "daily-ds")).collect_settings()
-    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
-    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
 
 
 def test_collect_lines_accept_full_width_colons_and_titled_links():

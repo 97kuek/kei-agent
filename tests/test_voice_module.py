@@ -3,7 +3,6 @@
 担当プロセス側（喋る・聞く・道具）は test_voice.py。
 """
 
-import asyncio
 
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
@@ -11,6 +10,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
+from kei_agent.testing.kit import settle
 
 
 @pytest.fixture
@@ -28,10 +28,6 @@ def env(config, store, monkeypatch):
     return assistant, told
 
 
-async def settle(assistant):
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 def test_voice_is_a_module_with_its_own_process():

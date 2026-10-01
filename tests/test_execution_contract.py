@@ -29,45 +29,20 @@ def test_agent_provider_contract_matrix(config, actor, case, provider, model, ef
     workspace = (router.workspace(config) if actor == "router" else
                  themes.resolve(config, "vlm") if actor == "research" else
                  themes.agent_workspace(config, actor))
-    contract = resolve_contract(config, runner.ExecutionRequest(
-        workspace, resolve(actor, provider, case), None, "C1", "1.1"))
+    request = runner.ExecutionRequest(workspace, resolve(actor, provider, case), None, "C1", "1.1")
+    contract = resolve_contract(config, request)
 
+    assert contract.recipe == request.recipe
     assert (contract.recipe.model, contract.recipe.reasoning_effort) == (model, effort)
     # 研究・大学・仕事の指示書はモジュールのフォルダ（modules/<名前>/）、本体の担当はリポジトリの prompts/
     folder = config.repo_root / (f"modules/{actor}" if actor in ("research", "course", "work") else "prompts")
     assert contract.prompt_text == (folder / prompt_name).read_text(encoding="utf-8")
     assert len(contract.prompt_version) == 12
-    assert (contract.skill_dir is not None) is has_skills
+    # skill は担当の plugin のもの。振り分け係は研究の skill も書き込みも受け継がない
+    assert contract.skill_dir == (config.agent_plugin_dir(actor) / "skills" if has_skills else None)
+    assert contract.read_only is (actor == "router")
     assert contract.capabilities == capabilities
     assert contract.policy.name == actor
-
-
-def test_research_contract_uses_workspace_prompt_and_agent_skills(config):
-    workspace = themes.resolve(config, "vlm")
-    request = runner.ExecutionRequest(
-        workspace, resolve("research", "codex", "research_execute"), None, "C1", "1.1"
-    )
-
-    contract = resolve_contract(config, request)
-
-    prompt_path = workspace.system_prompt or config.repo_root / "modules" / "research" / "research.md"
-    assert contract.recipe == request.recipe
-    assert contract.prompt_text == prompt_path.read_text(encoding="utf-8")
-    assert contract.skill_dir == config.agent_plugin_dir("research") / "skills"
-    assert len(contract.prompt_version) == 12
-    assert "mcp.allowlist" in contract.capabilities
-
-
-def test_router_contract_does_not_inherit_research_skills_or_write(config):
-    request = runner.ExecutionRequest(
-        router.workspace(config), resolve("router", "codex", UseCase.ROUTING), None, "C1", "1.1"
-    )
-
-    contract = resolve_contract(config, request)
-
-    assert contract.skill_dir is None
-    assert contract.read_only
-    assert "filesystem.write_scope" not in contract.capabilities
 
 
 def test_read_only_research_contract_does_not_request_write_and_reads_notion_only(config):
@@ -120,8 +95,6 @@ def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
 
 def test_only_agents_that_reach_notion_get_the_shared_notion_skill(config):
     """既存のページの書式を保つ skill は、Notion を使える担当（ホームを書いたもの）にだけ渡す。"""
-    from dataclasses import replace
-
     from kei_agent.agent_policy import policy_of
     from kei_agent.config import NotionConfig
     from kei_agent.execution_contract import shared_skill_dirs

@@ -21,6 +21,7 @@ from kei_agent.jobs import JobManager
 from kei_agent.notion import NotionError
 from kei_agent.records import Records
 from kei_agent.store import Store
+from kei_agent.testing.kit import settle
 from kei_agent.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent_modules.time import commands, entries, importer
 from kei_agent_modules.time.entries import Entries
@@ -46,10 +47,6 @@ def use_toggl(monkeypatch, module, toggl):
     monkeypatch.setattr(sys.modules[type(module).__module__], "load_toggl", lambda: toggl)
 
 
-async def settle(assistant):
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 def press(action_id, value="start", channel="C1", name="1-vlm", user="UME"):
@@ -100,26 +97,32 @@ async def test_the_card_starts_and_stops_one_timer(env):
     assert update["ts"] == card["ts"] and update["blocks"][1]["elements"][0]["action_id"] == START
 
 
-async def test_the_raw_channel_name_decides_the_domain(env):
-    """ボタンの body にチャンネル名がないときも、番号付きの名前で大学・仕事を見分ける。"""
+async def test_stale_stops_and_other_people_leave_the_timer_alone(env):
     assistant, module, slack = env
-    await assistant.module_action(press(START, channel="C3", name=""))
-    entry = module.entries.active("UME")
-    assert (entry.domain, entry.description) == ("work", "仕事 / work")
-
-
-async def test_a_stale_stop_button_leaves_the_other_timer_running(env):
-    assistant, module, slack = env
+    await assistant.module_action(press(START, user="USOMEONE"))
+    assert module.entries.active("USOMEONE") is None and slack.posted() == []
     await assistant.module_action(press(START))
     running = module.entries.active("UME")
     await assistant.module_action(press(STOP, "old-entry"))
     assert module.entries.active("UME") == running
 
 
-async def test_only_the_owner_can_press_the_card(env):
+@pytest.mark.parametrize(("by_card", "channel", "name", "domain", "description"), [
+    # ボタンの body にチャンネル名がないときも、番号付きの名前で見分ける
+    (True, "C3", "", "work", "仕事 / work"),
+    # 非公開のチャンネルは privategroup と届くので、Slack に名前を聞く
+    (False, "C3", "privategroup", "work", "仕事 / work"),
+    # 授業ごとのチャンネル（pick_course に無いもの）は、チャンネルの名前で測る
+    (False, "C4", "2-linear-algebra", "course", "大学 / linear-algebra"),
+])
+async def test_the_raw_channel_name_decides_the_domain(env, by_card, channel, name, domain, description):
     assistant, module, slack = env
-    await assistant.module_action(press(START, user="USOMEONE"))
-    assert module.entries.active("USOMEONE") is None and slack.posted() == []
+    if by_card:
+        await assistant.module_action(press(START, channel=channel, name=name))
+    else:
+        await assistant.module_slash("toggl", toggl_command(channel=channel, name=name))
+    entry = module.entries.active("UME")
+    assert (entry.domain, entry.description) == (domain, description)
 
 
 async def test_a_deleted_card_is_posted_again(env):
@@ -152,29 +155,24 @@ async def test_the_memo_is_saved_from_its_view(env):
 
 # /toggl
 
-async def test_toggl_toggles_in_the_same_channel_without_posting_cards(env):
+async def test_toggl_toggles_and_switches_channels_without_posting_cards(env):
     assistant, module, slack = env
     started = await assistant.module_slash("toggl", toggl_command())
-    await settle(assistant)
-    entry = module.entries.active("UME")
-    assert entry.description == "研究 / vlm" and "始めた" in started
+    first = module.entries.active("UME")
+    assert first.description == "研究 / vlm" and "始めた" in started
 
-    stopped = await assistant.module_slash("toggl", toggl_command())
+    # 別のチャンネルで打つと、前のを止めてそこで測り始める
+    switched = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
+    await settle(assistant)
+    now = module.entries.active("UME")
+    assert (now.channel, now.domain) == ("C3", "work") and "研究 / vlm は止めた" in switched
+    assert module.entries.entry(first.id).ended_at == now.started_at
+
+    stopped = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
     await settle(assistant)
     assert module.entries.active("UME") is None and "止めた" in stopped
     # カードを置いていないチャンネルに、コマンドで新しいカードを投稿しない
-    assert module.entries.card("C1") == "" and slack.posted() == []
-
-
-async def test_toggl_in_another_channel_switches_the_timer(env):
-    assistant, module, slack = env
-    await assistant.module_slash("toggl", toggl_command())
-    first = module.entries.active("UME")
-    reply = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
-    await settle(assistant)
-    now = module.entries.active("UME")
-    assert (now.channel, now.domain) == ("C3", "work") and "研究 / vlm は止めた" in reply
-    assert module.entries.entry(first.id).ended_at == now.started_at
+    assert module.entries.card("C1") == "" and module.entries.card("C3") == "" and slack.posted() == []
 
 
 async def test_toggl_start_and_stop_words(env):
@@ -194,15 +192,13 @@ async def test_toggl_refuses_other_channels_and_people(env):
     assistant, module, slack = env
     assert "1-・2-・3-" in await assistant.module_slash("toggl", toggl_command(channel="C9", name="0-kei-agent"))
     assert "利用できません" in await assistant.module_slash("toggl", toggl_command(user="USOMEONE"))
-    # 非公開のチャンネルは privategroup と届くので、Slack に名前を聞く
-    await assistant.module_slash("toggl", toggl_command(channel="C3", name="privategroup"))
-    assert module.entries.active("UME").domain == "work"
 
 
 async def test_the_course_channel_asks_which_course(env, monkeypatch):
     """科目を選ぶチャンネル（設定の pick_course）では、大学のモジュールに今学期の科目を聞いて選ばせる。"""
     assistant, module, slack = env
     asked = []
+    reply = Reply.broken("つながらない")
 
     async def views_open(**kw):
         slack.calls.append(("views_open", kw))
@@ -210,15 +206,22 @@ async def test_the_course_channel_asks_which_course(env, monkeypatch):
 
     async def ask_agent(skill, payload):
         asked.append(skill)
-        return Reply(ok=True, data={"items": [{"id": "P1", "subject": "信号処理"}]})
+        return reply
 
     slack.views_open = views_open
     monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
 
-    reply = await assistant.module_slash("toggl", toggl_command(channel="C2", name="2-course"))
+    # 科目を読み出せないときは、選ぶ欄を出さずにそう伝える
+    await assistant.module_action(press(START, channel="C2", name="2-course"))
     await settle(assistant)
-    assert "科目" in reply and asked == ["list-current-courses"] and module.entries.active("UME") is None
     (_, update), = [(n, kw) for n, kw in slack.calls if n == "views_update"]
+    assert "読み出せなかった" in str(update["view"]) and "submit" not in update["view"]
+
+    reply = Reply(ok=True, data={"items": [{"id": "P1", "subject": "信号処理"}]})
+    answer = await assistant.module_slash("toggl", toggl_command(channel="C2", name="2-course"))
+    await settle(assistant)
+    assert "科目" in answer and asked == ["list-current-courses"] * 2 and module.entries.active("UME") is None
+    update = [kw for n, kw in slack.calls if n == "views_update"][-1]
     assert update["view_id"] == "V1" and "信号処理" in str(update["view"])
     option = update["view"]["blocks"][0]["element"]["options"][0]
 
@@ -234,31 +237,6 @@ async def test_the_course_channel_asks_which_course(env, monkeypatch):
     assert await assistant.module_view({"user": {"id": "UME"}, "view": broken}) == {"course": "科目を選び直してね"}
 
 
-async def test_other_course_channels_start_right_away(env):
-    """授業ごとのチャンネル（pick_course に無いもの）は、チャンネルの名前で測る。"""
-    assistant, module, slack = env
-    await assistant.module_slash("toggl", toggl_command(channel="C4", name="2-linear-algebra"))
-    entry = module.entries.active("UME")
-    assert (entry.domain, entry.description) == ("course", "大学 / linear-algebra")
-
-
-async def test_when_courses_cannot_be_read_the_view_says_so(env, monkeypatch):
-    assistant, module, slack = env
-
-    async def views_open(**kw):
-        return {"view": {"id": "V2"}}
-
-    async def ask_agent(skill, payload):
-        return Reply.broken("つながらない")
-
-    slack.views_open = views_open
-    monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
-    await assistant.module_action(press(START, channel="C2", name="2-course"))
-    await settle(assistant)
-    (_, update), = [(n, kw) for n, kw in slack.calls if n == "views_update"]
-    assert "読み出せなかった" in str(update["view"]) and "submit" not in update["view"]
-
-
 # Toggl と共通ホームへの送信
 
 async def test_every_domain_goes_to_toggl_then_to_the_hub(env, monkeypatch):
@@ -266,6 +244,10 @@ async def test_every_domain_goes_to_toggl_then_to_the_hub(env, monkeypatch):
     calls = []
     use_toggl(monkeypatch, module, RecordingToggl(calls))
     module.entries.bind_course("C2", "course-page", "マルチメディア工学A")
+    # カードのあるチャンネルなら、カードへのリンクも送る
+    links, record_time = [], assistant.hub.record_time
+    monkeypatch.setattr(assistant.hub, "record_time", lambda *args: (links.append(args[6]), record_time(*args)))
+    module.entries.set_card("C1", "5.5", module.buttons)
 
     research = await measure(module, "C1", "vlm")
     course = await measure(module, "C2", "course", "course")
@@ -276,6 +258,7 @@ async def test_every_domain_goes_to_toggl_then_to_the_hub(env, monkeypatch):
     assert assistant.hub.recorded == [(research.id, "research", "vlm", 25, "Slack"),
                                       (course.id, "course", "マルチメディア工学A", 25, "Slack"),
                                       (work.id, "work", "work", 25, "Slack")]
+    assert links == ["https://example.slack.com/archives/C1/p55", "", ""]
     for entry in (research, course, work):
         assert (entry.toggl_state, entry.notion_state) == ("done", "done")
     # 送り終えた記録は、しばらくしたら消える（Toggl と「時間記録」に残っている）
@@ -292,15 +275,6 @@ async def test_without_toggl_the_hub_still_gets_the_time_with_the_card_link(env)
     sent = module.entries.entry(entry.id)
     assert (sent.toggl_state, sent.notion_state) == ("not_configured", "done")
     assert assistant.hub.recorded == [(entry.id, "research", "vlm", 1, "Slack")]
-
-
-async def test_the_card_link_goes_to_the_hub(env, monkeypatch):
-    assistant, module, slack = env
-    seen = []
-    monkeypatch.setattr(assistant.hub, "record_time", lambda *args: seen.append(args[6]))
-    module.entries.set_card("C1", "5.5", module.buttons)
-    await measure(module, "C1", "vlm")
-    assert seen == ["https://example.slack.com/archives/C1/p55"]
 
 
 async def test_a_toggl_failure_is_kept_and_holds_back_the_hub(env, monkeypatch, caplog):
@@ -335,36 +309,31 @@ async def test_an_unsure_toggl_write_waits_for_the_owner(env, monkeypatch):
     assert calls == [("toggl", "研究 / vlm", 1500)] and module.entries.entry(entry.id).sent
 
 
-async def test_without_the_hub_the_time_waits_quietly(env):
-    """共通ホームが使えない間は保留にするだけで、毎回は知らせない。使えるようになったら送る。"""
+async def test_hub_trouble_waits_quietly_and_is_retried_by_the_look_around(env, monkeypatch):
+    """共通ホームが使えない間・失敗した記録は保留にするだけで、毎回は知らせない。見回りで送り直す。"""
     assistant, module, slack = env
+    hub = assistant.hub
     assistant.hub = None
-    entry = await measure(module, "C1", "vlm")
+    waiting = await measure(module, "C1", "vlm")
     await module._look_around()
-    assert module.entries.entry(entry.id).notion_state == "pending" and slack.posted() == []
+    assert module.entries.entry(waiting.id).notion_state == "pending" and slack.posted() == []
 
-    assistant.hub = FakeHub()
-    await module._look_around()
-    assert [r[0] for r in assistant.hub.recorded] == [entry.id]
-
-
-async def test_a_hub_failure_is_retried_by_the_look_around(env, monkeypatch):
-    assistant, module, slack = env
+    assistant.hub = hub
     failing = True
-    record_time = assistant.hub.record_time
+    record_time = hub.record_time
 
     def flaky(*args):
         if failing:
             raise NotionError("503")
         record_time(*args)
 
-    monkeypatch.setattr(assistant.hub, "record_time", flaky)
-    entry = await measure(module, "C1", "vlm")
-    assert module.entries.entry(entry.id).notion_state == "pending"
-
+    monkeypatch.setattr(hub, "record_time", flaky)
+    failed = await measure(module, "C1", "vlm")
+    assert module.entries.entry(failed.id).notion_state == "pending"
     failing = False
     await module._look_around()
-    assert module.entries.entry(entry.id).notion_state == "done"
+    assert {r[0] for r in hub.recorded} == {waiting.id, failed.id}
+    assert module.entries.entry(failed.id).notion_state == "done"
 
 
 async def test_the_look_around_runs_in_the_background_one_at_a_time(env, monkeypatch):
@@ -387,19 +356,11 @@ async def test_the_look_around_runs_in_the_background_one_at_a_time(env, monkeyp
     await settle(assistant)
 
 
-# 本体から写した記録とカード
-
-def modules_records(store):
-    return Records(store, "time")
-
-
-def test_a_new_database_has_no_old_time_tables(store):
-    tables = {r[0] for r in store.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert not tables & {"time_entries", "active_timers", "time_cards", "course_channel_bindings"}
-
+# 前のボタンのカード
 
 async def test_old_cards_get_the_new_buttons_once(env):
-    """本体が置いたカード（ボタンの名前が前のもの）は、起動して最初の見回りで、今のボタンに描き直す。固定はそのまま。"""
+    """本体が置いたカード（ボタンの名前が前のもの）は、起動して最初の見回りで、今のボタンに描き直す。固定はそのまま。
+    消されていたカードは置き直さずに忘れ、つながらなかったカードは次に起動したときにもう一度試す。"""
     assistant, module, slack = env
     module.core.records.put("card", "C1", {"channel": "C1", "ts": "11.1"})
     module.core.records.put("card", "C3", {"channel": "C3", "ts": "33.3"})
@@ -412,28 +373,23 @@ async def test_old_cards_get_the_new_buttons_once(env):
     assert updates["11.1"]["blocks"][1]["elements"][0]["action_id"] == START
     assert updates["33.3"]["blocks"][1]["elements"][0]["value"] == entry.id       # 計測中のカードは計測中のまま
     assert {c["buttons"] for c in module.entries.cards()} == {module.buttons}
-    assert slack.posted() == []
 
     await module.tick(datetime.now())
     await settle(assistant)
     assert len([n for n, _ in slack.calls if n == "chat_update"]) == 2
 
-
-async def test_deleted_old_cards_are_forgotten_and_unreachable_ones_are_kept(env):
-    """消されていたカードは置き直さずに忘れる。つながらなかったカードは、次に起動したときにもう一度試す。"""
-    assistant, module, slack = env
-    module.core.records.put("card", "C1", {"channel": "C1", "ts": "11.1"})
-    module.core.records.put("card", "C3", {"channel": "C3", "ts": "33.3"})
+    module.core.records.put("card", "C2", {"channel": "C2", "ts": "22.2"})
+    module.core.records.put("card", "C4", {"channel": "C4", "ts": "44.4"})
 
     async def update(**kw):
-        if kw["channel"] == "C1":
+        if kw["channel"] == "C2":
             raise SlackApiError("message_not_found", {"ok": False, "error": "message_not_found"})
         raise ConnectionError("つながらない")
 
     slack.chat_update = update
     await module._redraw_cards()
-    assert module.entries.card("C1") == "" and module.entries.card("C3") == "33.3"
-    assert slack.posted() == []
+    assert module.entries.card("C2") == "" and module.entries.card("C4") == "44.4"
+    assert module.entries.card("C1") == "11.1" and slack.posted() == []
 
 
 # 設定
@@ -453,11 +409,8 @@ def test_the_channel_prefixes_can_be_changed_and_are_checked(config, store):
     assert entries.domain_of(entries.prefixes_of({"1": "work", "1-": "research"}), "1-vlm") == "research"
 
 
-def test_the_module_is_on_by_default_with_its_command_and_schedule(config):
-    spec = modules.builtin()["time"]
-    assert "time" in config.modules and set(spec.slash_commands) == {"toggl"}
-    assert [(s.name, s.default) for s in spec.schedules] == [("toggl_import", "22:00")]
-    assert config.settings("time")["prefixes"] == {"1-": "research", "2-": "course", "3-": "work"}
+def test_the_toggl_import_runs_at_22_by_default():
+    assert [(s.name, s.default) for s in modules.builtin()["time"].schedules] == [("toggl_import", "22:00")]
 
 
 # Toggl で直接測った記録の取り込み（定期処理 toggl_import）
@@ -498,6 +451,8 @@ def test_import_adds_only_marked_entries_measured_outside_slack():
     toggl = FakeToggl([
         # Slack から送った記録（Toggl 側の開始が数秒ずれても同じとみなす）
         toggl_entry((slack_start + timedelta(seconds=20)).isoformat(), 1500, project="研究 / vlm", id=1),
+        # 開始が同じでも、長さが1分より大きくずれていれば別の記録
+        toggl_entry(slack_start.isoformat(), 1500 + 120, project="研究/vlm", id=8),
         toggl_entry("2026-09-21T13:00:00Z", 3000, project="大学/データベース", id=2, description="過去問"),
         toggl_entry("2026-09-21T15:00:00Z", 600, project="アルバイト", id=3),        # 印がない
         toggl_entry("2026-09-21T16:00:00Z", -1, project="研究/vlm", id=4),         # 計測中
@@ -511,23 +466,14 @@ def test_import_adds_only_marked_entries_measured_outside_slack():
                                    date(2026, 9, 21))
 
     assert toggl.asked == [(date(2026, 9, 15), date(2026, 9, 21))]
-    assert [r["id"] for r in hub.recorded] == ["toggl:2", "toggl:7"]
-    first = hub.recorded[0]
+    assert [r["id"] for r in hub.recorded] == ["toggl:8", "toggl:2", "toggl:7"]
+    first = hub.recorded[1]
     assert (first["domain"], first["label"], first["minutes"], first["memo"], first["source"]) == (
         "大学", "データベース", 50, "過去問", "Toggl")
     assert datetime.fromisoformat(first["started_at"]) == datetime(2026, 9, 21, 13, 0, tzinfo=UTC)
     # 説明がプロジェクト名と同じならメモにしない。1分に満たなくても1分として残す
-    assert (hub.recorded[1]["memo"], hub.recorded[1]["minutes"]) == ("", 1)
-    assert result == {"status": "done", "imported": 2, "own": 1, "known": 1, "unmarked": 1}
-
-
-def test_a_long_gap_is_a_different_entry():
-    """開始か長さが1分より大きくずれていれば、Slack の記録とは別のものとして入れる。"""
-    start = datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
-    toggl = FakeToggl([toggl_entry(start.isoformat(), 1500, project="研究/vlm", id=9)])
-    hub = ImportHub()
-    importer.import_toggl(toggl, hub, [(start.timestamp(), 1500.0 + 120)], date(2026, 9, 21), date(2026, 9, 21))
-    assert [r["id"] for r in hub.recorded] == ["toggl:9"]
+    assert (hub.recorded[2]["memo"], hub.recorded[2]["minutes"]) == ("", 1)
+    assert result == {"status": "done", "imported": 3, "own": 1, "known": 1, "unmarked": 1}
 
 
 def test_split_project_needs_a_known_mark():
@@ -554,26 +500,23 @@ async def test_the_schedule_imports_toggl_and_skips_slack_entries(env, monkeypat
     assert (detail["imported"], detail["own"]) == (1, 1)
 
 
-async def test_the_schedule_reports_a_toggl_failure(env, monkeypatch):
-    assistant, module, slack = env
-
-    class Broken:
-        def entries(self, since, until):
-            raise TogglError("GET /time-entries: 503")
-
-    use_toggl(monkeypatch, module, Broken())
-    detail = await module.run_schedule("toggl_import", "2026-09-18")
-    assert detail["status"] == "error" and "503" in detail["error"]
-
-
-async def test_the_schedule_waits_for_the_time_db(env, monkeypatch):
+async def test_the_schedule_waits_for_the_time_db_and_reports_toggl_failures(env, monkeypatch):
     assistant, module, slack = env
     monkeypatch.setattr(sys.modules[type(module).__module__], "load_toggl",
                         lambda: pytest.fail("時間記録が無いのに Toggl を読んだ"))
     assistant.hub.has_time_db = False
     assert await module.run_schedule("toggl_import", "2026-09-18") == {"status": "skipped", "reason": "no_hub"}
-    assistant.hub = None
+    hub, assistant.hub = assistant.hub, None
     assert await module.run_schedule("toggl_import", "2026-09-18") == {"status": "skipped", "reason": "no_hub"}
+
+    class Broken:
+        def entries(self, since, until):
+            raise TogglError("GET /time-entries: 503")
+
+    hub.has_time_db, assistant.hub = True, hub
+    use_toggl(monkeypatch, module, Broken())
+    detail = await module.run_schedule("toggl_import", "2026-09-18")
+    assert detail["status"] == "error" and "503" in detail["error"]
 
 
 # Daily と振り返りの材料
@@ -597,13 +540,13 @@ async def test_the_material_shows_this_weeks_time(env):
 
 async def test_the_cards_command_posts_only_where_cards_are_missing(config, store):
     slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C5": "0-overview", "C9": "0-kei-agent"})
-    Entries(modules_records(store)).set_card("C2", "22.2", "kei_agent_module:time:")
+    Entries(Records(store, "time")).set_card("C2", "22.2", "kei_agent_module:time:")
 
     assert await commands.post_cards(config, slack) == 1
 
     posted, = slack.posted()
     assert posted["channel"] == "C1" and posted["blocks"][1]["elements"][0]["action_id"] == START
-    card = modules_records(Store(config.db_path)).get("card", "C1")
+    card = Records(Store(config.db_path), "time").get("card", "C1")
     assert card == {"channel": "C1", "ts": "1001.000", "buttons": "kei_agent_module:time:"}
 
 

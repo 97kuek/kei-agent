@@ -61,15 +61,13 @@ async def test_research_question_runs_read_only_in_the_theme(assistant):
     assert answer == "結果です"
 
 
-async def test_research_question_needs_a_theme_and_nothing_runs(assistant):
+async def test_unclear_questions_are_answered_without_asking_anyone(assistant):
+    """研究テーマが無い・担当が分からない・中身が空の問いは、どの AI も動かさずに聞き返す。"""
     assert "研究テーマ" in await assistant.answer_question("research", "何を確かめていた？")
     assert "研究テーマ" in await assistant.answer_question("research", "何を確かめていた？", "course")
-    assert assistant.claude.calls == []
-
-
-async def test_unknown_actor_or_empty_question_is_answered_without_asking(assistant):
     assert "どれを調べるか" in await assistant.answer_question("hobby", "何？")
     assert "何を調べるか" in await assistant.answer_question("work", "  ")
+    assert assistant.claude.calls == []
 
 
 async def test_broken_answer_is_replaced_by_the_fixed_failure_text(assistant):

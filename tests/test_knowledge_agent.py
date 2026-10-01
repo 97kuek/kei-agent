@@ -116,13 +116,10 @@ def _answers(monkeypatch, *codes, agents=None):
     return waited
 
 
-def test_arxiv_is_read_again_after_waiting_when_busy(monkeypatch):
+def test_arxiv_waits_when_busy_and_gives_up_after_the_last_wait_or_on_a_real_refusal(monkeypatch):
     waited = _answers(monkeypatch, 429, 503, 200)
     assert [p.id for p in feeds.arxiv_papers(["counting"])] == ["arXiv:2609.00001"]
     assert waited == list(feeds.ARXIV_WAITS[:2])
-
-
-def test_arxiv_gives_up_after_the_last_wait_or_on_a_real_refusal(monkeypatch):
     waited = _answers(monkeypatch, *[503] * (len(feeds.ARXIV_WAITS) + 1))
     with pytest.raises(feeds.FetchError, match="503"):
         feeds.arxiv_papers(["counting"])
@@ -191,20 +188,10 @@ def test_candidates_drop_seen_old_duplicate_and_off_topic_feeds(tmp_path):
         _entry("LLM の見た話", "https://zenn.dev/seen"),
         _entry("興味の外", "https://zenn.dev/off", topic="golang"),
         feeds.Entry("Company news", "https://blog.example/n", "", "Blog", NOW - timedelta(hours=1)),
+        _entry("LLM の本", "https://zenn.dev/a/books/llm-book"),     # Zenn の本は目次と概要しか読めない
     ]
     found = digest.candidates(entries, INTERESTS, seen, NOW)
     assert [(e.title, hits) for e, hits in found] == [("LLM の話", ["AI"]), ("Company news", [])]
-
-
-def test_candidates_drop_zenn_books(tmp_path):
-    """Zenn の本（目次と概要しか読めない）は、有料・無料とも候補から外す。"""
-    seen = digest.Seen(tmp_path / "seen.json", now=NOW.timestamp())
-    entries = [
-        _entry("LLM の本", "https://zenn.dev/a/books/llm-book"),
-        _entry("LLM の記事", "https://zenn.dev/a/articles/llm-article"),
-    ]
-    found = digest.candidates(entries, INTERESTS, seen, NOW)
-    assert [e.title for e, _ in found] == ["LLM の記事"]
 
 
 def test_likes_nudge_candidates_toward_liked_sources_and_interests(tmp_path):
@@ -274,9 +261,16 @@ class FakeModel:
         return runner.RunResult(text=json.dumps(answer, ensure_ascii=False))
 
 
+AI_PAYLOAD = {"interests": [{"name": "AI", "keywords": ["RAG"]}], "sources": ["zenn: llm"]}
+
+
 @pytest.fixture
-def reading_feeds(monkeypatch):
+def now(monkeypatch):
     monkeypatch.setattr(digest, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
+
+
+@pytest.fixture
+def reading_feeds(monkeypatch, now):
     monkeypatch.setattr(feeds, "fetch", lambda url, **kw: RSS if "zenn" in url else ATOM)
     monkeypatch.setattr(feeds, "article_text", lambda url: "本文: RAG の作り方を順に説明する。")
 
@@ -308,8 +302,7 @@ async def test_reading_falls_back_to_descriptions_when_the_answer_is_broken(conf
                        "knowledge_summary": runner.RunResult(text="要約できませんでした")})
     monkeypatch.setattr(runner, "run_model", model)
 
-    data = await digest.reading(config, store, {"interests": [{"name": "AI", "keywords": ["RAG"]}],
-                                                "sources": ["zenn: llm"]}, provider="claude")
+    data = await digest.reading(config, store, AI_PAYLOAD, provider="claude")
 
     assert data["items"][0]["summary"] == "RAG の 作り方" and "AI" in data["items"][0]["why"]
 
@@ -324,8 +317,8 @@ PAYWALL_RSS = """<?xml version="1.0"?><rss version="2.0"><channel><title>Zenn</t
 </channel></rss>""".encode()
 
 
-async def test_reading_fills_the_count_with_the_next_candidate_when_a_pick_is_paywalled(config, store, monkeypatch):
-    monkeypatch.setattr(digest, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
+async def test_reading_fills_the_count_with_the_next_candidate_when_a_pick_is_paywalled(config, store, monkeypatch,
+                                                                                         now):
     monkeypatch.setattr(feeds, "fetch", lambda url, **kw: PAYWALL_RSS)
     bodies = {"https://zenn.dev/a/1": "ここから先は有料です", "https://zenn.dev/a/2": "普通の本文2",
              "https://zenn.dev/a/3": "普通の本文3"}
@@ -344,13 +337,11 @@ async def test_reading_stops_at_the_usage_limit(config, store, monkeypatch, read
     monkeypatch.setattr(runner, "run_model", FakeModel({"knowledge_pick": limited}))
 
     with pytest.raises(digest.DigestError) as e:
-        await digest.reading(config, store, {"interests": [{"name": "AI", "keywords": ["RAG"]}],
-                                             "sources": ["zenn: llm"]}, provider="claude")
+        await digest.reading(config, store, AI_PAYLOAD, provider="claude")
     assert e.value.limit_reset_at == 123.0
 
 
-async def test_papers_are_chosen_against_the_premises(config, store, monkeypatch):
-    monkeypatch.setattr(digest, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
+async def test_papers_are_chosen_against_the_premises(config, store, monkeypatch, now):
     monkeypatch.setattr(feeds, "fetch", lambda url, **kw: ARXIV)
     model = FakeModel({"knowledge_summary": {"items": [
         {"id": "arXiv:2609.00001", "summary": "数え間違いを分けた。", "relation": "条件Bに使える。"},
@@ -407,10 +398,12 @@ async def server(config, store):
     await task
 
 
-async def test_card_lists_the_morning_jobs_and_questions(server):
+async def test_card_lists_the_morning_jobs_and_refuses_a_digest_without_json(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"] == "Kei Agent（知識）"
     assert [s["id"] for s in card["skills"]] == ["reading-digest", "paper-digest", "ask"]
+    result = await Agent(server, TOKEN, timeout=30).ask("reading-digest", "材料なし")
+    assert not result.ok and "JSON" in json.loads(result.answer)["text"]
 
 
 async def test_digest_comes_back_in_the_envelope(server, monkeypatch):
@@ -424,7 +417,3 @@ async def test_digest_comes_back_in_the_envelope(server, monkeypatch):
     reply = json.loads(result.answer)
     assert result.ok and reply["data"]["items"] == [{"id": "arXiv:1", "theme": "vlm"}]
 
-
-async def test_a_digest_without_json_material_is_refused(server):
-    result = await Agent(server, TOKEN, timeout=30).ask("reading-digest", "材料なし")
-    assert not result.ok and "JSON" in json.loads(result.answer)["text"]

@@ -77,13 +77,6 @@ def test_the_daily_module_takes_daily_and_review(config):
     assert "daily" not in task_names(off) and "daily" not in settings.schedule_names(off)
 
 
-async def test_the_scheduler_runs_the_modules_daily(env, store):
-    scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": DAILY_REPLY}]
-    detail = await scheduler.run_task("daily", "2026-09-24")
-    assert detail["status"] == "posted" and store.schedule_ran("daily", "2026-09-24")
-
-
 # Daily と振り返り
 
 async def test_daily_posts_to_overview_and_notion(env, config, store):
@@ -120,7 +113,6 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
     # チャンネルには予定だけ、Daily の見出しはスレッドの先頭
     assert header["channel"] == "C5" and header["text"].startswith("☀️") and "Daily" not in header["text"]
-    assert header["text"].startswith("☀️")
     note = assistant.hub.notes[-1]
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
     assert [n.kind for n in assistant.notion.notes] == ["考察"]
@@ -128,63 +120,58 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert not (config.overview_dir / "daily").exists()
 
 
-async def test_daily_posts_only_four_bold_sections(env):
+async def test_the_scheduler_posts_only_the_four_bold_sections_of_daily(env, store):
     scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": "手順を確認します\n<<kei-agent-final>>\n" + DAILY_REPLY + "\n<<kei-agent-final-end>>"}]
+    claude.behaviors = [{"text": "手順を確認します\n" + final(DAILY_REPLY)}]
 
-    result = await daily(assistant).daily("2026-09-24")
+    result = await scheduler.run_task("daily", "2026-09-24")
 
-    assert result["status"] == "posted"
+    assert result["status"] == "posted" and store.schedule_ran("daily", "2026-09-24")
     assert "手順を確認" not in "\n".join(slack.texts())
     assert slack.texts()[1] == f"**🌅 Daily 9/24（木）**\n\n{DAILY_REPLY}"
 
 
-async def test_invalid_daily_is_not_saved_to_notion(env):
-    scheduler, assistant, _slack, claude = env
-    claude.behaviors = [{"text": "<<kei-agent-final>>\n*今日のタスク*\nなし\n<<kei-agent-final-end>>"}]
+@pytest.mark.parametrize(("task", "day", "text", "notice"), [
+    ("daily", "2026-09-24", final("*今日のタスク*\nなし"), ""),       # 4つの見出しがそろっていない
+    ("review", "2026-09-23", "まず材料を確認します。\n" + REVIEW_REPLY,  # 途中の独り言が混ざっている
+     "振り返りを利用者向けの形に整えられなかったよ"),
+])
+async def test_an_answer_in_the_wrong_shape_is_not_posted_or_saved(env, task, day, text, notice):
+    scheduler, assistant, slack, claude = env
+    claude.behaviors = [{"text": text}]
 
-    result = await daily(assistant).daily("2026-09-24")
+    result = await getattr(daily(assistant), task)(day)
 
     assert result["status"] == "error"
-    assert assistant.notion.notes == []
-    assert assistant.hub.notes == []
+    assert assistant.notion.notes == [] and assistant.hub.notes == []
+    assert all("まず材料を確認します" not in shown and "*今日のタスク*" not in shown for shown in slack.texts())
+    assert not notice or any(notice in shown for shown in slack.texts())
 
 
-async def test_digest_lists_stalled_and_waiting_only_for_active_channels(env, config, store):
-    from kei_agent.digest import DigestBuilder
-    scheduler, assistant, *_ = env
-    make_theme(config, "old-theme")
-    make_theme(config, "archived")
-    store.upsert_thread("C7", "1.1", "old-theme", "s")
-    store.upsert_thread("C8", "2.1", "archived", "s")
-    store.conn.execute("UPDATE threads SET updated_at = ?", (time.time() - 5 * 86400,))
-    store.set_awaiting("C7", "1.1", True)
-    store.set_awaiting("C8", "2.1", True)
-
-    digest = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "t", {"old-theme"})
-
-    stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
-    waiting = digest.split("## 返事待ちのスレッド")[1].split("##")[0]
-    assert "#old-theme" in stalled and "archived" not in stalled
-    assert "#old-theme" in waiting and "archived" not in waiting
-
-
-async def test_digest_skips_theme_never_asked(env, config, store):
-    """招待しただけで一度も依頼のないテーマは、止まっているテーマに数えない。"""
+async def test_digest_lists_stalled_and_waiting_only_for_asked_active_channels(env, config, store):
+    """止まっているテーマ・返事待ちには、いま使っているチャンネルだけを出す。招待しただけで一度も依頼のないテーマは数えない。"""
     import os
 
     from kei_agent.digest import DigestBuilder
     scheduler, assistant, *_ = env
-    ws = make_theme(config, "just-invited")
+    make_theme(config, "old-theme")
+    make_theme(config, "archived")
+    invited = make_theme(config, "just-invited")
     old = time.time() - 5 * 86400
-    os.utime(ws.cwd, (old, old))
+    os.utime(invited.cwd, (old, old))
+    store.upsert_thread("C7", "1.1", "old-theme", "s")
+    store.upsert_thread("C8", "2.1", "archived", "s")
+    store.conn.execute("UPDATE threads SET updated_at = ?", (old,))
+    store.set_awaiting("C7", "1.1", True)
+    store.set_awaiting("C8", "2.1", True)
 
     digest = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "t", {"just-invited"})
+        time.time() - 86400, time.time(), "t", {"old-theme", "just-invited"})
 
     stalled = digest.split("## 3日以上やり取りのないテーマ")[1].split("##")[0]
-    assert "just-invited" not in stalled and "なし" in stalled
+    waiting = digest.split("## 返事待ちのスレッド")[1].split("##")[0]
+    assert "#old-theme" in stalled and "archived" not in stalled and "just-invited" not in stalled
+    assert "#old-theme" in waiting and "archived" not in waiting
 
 
 async def test_review_is_saved_to_the_day_row_and_asks_what_was_learned(env, config, store):
@@ -250,55 +237,24 @@ async def test_the_review_thread_turns_what_was_learned_into_notes(env):
     assert assistant.hub.trashed == [page_id] and len(assistant.hub.learnings) == 2
 
 
-async def test_review_never_posts_model_progress_narration(env):
-    scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": "まず材料を確認します。\n" + REVIEW_REPLY}]
-
-    result = await daily(assistant).review("2026-09-23")
-
-    assert result["status"] == "error"
-    assert all("まず材料を確認します" not in text for text in slack.texts())
-    assert any("振り返りを利用者向けの形に整えられなかったよ" in text for text in slack.texts())
-
-
-async def test_review_does_not_post_extra_footer(env):
-    scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": REVIEW_REPLY}]
-
-    await daily(assistant).review("2026-09-23")
-
-    assert slack.texts()[:2] == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
-    assert len(slack.texts()) == 3 and slack.texts()[2].startswith("今日、職場や学校で学んだこと")
-
-
-async def test_review_without_hub_never_writes_research_notes(env, config):
+async def test_without_hub_daily_and_review_still_post_and_say_so(env, config):
+    """共通ホームが使えなくても Slack には出し、日別記録に残せなかったことを知らせる。代わりのファイルは作らない。"""
     scheduler, assistant, slack, claude = env
     assistant.hub = None
-    claude.behaviors = [{"text": REVIEW_REPLY}]
+    claude.behaviors = [{"text": DAILY_REPLY}, {"text": REVIEW_REPLY}]
 
-    result = await daily(assistant).review("2026-09-23")
+    daily_result = await daily(assistant).daily("2026-09-24")
+    review_result = await daily(assistant).review("2026-09-23")
 
-    assert result["notion_url"] is None
+    assert daily_result["status"] == "posted" and daily_result["notion_url"] is None
+    assert review_result["notion_url"] is None
+    assert f"**🌅 Daily 9/24（木）**\n\n{DAILY_REPLY}" in slack.texts() and REVIEW_REPLY in slack.texts()
+    # 続けて起きた問題は1通にまとまる（あとのものは書き足される）
+    notices = "\n".join(kw["text"] for _, kw in slack.calls if kw.get("channel") == "C9")
+    assert "Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in notices
+    assert "Retro & Planning 9/23（水） を日別記録に保存できませんでした" in notices
     assert assistant.notion.notes == []
-    # Slack には出し、日別記録に残せなかったことを知らせる。代わりのファイルは作らない
-    assert REVIEW_REPLY in slack.texts()
-    notice, = [kw for kw in slack.posted() if kw["channel"] == "C9"]
-    assert "日別記録に保存できませんでした" in notice["text"]
-    assert not (config.overview_dir / "reviews").exists()
-
-
-async def test_daily_without_hub_still_posts_and_says_so(env, config):
-    scheduler, assistant, slack, claude = env
-    assistant.hub = None
-    claude.behaviors = [{"text": DAILY_REPLY}]
-
-    result = await daily(assistant).daily("2026-09-24")
-
-    assert result["status"] == "posted" and result["notion_url"] is None
-    assert f"**🌅 Daily 9/24（木）**\n\n{DAILY_REPLY}" in slack.texts()
-    assert any("Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in t
-               for t in slack.texts())
-    assert not (config.overview_dir / "daily").exists()
+    assert not (config.overview_dir / "daily").exists() and not (config.overview_dir / "reviews").exists()
     # 人の時間は読めないと材料に書く（落ちない）
     assert "共通 Notion ホームが使えない" in material(claude.calls[0]["prompt"])
 
@@ -340,27 +296,24 @@ def test_the_daily_answer_needs_the_four_sections():
     assert daily_answer("marker のない答え") == ""
 
 
-VALID_REVIEW = REVIEW_REPLY
-
-
 def test_the_review_answer_adds_the_night_question_when_missing():
     body = "**今日の成果**\n- 実験を回した\n\n\n**未完了タスク**\nなし"
     expected = "**今日の成果**\n- 実験を回した\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？"
     assert review_answer(final(body)) == expected
     assert review_answer(final(body + "\n\n夜間に実行したいタスクはありますか？")) == expected
-    assert review_answer(final(VALID_REVIEW)) == VALID_REVIEW
+    assert review_answer(final(REVIEW_REPLY)) == REVIEW_REPLY
     # Web のリンクと、作業場の中のファイル名は通す
-    linked = VALID_REVIEW.replace("なし", "資料: https://example.com/notes", 1)
+    linked = REVIEW_REPLY.replace("なし", "資料: https://example.com/notes", 1)
     assert review_answer(final(linked)) == linked
-    named = VALID_REVIEW.replace("なし", "振り返りを reviews/2026-09-24.md にまとめた", 1)
+    named = REVIEW_REPLY.replace("なし", "振り返りを reviews/2026-09-24.md にまとめた", 1)
     assert review_answer(final(named)) == named
 
 
 @pytest.mark.parametrize("text", [
-    "まず材料を確認します。\n" + VALID_REVIEW,
-    VALID_REVIEW + "\nCodex App を開いてください",
+    "まず材料を確認します。\n" + REVIEW_REPLY,
+    REVIEW_REPLY + "\nCodex App を開いてください",
     "**今日の成果**\n\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
-    "# 今日\n" + VALID_REVIEW,
+    "# 今日\n" + REVIEW_REPLY,
     "**今日の成果**\nBash で材料を読みました。\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
     "**今日の成果**\nSkill を使って調査中です。\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
 ])

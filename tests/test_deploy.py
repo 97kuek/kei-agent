@@ -41,23 +41,17 @@ def _launches() -> dict[str, tuple[str, list[str], str]]:
     return found
 
 
-def test_the_notion_gateway_is_a_module_process():
-    """Notion のゲートウェイは Notion のモジュールの常駐のプロセス（A2A ではない）。起動は担当と同じ run-agent.sh。"""
+def test_the_notion_gateway_is_a_module_process_and_the_readme_holds_no_secret():
+    """Notion のゲートウェイは Notion のモジュールの常駐のプロセス（A2A ではない）。起動は担当と同じ run-agent.sh。
+
+    手順には合言葉の作り方を書き、本物のトークンは貼らない（例は ... のまま）。講義用の Notion の鍵はもう求めない。
+    """
     assert not (DEPLOY / "run-notion-gateway.sh").exists()
     assert "deploy/install.sh notion" in (DEPLOY / "install.sh").read_text(encoding="utf-8")
-
-
-def test_deploy_readme_tells_how_to_make_the_gateway_token():
     readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
-    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" in readme
+    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" in readme and "openssl rand -hex 32" in readme and "ntn_..." in readme
     assert "deploy/install.sh notion" in readme and "notion-gateway" not in readme
-
-
-def test_no_secret_is_written_into_the_repository():
-    """手順に本物のトークンを貼らない（例は ... のまま）。"""
-    readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
-    assert "ntn_..." in readme
-    assert "openssl rand -hex 32" in readme
+    assert "NOTION_COURSE_TOKEN" not in readme
 
 
 @needs_zsh
@@ -78,15 +72,14 @@ def test_every_agent_starts_from_one_script():
 
 
 @needs_zsh
-def test_every_launchd_script_is_started_by_a_plist():
-    """起動スクリプトは plist から呼ばれるものだけ（エージェントごとの写しを残さない）。"""
-    assert {script for script, _, _ in _launches().values()} == {path.name for path in DEPLOY.glob("run*.sh")}
+def test_every_launchd_script_is_started_by_a_plist_and_trims_its_own_log():
+    """起動スクリプトは plist から呼ばれるものだけ（エージェントごとの写しを残さない）。
 
-
-@needs_zsh
-def test_every_launchd_script_trims_its_own_launchd_log():
-    """launchd の出力は回らない。どのプロセスも起動のたびに、自分の plist が書く先を切り詰める。"""
-    for label, (script, args, log) in _launches().items():
+    launchd の出力は回らない。どのプロセスも起動のたびに、自分の plist が書く先を切り詰める。
+    """
+    launches = _launches()
+    assert {script for script, _, _ in launches.values()} == {path.name for path in DEPLOY.glob("run*.sh")}
+    for label, (script, args, log) in launches.items():
         body = (DEPLOY / script).read_text(encoding="utf-8")
         assert 'source "$REPO/deploy/_common.sh"' in body, label
         if args:
@@ -176,20 +169,29 @@ def _started(result: subprocess.CompletedProcess) -> tuple[str, str, str, dict[s
 
 @needs_zsh
 def test_only_the_notion_module_process_keeps_the_notion_token(tmp_path):
-    """Notion の鍵（NOTION_TOKEN）が残るのは Notion のモジュールのプロセス（ゲートウェイ）だけ。親の合言葉は全員に残る。"""
-    common = 'export NOTION_TOKEN="ntn_x"\nexport KEI_AGENT_NOTION_GATEWAY_TOKEN="master"\n'
+    """Notion の鍵が残るのは Notion のモジュールのプロセス（ゲートウェイ）だけ。
+
+    エージェントごとのファイルに書いてあっても消す。ゲートウェイの親の合言葉は全員に残る。
+    """
+    common = 'export NOTION_TOKEN="ntn_x" KEI_AGENT_NOTION_GATEWAY_TOKEN="master"\n'
     *_, env = _started(_run_agent(tmp_path / "notion", "notion", common=common))
     assert env.get("NOTION_TOKEN") == "ntn_x"
-    *_, env = _started(_run_agent(tmp_path / "course", "course", common=common))
-    assert "NOTION_TOKEN" not in env and env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "master"
+    own = {"course": 'export NOTION_COURSE_TOKEN="ntn_y"\n'}
+    *_, env = _started(_run_agent(tmp_path / "course", "course", common=common, own=own))
+    assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
+    assert env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "master"
 
 
 @needs_zsh
-@pytest.mark.parametrize("args", [(), ("",), ("assistant",), ("notion-gateway",), ("../work",), ("course work",)])
-def test_run_agent_refuses_an_unknown_name(tmp_path, args):
-    result = _run_agent(tmp_path, *args)
+@pytest.mark.parametrize("args, common, message", [
+    *[(args, "", "知らない担当です")
+      for args in [(), ("",), ("assistant",), ("notion-gateway",), ("../work",), ("course work",)]],
+    (("course",), None, "秘密情報のファイルがありません"),     # エージェントごとのファイルだけでは動かさない
+])
+def test_run_agent_refuses_unknown_names_and_missing_common_secrets(tmp_path, args, common, message):
+    result = _run_agent(tmp_path, *args, common=common, own={"course": 'export CLAUDE_CONFIG_DIR="x"\n'})
     assert result.returncode == 1
-    assert "知らない担当です" in result.stderr
+    assert message in result.stderr
     assert result.stdout == ""  # uv まで行かない
 
 
@@ -232,30 +234,6 @@ def test_run_agent_reads_secrets_from_the_configured_place(tmp_path):
     (tmp_path / ".config" / "kei-agent" / "secrets" / "kei-agent.zsh").write_text('export PICKED="default"\n')
     *_, env = _started(_run_agent(tmp_path, "course", common='export PICKED="chosen"\n', secrets=chosen))
     assert env["PICKED"] == "chosen"
-
-
-@needs_zsh
-def test_run_agent_drops_notion_secrets_from_every_file(tmp_path):
-    """Notion の鍵は、エージェントごとのファイルに書いてあっても消す。ゲートウェイの親の合言葉は残す。"""
-    common = 'export NOTION_TOKEN="ntn_x" KEI_AGENT_NOTION_GATEWAY_TOKEN="master"\n'
-    own = {"course": 'export NOTION_COURSE_TOKEN="ntn_y"\n'}
-    *_, env = _started(_run_agent(tmp_path, "course", common=common, own=own))
-    assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
-    assert env["KEI_AGENT_NOTION_GATEWAY_TOKEN"] == "master"
-
-
-@needs_zsh
-def test_run_agent_stops_without_the_common_secrets(tmp_path):
-    """エージェントごとのファイルだけでは動かさない。"""
-    result = _run_agent(tmp_path, "course", common=None, own={"course": 'export CLAUDE_CONFIG_DIR="x"\n'})
-    assert result.returncode == 1
-    assert "秘密情報のファイルがありません" in result.stderr
-    assert result.stdout == ""
-
-
-def test_readme_no_longer_asks_for_a_course_notion_token():
-    readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
-    assert "NOTION_COURSE_TOKEN" not in readme
 
 
 # deploy/update.sh（1コマンドのデプロイ）。本物の launchd と uv には触らない

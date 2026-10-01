@@ -7,15 +7,23 @@ import pytest
 from kei_agent.model_json import json_list, json_object
 
 
-def test_json_list_takes_the_outer_array_even_when_items_hold_arrays():
-    text = '```json\n[{"subject": "朝会", "attendees": [{"name": "A"}]}]\n```\n出典 [1, 2]'
-    assert json_list(text) == [{"subject": "朝会", "attendees": [{"name": "A"}]}]
+@pytest.mark.parametrize(("text", "expected"), [
+    ('```json\n[{"subject": "朝会", "attendees": [{"name": "A"}]}]\n```\n出典 [1, 2]',
+     [{"subject": "朝会", "attendees": [{"name": "A"}]}]),                 # 中に配列があっても外側を取る
+    ('はい、調べました。\n[{"subject": "定例"}]', [{"subject": "定例"}]),  # 前置きは読み飛ばす
+    ('注記 [これは説明] 本文 [{"subject": "朝会"}]', [{"subject": "朝会"}]),  # 項目を持つ配列を選ぶ
+    ('[{"subject": "朝会"}]\n\n出典 [1, 2]', [{"subject": "朝会"}]),
+    ("予定はありません。[]", []),
+])
+def test_json_list_takes_the_array_that_holds_the_items(text, expected):
+    assert json_list(text) == expected
 
 
-def test_json_list_prefers_the_array_that_holds_the_items():
-    assert json_list('注記 [これは説明] 本文 [{"subject": "朝会"}]') == [{"subject": "朝会"}]
-    assert json_list('[{"subject": "朝会"}]\n\n出典 [1, 2]') == [{"subject": "朝会"}]
-    assert json_list("予定はありません。[]") == []
+def test_json_list_says_when_the_reply_is_not_json():
+    with pytest.raises(ValueError, match="読めません"):
+        json_list("[これは JSON ではない]")
+    with pytest.raises(ValueError, match="JSON の配列"):
+        json_list("予定はありません")
 
 
 def test_json_list_reads_a_long_reply_without_trying_every_bracket_pair():

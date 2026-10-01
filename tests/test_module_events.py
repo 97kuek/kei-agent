@@ -13,6 +13,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
+from kei_agent.testing.kit import settle
 
 LAMP_TOML = 'api = 1\nname = "lamp"\nlabel = "ランプ"\n'
 
@@ -58,30 +59,20 @@ def env(config, store, tmp_path, monkeypatch):
     return assistant, slack
 
 
-async def settle(assistant):
-    """裏で動かした仕事が全部終わるまで待つ（終わった仕事が集合から外れるのも待つ）。"""
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 # 出来事（core.emit → on_event）
 
-async def test_events_reach_every_module_that_listens(env):
-    """本体やモジュールが配った出来事は、on_event を持つモジュールに届く（空の中身は外す）。"""
+async def test_events_reach_every_module_that_listens(env, caplog):
+    """本体やモジュールが配った出来事は、on_event を持つモジュールに届く（空の中身は外す）。受け手が壊れても送り手は止まらない。"""
     assistant, slack = env
     lamp = assistant.modules["lamp"]
     assistant.cores["course"].emit("due", title="レポート", at="2026-09-28T23:59", url="")
     assistant.emit("done", theme="vlm")
-    await settle(assistant)
-    assert lamp.events == [("due", {"title": "レポート", "at": "2026-09-28T23:59"}), ("done", {"theme": "vlm"})]
-
-
-async def test_a_module_that_breaks_on_an_event_does_not_stop_the_sender(env, caplog):
-    assistant, slack = env
     assistant.emit("boom")
     await settle(assistant)
-    assert assistant.modules["lamp"].events == [("boom", {})]
+    assert lamp.events == [("due", {"title": "レポート", "at": "2026-09-28T23:59"}), ("done", {"theme": "vlm"}),
+                           ("boom", {})]
     assert "出来事（boom）を受け取れませんでした" in caplog.text
 
 
@@ -111,7 +102,8 @@ async def test_a_module_puts_its_own_items_on_app_home_and_handles_them(env, sto
     assert [option["value"] for option in light["initial_options"]] == ["on"]
 
 
-async def test_only_the_owner_sees_and_uses_module_items(env):
+async def test_module_items_are_for_the_owner_and_a_broken_one_is_left_out(env, monkeypatch):
+    """ほかの人には見せず、押されても扱わない。1つのモジュールの項目が作れなくても、App Home は出す。"""
     assistant, slack = env
     await assistant.on_home_action(_action("kei_agent_home_module:lamp:light", user="USOMEONE",
                                            selected_options=[{"value": "on"}]))
@@ -119,14 +111,10 @@ async def test_only_the_owner_sees_and_uses_module_items(env):
     await assistant.publish_home("USOMEONE")
     assert "ランプ" not in json.dumps(_published(slack), ensure_ascii=False)
 
-
-async def test_a_module_whose_home_breaks_is_left_out(env, monkeypatch):
-    """1つのモジュールの項目が作れなくても、App Home は出す。"""
-    assistant, slack = env
     monkeypatch.setattr(assistant.modules["lamp"], "home", lambda: 1 / 0)
     await assistant.publish_home("UME")
-    assert "ランプ" not in json.dumps(_published(slack), ensure_ascii=False)
-    assert "定期実行" in json.dumps(_published(slack), ensure_ascii=False)
+    shown = json.dumps(_published(slack), ensure_ascii=False)
+    assert "ランプ" not in shown and "定期実行" in shown
 
 
 @pytest.mark.parametrize(("hook", "message"), [

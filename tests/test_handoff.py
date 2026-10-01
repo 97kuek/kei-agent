@@ -1,6 +1,7 @@
 """長くなったスレッドを区切って、新しいスレッドで続ける流れ（handoff.py）。"""
 
 import asyncio
+import logging
 from dataclasses import replace
 
 import pytest
@@ -10,6 +11,8 @@ from kei_agent import runner
 from kei_agent.assistant import Assistant
 from kei_agent.handoff import ACCEPT_ACTION, DECLINE_ACTION, handoff_title, split_memo, strip_handoff
 from kei_agent.jobs import JobManager
+from kei_agent.request import Request
+from kei_agent.testing.kit import settle
 
 
 @pytest.fixture
@@ -22,9 +25,6 @@ def env(config, store, monkeypatch):
     return assistant, slack, claude
 
 
-async def settle(assistant):
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks))
 
 
 def buttons(slack):
@@ -50,9 +50,6 @@ def test_marker_gives_the_title_and_is_hidden_from_the_reply():
     assert handoff_title(text) == "ベースラインの検討"
     assert handoff_title("ふつうの返事") is None
     assert strip_handoff(text) == "データの準備が終わったよ。"
-
-
-def test_memo_is_split_into_title_and_body():
     assert split_memo("**ベースラインの検討**\n**目的**\n- 比べる") == ("ベースラインの検討", "**目的**\n- 比べる")
     assert split_memo("") == ("続き", "")
 
@@ -83,17 +80,14 @@ async def test_button_appears_after_many_turns_and_not_again_right_after_declini
     assert len(buttons(slack)) == 4
 
 
-async def test_no_button_while_waiting_for_an_answer(env):
+@pytest.mark.parametrize("channel, answer", [
+    ("C1", "どっちにする？\n❓ 確認: A と B のどちらで進める？\n🧵 区切り: 次"),   # 答えを待っている間
+    ("C9", "案だよ\n🧵 区切り: 次"),                                              # 自己改善のチャンネル
+])
+async def test_no_button_while_waiting_for_an_answer_or_in_the_improve_channel(env, channel, answer):
     assistant, slack, claude = env
-    claude.behaviors = [{"text": "どっちにする？\n❓ 確認: A と B のどちらで進める？\n🧵 区切り: 次"}]
-    await ask(assistant, "10.1")
-    assert buttons(slack) == []
-
-
-async def test_no_button_in_the_improve_channel(env, config):
-    assistant, slack, claude = env
-    claude.behaviors = [{"text": "案だよ\n🧵 区切り: 次"}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> 直して"})
+    claude.behaviors = [{"text": answer}]
+    await assistant.on_mention({"channel": channel, "user": "UME", "ts": "20.1", "text": "<@UBOT> 続けて"})
     await settle(assistant)
     assert buttons(slack) == []
 
@@ -167,9 +161,6 @@ async def test_failed_memo_keeps_the_thread(env, store):
 
 async def test_a_broken_background_job_is_logged(env, caplog):
     """裏で動かした仕事が落ちたら、必ずログに残す（黙って消えると原因が追えない）。"""
-    import asyncio
-    import logging
-
     assistant, *_ = env
 
     async def broken():
@@ -185,8 +176,6 @@ async def test_a_broken_background_job_is_logged(env, caplog):
 
 async def test_an_interrupted_handoff_is_summarised_again(env, store, monkeypatch):
     """入れ替えで引き継ぎが止まったら、普通の依頼にせず、もう一度区切らせる。"""
-    from kei_agent.request import Request
-
     assistant, slack, claude = env
     req = Request("C1", "vlm", "10.1", None, "引き継ぎメモを書いて", trigger="handoff")
     store.upsert_thread("C1", "10.1", "vlm", "s1")
@@ -199,7 +188,6 @@ async def test_an_interrupted_handoff_is_summarised_again(env, store, monkeypatc
     monkeypatch.setattr(assistant, "hand_off", fake_hand_off)
 
     assert await assistant.resume_interrupted() == 1
-    import asyncio
     await asyncio.gather(*list(assistant.tasks))
 
     assert handed == ["handoff"]

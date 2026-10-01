@@ -137,11 +137,6 @@ async def test_create_page_under_a_page_with_markdown_and_icon(tools, api, world
     assert body["markdown"] == "## 結果\n良かった" and body["icon"] == {"type": "emoji", "emoji": "📝"}
 
 
-async def test_create_page_says_which_column_is_missing(tools, world):
-    result = await call(tools, "create_page", parent_id=world.research.ds, properties={"無い列": "x"})
-    assert result.is_error and "無い列" in result.content[0].text
-
-
 async def test_update_page_properties_icon_and_trash(tools, api, world):
     await ok(tools, "update_page", page_id=world.research.row, properties={"名前": "直した"}, icon="",
              in_trash=True)
@@ -163,6 +158,10 @@ async def test_replace_content_keeps_child_pages_and_databases(tools, api, world
     await ok(tools, "replace_content", page_id=world.research.page, content="# 新しい本文")
     body = last(api, "PATCH", "/pages/")
     assert body == {"type": "replace_content", "replace_content": {"new_str": "# 新しい本文"}}
+    # データベースの中へ移すときは、その data source を親にする
+    await ok(tools, "move", page_id=world.research.page, new_parent_id=world.research.db)
+    body = last(api, "POST", "/pages/")
+    assert body == {"parent": {"type": "data_source_id", "data_source_id": notion_id(world.research.ds)}}
 
 
 async def test_update_block_text_and_delete_block(tools, api, world):
@@ -191,12 +190,6 @@ async def test_update_data_source_adds_renames_and_removes_columns(tools, api, w
     assert set(updated["schema"]) == {"タイトル", "期日"}
 
 
-async def test_move_a_page_into_a_database(tools, api, world):
-    await ok(tools, "move", page_id=world.research.page, new_parent_id=world.research.db)
-    body = last(api, "POST", "/pages/")
-    assert body == {"parent": {"type": "data_source_id", "data_source_id": notion_id(world.research.ds)}}
-
-
 # 届かないもの
 
 OUTSIDE = {
@@ -221,7 +214,9 @@ async def test_every_tool_refuses_what_is_outside_the_callers_home(tools, api, w
     assert api.forwarded == []
 
 
-async def test_a_relation_to_another_home_is_refused(tools, api, world):
+async def test_create_page_refuses_unknown_columns_and_relations_to_another_home(tools, api, world):
+    result = await call(tools, "create_page", parent_id=world.research.ds, properties={"無い列": "x"})
+    assert result.is_error and "無い列" in result.content[0].text
     result = await call(tools, "create_page", parent_id=world.research.ds,
                         properties={"名前": "x", "関連": {"relation": [{"id": world.course.page}]}})
     assert result.is_error and "届きません" in result.content[0].text

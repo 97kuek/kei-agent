@@ -83,6 +83,11 @@ def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_
     before = prompt_version(config, "course")
     (home / "profile.md").write_text("## 話し方\n\n- 一人称は「私」\n", encoding="utf-8")
     assert prompt_version(config, "course") != before
+    # 例のプロフィールをそのまま写しても、書き方の説明は指示書に入らない
+    (home / "profile.md").write_text((config.repo_root / "profile.example.md").read_text(encoding="utf-8"),
+                                     encoding="utf-8")
+    text = load_config(env={"KEI_AGENT_HOME": str(home)}).profile_text
+    assert text.startswith("## 話し方") and "<!--" not in text and "写して書き換える" not in text
 
 
 def test_a_prompt_can_be_replaced_as_a_whole(tmp_path):
@@ -95,15 +100,6 @@ def test_a_prompt_can_be_replaced_as_a_whole(tmp_path):
     assert config.prompt_file("knowledge.md", module="knowledge") == config.repo_root / "modules" / "knowledge" / "knowledge.md"
     (home / "prompts" / "knowledge.md").write_text("# 自分の知識の担当\n", encoding="utf-8")
     assert config.prompt_file("knowledge.md", module="knowledge") == home.resolve() / "prompts" / "knowledge.md"
-
-
-def test_the_example_profile_adds_only_its_content(tmp_path):
-    """例のプロフィールをそのまま写しても、書き方の説明は指示書に入らない。"""
-    from kei_agent.config import REPO_ROOT
-
-    home = _home(tmp_path, profile=(REPO_ROOT / "profile.example.md").read_text(encoding="utf-8"))
-    text = load_config(env={"KEI_AGENT_HOME": str(home)}).profile_text
-    assert text.startswith("## 話し方") and "<!--" not in text and "写して書き換える" not in text
 
 
 def test_launch_scripts_can_ask_where_the_secrets_are(tmp_path):

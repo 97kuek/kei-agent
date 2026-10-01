@@ -3,7 +3,6 @@
 連携の道具、用途の選び分け、skill とフックの置き場所、研究全体のチャンネルからの振り分け、予定（agenda）、声からの問い合わせ。
 """
 
-import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -16,6 +15,7 @@ from kei_agent.agent_policy import policy_of
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
+from kei_agent.testing.kit import settle
 
 CALENDAR_TOML = '''api = 1
 name = "calendar"
@@ -146,11 +146,6 @@ def env(config, store, tmp_path, monkeypatch):
     return Scheduler(config, store, assistant), assistant, slack, claude, agent
 
 
-async def settle(assistant):
-    """裏で動かした仕事が全部終わるまで待つ（終わった仕事を1つずつ待つと、集合から外れる前に空回りすることがある）。"""
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
 
 
 # module.toml
@@ -164,18 +159,19 @@ def test_connectors_become_the_only_account_tools_the_actor_gets(env):
     assert (app.name, app.tools) == ("Google Calendar", ("google_calendar.list_events",))
     # 振り分け・分類の回は、どの担当のものでも道具を持たない
     assert policy_of("calendar", model_policy.UseCase.ROUTING).connectors == ()
-
-
-def test_the_plugin_lives_in_the_module_folder(env, config):
-    scheduler, assistant, *_ = env
+    # plugin はモジュールのフォルダに置く
+    assistant = env[1]
     assert assistant.config.agent_plugin_dir("calendar") == modules.known()["calendar"].path / "plugin"
 
 
 @pytest.mark.parametrize(("extra", "message"), [
     ("[[actor.connectors]]\nname = \"x\"\n", "claude_server"),
     ("[[actor.connectors]]\nname = \"x\"\nclaude_server = \"s\"\nclaude_tools = [\"a b\"]\n", "道具の名前"),
+    # classify は用途が2つ以上あるときだけ、plugin はフォルダがあるときだけ
+    ('classify = "迷ったら broken_answer"\n', "classify"),
+    ("plugin = true\n", "plugin.json"),
 ])
-def test_a_broken_connector_is_refused(tmp_path, extra, message):
+def test_a_broken_actor_is_refused(tmp_path, extra, message):
     folder = tmp_path / "broken"
     folder.mkdir()
     (folder / "broken.md").write_text("#\n", encoding="utf-8")
@@ -183,19 +179,6 @@ def test_a_broken_connector_is_refused(tmp_path, extra, message):
         'api = 1\nname = "broken"\n[actor]\nprompt = "broken.md"\n' + extra
         + '[use_cases.broken_answer]\nclaude = { model = "claude-sonnet-5" }\n', encoding="utf-8")
     with pytest.raises(modules.ModuleError, match=message):
-        modules.load_spec(folder)
-
-
-def test_classify_needs_two_use_cases_and_plugin_needs_its_folder(tmp_path):
-    folder = tmp_path / "one"
-    folder.mkdir()
-    (folder / "one.md").write_text("#\n", encoding="utf-8")
-    base = 'api = 1\nname = "one"\n[actor]\nprompt = "one.md"\n{}\n[use_cases.one_answer]\nclaude = {{ model = "claude-sonnet-5" }}\n'
-    (folder / "module.toml").write_text(base.format('classify = "迷ったら one_answer"'), encoding="utf-8")
-    with pytest.raises(modules.ModuleError, match="classify"):
-        modules.load_spec(folder)
-    (folder / "module.toml").write_text(base.format("plugin = true"), encoding="utf-8")
-    with pytest.raises(modules.ModuleError, match="plugin.json"):
         modules.load_spec(folder)
 
 
@@ -238,6 +221,13 @@ async def test_the_module_picks_its_own_skill_in_its_channel(env, monkeypatch):
     assert (skill, payload, params) == ("list-events", {"days": 2}, {"provider": "claude"})
     assert slack.texts()[-1] == "1 件"
 
+    # 担当が失敗したら、依頼に ⚠️ を付けて知らせる
+    agent.broken = True
+    await assistant.on_mention({"channel": "C60", "user": "UME", "ts": "60.2", "text": "<@UBOT> 予定は？"})
+    await settle(assistant)
+    assert "接続に失敗" in slack.texts()[-1]
+    assert ("reactions_add", {"channel": "C60", "timestamp": "60.2", "name": "warning"}) in slack.calls
+
 
 async def test_a_choice_from_the_overview_router_reaches_the_module(env, monkeypatch):
     """研究全体のチャンネルで振り分け係が選んだ仕事は、選び直さずにモジュールへ渡る。"""
@@ -256,21 +246,6 @@ async def test_a_choice_from_the_overview_router_reaches_the_module(env, monkeyp
     await settle(assistant)
 
     assert assistant.modules["calendar"].routed == [("list-events", {"days": 7})]
-
-
-async def test_a_failed_reply_marks_the_request_with_a_warning(env, monkeypatch):
-    scheduler, assistant, slack, claude, agent = env
-    agent.broken = True
-
-    async def fake_pick(config, skills, text, *, store=None):
-        return router.Choice(skill="list-events")
-
-    monkeypatch.setattr(router, "pick", fake_pick)
-    await assistant.on_mention({"channel": "C60", "user": "UME", "ts": "60.2", "text": "<@UBOT> 予定は？"})
-    await settle(assistant)
-
-    assert "接続に失敗" in slack.texts()[-1]
-    assert ("reactions_add", {"channel": "C60", "timestamp": "60.2", "name": "warning"}) in slack.calls
 
 
 # 予定（agenda）
@@ -303,15 +278,6 @@ async def test_an_unreadable_agenda_is_told_and_never_marks_the_calendar(env):
     assert assistant.hub.calendar[0]["同期状態"] == "確認済み"          # 読めなかった日に「要確認」にしない
     # 読めなかったことは、朝の一覧ではなく #0-kei-agent に知らせる
     assert "予定の予定の読み取り" not in text and any("予定の予定の読み取り" in t for t in told)
-
-
-async def test_module_agenda_goes_into_the_review_material(env):
-    from kei_agent import digest
-
-    scheduler, assistant, slack, claude, agent = env
-    lines = await digest.DigestBuilder(assistant.config, assistant.store, assistant)._agenda(
-        datetime(2026, 9, 27, 21, 0).timestamp())
-    assert "## 予定" in lines and "- 明日の予定: 10:00–11:00 打ち合わせ" in lines
 
 
 # 声
@@ -393,7 +359,7 @@ async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, mon
 
     async def agenda(days, kinds=None):
         asked.append((days, kinds))
-        return _school_items(now)
+        return [item for item in _school_items(now) if kinds is None or item["kind"] in kinds]
 
     async def prepare(kind, day):
         return ["課題の取り込み"]
@@ -410,35 +376,28 @@ async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, mon
     assert notices == ["module.calendar.due:r1"]
     assert asked == [(7, None)]
 
-
-async def test_review_lists_module_deadlines_without_reading_meetings(env, monkeypatch):
-    scheduler, assistant, slack, claude, agent = env
-    now = datetime(2026, 9, 28, 21, 0)
-    asked = []
-
-    async def agenda(days, kinds=None):
-        asked.append(kinds)
-        return [item for item in _school_items(now) if kinds is None or item["kind"] in kinds]
-
-    monkeypatch.setattr(assistant.modules["calendar"], "agenda", agenda)
+    # 振り返りは締切だけを頼む（会議は読まない）
     agenda_items, _ = await assistant.module_agenda(3, frozenset({"due"}))
-
-    assert asked == [frozenset({"due"})]
+    assert asked[-1] == (3, frozenset({"due"}))
     assert [item["kind"] for item in agenda_items["calendar"]] == ["due"]
 
 
-async def test_dues_from_a_module_go_into_the_review_material(env, monkeypatch):
+async def test_module_agenda_goes_into_the_review_material(env, monkeypatch):
     from kei_agent import digest
 
     scheduler, assistant, slack, claude, agent = env
+    builder = digest.DigestBuilder(assistant.config, assistant.store, assistant)
+    lines = await builder._agenda(datetime(2026, 9, 27, 21, 0).timestamp())
+    assert "## 予定" in lines and "- 明日の予定: 10:00–11:00 打ち合わせ" in lines
+
+    # 授業と締切は、今日あったものとして並ぶ
     now = datetime(2026, 9, 28, 21, 0)
 
     async def agenda(days, kinds=None):
         return _school_items(now)
 
     monkeypatch.setattr(assistant.modules["calendar"], "agenda", agenda)
-    lines = await digest.DigestBuilder(assistant.config, assistant.store, assistant)._agenda(now.timestamp())
-
+    lines = await builder._agenda(now.timestamp())
     assert "- 今日あった予定: 10:40–12:20 データベース" in lines
     assert "- 今日が期限だったもの: データベース / 第3回レポート（17:00）" in lines
 

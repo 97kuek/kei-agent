@@ -70,8 +70,10 @@ def ran(monkeypatch):
 @pytest.mark.parametrize(("kind", "use_case"), [
     ("research", "research_extract"), ("course", "course_explain"), ("work", "work_decide")])
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
+    """研究はテーマの作業場で、大学と仕事はいつも同じ自分の作業場で動く。"""
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
-           "use_case": str(use_case), "provider": "claude", "channel_name": "vlm"}
+           "use_case": str(use_case), "provider": "claude", "channel_name": "vlm",
+           "allowed_domains": ["example.com"]}
     updater = _Updater()
 
     await _executor(kind, config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
@@ -81,30 +83,13 @@ async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, stor
     assert prompt == "調べて"                                    # 指示書は system prompt で渡し、依頼の文に混ぜない
     assert (request.recipe.actor, request.recipe.use_case, request.session_id) == (kind, use_case, "s-0")
     assert (request.channel, request.thread_ts) == ("C1", "1.2")
+    assert request.workspace.cwd == {"research": config.research_root / "vlm", "course": config.course_root,
+                                     "work": config.state_dir / "agents" / "work"}[kind]
+    if kind == "research":
+        assert request.workspace.allowed_domains == ("example.com",)
     reply = updater.envelope()
     assert reply["ok"] and reply["data"]["session_id"] == "s-1"
     assert set(reply["data"]) <= set(FIELDS)
-
-
-@pytest.mark.parametrize("kind", ["course", "work"])
-async def test_course_and_work_run_in_their_own_stable_workspace(kind, config, store, ran):
-    ask = {"prompt": "調べて", "use_case": {"course": "course_explain", "work": "work_decide"}[kind],
-           "provider": "codex"}
-    await _executor(kind, config, store).handle(_Updater(), {"skill": "ask"}, json.dumps(ask))
-    await _executor(kind, config, store).handle(_Updater(), {"skill": "ask"}, json.dumps(ask))
-
-    first, second = (request.workspace.cwd for request, _ in ran)
-    assert first == second == (config.course_root if kind == "course" else config.state_dir / "agents" / "work")
-
-
-async def test_research_runs_in_the_theme_workspace(config, store, ran):
-    ask = {"prompt": "図を作って", "use_case": "research_execute", "provider": "claude",
-           "channel_name": "vlm", "allowed_domains": ["example.com"]}
-    await _executor("research", config, store).handle(_Updater(), {}, json.dumps(ask))
-
-    (request, _), = ran
-    assert request.workspace.cwd == config.research_root / "vlm"
-    assert request.workspace.allowed_domains == ("example.com",)
 
 
 async def test_ask_without_a_use_case_is_classified_by_the_agents_classifier(config, store, ran, monkeypatch):
@@ -133,6 +118,11 @@ async def test_classifier_limit_comes_back_as_a_limited_failure(config, store, r
     assert updater.state == "failed" and updater.envelope()["limit_reset_at"] == 456.0
     assert ran == []
 
+    # ok: false の封筒は、A2A のタスクも failed にする（completed だと頼んだ側が気づけない）
+    updater = _Updater()
+    await run.finish(updater, envelope.failure("上限に達した"))
+    assert updater.state == "failed"
+
 
 @pytest.mark.parametrize("text", ["過去問ある？", "{}", '{"prompt": ""}'])
 async def test_ask_needs_a_json_request_with_a_prompt(text, config, store, ran):
@@ -158,12 +148,6 @@ async def test_execute_sends_only_the_fields_the_orchestrator_reads(config, monk
 
     assert set(payload["data"]) <= set(FIELDS)
     assert "検証前の文" not in json.dumps(payload, ensure_ascii=False)
-
-
-async def test_failed_envelope_makes_the_a2a_task_fail():
-    updater = _Updater()
-    await run.finish(updater, envelope.failure("上限に達した"))
-    assert updater.state == "failed"
 
 
 async def test_the_recipe_comes_back_in_the_envelope(config, store, monkeypatch):

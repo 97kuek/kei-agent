@@ -36,12 +36,9 @@ def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):
 
     record = waseda.read_record([grades, credits])
 
-    assert len(record.grades) == 1
-    assert record.grades[0].course_name == "数学"
-    assert record.grades[0].category == "Ａ群 / 基礎科目"
-    assert record.grades[0].gp == 4.0
-    assert record.requirements[-1].name == "総合計"
-    assert record.requirements[-1].remaining == 5.0
+    grade, = record.grades
+    assert (grade.course_name, grade.category, grade.gp) == ("数学", "Ａ群 / 基礎科目", 4.0)
+    assert (record.requirements[-1].name, record.requirements[-1].remaining) == ("総合計", 5.0)
     assert [entry.kind for entry in record.gpa] == ["春学期", "秋学期", "通算"]
     assert record.gpa[-1].gpa == 3.4
 

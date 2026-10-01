@@ -41,43 +41,32 @@ def skill_metadata(plugin_dir: Path) -> dict[str, dict[str, str]]:
     return {path.parent.name: frontmatter(path) for path in sorted(plugin_dir.glob("skills/*/SKILL.md"))}
 
 
-def test_research_plugin_has_renamed_skills():
-    skills = skill_metadata(PLUGINS["research"])
-    assert {"running-jobs", "researching-literature"} <= set(skills)
-    assert not (PLUGIN / "skills").exists()
-    assert not (PLUGIN / ".claude-plugin").exists()
-
-
-@pytest.mark.parametrize("agent", AGENTS)
-def test_each_agent_has_its_own_plugin_manifest(agent):
+@pytest.mark.parametrize(("agent", "skills", "boundary"), [
+    ("research", {"running-jobs", "researching-literature"}, "Notion"),
+    ("course", {"finding-course-materials", "managing-assignments", "managing-course-notion",
+                "managing-academic-record"}, "Box"),
+    ("work", {"researching-work-context", "preparing-meetings", "drafting-work-actions"}, "送"),
+])
+def test_each_agent_has_its_own_plugin_with_scoped_skills(agent, skills, boundary):
     manifest = json.loads((PLUGINS[agent] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    assert manifest["name"] == f"kei-agent-{agent}"
-    assert manifest["description"]
-
-
-@pytest.mark.parametrize("agent", AGENTS)
-def test_every_skill_says_its_name_and_when_to_use_it(agent):
-    for name, meta in skill_metadata(PLUGINS[agent]).items():
+    assert manifest["name"] == f"kei-agent-{agent}" and manifest["description"]
+    found = skill_metadata(PLUGINS[agent])
+    assert skills <= set(found) if agent == "research" else skills == set(found)
+    bodies = []
+    for name, meta in found.items():
         assert meta.get("name") == name, f"{agent}/{name}: frontmatter の name がディレクトリ名と違う"
         assert meta.get("description", "").startswith("Use when"), f"{agent}/{name}: description は使用条件から書く"
-
-
-@pytest.mark.parametrize("agent", AGENTS)
-def test_skills_stay_short_enough_to_read(agent):
-    for name, _ in skill_metadata(PLUGINS[agent]).items():
         body = (PLUGINS[agent] / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
         assert len(body.split()) <= MAX_WORDS, f"{agent}/{name}: SKILL.md が長い（references/ に分ける）"
+        # skill のスクリプトは plugin の中から辿る。環境変数が無いと動かない形にしない
+        assert "KEI_AGENT_PLUGIN_DIR" not in body, f"{agent}/{name}"
+        bodies.append(body)
+    # 権限の境界は、どこか1つの skill には必ず書いてある
+    assert boundary in "\n".join(bodies)
 
 
-def test_skills_do_not_depend_on_an_environment_variable_for_their_scripts():
-    """skill のスクリプトは plugin の中から辿る。環境変数が無いと動かない形にしない。"""
-    for path in (path for folder in PLUGINS.values() for path in folder.glob("skills/*/SKILL.md")):
-        assert "KEI_AGENT_PLUGIN_DIR" not in path.read_text(encoding="utf-8"), path
-
-
-def test_course_plugin_has_three_scoped_skills():
-    assert set(skill_metadata(PLUGINS["course"])) == {
-        "finding-course-materials", "managing-assignments", "managing-course-notion", "managing-academic-record"}
+def test_the_old_shared_plugin_folder_is_gone():
+    assert not (PLUGIN / "skills").exists() and not (PLUGIN / ".claude-plugin").exists()
 
 
 def test_course_skills_name_the_canonical_databases():
@@ -85,20 +74,3 @@ def test_course_skills_name_the_canonical_databases():
     course_schema = (PLUGINS["course"] / "skills" / "managing-course-notion" / "SKILL.md").read_text(encoding="utf-8")
     for name in ("授業", "課題", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"):
         assert name in text or name in course_schema
-
-
-def test_work_plugin_has_three_scoped_skills():
-    assert set(skill_metadata(PLUGINS["work"])) == {
-        "researching-work-context", "preparing-meetings", "drafting-work-actions"}
-
-
-@pytest.mark.parametrize(("agent", "word"), [
-    ("research", "Notion"),
-    ("course", "Box"),
-    ("work", "送"),
-])
-def test_each_plugin_says_what_it_must_not_touch(agent, word):
-    """権限の境界は、どこか1つの skill には必ず書いてある。"""
-    bodies = "\n".join((PLUGINS[agent] / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-                       for name in skill_metadata(PLUGINS[agent]))
-    assert word in bodies

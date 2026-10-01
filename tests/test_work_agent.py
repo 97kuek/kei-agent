@@ -32,34 +32,26 @@ def _free_port() -> int:
 
 
 def test_events_are_grouped_by_day():
-    """今日・明日・そのあとに分け、件名と時間と場所とリンクを出す（1行ずつ並べる形）。"""
-    text = work.events_text(work.events_of({"items": EVENTS}), datetime(2026, 9, 21, 9, 0))
-    lines = text.splitlines()
+    """今日・明日・そのあとに分け、件名と時間と場所とリンクを出す（1行ずつ並べる形）。明日を聞かれたら明日だけ。"""
+    events = work.events_of({"items": EVENTS})
+    lines = work.events_text(events, datetime(2026, 9, 21, 9, 0)).splitlines()
     assert lines[0] == "*今日*"
     assert lines[1] == "• 10:00–10:15 朝会（Zoom） <https://outlook/1|Outlook>"
     assert lines[2] == "*明日*" and "14:00–15:00 定例" in lines[3]
     assert lines[4] == "*このあと*" and lines[5] == "• 9/25（金） 終日 全社イベント（本社）"
 
-
-def test_tomorrow_request_excludes_today_and_later_events():
-    text = work.events_text(work.events_of({"items": EVENTS}), datetime(2026, 9, 21, 9),
-                            period="tomorrow")
-    assert text.startswith("*明日*\n• 14:00–15:00 定例")
-    assert "朝会" not in text and "全社イベント" not in text
+    tomorrow = work.events_text(events, datetime(2026, 9, 21, 9), period="tomorrow")
+    assert tomorrow.startswith("*明日*\n• 14:00–15:00 定例")
+    assert "朝会" not in tomorrow and "全社イベント" not in tomorrow
+    # 予定が無ければそう言い、読めない時刻の予定は落とす
+    assert work.events_text([], datetime(2026, 9, 21)) == work.NO_EVENTS
+    assert work.events_of({"items": [{"subject": "壊れている", "start": "いつか"}]}) == []
 
 
 def test_requested_period_preserves_tomorrow_intent():
     assert work.requested_period("明日の予定を教えて") == "tomorrow"
     assert work.requested_period("今日の予定") == "today"
     assert work.requested_period("今週の予定") == "week"
-
-
-def test_no_events_says_so():
-    assert work.events_text([], datetime(2026, 9, 21)) == work.NO_EVENTS
-
-
-def test_broken_times_are_dropped():
-    assert work.events_of({"items": [{"subject": "壊れている", "start": "いつか"}]}) == []
 
 
 @pytest.fixture
@@ -93,31 +85,25 @@ async def server(config, monkeypatch):
     await task
 
 
-async def test_card_says_it_reads_the_calendar(server):
-    base, _ = server
+async def test_card_and_list_events_come_back_in_the_envelope(server, monkeypatch):
+    from kei_agent_modules.work import connector
+
+    base, asked = server
     card = await Agent(base, TOKEN).card()
     assert card["name"] == "Kei Agent（仕事）"
     assert [s["id"] for s in card["skills"]] == ["list-events", "ask"]
 
-
-async def test_list_events_comes_back_in_the_envelope(server):
-    base, asked = server
     task = await Agent(base, TOKEN, timeout=30).ask("list-events", json.dumps({"days": 3}))
     envelope = json.loads(task.answer)
     assert task.ok and envelope["ok"] is True
     assert envelope["data"]["days"] == 3 and len(envelope["data"]["items"]) == 3
     assert asked == [3]
 
-
-async def test_without_the_connection_it_says_so(server, monkeypatch):
-    """連携が使えないときは、その理由を返す（黙って0件にしない）。"""
-    from kei_agent_modules.work import connector
-
+    # 連携が使えないときは、その理由を返す（黙って0件にしない）
     async def broken(cfg, store, days=7, today=None, provider=""):
         raise connector.WorkCalendarError("連携を使えませんでした")
 
     monkeypatch.setattr(connector, "events", broken)
-    base, _ = server
     task = await Agent(base, TOKEN, timeout=30).ask("list-events")
     assert not task.ok and "連携を使えませんでした" in json.loads(task.answer)["text"]
 
@@ -125,29 +111,15 @@ async def test_without_the_connection_it_says_so(server, monkeypatch):
 # 会社の Claude アカウントに付いている連携から読む道（既定）
 
 
-def test_connector_reads_the_json_and_drops_the_body():
-    """連携には JSON で答えさせる。会議の本文（参加リンクなど）は持ち込まない。"""
-    from kei_agent.model_json import json_list
-
-    text = ('はい、調べました。\n[{"subject": "定例", "start": "2026-09-25T11:00", '
-            '"end": "2026-09-25T13:00", "location": "Teams", "organizer": "c@example.com"}]')
-    found = json_list(text)
-    assert found[0]["subject"] == "定例"
+def test_connector_drops_the_body_of_an_event():
+    """会議の本文（参加リンクなど）は持ち込まない。"""
     from kei_agent_modules.work import connector
 
-    event = connector._event(found[0])
+    event = connector._event({"subject": "定例", "start": "2026-09-25T11:00", "end": "2026-09-25T13:00",
+                              "location": "Teams", "organizer": "c@example.com", "body": "参加リンク"})
     assert set(event) == {"id", "subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
     assert event["start"] == "2026-09-25T11:00"
     assert event["id"] == ""
-
-
-def test_connector_says_when_the_reply_is_not_json():
-    from kei_agent.model_json import json_list
-
-    with pytest.raises(ValueError, match="読めません"):
-        json_list("[これは JSON ではない]")
-    with pytest.raises(ValueError, match="JSON の配列"):
-        json_list("予定はありません")
 
 
 def test_calendar_text_escapes_values_from_outlook():
@@ -165,15 +137,6 @@ def test_calendar_text_escapes_values_from_outlook():
     assert "<!channel>" not in text and "<@U123>" not in text
     assert "&lt;!channel&gt;" in text and "&lt;@U123&gt;" in text
     assert "|&lt;!channel&gt;" not in text
-
-
-def test_work_connector_has_no_write_tools():
-    """仕事は読むだけ。送信・作成・更新の道具を許可の一覧（制限の表）に入れない。"""
-    from kei_agent.agent_policy import policy_of
-
-    forbidden = ("send", "create", "update", "delete", "move", "upload", "post")
-    names = [name for connector in policy_of("work").connectors for name in connector.claude_names()]
-    assert names and not any(any(word in name.lower() for word in forbidden) for name in names)
 
 
 async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(config, store, monkeypatch):

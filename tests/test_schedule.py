@@ -1,8 +1,6 @@
-import asyncio
 import json
 import time
 from datetime import date, datetime, timedelta
-from datetime import time as dtime
 
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
@@ -14,6 +12,7 @@ from kei_agent.calendar_sync import SyncReport
 from kei_agent.jobs import JobManager
 from kei_agent.notion_store import Note
 from kei_agent.schedule import Scheduler, due_day
+from kei_agent.testing.kit import settle
 
 
 @pytest.fixture
@@ -24,6 +23,29 @@ def env(config, store, monkeypatch):
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack, claude
+
+
+def capture_troubles(monkeypatch, assistant):
+    """改善のチャンネルへの知らせを、送らずに list に貯める。"""
+    troubles = []
+
+    async def notice(text):
+        troubles.append(text)
+
+    monkeypatch.setattr(assistant, "notify_trouble", notice)
+    return troubles
+
+
+def record_runs(monkeypatch, scheduler, ran, status="done"):
+    """run_task の代わりに、動かした (名前, 日) を ran に足して、その日の分として記録する。"""
+    async def fake_run(name, day, record=True):
+        ran.append((name, day))
+        scheduler.store.record_schedule(name, day, {"status": status})
+        return {}
+
+    monkeypatch.setattr(scheduler, "run_task", fake_run)
+
+
 
 
 async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypatch, caplog):
@@ -51,7 +73,10 @@ async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypa
 
 
 async def test_hub_calendar_copies_all_future_assignments_without_asking_work(env, monkeypatch):
-    """課題はこれからの全部を写す（大学のモジュールの見回り）。会議は朝の Daily で書くので、仕事の担当には聞かない。"""
+    """課題はこれからの全部を写す（大学のモジュールの見回り）。会議は朝の Daily で書くので、仕事の担当には聞かない。
+
+    研究ホームが無い間は、担当にも聞かない。
+    """
     from kei_agent import api
 
     scheduler, assistant, *_ = env
@@ -70,6 +95,10 @@ async def test_hub_calendar_copies_all_future_assignments_without_asking_work(en
     monkeypatch.setattr(assistant.modules["work"], "agenda", no_work)
     monkeypatch.setattr(api, "sync_calendar", record_sync)
 
+    hub, assistant.hub = assistant.hub, None
+    await assistant.modules["course"].sync_calendar(datetime(2026, 9, 26, 8, 0))
+    assert agent.asked == []
+    assistant.hub = hub
     await assistant.modules["course"].sync_calendar(datetime(2026, 9, 26, 8, 5))
 
     assert agent.asked == [("list-calendar-assignments", {"days": 400, "provider": "claude"})]
@@ -78,23 +107,10 @@ async def test_hub_calendar_copies_all_future_assignments_without_asking_work(en
     assert record == {"day": "2026-09-26", "created": 1, "updated": 0, "stale": 0}
 
 
-async def test_hub_calendar_sync_without_hub_does_not_call_agents(env):
-    scheduler, assistant, *_ = env
-    assistant.hub = None
-    agent = FakeCourseAgent([])
-    assistant.agents["course"] = agent
-    await assistant.modules["course"].sync_calendar(datetime(2026, 9, 24, 9, 0))
-    assert agent.asked == []
-
-
 async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
+    """研究ホームの列が足りないときは研究ホームだけ止め、Notion の Task は使い続ける。"""
     _, assistant, *_ = env
-    notices = []
-
-    async def notice(text):
-        notices.append(text)
-
-    monkeypatch.setattr(assistant, "notify_trouble", notice)
+    notices = capture_troubles(monkeypatch, assistant)
     monkeypatch.setattr(assistant.hub, "schema_problems", lambda: ["日別記録の列がありません"])
     assert await assistant.check_hub_schema() == ["日別記録の列がありません"]
     assert assistant.hub is None
@@ -105,12 +121,7 @@ async def test_hub_schema_failure_disables_only_hub(env, monkeypatch):
 async def test_missing_time_db_is_reported_but_keeps_the_hub(env, monkeypatch):
     """時間記録がまだ無いだけなら、日別記録は使い続け、作り方を一度だけ知らせる。"""
     _, assistant, *_ = env
-    notices = []
-
-    async def notice(text):
-        notices.append(text)
-
-    monkeypatch.setattr(assistant, "notify_trouble", notice)
+    notices = capture_troubles(monkeypatch, assistant)
     hub = assistant.hub
     hub.has_time_db = False
     assert await assistant.check_hub_schema() == []
@@ -119,26 +130,16 @@ async def test_missing_time_db_is_reported_but_keeps_the_hub(env, monkeypatch):
     assert "時間記録" in notice_text and "kei-agent-hub-setup --apply" in notice_text
 
 
-async def test_hub_calendar_runs_without_daily_and_retries_after_failed_hour(env):
-    """全部を読めなかった日は、1時間おきに写し直す（Daily が動いていなくても、見回りが写す）。"""
-    scheduler, assistant, *_ = env
-    agent = FakeCourseAgent([])
-    agent.incomplete = True
-    assistant.agents["course"] = agent
-    module = assistant.modules["course"]
-    for at in ("2026-09-18T08:05", "2026-09-18T08:06", "2026-09-18T09:06"):
-        await module.sync_calendar(datetime.fromisoformat(at))
-    assert [skill for skill, _ in agent.asked] == ["list-calendar-assignments", "list-calendar-assignments"]
-
-
-async def test_hub_calendar_is_done_for_the_day_once_assignments_are_copied(env):
+@pytest.mark.parametrize("incomplete, asked", [(True, 2), (False, 1)])
+async def test_hub_calendar_retries_hourly_only_while_incomplete(env, incomplete, asked):
+    """全部を読めなかった日は1時間おきに写し直し、写せた日はそれで終わり（Daily が動いていなくても見回りが写す）。"""
     scheduler, assistant, *_ = env
     agent = FakeCourseAgent([], assignments=[{"id": "a", "title": "課題", "due": "2026-10-01", "status": "未着手"}])
+    agent.incomplete = incomplete
     assistant.agents["course"] = agent
-    module = assistant.modules["course"]
-    await module.sync_calendar(datetime.fromisoformat("2026-09-18T08:05"))
-    await module.sync_calendar(datetime.fromisoformat("2026-09-18T10:06"))
-    assert [skill for skill, _ in agent.asked] == ["list-calendar-assignments"]
+    for at in ("2026-09-18T08:05", "2026-09-18T08:06", "2026-09-18T09:06"):
+        await assistant.modules["course"].sync_calendar(datetime.fromisoformat(at))
+    assert [skill for skill, _ in agent.asked] == ["list-calendar-assignments"] * asked
 
 
 # 時刻
@@ -166,13 +167,7 @@ def test_search_keywords_ignores_template_comment(config):
 async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
     scheduler, *_ = env
     ran = []
-
-    async def fake_run(name, day, record=True):
-        ran.append((name, day))
-        scheduler.store.record_schedule(name, day, {"status": "done"})
-        return {}
-
-    monkeypatch.setattr(scheduler, "run_task", fake_run)
+    record_runs(monkeypatch, scheduler, ran)
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
     await scheduler.tick(datetime.fromisoformat("2026-09-18 08:06"))
     # 01:30 の夜間、07:00 の先行研究と読みもの、08:00 の Daily が1回ずつ。21:00 はまだ
@@ -188,17 +183,12 @@ async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
     scheduler, *_ = env
     from kei_agent import settings
     ran = []
-
-    async def fake_run(name, day, record=True):
-        ran.append(name)
-        scheduler.store.record_schedule(name, day, {"status": "done"})
-        return {}
-
-    monkeypatch.setattr(scheduler, "run_task", fake_run)
+    record_runs(monkeypatch, scheduler, ran)
     settings.set_schedule(scheduler.store, "daily", "07:30", True)
     settings.set_schedule(scheduler.store, "literature", "07:00", False)
     await scheduler.tick(datetime.fromisoformat("2026-09-18 07:35"))
-    assert "daily" in ran and "literature" not in ran
+    names = [name for name, _ in ran]
+    assert "daily" in names and "literature" not in names
 
 
 # 🌙 の夜間 Task
@@ -227,12 +217,18 @@ async def test_moon_reaction_creates_notion_task_and_removal_cancels(env):
 
 
 async def test_moon_reaction_ignored_for_others_and_non_theme(env):
+    """🌙 は自分のメッセージにつけたもの・テーマのチャンネルのものだけ見る。外すときも同じ。"""
     scheduler, assistant, *_ = env
     await assistant.on_reaction_added({**MOON, "user": "USOMEONE", "item_user": "USOMEONE"})
     await assistant.on_reaction_added({**MOON, "item_user": "UOTHER"})
     await assistant.on_reaction_added({**MOON, "reaction": "eyes"})
     await assistant.on_reaction_added({**MOON, "item": {"type": "message", "channel": "C9", "ts": "60.1"}})
     assert assistant.notion.tasks == {}
+
+    assistant.notion.add_task("誰かの Task", "vlm", slack_url="https://example.slack.com/archives/C1/p101")
+    await assistant.on_reaction_removed({**MOON, "item_user": "USOMEONE",
+                                         "item": {"type": "message", "channel": "C1", "ts": "10.1"}})
+    assert [t.status for t in assistant.notion.tasks.values()] == ["今夜やる"]
 
 
 async def test_moon_reaction_reports_notion_failure(env):
@@ -264,18 +260,21 @@ async def test_night_runs_slack_task_in_its_thread(env, config):
     assert detail["tasks"][0]["status"] == "完了" and detail["remaining"] == 0
 
 
-async def test_night_runs_notion_task_in_new_thread(env, config):
+@pytest.mark.parametrize("slack_url", [None, "https://example.slack.com/archives/C9/p1789636798229039"])
+async def test_night_runs_other_tasks_in_a_new_theme_thread(env, config, slack_url):
+    """Notion で作った Task も、別のチャンネルで作った Task も、テーマのチャンネルに新しいスレッドを立てて動かす。"""
     scheduler, assistant, slack, claude = env
     make_theme(config)
-    task = assistant.notion.add_task("先行研究を追加で探す", "vlm", body="2024年以降に絞る")
+    task = assistant.notion.add_task("先行研究を追加で探す", "vlm", body="2024年以降に絞る", slack_url=slack_url)
+    slack.replies = [{"ts": "1789636798.229039", "user": "UME", "text": "先行研究を追加で探す"}]
 
     await scheduler.run_night("2026-09-18")
 
-    header = slack.posted()[0]
-    assert header == {"channel": "C1", "text": "🌙 Task: 先行研究を追加で探す"}
-    assert claude.calls[0]["thread_ts"] == "1001.000"
-    assert task.slack_url.startswith("https://example.slack.com/archives/C1/p")
+    assert slack.posted()[0] == {"channel": "C1", "text": "🌙 Task: 先行研究を追加で探す"}
+    assert claude.calls[0]["thread_ts"] == "1001.000" and claude.calls[0]["cwd"] == config.research_root / "vlm"
     assert task.status == "完了"
+    if slack_url is None:
+        assert task.slack_url.startswith("https://example.slack.com/archives/C1/p")
 
 
 async def test_night_marks_awaiting(env, config):
@@ -291,6 +290,14 @@ async def test_night_marks_awaiting(env, config):
     assert asks.status == "確認待ち" and len(claude.calls) == 1
 
 
+async def test_night_skips_when_notion_is_down(env, config):
+    scheduler, assistant, slack, claude = env
+    assistant.notion.fail = True
+    detail = await scheduler.run_night("2026-09-18")
+    assert detail["status"] == "error" and claude.calls == []
+    assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
+
+
 async def test_night_respects_limit(env, config):
     scheduler, assistant, slack, claude = env
     make_theme(config)
@@ -298,14 +305,6 @@ async def test_night_respects_limit(env, config):
         assistant.notion.add_task(f"task {i}", "vlm")
     detail = await scheduler.run_night("2026-09-18")
     assert len(claude.calls) == 5 and detail["remaining"] == 2
-
-
-async def test_night_skips_when_notion_is_down(env, config):
-    scheduler, assistant, slack, claude = env
-    assistant.notion.fail = True
-    detail = await scheduler.run_night("2026-09-18")
-    assert detail["status"] == "error" and claude.calls == []
-    assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
 
 async def test_member_joined_registers_theme_in_notion(env, config):
@@ -328,9 +327,7 @@ async def test_awaiting_marker_nudges_once_and_clears_on_reply(env, config, stor
     scheduler, assistant, slack, claude = env
     claude.behaviors = [{"text": "途中まで進めました\n❓ 確認: 条件Bも含めますか？"}]
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 進めて"})
-    while assistant.tasks:
-        import asyncio
-        await asyncio.gather(*list(assistant.tasks))
+    await settle(assistant)
     assert store.get_thread("C1", "10.1")["awaiting_since"] is not None
 
     await scheduler.nudge_stale_threads()
@@ -388,19 +385,6 @@ async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatc
     assert detail["tasks"][0]["status"] == "error"
 
 
-async def test_night_task_from_other_channel_runs_in_theme_channel(env, config):
-    scheduler, assistant, slack, claude = env
-    make_theme(config)
-    assistant.notion.add_task("別のチャンネルで作った", "vlm",
-                              slack_url="https://example.slack.com/archives/C9/p1789636798229039")
-    slack.replies = [{"ts": "1789636798.229039", "user": "UME", "text": "別のチャンネルで作った"}]
-
-    await scheduler.run_night("2026-09-18")
-
-    assert slack.posted()[0] == {"channel": "C1", "text": "🌙 Task: 別のチャンネルで作った"}
-    assert claude.calls[0]["cwd"] == config.research_root / "vlm"
-
-
 async def test_nudge_failure_is_not_retried_every_minute(env, store, monkeypatch):
     scheduler, assistant, slack, claude = env
     store.upsert_thread("C1", "10.1", "vlm", "s")
@@ -438,48 +422,25 @@ async def test_theme_is_registered_in_notion_on_first_use(env, config):
     assert assistant.notion.themes == {}
 
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks))
+    await settle(assistant)
 
     assert "vlm" in assistant.notion.themes
-
-
-async def test_moon_removed_from_someone_elses_message_is_ignored(env):
-    """🌙 をつけるときと同じく、外すときも自分のメッセージだけを見る。"""
-    scheduler, assistant, slack, claude = env
-    assistant.notion.add_task("誰かの Task", "vlm", slack_url="https://example.slack.com/archives/C1/p101")
-
-    await assistant.on_reaction_removed({
-        "user": "UME", "item_user": "USOMEONE", "reaction": "crescent_moon",
-        "item": {"type": "message", "channel": "C1", "ts": "10.1"},
-    })
-
-    assert [t.status for t in assistant.notion.tasks.values()] == ["今夜やる"]
 
 
 # 契約の上限（Claude AI usage limit）
 
 
-async def test_limited_schedule_is_deferred_only_once_per_day(env):
-    scheduler, _, *_ = env
+async def test_tick_waits_while_the_usage_limit_is_on(env, monkeypatch):
+    """上限の間は何も動かさず、やり直しの予約は1日に1つだけ（毎分増やさない）。"""
+    scheduler, *_ = env
+    ran = []
+    record_runs(monkeypatch, scheduler, ran)
     scheduler.store.set_limit_until("claude", time.time() + 3600)
     now = datetime.fromisoformat("2026-09-18 08:05")
     await scheduler.tick(now)
     first = scheduler.store.pending_deferred("schedule")
     await scheduler.tick(now)
-    assert scheduler.store.pending_deferred("schedule") == first
-
-
-async def test_tick_waits_while_the_usage_limit_is_on(env, monkeypatch):
-    scheduler, assistant, *_ = env
-    ran = []
-    async def record(name, day, record=True):
-        ran.append(name)
-    monkeypatch.setattr(scheduler, "run_task", record)
-    scheduler.store.set_limit_until("claude", time.time() + 3600)
-
-    await scheduler.tick(datetime.fromisoformat("2026-09-18 08:05"))
-    assert ran == []  # 08:05 時点では保守はまだ期日ではない
+    assert ran == [] and first and scheduler.store.pending_deferred("schedule") == first
 
 
 async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monkeypatch):
@@ -501,12 +462,7 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
     assert scheduler.store.due_deferred("schedule", reset + 120)    # 明けたらやり直す
 
     done = []
-
-    async def works(name, day, record=True):
-        done.append((name, day))
-        scheduler.store.record_schedule(name, day, {"status": "done"})
-
-    monkeypatch.setattr(scheduler, "run_task", works)
+    record_runs(monkeypatch, scheduler, done)
     scheduler.store.set_limit_until("claude", 0)
     await scheduler.catch_up_deferred(reset + 120)
     assert done == [("night", "2026-09-18"), ("literature", "2026-09-18"), ("reading", "2026-09-18"),
@@ -515,6 +471,13 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
 
 
 # 授業の締切（大学エージェント）
+
+
+def envelope(text, data):
+    """全エージェント共通の返事の封筒。"""
+    from kei_agent import a2a
+    body = {"ok": True, "text": text, "data": data, "limit_reset_at": None, "cost_usd": None}
+    return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(body, ensure_ascii=False))
 
 
 class FakeCourseAgent:
@@ -529,7 +492,6 @@ class FakeCourseAgent:
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent import a2a
         from kei_agent.dates import weekday
         params = {**(json.loads(text) if text.startswith("{") else {}), **(params or {})}
         self.asked.append((skill, params))
@@ -544,10 +506,7 @@ class FakeCourseAgent:
             data = dict(self.synced)
         elif skill == "list-calendar-assignments":
             data = {"complete": not getattr(self, "incomplete", False), "items": self.assignments}
-        # 返事は全エージェント共通の封筒
-        envelope = {"ok": True, "text": f"{skill} をやったよ", "data": data,
-                    "limit_reset_at": None, "cost_usd": None}
-        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(envelope, ensure_ascii=False))
+        return envelope(f"{skill} をやったよ", data)
 
 
 class FakeWorkAgent:
@@ -559,11 +518,8 @@ class FakeWorkAgent:
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent import a2a
         self.asked.append((skill, json.loads(text)))
-        return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(
-            {"ok": True, "text": "予定", "data": {"items": self.items},
-             "limit_reset_at": None, "cost_usd": None}))
+        return envelope("予定", {"items": self.items})
 
 
 def due_item(at, title="第3回レポート の 提出期限", course="データベース", uid="1@moodle"):
@@ -595,14 +551,6 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
                       "agenda": {"synced": {"Outlook": {"created": 1, "updated": 0, "stale": 0}}, "unread": []}}
     assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
     assert assistant.agents["work"].asked == [("list-events", {"days": schedule_module.VOICE_DAYS})]
-
-
-# 1日の帯と空き時間（morning.py）
-
-def _entry(at, end=None, icon=morning.CLASS, text="授業"):
-    day = date(2026, 9, 21)
-    return morning.Entry(datetime.combine(day, dtime(*at)), icon, text,
-                         datetime.combine(day, dtime(*end)) if end else None)
 
 
 async def test_morning_text_works_without_the_agents(env):
@@ -685,29 +633,11 @@ async def test_review_digest_gathers_all_three_domains(env, config, store):
     assert "明日の予定: 11:00–13:00 ゆうちょ様AML" in work
 
 
-async def test_daily_digest_does_not_ask_the_agents_again(env, config, store):
-    """朝は、朝のまとめですでに聞いているので、材料づくりで二度聞かない（claude を無駄に動かさない）。"""
-    from kei_agent.digest import DigestBuilder
-
-    scheduler, assistant, slack, _ = env
-    course_agent = FakeCourseAgent([])
-    work_agent = FakeWorkAgent([])
-    assistant.agents["course"], assistant.agents["work"] = course_agent, work_agent
-
-    text = await DigestBuilder(config, store, assistant).build(
-        time.time() - 86400, time.time(), "Daily の材料", set())
-
-    assert "## 大学" not in text and "## 仕事" not in text
-    assert course_agent.asked == [] and work_agent.asked == []
-
-
 def test_the_voice_layer_gets_a_week_not_just_today():
     """声のレイヤは「明日の予定」「今週の予定」に答える。
 
     今日ぶんだけ渡していたせいで、明日を聞かれても今日の予定を答えていた（実測）。
     """
-    from datetime import datetime
-
     classes = [{"start": "2026-09-21T10:40", "end": "2026-09-21T12:20", "subject": "データベース"},
                {"start": "2026-09-22T13:00", "end": "2026-09-22T14:40", "subject": "信号処理"},
                {"start": "2026-10-01T13:00", "end": "2026-10-01T14:40", "subject": "来月の授業"}]
@@ -755,12 +685,17 @@ async def test_digest_reads_yesterday_review_and_week_time_from_the_hub(env, con
     assert "- 合計 0.5 時間" in text.split("## Kei Agent の稼働（今週）")[1].split("\n## ")[0]
 
 
-async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
-    """材料が長すぎるときは長い本文から削り、今日のタスクの元になる一覧は残す。"""
+async def test_daily_digest_is_capped_and_does_not_ask_the_agents_again(env, config, store):
+    """材料が長すぎるときは長い本文から削り、今日のタスクの元になる一覧は残す。
+
+    朝は朝のまとめですでに大学と仕事に聞いているので、材料づくりで二度聞かない（claude を無駄に動かさない）。
+    """
     from kei_agent import digest
     from kei_agent.digest import DigestBuilder
 
     _, assistant, *_ = env
+    course_agent, work_agent = assistant.agents["course"], assistant.agents["work"] = (
+        FakeCourseAgent([]), FakeWorkAgent([]))
     today = datetime.now().date()
     task = assistant.notion.add_task("今日の締切の Task", "vlm", status="未着手")
     task.due = today.isoformat()
@@ -772,35 +707,27 @@ async def test_digest_is_capped_but_keeps_the_task_lists(env, config, store):
         time.time() - 86400, time.time(), "Daily の材料", set())
 
     assert len(text) <= digest.MAX_DIGEST_CHARS + 200
-    assert "今日の締切の Task" in text
-    assert digest.TRUNCATED in text
+    assert "今日の締切の Task" in text and digest.TRUNCATED in text
+    assert "## 大学" not in text and "## 仕事" not in text
+    assert course_agent.asked == [] and work_agent.asked == []
 
 
 # Moodle の取り込みの知らせと、レトプラの締切
 
 
-async def test_scheduled_sync_announces_new_and_changed_assignments(env):
+async def test_scheduled_sync_announces_only_new_and_changed_assignments(env):
+    """変わりがなければ黙り、新着と締切変更があれば大学のチャンネルに1通で知らせる。"""
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "2-course"
-    assistant.agents["course"] = FakeCourseAgent([], synced={
-        "added": ["10/26 00:00 情報 / Assignment A"], "updated": ["11/02 00:00 情報 / Assignment B"]})
-
-    assert await assistant.modules["course"].sync_assignments() is True
-
-    post = slack.posted()[-1]
-    assert post["channel"] == "C7"
-    assert post["text"] == ("📚 Moodle の課題（新着 1件・締切変更 1件）\n• 10/26 00:00 情報 / Assignment A\n"
-                            "• :repeat: 11/02 00:00 情報 / Assignment B")
-
-
-async def test_scheduled_sync_stays_quiet_without_changes(env):
-    scheduler, assistant, slack, _ = env
-    slack.channels["C7"] = "2-course"
-    assistant.agents["course"] = FakeCourseAgent([])
+    agent = assistant.agents["course"] = FakeCourseAgent([])
     before = len(slack.posted())
-
     assert await assistant.modules["course"].sync_assignments() is True
     assert len(slack.posted()) == before
+
+    agent.synced = {"added": ["10/26 00:00 情報 / Assignment A"], "updated": []}
+    assert await assistant.modules["course"].sync_assignments() is True
+    post, = slack.posted()[before:]            # 文面は test_course_module で見る
+    assert post["channel"] == "C7" and "Assignment A" in post["text"]
 
 
 # 締切3日前の未着手、うまくいかなかったこと、起動し直していない新しい版
@@ -845,13 +772,9 @@ async def test_the_morning_says_what_went_wrong_since_the_last_daily(env):
 
 
 async def test_a_new_version_left_unrestarted_is_reported_once_after_an_hour(env, monkeypatch):
+    """新しい版を置いたのに起動し直していないと、1時間たってから1回だけ知らせる。"""
     scheduler, assistant, *_ = env
-    troubles = []
-
-    async def trouble(text):
-        troubles.append(text)
-
-    monkeypatch.setattr(assistant, "notify_trouble", trouble)
+    troubles = capture_troubles(monkeypatch, assistant)
     monkeypatch.setattr(schedule_module.version, "RUNNING", "old")
     monkeypatch.setattr(schedule_module.version, "on_disk", lambda: "new")
     start = datetime(2026, 9, 27, 10, 0)

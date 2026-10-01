@@ -19,7 +19,7 @@ def _action(action_id, **extra):
     return {"user": {"id": "UME"}, "trigger_id": "trig", "actions": [{"action_id": action_id, **extra}]}
 
 
-async def test_cleared_time_keeps_the_previous_time(env, config, store):
+async def test_cleared_choices_keep_the_previous_value(env, config, store):
     assistant, slack = env
     await assistant.on_home_action(_action("kei_agent_home_time:daily", selected_time="07:30"))
     await assistant.on_home_action(_action("kei_agent_home_time:daily", selected_time=None))
@@ -27,9 +27,6 @@ async def test_cleared_time_keeps_the_previous_time(env, config, store):
     # 表示を作り直して、元の時刻に戻して見せる
     assert [name for name, _ in slack.calls].count("views_publish") == 2
 
-
-async def test_cleared_provider_is_ignored(env, config, store):
-    assistant, slack = env
     before = settings.selected_provider(config, store, "course")
     await assistant.on_home_action(_action("kei_agent_home_provider:course", selected_option=None))
     assert settings.selected_provider(config, store, "course") == before

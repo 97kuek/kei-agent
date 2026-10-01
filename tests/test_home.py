@@ -61,10 +61,7 @@ def test_home_shows_agent_provider_controls(config, store):
         "kei_agent_home_provider:router", "kei_agent_home_provider:improve",
         "kei_agent_home_provider:knowledge",
     }
-
-
-def test_home_exposes_no_model_or_effort_override(config, store):
-    view = home.build_home(config, store, [], is_owner=True)
+    # 選べるのは AI だけ。モデルや深さは用途の表で決まり、ホームから上書きさせない
     action_ids = {element.get("action_id") for block in view["blocks"]
                   for element in [block.get("accessory", {}), *block.get("elements", [])]}
     assert not any(action_id.startswith("kei_agent_home_model:") for action_id in action_ids if action_id)
@@ -77,22 +74,22 @@ def test_home_for_someone_else_changes_nothing(config, store):
     assert not any(b.get("accessory") or b["type"] == "actions" for b in view["blocks"])
 
 
-async def test_opening_home_publishes_it(env):
+async def test_opening_or_refreshing_home_publishes_it(env):
     assistant, slack = env
     await assistant.on_home_opened({"type": "app_home_opened", "user": "UME", "tab": "home"})
     assert _published(slack)["user_id"] == "UME"
+    slack.calls.clear()
+    await assistant.on_home_action(_action(home.REFRESH_ACTION, "refresh"))
+    assert _published(slack)["user_id"] == "UME"
 
 
-async def test_remove_domain_from_home(env, store):
+async def test_remove_domain_from_home_with_the_button_or_the_select(env, store):
     assistant, slack = env
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     await assistant.on_home_action(_action("kei_agent_home_remove_domain", "vlm\tzenodo.org"))
     assert settings.theme_domains(store, "vlm") == []
     assert "zenodo.org" not in _texts(_published(slack)["view"])
 
-
-async def test_remove_domain_with_the_select(env, store):
-    assistant, slack = env
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     view = home.build_home(assistant.config, store, ["vlm"], is_owner=True)
     remove, = [b["accessory"] for b in view["blocks"]
@@ -151,16 +148,12 @@ async def test_voice_checkboxes_open_and_close_the_microphone(env, store, monkey
     assert boxes["action_id"] == switches and "initial_options" not in boxes
 
 
-async def test_home_provider_action_changes_the_next_agent_run(env, store):
+async def test_home_provider_action_changes_the_next_agent_run(env, config, store, monkeypatch):
+    """App Home で選んだ AI で次の回が動き、モデルと深さは用途の表から選ぶ。"""
     assistant, _ = env
     await assistant.on_home_action(_action("kei_agent_home_provider:course", selected_option={"value": "codex"}))
     assert settings.agent_profile(assistant.config, store, "course").provider == "codex"
-
-
-async def test_research_provider_selection_uses_the_use_case_recipe(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm"})
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
-    settings.set_agent_provider(store, "research", "codex")
+    await assistant.on_home_action(_action("kei_agent_home_provider:research", selected_option={"value": "codex"}))
     seen = {}
 
     async def fake_run(_config, request, _prompt, *_args, **_kwargs):
@@ -222,21 +215,12 @@ def test_home_shows_what_is_running(config, store):
     assert str(int(time.time())) not in text            # 時刻ではなく経過時間で出す
 
 
-def test_home_says_when_nothing_is_running(config, store):
-    blocks = home.build_home(config, store, [], is_owner=True)["blocks"]
-    assert blocks[1]["text"]["text"] == "*動いているもの*" and blocks[2]["elements"][0]["text"] == "なし"
-
-
-def test_home_has_no_explanations(config, store):
+def test_home_has_no_explanations_and_says_when_nothing_is_running(config, store):
     """見出しと操作だけ。説明の文（context）は「なし」などの状態だけにする。"""
     settings.allow_domain(store, "vlm", "zenodo.org", "")
     blocks = home.build_home(config, store, ["vlm"], is_owner=True)["blocks"]
+    assert blocks[1]["text"]["text"] == "*動いているもの*" and blocks[2]["elements"][0]["text"] == "なし"
     contexts = [e["text"] for b in blocks if b["type"] == "context" for e in b["elements"]]
     assert contexts == ["なし"]
     assert "config.toml" not in _texts({"blocks": blocks})
 
-
-async def test_refresh_button_rebuilds_the_home(env):
-    assistant, slack = env
-    await assistant.on_home_action(_action(home.REFRESH_ACTION, "refresh"))
-    assert _published(slack)["user_id"] == "UME"

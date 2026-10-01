@@ -3,31 +3,73 @@ import json
 import os
 import tomllib
 from dataclasses import replace
+from datetime import datetime
 
 import pytest
 
 from kei_agent import guard, router, runner, themes
 from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
+from kei_agent.config import load_config
 from kei_agent.execution_contract import resolve_contract
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
-from kei_agent.provider_permissions import preflight
+from kei_agent.notion import gateway_client_token
+from kei_agent.provider_permissions import CapabilityUnavailable, preflight
 
 
 def request(config, *, actor="research", provider="claude", use_case="research_execute",
             session_id=None, read_only=False):
-    ws = router.workspace(config) if actor == "router" else themes.resolve(config, "vlm")
+    if actor == "router":
+        ws = router.workspace(config)
+    elif actor == "course":
+        ws = themes.agent_workspace(config, "course")
+    else:
+        ws = themes.resolve(config, "vlm")
     return runner.ExecutionRequest(ws, resolve(actor, provider, use_case), session_id, "C1", "1.1", read_only)
 
 
-def test_settings_limit_theme_to_its_directory(config):
+def codex_configs(command):
+    return [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+
+
+def codex_filesystem(command):
+    value = next(item.split("=", 1)[1] for item in command
+                 if item.startswith("permissions.kei_agent_scoped.filesystem="))
+    return tomllib.loads("value=" + value)["value"]
+
+
+def claude_settings(command):
+    return json.loads(command[command.index("--settings") + 1])
+
+
+def fake_bin(tmp_path, name, body):
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\ncat > /dev/null\n" + body)
+    path.chmod(0o755)
+    return str(path)
+
+
+CLAUDE_OK = 'printf \'{"type":"result","subtype":"success","session_id":"s1","result":"ok","is_error":false}\\n\'\n'
+
+
+def test_settings_limit_theme_to_its_directory_and_block_secrets(config):
+    """テーマの外へ書かせず、秘密情報の置き場所は sandbox（Bash）と Read の両方で塞ぐ。"""
     ws = themes.resolve(config, "vlm")
     settings = guard.build_settings(config, ws, policy_of("research"))
-    allow = settings["permissions"]["allow"]
+    allow, deny = settings["permissions"]["allow"], settings["permissions"]["deny"]
     assert f"Read(/{ws.cwd}/**)" in allow
     assert f"Edit(/{ws.cwd}/**)" in allow
     assert settings["sandbox"]["enabled"] is True
     assert settings["sandbox"]["allowUnsandboxedCommands"] is False
     assert settings["sandbox"]["network"]["allowedDomains"] == ["export.arxiv.org"]
+    filesystem = settings["sandbox"]["filesystem"]
+    assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
+    assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
+    # sandbox は Bash にしか効かない。Read・Grep・Glob からも、同じ場所を読ませない
+    for path in config.deny_read:
+        assert f"Read(/{path}/**)" in deny and f"Read(/{path})" in deny
+    # 研究ホームだけに届くゲートウェイは使える。アカウントに付いた Notion 連携はホームの外まで届くので断る
+    assert "mcp__kei-notion" in allow
+    assert "mcp__claude_ai_Notion" in deny
 
 
 def test_settings_add_domains_allowed_for_the_theme(config):
@@ -45,129 +87,116 @@ def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
     assert f"Edit(/{config.research_root}/**)" not in allow
 
 
+def test_default_deny_read_covers_keys_profiles_and_the_state_dir(tmp_path):
+    """研究の Bash から、鍵・大学や仕事の連携を付けたプロファイル・状態の秘密情報を読ませない。"""
+    toml = tmp_path / "config.toml"
+    toml.write_text(f'state_dir = "{tmp_path / "state"}"\n')
+    deny_read = load_config(toml, env={}).deny_read
+    paths = [str(p) for p in deny_read]
+    for suffix in ("/.ssh", "/.aws", "/.claude", "/.claude-personal", "/.claude-work"):
+        assert any(p.endswith(suffix) for p in paths), suffix
+    assert any("zsh/local" in p for p in paths)
+    assert (tmp_path / "state" / "secrets").resolve() in deny_read
+
+
 def test_command_resumes_session_and_ignores_user_settings(config):
     cmd = runner.build_command(config, request(config, session_id="sess-1"))
     assert cmd[cmd.index("--resume") + 1] == "sess-1"
     assert cmd[cmd.index("--setting-sources") + 1] == ""
     assert cmd[cmd.index("--permission-mode") + 1] == "dontAsk"
-    json.loads(cmd[cmd.index("--settings") + 1])
+    claude_settings(cmd)
     assert "--resume" not in runner.build_command(config, request(config))
 
 
-def test_codex_recipe_builds_a_jsonl_workspace_write_command(config):
+def test_research_claude_command_loads_only_its_plugin_and_the_scoped_notion_mcp(config):
+    """担当外の plugin（大学・仕事）とほかの MCP を読ませない。Notion は研究ホームだけのゲートウェイ経由。"""
+    cmd = runner.build_command(config, request(config))
+
+    loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
+    assert loaded == [str(config.repo_root / "modules" / "research" / "plugin"), str(config.repo_root / "plugins" / "notion")]
+    mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["kei-notion"]
+    assert mcp["url"] == config.notion_gateway_url
+    assert mcp["headers"]["Authorization"] == "${KEI_AGENT_NOTION_GATEWAY_AUTH}"
+    assert "--strict-mcp-config" in cmd
+
+
+def test_agent_plugin_dir_refuses_an_unknown_agent(config):
+    # 大学はモジュール。skill とフックは modules/course/plugin
+    assert config.agent_plugin_dir("course") == config.repo_root / "modules" / "course" / "plugin"
+    with pytest.raises(ValueError, match="未知のagent"):
+        config.agent_plugin_dir("voice")
+
+
+def test_codex_recipe_builds_a_scoped_jsonl_command(config):
+    """Codex には解決したモデルと深さだけを1回渡し、粗い sandbox ではなく絞ったプロファイルで動かす。"""
     config = replace(config, codex_bin="codex-test")
-    cmd = runner.build_command(config, request(config, provider="codex", session_id="thread-1"))
+    execution = request(config, provider="codex", session_id="thread-1")
+    cmd = runner.build_command(config, execution)
+    contract = resolve_contract(config, execution)
 
     assert cmd[:4] == ["codex-test", "exec", "--json", "--strict-config"]
-    filesystem_config = next(value.split("=", 1)[1] for value in cmd
-                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
-    filesystem = tomllib.loads("value=" + filesystem_config)["value"]
-    assert filesystem[str(config.research_root / "vlm")] == "write"
-    assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "gpt-6-sol"
-    assert "--config" in cmd and "model_reasoning_effort=high" in cmd
-    assert "--plugin-dir" not in cmd
+    assert codex_filesystem(cmd)[str(config.research_root / "vlm")] == "write"
+    assert cmd[cmd.index("--model") + 1] == "gpt-6-sol" and cmd.count("gpt-6-sol") == 1
+    assert "model_reasoning_effort=high" in cmd and "gpt-5.6-terra" not in cmd
+    assert "--plugin-dir" not in cmd and "--sandbox" not in cmd
+    assert "--ignore-user-config" in cmd
+    assert all(setting in cmd for setting in preflight(config, contract, "codex_cli").config_overrides)
+    instruction = next(value for value in cmd if value.startswith("developer_instructions="))
+    assert json.loads(instruction.split("=", 1)[1]) == contract.prompt_text
     assert cmd[-1] == "-"
+    # 用途が変われば深さも変わる（ExecutionRequest にモデルや深さを上書きする欄は無い）
+    design = runner.build_command(config, request(config, provider="codex", use_case="research_design"))
+    assert "model_reasoning_effort=xhigh" in design
+    assert {"model", "reasoning_effort"}.isdisjoint(execution.__dataclass_fields__)
 
 
-def test_codex_command_receives_the_canonical_prompt_as_developer_instructions(config):
-    execution = request(config, provider="codex")
-    command = runner.build_command(config, execution)
-    instruction = next(value for value in command if value.startswith("developer_instructions="))
-
-    assert json.loads(instruction.split("=", 1)[1]) == resolve_contract(config, execution).prompt_text
+def test_execution_request_rejects_a_forged_manual_recipe(config):
+    forged = runner.ResolvedModel("research", "research_execute", "codex", "gpt-6-astra", "xhigh")
+    with pytest.raises(ModelPolicyError, match="recipe"):
+        runner.build_command(config, runner.ExecutionRequest(themes.resolve(config, "vlm"), forged, None, "C1", "1.1"))
 
 
-def test_codex_command_uses_scoped_profile_instead_of_coarse_sandbox(config):
-    execution = request(config, provider="codex")
-    command = runner.build_command(config, execution)
-    profile = preflight(config, resolve_contract(config, execution), "codex_cli")
+def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
+    thinking = runner.build_command(config, request(config))
+    no_thinking = runner.build_command(config, request(config, actor="router", use_case=UseCase.ROUTING))
 
-    assert "--sandbox" not in command
-    assert "--strict-config" in command
-    assert "--ignore-user-config" in command
-    assert all(setting in command for setting in profile.config_overrides)
+    assert thinking[thinking.index("--model"):thinking.index("--model") + 2] == ["--model", "claude-sonnet-5"]
+    assert thinking[thinking.index("--effort"):thinking.index("--effort") + 2] == ["--effort", "high"]
+    assert "--effort" not in no_thinking
+    # 振り分けには研究の plugin も Notion も渡さない
+    assert "research-notion" not in " ".join(no_thinking)
+    assert str(config.agent_plugin_dir("research")) not in no_thinking
 
 
 def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skills(config, tmp_path):
     research = resolve_contract(config, request(config, provider="codex"))
-    course_request = request(config, actor="course", provider="codex", use_case="course_explain")
-    course = resolve_contract(config, course_request)
+    course = resolve_contract(config, request(config, actor="course", provider="codex", use_case="course_explain"))
+    router_contract = resolve_contract(config, request(
+        config, actor="router", provider="codex", use_case=UseCase.ROUTING, read_only=True))
     target = tmp_path / ".agents" / "skills"
-    target.mkdir(parents=True)
     user_skill = target / "user-skill"
-    user_skill.mkdir()
+    user_skill.mkdir(parents=True)
     (user_skill / "SKILL.md").write_text("user-owned")
 
     runner.install_agent_skills(research, tmp_path)
-    assert any(path.is_symlink() for path in target.iterdir() if path.name != "user-skill")
+    wandb = target / "managing-wandb"
+    assert wandb.is_symlink()
+    assert wandb.resolve() == config.agent_plugin_dir("research") / "skills" / "managing-wandb"
+    assert not (target / "managing-academic-record").exists()
     runner.install_agent_skills(course, tmp_path)
 
     assert user_skill.is_dir()
     assert {path.name for path in target.iterdir() if path.is_symlink()} == {
         path.name for path in course.skill_dir.iterdir() if (path / "SKILL.md").is_file()
     } | {"keeping-notion-format"}                         # 大学は Notion を使うので、共通の skill も渡す
-
-
-def test_router_skill_installation_removes_previously_managed_agent_skills(config, tmp_path):
-    research = resolve_contract(config, request(config, provider="codex"))
-    router_contract = resolve_contract(config, request(
-        config, actor="router", provider="codex", use_case=UseCase.ROUTING, read_only=True))
-    target = tmp_path / ".agents" / "skills"
-
-    runner.install_agent_skills(research, tmp_path)
+    # 振り分けに切り替えると、前に入れた担当の skill を外す
     runner.install_agent_skills(router_contract, tmp_path)
-
     assert not [path for path in target.iterdir() if path.is_symlink()]
+    assert user_skill.is_dir()
 
 
-def test_execution_request_has_no_model_or_effort_override_fields(config):
-    assert {"model", "reasoning_effort"}.isdisjoint(request(config).__dataclass_fields__)
-
-
-def test_resolved_recipe_is_the_only_model_and_effort_sent_to_codex(config):
-    command = runner.build_command(config, runner.ExecutionRequest(
-        themes.resolve(config, "vlm"), resolve("research", "codex", "research_execute"), None, "", ""))
-
-    assert command.count("gpt-6-sol") == 1
-    assert "model_reasoning_effort=high" in command
-    assert "gpt-5.6-terra" not in command
-
-
-def test_execution_request_uses_resolved_recipe_without_model_override_fields(config):
-    workspace = themes.resolve(config, "vlm")
-    execution = runner.ExecutionRequest(
-        workspace, resolve("research", "codex", "research_design"), None, "C1", "1.1",
-    )
-
-    command = runner.build_command(config, execution)
-    assert command[command.index("--model") + 1] == "gpt-6-sol"
-    assert "model_reasoning_effort=xhigh" in command
-
-
-def test_execution_request_rejects_a_forged_manual_recipe(config):
-    forged = runner.ResolvedModel(
-        "research", "research_execute", "codex", "gpt-6-astra", "xhigh",
-    )
-
-    with pytest.raises(ModelPolicyError, match="recipe"):
-        runner.build_command(config, runner.ExecutionRequest(
-            themes.resolve(config, "vlm"), forged, None, "C1", "1.1"))
-
-
-def test_router_execution_request_has_no_research_plugin_or_notion(config):
-    execution = runner.ExecutionRequest(
-        router.workspace(config), resolve("router", "claude", UseCase.ROUTING), None, "", "",
-    )
-
-    command = runner.build_command(config, execution)
-    assert "research-notion" not in " ".join(command)
-    assert str(config.agent_plugin_dir("research")) not in command
-
-
-def test_read_only_execution_removes_claude_write_tools_and_keeps_only_notion_reads(config):
-    execution = request(config, read_only=True)
-    command = runner.build_command(config, execution)
-    settings = json.loads(command[command.index("--settings") + 1])
+def test_read_only_execution_removes_write_tools_and_keeps_only_notion_reads(config):
+    settings = claude_settings(runner.build_command(config, request(config, read_only=True)))
     allow, deny = settings["permissions"]["allow"], settings["permissions"]["deny"]
 
     assert "Bash" not in allow and "Bash" in deny
@@ -177,14 +206,9 @@ def test_read_only_execution_removes_claude_write_tools_and_keeps_only_notion_re
     assert [item for item in allow if item.startswith("mcp__kei-notion__")] == [
         f"mcp__kei-notion__{tool}" for tool in NOTION_READ_TOOLS]
 
-
-def test_read_only_execution_has_no_codex_notion_gateway(config):
-    command = runner.build_command(config, request(config, provider="codex", read_only=True))
-    filesystem_config = next(value.split("=", 1)[1] for value in command
-                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
-    assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
-    configs = [command[index + 1] for index, part in enumerate(command) if part == "--config"]
-    enabled = next(item for item in configs if item.startswith("mcp_servers.kei-notion.enabled_tools="))
+    codex = runner.build_command(config, request(config, provider="codex", read_only=True))
+    assert "write" not in codex_filesystem(codex).values()
+    enabled = next(item for item in codex_configs(codex) if item.startswith("mcp_servers.kei-notion.enabled_tools="))
     assert json.loads(enabled.split("=", 1)[1]) == list(NOTION_READ_TOOLS)
 
 
@@ -192,33 +216,16 @@ def test_classifier_recipe_is_always_read_only_even_if_the_caller_omits_it(confi
     recipe = resolve_classifier(config, store, "research")
     command = runner.build_command(config, runner.ExecutionRequest(
         themes.resolve(config, "vlm"), recipe, None, "C1", "1.1"))
-    settings = json.loads(command[command.index("--settings") + 1])
 
-    assert "Bash" not in settings["permissions"]["allow"]
+    assert "Bash" not in claude_settings(command)["permissions"]["allow"]
     # 分類は道具を持たない。MCP も何も読み込まない
     assert json.loads(command[command.index("--mcp-config") + 1]) == {"mcpServers": {}}
     assert "--strict-mcp-config" in command
     assert "--plugin-dir" not in command
 
 
-def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
-    from kei_agent.model_policy import UseCase, resolve
-
-    ws = themes.resolve(config, "vlm")
-    thinking = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", "research_execute"), None, "", ""))
-    no_thinking = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("router", "claude", UseCase.ROUTING), None, "", ""))
-
-    assert thinking[thinking.index("--model"):thinking.index("--model") + 2] == ["--model", "claude-sonnet-5"]
-    assert thinking[thinking.index("--effort"):thinking.index("--effort") + 2] == ["--effort", "high"]
-    assert "--effort" not in no_thinking
-
-
 def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
-    execution = request(config, provider="codex")
-    command = runner.build_command(config, execution)
-    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+    configs = codex_configs(runner.build_command(config, request(config, provider="codex")))
     assert any("mcp_servers.kei-notion.url" in item and config.notion_gateway_url in item for item in configs)
     assert "mcp_servers.kei-notion.required=true" in configs
     # 無人で動くので、ゲートウェイの道具を呼ぶたびの承認は求めない（求めると Codex は断って止まる）
@@ -230,14 +237,11 @@ def test_codex_research_command_uses_only_the_scoped_notion_gateway(config):
 
 def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(config):
     """振り分けは非gitの状態DBで動き、Google等のAppや研究Notionを触らない。"""
-    execution = request(config, actor="router", provider="codex", use_case=UseCase.ROUTING)
-    command = runner.build_command(config, execution)
+    command = runner.build_command(config, request(config, actor="router", provider="codex", use_case=UseCase.ROUTING))
 
     assert "--skip-git-repo-check" in command
-    filesystem_config = next(value.split("=", 1)[1] for value in command
-                             if value.startswith("permissions.kei_agent_scoped.filesystem="))
-    assert "write" not in tomllib.loads("value=" + filesystem_config)["value"].values()
-    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+    assert "write" not in codex_filesystem(command).values()
+    configs = codex_configs(command)
     assert "apps._default.enabled=false" in configs
     assert 'web_search="disabled"' in configs
     assert not any("kei-notion" in item for item in configs)
@@ -246,13 +250,9 @@ def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(
 
 def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
     """Codex App は、表に書いた App の読む道具だけ。アップロードや共有の道具はモデルに見せない。"""
-    from kei_agent.agent_policy import policy_of
-
     box = next(app for app in policy_of("course").codex_apps if app.name == "Box")
-    execution = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
-                                        resolve("course", "codex", "course_explain"), None, "C1", "1.1")
-    command = runner.build_command(config, execution, apps={"Box": "asdk_app_1"})
-    configs = [command[i + 1] for i, arg in enumerate(command) if arg == "--config"]
+    execution = request(config, actor="course", provider="codex", use_case="course_explain")
+    configs = codex_configs(runner.build_command(config, execution, apps={"Box": "asdk_app_1"}))
 
     assert "apps._default.enabled=false" in configs
     assert "apps.asdk_app_1.default_tools_enabled=false" in configs
@@ -269,72 +269,46 @@ def test_codex_turns_off_tools_that_claude_agents_do_not_have(config):
         return {command[i + 1] for i, arg in enumerate(command) if arg == "--disable"}
 
     research = runner.build_command(config, request(config, provider="codex"))
-    course = runner.build_command(config, runner.ExecutionRequest(
-        themes.agent_workspace(config, "course"), resolve("course", "codex", "course_explain"), None, "", ""))
+    course = runner.build_command(config, request(config, actor="course", provider="codex", use_case="course_explain"))
 
     assert set(runner.CODEX_OFF_FEATURES) <= disabled(research) and "view_image" not in disabled(research)
     assert set(runner.CODEX_OFF_FEATURES) | {"view_image"} <= disabled(course)
 
 
-def test_codex_install_links_only_research_skills_into_theme_workspace(config):
-    """Codex をテーマ直下から起動しても、研究 plugin の skill だけを発見できる。"""
-    ws = themes.resolve(config, "vlm")
-    themes.ensure_workspace(ws)
-
-    execution = request(config, provider="codex")
-    runner.install_agent_skills(resolve_contract(config, execution), ws.cwd)
-
-    skills_dir = ws.cwd / ".agents" / "skills"
-    wandb = skills_dir / "managing-wandb"
-    assert wandb.is_symlink()
-    assert wandb.resolve() == config.agent_plugin_dir("research") / "skills" / "managing-wandb"
-    assert not (skills_dir / "managing-academic-record").exists()
-
-
-def test_apply_codex_events_maps_thread_message_and_command_activity():
+def test_apply_codex_events_maps_thread_message_and_activities():
+    """Codex の道具の経過も Claude と同じ言い方で出し、答えは回が終わったときの最後の文だけにする。"""
     result = runner.RunResult()
     assert runner.apply_codex_event(result, {"type": "thread.started", "thread_id": "t1"}) is None
-    activity = runner.apply_codex_event(result, {
-        "type": "item.started",
-        "item": {"type": "command_execution", "command": "pytest -q"},
-    })
-    assert activity == "実行している: pytest -q"
-    runner.apply_codex_event(result, {
-        "type": "item.completed",
-        "item": {"type": "agent_message", "text": "完了"},
-    })
+    command = runner.apply_codex_event(result, {
+        "type": "item.started", "item": {"type": "command_execution", "command": "pytest -q"}})
+    mcp = runner.apply_codex_event(result, {"type": "item.started", "item": {
+        "type": "mcp_tool_call", "server": "kei-notion", "tool": "search", "arguments": {"query": "授業"}}})
+    search = runner.apply_codex_event(result, {"type": "item.completed", "item": {
+        "type": "web_search", "query": "VLM benchmark"}})
+    assert command == "実行している: pytest -q"
+    assert mcp == "mcp__kei-notion__search"
+    assert search == "Web で検索している: VLM benchmark"
+    assert result.activities == [command, mcp, search]
+
+    runner.apply_codex_event(result, {"type": "item.completed", "item": {"type": "agent_message", "text": "内部の途中経過"}})
+    runner.apply_codex_event(result, {"type": "item.completed", "item": {"type": "agent_message", "text": "完了"}})
     assert result.text == ""
     runner.apply_codex_event(result, {"type": "turn.completed", "usage": {"total_cost_usd": 0.2}})
     assert (result.session_id, result.text, result.is_error) == ("t1", "完了", False)
 
 
-def test_codex_tool_calls_show_as_the_same_activities_as_claude():
-    result = runner.RunResult()
-    mcp = runner.apply_codex_event(result, {"type": "item.started", "item": {
-        "type": "mcp_tool_call", "server": "kei-notion", "tool": "search", "arguments": {"query": "授業"}}})
-    search = runner.apply_codex_event(result, {"type": "item.completed", "item": {
-        "type": "web_search", "query": "VLM benchmark"}})
-
-    assert mcp == "mcp__kei-notion__search"
-    assert search == "Web で検索している: VLM benchmark"
-    assert result.activities == [mcp, search]
-
-
-def test_codex_only_uses_the_last_message_after_a_completed_turn():
-    result = runner.RunResult()
-    runner.apply_codex_event(result, {"type": "item.completed", "item": {
-        "type": "agent_message", "text": "内部の途中経過"}})
-    runner.apply_codex_event(result, {"type": "item.completed", "item": {
-        "type": "agent_message", "text": "<<kei-agent-final>>\n答え\n<<kei-agent-final-end>>"}})
-    assert result.text == ""
-    runner.apply_codex_event(result, {"type": "turn.completed"})
-    assert result.text == "<<kei-agent-final>>\n答え\n<<kei-agent-final-end>>"
-
-
-def test_nonzero_exit_discards_even_a_result_text():
-    result = runner.finalize_run_result(runner.RunResult(text="途中結果"), returncode=1)
+@pytest.mark.parametrize("returncode", [1, -9])
+def test_failed_or_killed_run_discards_even_a_result_text(returncode):
+    result = runner.finalize_run_result(runner.RunResult(text="途中結果"), returncode=returncode)
     assert result.is_error and result.failure_kind == "runtime"
     assert result.text == ""
+
+
+def test_codex_missing_rollout_is_a_missing_session():
+    """Codex の resume で会話が見つからないときも、Slack の履歴から戻せるようにする。"""
+    result = runner.finalize_run_result(runner.RunResult(
+        is_error=True, errors=["Error: thread/resume failed: no rollout found for thread id abc"]), returncode=1)
+    assert result.session_missing and result.failure_kind == "session_missing"
 
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
@@ -381,60 +355,35 @@ def test_env_strips_kei_agent_tokens_and_every_notion_key():
     assert env == {"KEI_AGENT_CONFIG": "/tmp/config.toml"}
 
 
-def test_default_deny_read_covers_the_connector_profiles(tmp_path):
-    """研究の Bash から、大学・仕事の連携を付けたプロファイルを読ませない。"""
-    from kei_agent.config import load_config
-    (tmp_path / "none.toml").write_text("")
-    paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
-    assert any(p.endswith("/.claude-personal") for p in paths)
-    assert any(p.endswith("/.claude-work") for p in paths)
+@pytest.mark.parametrize("agent", ["research", "course", "work", "router", "improve", None])
+def test_notion_agents_carry_only_their_home_token_never_the_master(config, agent):
+    """子が持つのは自分のホームにしか届かない合言葉だけ。親の合言葉があれば全部のホームに届いてしまう。
+    Notion を使わない担当には、合言葉を何も渡さない。"""
+    env = runner.build_env(config, {
+        "PATH": "/bin",
+        "NOTION_TOKEN": "ntn_raw",
+        "NOTION_COURSE_TOKEN": "ntn_course",
+        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master",
+        "KEI_AGENT_NOTION_GATEWAY_AUTH": "Bearer stray",
+    }, "C1", "1.2", policy_of(agent) if agent else None)
 
-
-def test_default_deny_read_follows_the_state_dir(tmp_path):
-    from kei_agent.config import load_config
-    toml = tmp_path / "config.toml"
-    toml.write_text(f'state_dir = "{tmp_path / "state"}"\n')
-    paths = load_config(toml, env={}).deny_read
-    assert (tmp_path / "state" / "secrets").resolve() in paths
-
-
-def test_codex_env_exposes_only_a_bearer_header_for_the_scoped_gateway(config):
-    from kei_agent.notion import gateway_client_token
-
-    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"}, "C1", "1",
-                           policy_of("research"))
-    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('gateway-secret', 'research')}"
-    assert "gateway-secret" not in env.values()
+    assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
-
-
-def test_agents_without_notion_get_no_gateway_credentials(config):
-    for policy in (policy_of("work"), policy_of("router"), policy_of("improve"), None):
-        env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway-secret"},
-                               "C1", "1", policy)
+    assert not any("master" in value for value in env.values())
+    if agent in ("research", "course"):
+        assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', agent)}"
+    else:
         assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env
-        assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
 
 
-def test_course_env_carries_the_course_token(config):
-    """大学の子が持つのは、授業ホームにしか届かない合言葉だけ。"""
-    from kei_agent.notion import gateway_client_token
+def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config):
+    """合言葉そのものは子に渡さないので、ヘッダーは渡している GATEWAY_AUTH を展開する。"""
+    header = runner.notion_mcp_config(config)["mcpServers"][runner.NOTION_MCP]["headers"]["Authorization"]
+    env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1", policy_of("research"))
 
-    env = runner.build_env(config, {"PATH": "/bin", "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, "C1", "1",
-                           policy_of("course"))
-    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', 'course')}"
-
-
-def test_apply_event_keeps_domains_claude_asked_for():
-    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Kei Agent がボタンにできるよう覚えておく。"""
-    result = runner.RunResult()
-    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
-        "type": "tool_use", "name": "Bash",
-        "input": {"command": "curl -I https://huggingface.co/x", "description": "重みのサイズを見る",
-                  "allowed_domains": ["huggingface.co", "cdn-lfs.huggingface.co"]}}]}})
-    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
-        "type": "tool_use", "name": "Bash", "input": {"command": "ls", "allowed_domains": ["huggingface.co"]}}]}})
-    assert result.requested_domains == [("huggingface.co", "重みのサイズを見る"), ("cdn-lfs.huggingface.co", "重みのサイズを見る")]
+    name = header.removeprefix("${").removesuffix("}")
+    assert env[name] == f"Bearer {gateway_client_token('s3cret', 'research')}"
+    assert runner.GATEWAY_TOKEN_ENV not in env
 
 
 def test_apply_events():
@@ -456,6 +405,18 @@ def test_apply_events():
     assert result.activities == ["実行している: 一覧を見る"]
 
 
+def test_apply_event_keeps_domains_claude_asked_for():
+    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Kei Agent がボタンにできるよう覚えておく。"""
+    result = runner.RunResult()
+    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
+        "type": "tool_use", "name": "Bash",
+        "input": {"command": "curl -I https://huggingface.co/x", "description": "重みのサイズを見る",
+                  "allowed_domains": ["huggingface.co", "cdn-lfs.huggingface.co"]}}]}})
+    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
+        "type": "tool_use", "name": "Bash", "input": {"command": "ls", "allowed_domains": ["huggingface.co"]}}]}})
+    assert result.requested_domains == [("huggingface.co", "重みのサイズを見る"), ("cdn-lfs.huggingface.co", "重みのサイズを見る")]
+
+
 def test_missing_session_detected():
     result = runner.RunResult()
     runner.apply_event(result, {
@@ -465,310 +426,45 @@ def test_missing_session_detected():
     assert result.session_missing
 
 
-def test_describe_tool_truncates():
+def test_describe_tool_uses_plain_japanese_and_truncates():
+    assert runner.describe_tool("Read", {"file_path": "a.py"}) == "読んでいる: a.py"
+    assert runner.describe_tool("Grep", {"pattern": "x"}) == "調べている: x"
     text = runner.describe_tool("WebSearch", {"query": "あ" * 200})
     assert text.startswith("Web で検索している: ") and text.endswith("…") and len(text) < 100
 
 
-def test_settings_deny_reading_secret_locations(config):
-    """sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞いでおく。"""
-    ws = themes.resolve(config, "vlm")
-    settings = guard.build_settings(config, ws, policy_of("research"))
-    filesystem = settings["sandbox"]["filesystem"]
-    assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
-    assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
-    # sandbox は Bash にしか効かない。Read・Grep・Glob からも、同じ場所を読ませない
-    deny = settings["permissions"]["deny"]
-    for path in config.deny_read:
-        assert f"Read(/{path}/**)" in deny and f"Read(/{path})" in deny
-
-
-def test_default_deny_read_covers_tokens_and_keys(tmp_path):
-    from kei_agent.config import load_config
-    (tmp_path / "none.toml").write_text("")
-    paths = [str(p) for p in load_config(tmp_path / "none.toml", env={}).deny_read]
-    assert any(p.endswith("/.ssh") for p in paths)
-    assert any(p.endswith("/.aws") for p in paths)
-    assert any(p.endswith("/.claude") for p in paths)
-    assert any("zsh/local" in p for p in paths)
-
-
-async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(config, tmp_path, monkeypatch):
-    """claude が終わっても、Bash が残したプロセスが出力を握っていることがある。そこで固まらない。
-
-    直す前は stderr の EOF を待ち続けて、スレッドの順番待ちと並行枠を握ったままになっていた。
-    """
-    fake = tmp_path / "fake-claude.sh"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "cat > /dev/null\n"
-        "sleep 60 &\n"
-        "echo $! > left-over.pid\n"
-        'printf \'{"type":"result","subtype":"success","session_id":"s1","result":"ok","is_error":false}\\n\'\n'
-    )
-    fake.chmod(0o755)
-    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
-    config = replace(config, claude_bin=str(fake))
-    ws = themes.resolve(config, "vlm")
-    themes.ensure_workspace(ws)
-
-    result = await asyncio.wait_for(
-        runner.run_model(config, runner.ExecutionRequest(
-            ws, resolve("research", "claude", "research_execute"), None, "C1", "1.1"), "hi"),
-        timeout=10,
-    )
-
-    assert result.text == "ok" and not result.is_error and not result.timed_out
-    pid = int((ws.cwd / "left-over.pid").read_text())
-    for _ in range(50):  # 残ったプロセスも片づける
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            break
-        await asyncio.sleep(0.1)
-    else:
-        pytest.fail(f"claude が残したプロセス {pid} が生きています")
-
-
-async def test_run_claude_keeps_a_successful_result_even_if_it_had_to_be_killed(config, tmp_path, monkeypatch):
-    """result まで届いたあと claude 自身が終わらず、猶予のあとで止めた回も、答えは捨てない。"""
-    fake = tmp_path / "fake-claude-hang.sh"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "cat > /dev/null\n"
-        'printf \'{"type":"result","subtype":"success","session_id":"s1","result":"ok","is_error":false}\\n\'\n'
-        "exec sleep 60\n"
-    )
-    fake.chmod(0o755)
-    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
-    config = replace(config, claude_bin=str(fake))
-    ws = themes.resolve(config, "vlm")
-    themes.ensure_workspace(ws)
-
-    result = await asyncio.wait_for(
-        runner.run_model(config, runner.ExecutionRequest(
-            ws, resolve("research", "claude", "research_execute"), None, "C1", "1.1"), "hi"),
-        timeout=10,
-    )
-
-    assert result.text == "ok" and not result.is_error
-
-
-def test_killed_run_without_a_result_is_still_an_error():
-    result = runner.finalize_run_result(runner.RunResult(text="途中"), returncode=-9)
-    assert result.is_error and result.text == ""
-
-
-def test_codex_missing_rollout_is_a_missing_session():
-    """Codex の resume で会話が見つからないときも、Slack の履歴から戻せるようにする。"""
-    result = runner.finalize_run_result(runner.RunResult(
-        is_error=True, errors=["Error: thread/resume failed: no rollout found for thread id abc"]), returncode=1)
-    assert result.session_missing and result.failure_kind == "session_missing"
-
-
-async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_path):
-    """Codex JSONLの応答・進捗と、テーマ作業場の研究skillを同時に扱える。"""
-    fake = tmp_path / "fake-codex.sh"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "cat > /dev/null\n"
-        "printf '%s\\n' "
-        "'{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}' "
-        "'{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"pwd\"}}' "
-        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"完了\"}}' "
-        "'{\"type\":\"turn.completed\"}'\n"
-    )
-    fake.chmod(0o755)
-    config = replace(config, codex_bin=str(fake))
-    ws = themes.resolve(config, "vlm")
-    themes.ensure_workspace(ws)
-    seen_activity: list[str] = []
-
-    async def on_activity(activity: str) -> None:
-        seen_activity.append(activity)
-
-    result = await runner.run_model(
-        config, runner.ExecutionRequest(
-            ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて",
-        on_activity=on_activity,
-    )
-
-    assert (result.session_id, result.text, result.is_error) == ("thread-1", "完了", False)
-    # 途中の文（未検証の agent_message）は流さず、道具の経過だけを流す
-    assert seen_activity == ["実行している: pwd"]
-    assert (ws.cwd / ".agents" / "skills" / "managing-wandb").is_symlink()
-
-
-async def test_codex_profile_canary_failure_stops_before_starting_the_model(config, monkeypatch):
-    from kei_agent.provider_permissions import CapabilityUnavailable
-
-    async def unavailable(*_args, **_kwargs):
-        raise CapabilityUnavailable("Codex の権限を強制できません")
-
-    async def should_not_start(*_args, **_kwargs):
-        raise AssertionError("model process must not start")
-
-    monkeypatch.setattr(runner, "verify_codex_profile", unavailable)
-    monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", should_not_start)
-    ws = themes.resolve(config, "vlm")
-
-    result = await runner.run_model(config, runner.ExecutionRequest(
-        ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて")
-
-    assert result.is_error and result.failure_kind == "capability"
-    assert result.text == ""
-
-
-async def test_codex_nonzero_exit_never_returns_its_completed_message(config, tmp_path, monkeypatch):
-    fake = tmp_path / "fake-codex-failed.sh"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "cat > /dev/null\n"
-        "printf '%s\\n' "
-        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"途中結果\"}}' "
-        "'{\"type\":\"turn.completed\"}'\n"
-        "exit 1\n"
-    )
-    fake.chmod(0o755)
-    config = replace(config, codex_bin=str(fake))
-    ws = themes.resolve(config, "vlm")
-    themes.ensure_workspace(ws)
-
-    async def verified(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr(runner, "verify_codex_profile", verified)
-
-    result = await runner.run_model(config, runner.ExecutionRequest(
-        ws, resolve("research", "codex", "research_execute"), None, "C1", "1.1"), "調べて")
-
-    assert result.is_error and result.failure_kind == "runtime"
-    assert result.text == ""
-
-
-def test_apply_event_reads_the_usage_limit_and_when_it_resets():
-    """claude -p は上限に達すると `Claude AI usage limit reached|<エポック秒>` を返す。"""
+@pytest.mark.parametrize("event, expected", [
+    # claude -p は上限に達すると `Claude AI usage limit reached|<エポック秒>` を返す
+    ({"result": "Claude AI usage limit reached|1789800000"}, 1789800000),
+    ({"errors": ["Claude AI usage limit reached"]}, runner.UNKNOWN_LIMIT_RESET),
+    ({"result": "rate limited by the tool"}, None),
+])
+def test_apply_event_reads_the_usage_limit(event, expected):
     result = runner.RunResult()
-    runner.apply_event(result, {"type": "result", "is_error": True,
-                                "result": "Claude AI usage limit reached|1789800000"})
-    assert result.limit_reset_at == 1789800000
-
-
-def test_apply_event_without_a_reset_time_still_counts_as_a_limit():
-    result = runner.RunResult()
-    runner.apply_event(result, {"type": "result", "is_error": True,
-                                "errors": ["Claude AI usage limit reached"]})
-    assert result.limit_reset_at == runner.UNKNOWN_LIMIT_RESET
-
-
-def test_a_normal_error_is_not_a_usage_limit():
-    result = runner.RunResult()
-    runner.apply_event(result, {"type": "result", "is_error": True, "result": "rate limited by the tool"})
-    assert result.limit_reset_at is None
-
-
-def test_describe_tool_uses_plain_japanese():
-    assert runner.describe_tool("Read", {"file_path": "a.py"}) == "読んでいる: a.py"
-    assert runner.describe_tool("Grep", {"pattern": "x"}) == "調べている: x"
+    runner.apply_event(result, {"type": "result", "is_error": True, **event})
+    assert result.limit_reset_at == expected
 
 
 # 契約の上限の読み取り（書き方が版によって違う）
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("Claude AI usage limit reached|1789830000", 1789830000.0),
-    ("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", "18:30"),
-    ("5-hour limit reached ∙ resets 3pm", "15:00"),
-    ("Weekly limit reached · resets 9am", "09:00"),
-    ("You've hit your session limit", runner.UNKNOWN_LIMIT_RESET),
-    ("ふつうのエラー: ファイルがありません", None),
+@pytest.mark.parametrize("text, now_hour, expected", [
+    ("Claude AI usage limit reached|1789830000", 12, 1789830000.0),
+    ("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", 12, "09/20 18:30"),
+    ("5-hour limit reached ∙ resets 3pm", 12, "09/20 15:00"),
+    ("Weekly limit reached · resets 9am", 12, "09/21 09:00"),
+    ("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", 20, "09/21 18:30"),  # 過ぎていれば翌日
+    ("You've hit your session limit", 12, runner.UNKNOWN_LIMIT_RESET),
+    ("ふつうのエラー: ファイルがありません", 12, None),
 ])
-def test_parse_limit_reads_every_wording(text, expected):
-    from datetime import datetime
-
-    now = datetime(2026, 9, 20, 12, 0).timestamp()
+def test_parse_limit_reads_every_wording(text, now_hour, expected):
+    now = datetime(2026, 9, 20, now_hour, 0).timestamp()
     got = runner.parse_limit(text, now)
     if isinstance(expected, str):
-        assert datetime.fromtimestamp(got).strftime("%H:%M") == expected
+        assert datetime.fromtimestamp(got).strftime("%m/%d %H:%M") == expected
         assert got > now  # 明ける時刻は必ず先
     else:
         assert got == expected
-
-
-def test_parse_limit_moves_to_tomorrow_when_the_time_has_passed():
-    from datetime import datetime
-
-    now = datetime(2026, 9, 20, 20, 0).timestamp()
-    got = runner.parse_limit("You've hit your session limit · resets 6:30pm (Asia/Tokyo)", now)
-    assert datetime.fromtimestamp(got).strftime("%m/%d %H:%M") == "09/21 18:30"
-
-
-def test_research_runner_loads_only_the_research_plugin(config):
-    """担当外の plugin（大学・仕事）を、同じ claude に読ませない。Notion を使えるので、共通の Notion の plugin は渡す。"""
-    ws = themes.resolve(config, "vlm")
-    cmd = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", "research_execute"), None, "", ""))
-
-    loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
-    assert loaded == [str(config.repo_root / "modules" / "research" / "plugin"), str(config.repo_root / "plugins" / "notion")]
-
-
-def test_agent_plugin_dir_refuses_an_unknown_agent(config):
-    # 大学はモジュール。skill とフックは modules/course/plugin
-    assert config.agent_plugin_dir("course") == config.repo_root / "modules" / "course" / "plugin"
-    with pytest.raises(ValueError, match="未知のagent"):
-        config.agent_plugin_dir("voice")
-
-
-def test_research_runner_uses_only_the_scoped_notion_mcp(config):
-    """研究の Notion は、研究ホームだけを操作できるゲートウェイ経由。ほかの MCP は読み込まない。"""
-    ws = themes.resolve(config, "vlm")
-    cmd = runner.build_command(config, runner.ExecutionRequest(
-        ws, resolve("research", "claude", "research_execute"), None, "", ""))
-
-    mcp = json.loads(cmd[cmd.index("--mcp-config") + 1])["mcpServers"]["kei-notion"]
-    assert mcp["url"] == config.notion_gateway_url
-    assert mcp["headers"]["Authorization"] == "${KEI_AGENT_NOTION_GATEWAY_AUTH}"
-    assert "--strict-mcp-config" in cmd
-
-
-def test_research_settings_allow_the_gateway_tools(config):
-    ws = themes.resolve(config, "vlm")
-    settings = guard.build_settings(config, ws, policy_of("research"))["permissions"]
-
-    assert "mcp__kei-notion" in settings["allow"]
-    # アカウントに付いた Notion 連携は、研究ホームの外まで届くので断る
-    assert "mcp__claude_ai_Notion" in settings["deny"]
-
-
-def test_research_env_carries_only_the_research_token_never_the_master(config):
-    """研究の子が持つのは研究ホームにしか届かない合言葉だけ。親の合言葉があれば全部のホームに届いてしまう。"""
-    from kei_agent.notion import gateway_client_token
-
-    env = runner.build_env(config, {
-        "PATH": "/bin",
-        "NOTION_TOKEN": "ntn_raw",
-        "NOTION_COURSE_TOKEN": "ntn_course",
-        "KEI_AGENT_NOTION_GATEWAY_TOKEN": "master",
-        "KEI_AGENT_NOTION_GATEWAY_AUTH": "Bearer stray",
-    }, "C1", "1.2", policy_of("research"))
-
-    assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
-    assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
-    assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', 'research')}"
-    assert not any("master" in value for value in env.values())
-
-
-def test_claude_gateway_header_reads_the_variable_the_child_actually_gets(config):
-    """合言葉そのものは子に渡さないので、ヘッダーは渡している GATEWAY_AUTH を展開する。"""
-    from kei_agent.notion import gateway_client_token
-
-    header = runner.notion_mcp_config(config)["mcpServers"][runner.NOTION_MCP]["headers"]["Authorization"]
-    env = runner.build_env(config, {"PATH": "/bin", runner.GATEWAY_TOKEN_ENV: "s3cret"}, "C1", "1.1", policy_of("research"))
-
-    name = header.removeprefix("${").removesuffix("}")
-    assert env[name] == f"Bearer {gateway_client_token('s3cret', 'research')}"
-    assert runner.GATEWAY_TOKEN_ENV not in env
 
 
 def test_failure_reason_says_what_happened_even_without_an_error_text():
@@ -794,3 +490,99 @@ def test_an_expired_login_is_told_apart_from_other_failures():
     # ほかの失敗は、今までどおり実行の失敗（途中の文は理由にしない）
     other = runner.finalize_run_result(runner.RunResult(text="途中の答え"), returncode=1)
     assert (other.failure_kind, other.errors) == ("runtime", [])
+
+
+# 本物のプロセスを起動する（偽の claude・codex のシェルスクリプト）
+
+
+async def run_fake(config, provider="claude", **kwargs):
+    execution = request(config, provider=provider)
+    themes.ensure_workspace(execution.workspace)
+    return await asyncio.wait_for(runner.run_model(config, execution, "調べて", **kwargs), timeout=10)
+
+
+async def test_run_claude_returns_even_if_a_left_over_process_holds_the_output(config, tmp_path, monkeypatch):
+    """claude が終わっても、Bash が残したプロセスが出力を握っていることがある。そこで固まらない。
+
+    直す前は stderr の EOF を待ち続けて、スレッドの順番待ちと並行枠を握ったままになっていた。
+    """
+    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
+    config = replace(config, claude_bin=fake_bin(tmp_path, "fake-claude.sh", "sleep 60 &\necho $! > left-over.pid\n" + CLAUDE_OK))
+
+    result = await run_fake(config)
+
+    assert result.text == "ok" and not result.is_error and not result.timed_out
+    pid = int((themes.resolve(config, "vlm").cwd / "left-over.pid").read_text())
+    for _ in range(50):  # 残ったプロセスも片づける
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        pytest.fail(f"claude が残したプロセス {pid} が生きています")
+
+
+async def test_run_claude_keeps_a_successful_result_even_if_it_had_to_be_killed(config, tmp_path, monkeypatch):
+    """result まで届いたあと claude 自身が終わらず、猶予のあとで止めた回も、答えは捨てない。"""
+    monkeypatch.setattr(runner, "EXIT_GRACE_SECONDS", 0.5)
+    config = replace(config, claude_bin=fake_bin(tmp_path, "fake-claude-hang.sh", CLAUDE_OK + "exec sleep 60\n"))
+
+    result = await run_fake(config)
+
+    assert result.text == "ok" and not result.is_error
+
+
+async def test_run_codex_reads_jsonl_and_installs_research_skills(config, tmp_path):
+    """Codex JSONLの応答・進捗と、テーマ作業場の研究skillを同時に扱える。"""
+    config = replace(config, codex_bin=fake_bin(tmp_path, "fake-codex.sh", (
+        "printf '%s\\n' "
+        "'{\"type\":\"thread.started\",\"thread_id\":\"thread-1\"}' "
+        "'{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"pwd\"}}' "
+        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"完了\"}}' "
+        "'{\"type\":\"turn.completed\"}'\n")))
+    seen_activity: list[str] = []
+
+    async def on_activity(activity: str) -> None:
+        seen_activity.append(activity)
+
+    result = await run_fake(config, "codex", on_activity=on_activity)
+
+    assert (result.session_id, result.text, result.is_error) == ("thread-1", "完了", False)
+    # 途中の文（未検証の agent_message）は流さず、道具の経過だけを流す
+    assert seen_activity == ["実行している: pwd"]
+    assert (themes.resolve(config, "vlm").cwd / ".agents" / "skills" / "managing-wandb").is_symlink()
+
+
+async def test_codex_profile_canary_failure_stops_before_starting_the_model(config, monkeypatch):
+    async def unavailable(*_args, **_kwargs):
+        raise CapabilityUnavailable("Codex の権限を強制できません")
+
+    async def should_not_start(*_args, **_kwargs):
+        raise AssertionError("model process must not start")
+
+    monkeypatch.setattr(runner, "verify_codex_profile", unavailable)
+    monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", should_not_start)
+
+    result = await run_fake(config, "codex")
+
+    assert result.is_error and result.failure_kind == "capability"
+    assert result.text == ""
+
+
+async def test_codex_nonzero_exit_never_returns_its_completed_message(config, tmp_path, monkeypatch):
+    config = replace(config, codex_bin=fake_bin(tmp_path, "fake-codex-failed.sh", (
+        "printf '%s\\n' "
+        "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"途中結果\"}}' "
+        "'{\"type\":\"turn.completed\"}'\n"
+        "exit 1\n")))
+
+    async def verified(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(runner, "verify_codex_profile", verified)
+
+    result = await run_fake(config, "codex")
+
+    assert result.is_error and result.failure_kind == "runtime"
+    assert result.text == ""
