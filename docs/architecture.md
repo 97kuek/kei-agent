@@ -78,7 +78,7 @@
 | 起動 | `claude -p`（stream-json） | `codex exec --json` |
 | 許可 | 表から `--settings` の許可と拒否を作り、`dontAsk` | 表から一時的な権限 profile `kei_agent_scoped` を作る |
 | ユーザー設定 | 持ち込まない（`--setting-sources ""`、`--strict-mcp-config`） | 持ち込まない（`--ignore-user-config`） |
-| 連携 | その担当のプロファイル（`CLAUDE_CONFIG_DIR`）の、表に書いた道具だけ | 表の App の、表に書いた読む道具だけ |
+| 連携 | その担当のアカウント（`agents.csv` の `claude_account`）の、表に書いた道具だけ | 表の App の、表に書いた読む道具だけ |
 
 - read-only（読むだけ）の実行は、書く・動かす手段を外す（声からの問い合わせ、分類など）
 - `offline = true` の用途は Web も外す（外の文・個人のデータ・外へ出す口を1回に揃えない）
@@ -203,7 +203,7 @@
 
 - 鍵 `NOTION_TOKEN` を持つのはゲートウェイ（:8791）だけ。ほかの起動スクリプトは読んだあとで消す
 - 合言葉は使う側（client）ごと。親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN` から HMAC-SHA256 で作る
-- 届くホームは `config.toml` の `[notion]`（モジュールのホームは `[notion.homes]`）
+- 届くホームは `agents.csv` の `notion` 列（共通ホームは overview の行）
 
 | client | 使うところ | 届くホーム | 口 |
 |---|---|---|---|

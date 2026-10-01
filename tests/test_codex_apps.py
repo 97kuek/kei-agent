@@ -66,7 +66,7 @@ async def test_silent_app_server_is_stopped_on_timeout(tmp_path):
 async def test_app_ids_reuses_the_list_for_a_while_and_says_when_it_cannot_be_read(monkeypatch):
     calls = []
 
-    async def installed(codex_bin, timeout_seconds=30):
+    async def installed(codex_bin, timeout_seconds=30, env=None):
         calls.append(codex_bin)
         if codex_bin == "broken":
             raise OSError("codex がない")

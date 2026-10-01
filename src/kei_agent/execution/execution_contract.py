@@ -102,7 +102,7 @@ def shared_skill_dirs(config: Config, policy: AgentPolicy) -> tuple[Path, ...]:
 
 
 def _within_reach(config: Config, policy: AgentPolicy) -> AgentPolicy:
-    """Notion のホームを書いていない担当には、届かない Notion の道具を渡さない（config.toml の [notion]）。"""
+    """Notion のホームを書いていない担当には、届かない Notion の道具を渡さない（agents.csv の notion 列）。"""
     if policy.notion != "none" and policy.name not in config.notion.client_homes():
         return replace(policy, notion="none")
     return policy

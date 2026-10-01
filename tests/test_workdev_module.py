@@ -62,7 +62,7 @@ def test_a_project_keeps_kei_agent_files_out_of_its_git(tmp_path):
 
 def test_workdev_writes_code_with_the_work_account_but_never_reads_mail():
     spec = modules.builtin()["workdev"]
-    assert spec.prefixes == {"work-": "project"} and spec.secrets_file == "kei-agent-work.zsh"
+    assert spec.prefixes == {"work-": "project"}
     policy = policy_of("workdev")
     assert (policy.files, policy.shell, policy.web, policy.notion) == ("write", True, True, "none")
     # 外の文（メール）と、コマンド・Web の外へ出す口を、1回の実行に揃えない

@@ -100,10 +100,7 @@ def next_steps(spec: modules.ModuleSpec, config: Config, added: bool) -> list[st
     if spec.settings:
         steps.append(f"設定できる項目（config.toml の [{spec.name}]）: " + "、".join(spec.settings))
     if spec.port is not None:
-        if spec.secrets_from:
-            steps.append(f"このプロセスは {spec.secrets_file}（{spec.secrets_from} のもの）を読む。そこにアカウントの場所などを書いておく")
-        else:
-            steps.append(f"そのプロセスだけの秘密情報があれば {spec.secrets_file} に書く（秘密情報の置き場所に。任意）")
+        steps.append(f"そのプロセスだけの秘密情報があれば kei-agent-{spec.name}.zsh に書く（秘密情報の置き場所に。任意）")
     if spec.actor is not None and not config.agent_profiles[spec.name].provider:
         steps.append(f"agents.csv の {spec.name} の行の engine に claude か codex を書く")
     return steps

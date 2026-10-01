@@ -82,7 +82,7 @@ def test_home_provider_changes_only_the_named_agents_provider(config, store):
     settings.set_agent_provider(store, "course", "codex")
     profile = settings.agent_profile(config, store, "course")
     assert profile.provider == "codex"
-    assert set(profile.__dataclass_fields__) == {"provider", "model", "effort"}
+    assert set(profile.__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account"}
     assert settings.agent_profile(config, store, "work").provider == "claude"
 
 

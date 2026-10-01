@@ -45,13 +45,14 @@ def resolve_apps(installed: Iterable[dict[str, Any]], names: Iterable[str]) -> d
     return ids
 
 
-async def installed_apps(codex_bin: str = "codex", timeout_seconds: float = 30) -> list[dict[str, Any]]:
+async def installed_apps(codex_bin: str = "codex", timeout_seconds: float = 30,
+                         env: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """いまの Codex のログインで入っている App の一覧。"""
     proc = await asyncio.create_subprocess_exec(
         codex_bin, "app-server", "--stdio",
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         # Slack などの鍵を App Server に渡さない
-        env=guard.strip_env(dict(os.environ)),
+        env=env if env is not None else guard.strip_env(dict(os.environ)),
         limit=APP_SERVER_LINE_LIMIT,
     )
     try:
@@ -67,18 +68,19 @@ async def installed_apps(codex_bin: str = "codex", timeout_seconds: float = 30) 
     return [item for item in result.get("apps") or [] if isinstance(item, dict)]
 
 
-async def app_ids(codex_bin: str, names: Iterable[str]) -> dict[str, str]:
-    """表示名 → ID。一覧は CACHE_SECONDS のあいだ使い回す。"""
+async def app_ids(codex_bin: str, names: Iterable[str], env: dict[str, str] | None = None) -> dict[str, str]:
+    """表示名 → ID。一覧はアカウント（CODEX_HOME）ごとに CACHE_SECONDS のあいだ使い回す。"""
     names = tuple(names)
     if not names:
         return {}
-    cached = _cache.get(codex_bin)
+    key = (codex_bin, (env or {}).get("CODEX_HOME", ""))
+    cached = _cache.get(key)
     if cached is None or time.monotonic() - cached[0] > CACHE_SECONDS:
         try:
-            cached = (time.monotonic(), await installed_apps(codex_bin))
+            cached = (time.monotonic(), await installed_apps(codex_bin, env=env))
         except (OSError, TimeoutError, ValueError) as e:
             raise AppsUnavailable("Codex の連携の一覧を取得できません") from e
-        _cache[codex_bin] = cached
+        _cache[key] = cached
     return resolve_apps(cached[1], names)
 
 

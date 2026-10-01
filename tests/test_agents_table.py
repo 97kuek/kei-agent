@@ -101,7 +101,7 @@ def test_the_header_bom_and_comments(tmp_path):
 
 def test_the_same_things_cannot_also_be_in_config_toml(tmp_path):
     home = _home(tmp_path, HEADER + "knowledge,true,,,,\n", 'modules = ["knowledge"]\n\n[agents.router]\nprovider = "claude"\n')
-    with pytest.raises(ConfigError, match="modules・agents は、担当の表（agents.csv）に移してください.*agents init"):
+    with pytest.raises(ConfigError, match="modules・agents は、担当の表（agents.csv）に移してください"):
         _load(home)
     # 表が無くても同じ（前の書き方のまま起動しない）
     (home / "agents.csv").unlink()
@@ -228,3 +228,22 @@ def test_the_example_table_lists_every_builtin_module(tmp_path):
     assert set(config.modules) == set(modules.builtin())
     # 例は AI を選んでいない状態で始まる（config.example.toml と同じ）
     assert all(not p.provider and not p.model for p in config.agent_profiles.values())
+
+
+def test_an_agent_runs_with_the_account_written_in_its_row(tmp_path):
+    """大学は個人、仕事は会社のアカウント。表の claude_account・codex_account が、その担当の AI の環境に入る。"""
+    from kei_agent.execution import runner
+    from kei_agent.execution.agent_policy import policy_of
+
+    header = "module,enabled,channels,engine,model,effort,claude_account,codex_account\n"
+    config = _load(_home(tmp_path, header + f"work,true,,claude,,,{tmp_path}/claude-work,{tmp_path}/codex-work\n"
+                                            "course,true,,claude,,,,\n"))
+    base = {"PATH": "/usr/bin", "CLAUDE_CODE_OAUTH_TOKEN": "common", "CLAUDE_CONFIG_DIR": "/default"}
+    work = runner.build_env(config, base, "C1", "1.1", policy_of("work"))
+    assert work["CLAUDE_CONFIG_DIR"] == str((tmp_path / "claude-work").resolve())
+    assert work["CODEX_HOME"] == str((tmp_path / "codex-work").resolve())
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in work           # 共通の鍵が残ると、アカウントのフォルダより先に使われる
+    course = runner.build_env(config, base, "C1", "1.1", policy_of("course"))
+    assert course["CLAUDE_CONFIG_DIR"] == "/default" and "CODEX_HOME" not in course
+    with pytest.raises(ConfigError, match="AI を使う担当の行だけ"):
+        _load(_home(tmp_path / "x", header + "notion,true,,,,,~/a,\n") if (tmp_path / "x").mkdir() is None else None)

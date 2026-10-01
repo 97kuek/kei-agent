@@ -42,6 +42,8 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 | `channels` | 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら `module.toml` の既定 |
 | `folder` | その担当の作業場。research の行はテーマのフォルダを置く場所（既定 `~/research`）、course の行は大学の作業場（既定 `~/course`）。AI を使う担当の行だけ。`/tmp` の下には置かない（sandbox が一時フォルダへの書き込みを許すため） |
 | `engine` | `claude` / `codex`。空欄の担当は動かない |
+| `notion` | その担当が届く Notion のホームのページ ID（URL の末尾32文字）。overview の行は共通ホーム、research は研究ホーム、course は授業ホーム。空欄ならその担当は Notion を使わない |
+| `claude_account` / `codex_account` | その担当が使うアカウントのフォルダ（`CLAUDE_CONFIG_DIR`・`CODEX_HOME`。例 `~/.claude-work`）。空欄ならプロセスの既定のアカウント。Claude のフォルダを書いた担当では、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外して動かす |
 | `model` / `effort` | ふだんは空欄（用途ごとに軽いモデルと重いモデルを選び分ける）。書くと、その担当の用途をすべてそのモデルにする（`[[manual-fable]]` などの明示の用途は除く）。使えるモデルは [architecture.md](../docs/architecture.md#actor-とモデル) |
 
 - `config.toml` に `modules`・`[channels]`・`[agents]`（前の書き方）があると、起動しない（書く場所を1つにする）
@@ -77,12 +79,11 @@ export TOGGL_WORKSPACE_ID="..."
 
 | ファイル | 中身 |
 |---|---|
-| `kei-agent-course.zsh` | `MOODLE_ICS_URL`、`unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-personal"`（Box をつないだ個人アカウント） |
-| `kei-agent-work.zsh` | `unset CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CONFIG_DIR="$HOME/.claude-work"`（Microsoft 365 をつないだ会社アカウント） |
+| `kei-agent-course.zsh` | `MOODLE_ICS_URL` |
 | `kei-agent-research.zsh` | 任意で `S2_API_KEY`（Semantic Scholar） |
 | `kei-agent-voice.zsh` | 任意で `OPENAI_API_KEY`（マイクの会話）、`KEI_AGENT_REALTIME_VOICE`、`KEI_AGENT_MIC`、`KEI_AGENT_STACKCHAN_URL` |
 
-プロファイルは一度作ってログインしておく:
+担当ごとのアカウント（大学は Box をつないだ個人、仕事は Microsoft 365 をつないだ会社）は、`agents.csv` のその行の `claude_account`（と `codex_account`）にフォルダを書く。プロファイルは一度作ってログインしておく:
 
 ```zsh
 CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude   # /login → 個人アカウント。claude.ai で Box をつなぐ
@@ -121,7 +122,7 @@ deploy/install.sh course print     # 登録する中身を見るだけ
 
 1. Notion でコネクト「Kei Agent」を作り、トークンを `NOTION_TOKEN` に貼る
 2. 共通ホーム・研究ホーム・授業ホームを、どれもこのコネクトに共有する
-3. 3つのページ ID を `config.toml` の `[notion]`（`hub_home`・`research_home`・`course_home`）に書く
+3. 3つのページ ID を `agents.csv` の `notion` 列（overview・research・course の行）に書く
 4. ゲートウェイを動かす（`deploy/install.sh notion`）
 5. DB を作る。どれも `--apply` を付けるまでは、作るものを並べるだけ
 
@@ -175,8 +176,8 @@ sqlite3 -header -column "file:$HOME/.local/state/kei-agent/kei-agent.db?mode=ro"
 | 担当だけ失敗する | `curl -s http://127.0.0.1:<番地>/.well-known/agent-card.json`、`<名前>-launchd.log`、`KEI_AGENT_A2A_TOKEN` が全部で同じか |
 | `can't open input file` | plist が古い起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
 | Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全部で同じか |
-| Notion で `can't reach` | ホームの外を触ろうとしている。ホームがコネクトに共有されているか、`[notion]` が合っているか |
-| 大学・仕事の連携が見えない | Claude は担当のファイルの `CLAUDE_CONFIG_DIR` とそのログイン、Codex は Codex アプリの連携 |
+| Notion で `can't reach` | ホームの外を触ろうとしている。ホームがコネクトに共有されているか、`agents.csv` の `notion` 列が合っているか |
+| 大学・仕事の連携が見えない | Claude は `agents.csv` の `claude_account` のフォルダとそのログイン、Codex は `codex_account`（無ければ `~/.codex`）の Codex アプリの連携 |
 | 声が出ない・聞かない | `ffmpeg`、マイクの許可、App Home のスイッチ、`voice-launchd.log` |
 | 上限に当たった | 何もしなくてよい。明けてから自動でやり直す |
 | 自己改善のあと起動しない | 3回失敗すると `deploy/run.sh` が `git revert` して前の版で起動し、Slack で知らせる |

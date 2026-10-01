@@ -24,7 +24,7 @@ job_parallel = 1
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
-# 使うモジュール・チャンネル・担当ごとの AI（engine・モデル）は、ここではなく担当の表 agents.csv に書く
+# 使うモジュール・チャンネル・担当ごとの AI（engine・モデル・アカウント）・Notion のホームは、ここではなく担当の表 agents.csv に書く
 # （例は agents.example.csv。kei-agent setup が作る。書き方は deploy/README.md の「担当の表」）
 
 [schedule]
@@ -61,17 +61,6 @@ orchestrator = "http://127.0.0.1:8786"
 # ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。
 # 担当プロセスを持つモジュール（研究・大学・仕事・知識・声）は、書かなければ module.toml の番地を使う。別の番地で
 # 動かすときだけ書く（例: research = "http://127.0.0.1:8788"）
-
-[notion]
-# Notion のホームのページ ID（URL の末尾32文字）。Notion を使わないなら空のまま。Notion を触るのはゲートウェイだけで、
-# 研究は research_home、大学は course_home、ほかのモジュールは [notion.homes] のホームの下だけを通す。
-# 本体と手で動かす setup は、書いてあるすべてのホームに届く。ホームの無い担当には、Notion の道具を渡さない
-hub_home = ""       # 共通ホーム（自分の名前のページなど。Daily・振り返り・予定・時間の記録）
-research_home = ""  # 研究ホーム（notion.json の home_page_id）
-course_home = ""    # 授業ホーム（notion-course.json の home_page_id）
-# ほかのモジュールのホーム（モジュールの名前 = ページ ID）。そのモジュールの AI と Python は、このホームの下だけに届く
-# [notion.homes]
-# weather = ""
 
 [course]
 # 大学のモジュールの設定（書けるものは modules/course/module.toml の [settings]）

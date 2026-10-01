@@ -35,10 +35,12 @@ def claude_project_dir_name(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
-def claude_projects_dir(env: dict[str, str] | None = None) -> Path:
+def claude_projects_dirs(config: Config, env: dict[str, str] | None = None) -> list[Path]:
+    """Claude がセッションの記録を置く場所。プロセスの既定のアカウントと、担当の表（agents.csv）のアカウントのもの。"""
     env = dict(os.environ) if env is None else env
-    base = Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") else Path.home() / ".claude"
-    return base / "projects"
+    bases = [Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") else Path.home() / ".claude"]
+    bases += [Path(p.claude_account) for p in config.agent_profiles.values() if p.claude_account]
+    return [base / "projects" for base in dict.fromkeys(bases)]
 
 
 def remove_older_than(paths: list[Path], cutoff: float) -> int:
@@ -53,7 +55,7 @@ def remove_older_than(paths: list[Path], cutoff: float) -> int:
     return removed
 
 
-def cleanup(config: Config, claude_projects: Path, now: float | None = None) -> dict:
+def cleanup(config: Config, claude_projects: Path | list[Path], now: float | None = None) -> dict:
     """Claude のセッションの記録と、スレッドのログのうち、古いものを消す。"""
     now = time.time() if now is None else now
     m = config.maintenance
@@ -67,10 +69,11 @@ def cleanup(config: Config, claude_projects: Path, now: float | None = None) -> 
         workspaces.append(config.overview_dir)
     names = {claude_project_dir_name(p.resolve()) for p in workspaces}
     sessions: list[Path] = []
-    for name in names:
-        project = claude_projects / name
-        if project.is_dir():
-            sessions += list(project.glob("*.jsonl"))
+    for base in claude_projects if isinstance(claude_projects, list) else [claude_projects]:
+        for name in names:
+            project = base / name
+            if project.is_dir():
+                sessions += list(project.glob("*.jsonl"))
     removed_sessions = remove_older_than(sessions, now - m.session_retention_days * 86400)
 
     # スレッドのログ（Codex が経緯を読むためのもの）も、セッションと同じ日数で整理する

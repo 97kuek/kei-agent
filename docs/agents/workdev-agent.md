@@ -1,7 +1,7 @@
 # 仕事の開発（`workdev`）
 
 - 仕事のプロジェクトのチャンネル（`#work-<名前>`）ごとの作業場で、コードを書き、コマンドとテストを動かす
-- 会社のアカウントで動く（秘密情報は仕事のもの `kei-agent-work.zsh` を読む。`module.toml` の `[process] secrets = "work"`）
+- 会社のアカウントで動く（`agents.csv` の workdev の行の `claude_account`・`codex_account`。仕事と同じフォルダを書く）
 - Outlook・Teams・SharePoint は読まない（メールなどの外の文と、コマンド・Web を1回の実行に揃えないため）。それは [仕事](work-agent.md) の `#3-work`
 
 | 項目 | 中身 |

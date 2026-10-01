@@ -297,7 +297,7 @@ class Scheduler:
         detail: dict = {"status": "done"}
         # 自己改善の worktree と作業用のフォルダは、自己改善のモジュールが片づける
         detail["removed"] = await asyncio.to_thread(
-            maintenance.cleanup, self.config, maintenance.claude_projects_dir(), None)
+            maintenance.cleanup, self.config, maintenance.claude_projects_dirs(self.config), None)
         detail["notices"] = self.store.drop_old_notices(time.time() - NOTICE_RETENTION_DAYS * 86400)
         # 声をかけてもさらに同じ時間が過ぎた返事待ちは閉じる（放っておくと何日も残る）
         detail["awaits"] = self.store.forget_stale_awaits(

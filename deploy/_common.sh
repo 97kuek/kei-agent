@@ -55,18 +55,6 @@ module_processes() {
 agent_names() {
   module_processes
 }
-# その担当のプロセスが読む、自分だけの秘密情報のファイルの名前（kei-agent-<これ>.zsh）。module.toml の [process] に
-# secrets = "<モジュール>" があれば、そのモジュールのもの（仕事の開発なら仕事の、会社のアカウントの場所）
-module_secrets_name() {
-  local name="$1" file found=""
-  for file in "${REPO:-}/modules/$name/module.toml" "${KEI_AGENT_HOME:-$HOME/.config/kei-agent}/modules/$name/module.toml"; do
-    if [[ -r "$file" ]]; then
-      found=$(sed -nE 's/^secrets *= *"([a-z][a-z0-9-]*)".*/\1/p' "$file" | head -n 1)
-      break
-    fi
-  done
-  print -r -- "${found:-$name}"
-}
 # そのうち、A2A ではない常駐のプロセス（[process] に kind = "service"。Notion のゲートウェイ）。
 # ほかのプロセスが使うので、起動し直すときは先にする
 service_processes() {

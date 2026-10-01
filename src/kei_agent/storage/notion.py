@@ -34,7 +34,7 @@ NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"
 # ゲートウェイの親の合言葉。これ自体は子プロセスに渡さず、名前ごとの合言葉を作るのにだけ使う
 GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
-# 本体（と手で動かす setup）の利用者の名前。そのほかの利用者は [notion] に書いたホームの持ち主（gateway_clients）
+# 本体（と手で動かす setup）の利用者の名前。そのほかの利用者は agents.csv の notion 列に書いたホームの持ち主（gateway_clients）
 KEI_AGENT = MAIN_CLIENT
 NO_GATEWAY = (f"{GATEWAY_TOKEN_ENV} がありません。Notion は Notion ゲートウェイ経由でだけ使えます"
               "（deploy/README.md の「秘密情報」）")
@@ -61,7 +61,7 @@ def gateway_client_token(master: str, client: str) -> str:
 
 
 def gateway_clients(config: Config) -> tuple[str, ...]:
-    """ゲートウェイの利用者（本体と、config.toml の [notion] にホームを書いたモジュール・研究）。"""
+    """ゲートウェイの利用者（本体と、agents.csv の notion 列にホームを書いたモジュール・研究）。"""
     return (KEI_AGENT, *config.notion.client_homes())
 
 
@@ -73,8 +73,8 @@ def gateway_notion(client: str, env: dict[str, str] | None = None, config: Confi
         raise NotionError(NO_GATEWAY)
     config = config or load_config()
     if client not in gateway_clients(config):
-        raise NotionError(f"{client} の Notion ホームが config.toml の [notion] にありません"
-                          f"（[notion.homes] に {client} = \"ページ ID\" を書いてください）")
+        raise NotionError(f"{client} の Notion ホームが agents.csv の notion 列にありません"
+                          f"（{client} の行の notion に、ページ ID を書いてください）")
     return Notion(gateway_client_token(master, client), base_url=config.notion_gateway_api)
 
 
@@ -706,7 +706,7 @@ class Setup:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-notion-setup")
     parser.add_argument("home_page_id", nargs="?", default="",
-                        help="研究ホームのページID（省くと config.toml の [notion] research_home）")
+                        help="研究ホームのページID（省くと agents.csv の research の行の notion）")
     parser.add_argument("--apply", action="store_true", help="書き込む（付けなければ、作るもの・足すものを見るだけ）")
     args = parser.parse_args()
     config = load_config()
@@ -716,7 +716,7 @@ def main() -> None:
         sys.exit(str(e))
     home = args.home_page_id or config.notion.research_home
     if not home:
-        sys.exit("研究ホームのページ ID がありません（config.toml の [notion] research_home）")
+        sys.exit("研究ホームのページ ID がありません（agents.csv の research の行の notion）")
     setup = Setup(notion, home, config.state_dir / "notion.json")
     if not args.apply:
         print("\n".join(setup.plan()) or "変更なし（そろっています）")

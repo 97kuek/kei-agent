@@ -143,7 +143,7 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
 def test_a_module_without_a_home_is_told_where_to_write_it(config):
     from kei_agent.storage.notion import gateway_notion
 
-    with pytest.raises(NotionError, match=r"\[notion.homes\] に weather"):
+    with pytest.raises(NotionError, match="weather の行の notion"):
         gateway_notion("weather", env={"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER}, config=config)
 
 

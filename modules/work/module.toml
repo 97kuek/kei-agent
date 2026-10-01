@@ -4,7 +4,7 @@ name = "work"
 label = "仕事"
 description = "会社のアカウントの Outlook・Teams・SharePoint を読む（読むだけ）。予定の一覧と、会社のことの質問に答える"
 
-# AI の実行役（provider は agents.csv の engine）。会社のアカウントは kei-agent-work.zsh の CLAUDE_CONFIG_DIR / CODEX_HOME。
+# AI の実行役（provider は agents.csv の engine）。会社のアカウントは agents.csv の work の行の claude_account / codex_account。
 # 手元のファイル・コマンド・Web・Notion は使わない。送信・投稿・作成・削除は、道具を渡さないうえに二の柵（plugin）が断る
 [actor]
 prompt = "work.md"
@@ -57,7 +57,7 @@ codex = { model = "gpt-6-sol", effort = "medium" }
 claude = { model = "claude-opus-5", effort = "high" }
 codex = { model = "gpt-6-sol", effort = "high" }
 
-# 担当プロセス（A2A のサーバー）。秘密情報は kei-agent-work.zsh（会社のアカウントの場所）
+# 担当プロセス（A2A のサーバー）
 [process]
 port = 8789
 

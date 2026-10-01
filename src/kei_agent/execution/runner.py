@@ -210,7 +210,8 @@ class ExecutionRequest:
     read_only: bool = False
 
 
-async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionProfile) -> None:
+async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionProfile,
+                               env: dict[str, str] | None = None) -> None:
     """同じ profile を OS sandbox が起動できることを、モデル実行前に確認する。"""
     command = [codex_bin, "sandbox", "-P", PROFILE_NAME, "-C", str(cwd)]
     for setting in profile.config_overrides:
@@ -218,7 +219,7 @@ async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionPro
     command += ["--", "/usr/bin/true"]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env,
         )
         await asyncio.wait_for(proc.wait(), timeout=10)
     except (OSError, TimeoutError) as exc:
@@ -295,6 +296,20 @@ def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) ->
     manifest.write_text(json.dumps(new_managed, ensure_ascii=False), encoding="utf-8")
 
 
+def account_env(config: Config, actor: str, env: dict[str, str]) -> dict[str, str]:
+    """その担当のアカウント（agents.csv の claude_account・codex_account）を、子の環境に入れる（env を書き換えて返す）。"""
+    profile = config.agent_profiles.get(actor)
+    if profile is None:
+        return env
+    if profile.claude_account:
+        env["CLAUDE_CONFIG_DIR"] = profile.claude_account
+        # 共通の鍵が残っていると、アカウントのフォルダより先に使われる
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    if profile.codex_account:
+        env["CODEX_HOME"] = profile.codex_account
+    return env
+
+
 def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str,
               policy: AgentPolicy | None = None) -> dict[str, str]:
     """子の環境。Notion の鍵は、その担当のホームにしか届かない合言葉（ヘッダーの値）だけを渡す。"""
@@ -305,7 +320,7 @@ def build_env(config: Config, base: dict[str, str], channel: str, thread_ts: str
     env["KEI_AGENT_THREAD_TS"] = thread_ts
     if policy is not None and policy.notion != "none" and master:
         env[GATEWAY_AUTH_ENV] = f"Bearer {gateway_client_token(master, policy.name)}"
-    return env
+    return account_env(config, policy.name, env) if policy is not None else env
 
 
 def describe_tool(name: str, tool_input: dict) -> str:
@@ -573,8 +588,10 @@ async def _run_model(
     if is_codex:
         try:
             # アカウントの連携は、いまのログインでの ID を表示名から引く（ID は保存しない）
-            apps = await codex_apps.app_ids(config.codex_bin, [app.name for app in policy.codex_apps])
-            await verify_codex_profile(config.codex_bin, ws.cwd, preflight(config, contract, "codex_cli"))
+            # その担当のアカウント（会社・個人）で調べる
+            account = account_env(config, policy.name, guard.strip_env(dict(os.environ)))
+            apps = await codex_apps.app_ids(config.codex_bin, [app.name for app in policy.codex_apps], env=account)
+            await verify_codex_profile(config.codex_bin, ws.cwd, preflight(config, contract, "codex_cli"), env=account)
         except (CapabilityUnavailable, codex_apps.AppsUnavailable) as exc:
             return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
         install_agent_skills(contract, ws.cwd)

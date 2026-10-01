@@ -176,8 +176,8 @@ def test_the_example_config_must_be_rewritable():
         setup_command.set_value("[notion]\n", "notion", "hub_home", PAGE)
     text = setup_command.set_value('[notion]\nhub_home = ""  # 共通ホーム\n', "notion", "hub_home", PAGE)
     assert text == f'[notion]\nhub_home = "{PAGE}"  # 共通ホーム\n'
-    data = tomllib.loads(setup_command.config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), {("notion", "hub_home"): PAGE}))
-    assert data["notion"]["hub_home"] == PAGE
+    data = tomllib.loads(setup_command.config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), {("maintenance", "time"): "23:00"}))
+    assert data["maintenance"]["time"] == "23:00"
     assert not {"modules", "channels", "agents", "research_root", "course_root"} & set(data)
 
 

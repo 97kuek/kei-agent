@@ -48,5 +48,5 @@
 
 | AI | つなぎ方 |
 |---|---|
-| Claude | `kei-agent-work.zsh` に `unset CLAUDE_CODE_OAUTH_TOKEN` と `CLAUDE_CONFIG_DIR="$HOME/.claude-work"`。そのプロファイルで claude.ai の Microsoft 365 をつなぐ |
+| Claude | `agents.csv` の work の行の `claude_account` に `~/.claude-work`。そのプロファイルで claude.ai の Microsoft 365 をつなぐ |
 | Codex | ChatGPT のログインで、Codex アプリの Outlook Email と Outlook Calendar をつなぐ |

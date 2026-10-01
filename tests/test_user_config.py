@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 import pytest
+from fakes import write_config
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.execution_contract import prompt_text, prompt_version
@@ -26,7 +27,8 @@ def _home(tmp_path, config: str = "", profile: str | None = None, prompts: dict[
 
 
 def test_config_comes_from_the_user_folder_and_says_how_to_start_without_one(tmp_path):
-    home = _home(tmp_path, '[notion]\nhub_home = "abc"\n')
+    home = _home(tmp_path)
+    write_config(home / "config.toml", '[notion]\nhub_home = "abc"\n')
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     assert config.user_dir == home.resolve() and config.notion.hub_home == "abc"
     with pytest.raises(ConfigError, match="config.example.toml を写して"):
@@ -53,17 +55,21 @@ def test_secrets_folder_is_configurable_and_never_readable_by_the_ai(tmp_path):
         load_config(env={"KEI_AGENT_HOME": str(home_b)})
 
 
-def test_notion_homes_are_all_listed_in_the_notion_table(tmp_path):
-    """Notion のホームは [notion] にまとめる。研究と大学は今の書き方のまま、ほかのモジュールは [notion.homes]。"""
-    home = _home(tmp_path, '[notion]\ncourse_home = "AAAA-BBBB"\n\n[notion.homes]\nknowledge = "CCCC"\n')
+def test_notion_homes_are_written_in_the_notion_column(tmp_path):
+    """Notion のホームは担当の表の notion 列（共通ホームは overview の行）。ID はハイフンを外して比べる。"""
+    home = _home(tmp_path)
+    (home / "agents.csv").write_text("module,enabled,channels,notion,engine,model,effort\n"
+                                     "overview,true,,HUB-1,,,\ncourse,true,,AAAA-BBBB,,,\nknowledge,true,,CCCC,,,\n")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
+    assert config.notion.hub_home == "hub1"
     assert config.notion.client_homes() == {"course": "aaaabbbb", "knowledge": "cccc"}
-    for text, message in (('[notion.homes]\nnothing = "x"\n', "知らないモジュール"),
-                          ('[notion]\ncourse_home = "a"\n\n[notion.homes]\ncourse = "b"\n', "2か所"),
-                          ('[notion.homes]\nknowledge = 1\n', "ページ ID")):
-        (home / "config.toml").write_text(text, encoding="utf-8")
-        with pytest.raises(ConfigError, match=message):
-            load_config(env={"KEI_AGENT_HOME": str(home)})
+    (home / "agents.csv").write_text("module,enabled,channels,notion,engine,model,effort\nrouter,true,,X,,,\n")
+    with pytest.raises(ConfigError, match="notion を書けません"):
+        load_config(env={"KEI_AGENT_HOME": str(home)})
+    # config.toml の [notion] は、表に移すよう知らせる
+    (home / "config.toml").write_text('[notion]\ncourse_home = "a"\n')
+    with pytest.raises(ConfigError, match="notion 列に書く"):
+        load_config(env={"KEI_AGENT_HOME": str(home)})
 
 
 def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_path):

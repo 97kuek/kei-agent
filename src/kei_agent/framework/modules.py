@@ -97,7 +97,7 @@ _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 PLUGIN_DIR = "plugin"
 _USE_CASE_KEYS = {"offline", "manual", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
-_PROCESS_KEYS = {"port", "kind", "secrets"}
+_PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
 PROCESS_KINDS = ("a2a", "service")
 _SCHEDULE_KEYS = {"label", "short", "default"}
@@ -196,14 +196,6 @@ class ModuleSpec:
     core_schedules: tuple[str, ...] = ()
     # 要る秘密情報（[secrets]。値は書かない）
     secrets: tuple[SecretSpec, ...] = ()
-    # プロセスが読む、自分だけの秘密情報のファイルの名前（kei-agent-<これ>.zsh）。[process] secrets で、ほかの
-    # モジュールのもの（仕事の開発なら仕事の、会社のアカウントの場所）を読める。書かなければ自分の名前
-    secrets_from: str = ""
-
-    @property
-    def secrets_file(self) -> str:
-        return f"kei-agent-{self.secrets_from or self.name}.zsh"
-
     @property
     def prefixes(self) -> dict[str, str]:
         """頭が一致するチャンネル（プロジェクトのチャンネル）の頭 → チャンネルの種類（[channels] に "work-*"）。"""
@@ -394,9 +386,6 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     port = process.get("port")
     if process and (not isinstance(port, int) or not 1024 <= port <= 65535):
         raise ModuleError(f"{where} の [process] port は 1024〜65535 の整数にしてください")
-    secrets_from = process.get("secrets", "")
-    if secrets_from and (not isinstance(secrets_from, str) or not _NAME.match(secrets_from)):
-        raise ModuleError(f"{where} の [process] secrets は、秘密情報のファイルを借りるモジュールの名前にしてください")
     kind = process.get("kind", "a2a")
     if kind not in PROCESS_KINDS:
         raise ModuleError(f"{where} の [process] kind は {' / '.join(PROCESS_KINDS)} のどれかにしてください")
@@ -451,7 +440,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
         settings=_settings(_table(data, "settings", where), where), slash_commands=slash, slash_hints=hints,
         core_channels=core_channels, core_schedules=core_schedules,
-        secrets=_secrets(_table(data, "secrets", where), where, bool(process)), secrets_from=secrets_from)
+        secrets=_secrets(_table(data, "secrets", where), where, bool(process)))
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:

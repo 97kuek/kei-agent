@@ -42,7 +42,7 @@ def without_replaced(text: str) -> str:
         table = _TABLE.match(row)
         if table:
             name = table.group(1).strip()
-            skipping = name in ("channels", "agents") or name.startswith("agents.")
+            skipping = name in ("channels", "agents", "notion") or name.startswith(("agents.", "notion."))
         if skipping:
             i += 1
             continue

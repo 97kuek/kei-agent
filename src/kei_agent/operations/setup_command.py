@@ -243,21 +243,22 @@ def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str],
         names = choose_modules(asker, modules.known())
         engine = choose_engine(asker, which)
         where = {"research_root": asker.text("  研究テーマの作業場を置く場所", "~/research")} if "research" in names else {}
-        table_text = agents_table.from_config({"modules": names, **where}, {actor: engine for actor in model_actors()})
-    if path.exists():
-        print(f"  もうある: {path}（書き換えない）")
-    else:
-        answers: dict[tuple[str, str], str] = {}
+        notion: dict[str, str] = {}
         if "notion" in names:
-            print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから config.toml の [notion] に書いてもよい）")
+            print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから agents.csv の notion 列に書いてもよい）")
             homes = [("hub_home", "共通ホーム（Daily・振り返り・予定・時間の記録）"),
                      *([("research_home", "研究ホーム")] if "research" in names else []),
                      *([("course_home", "授業ホーム")] if "course" in names else [])]
             for key, label in homes:
                 if found := ask_page(asker, f"  {label}"):
-                    answers[("notion", key)] = found
+                    notion[key] = found
+        table_text = agents_table.from_config({"modules": names, **where, "notion": notion},
+                                              {actor: engine for actor in model_actors()})
+    if path.exists():
+        print(f"  もうある: {path}（書き換えない）")
+    else:
         try:
-            text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), answers)
+            text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), {})
         except ConfigError as e:
             print(f"  ❌ この答えでは設定を読めないので、書かなかった: {e}")
             return None

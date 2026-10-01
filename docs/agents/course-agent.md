@@ -85,7 +85,7 @@ uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.
 | `school` | `config.toml` の `[course]` | 学校の部品（同梱は `waseda`）。自分の部品はファイルの場所 |
 | `periods` / `terms` | `config.toml` の `[course]` | 時限の時刻・学期。書かなければ学校の部品の既定 |
 | `MOODLE_ICS_URL` | `kei-agent-course.zsh` | Moodle のカレンダーの書き出し URL |
-| `CLAUDE_CONFIG_DIR` | `kei-agent-course.zsh` | Box をつないだ個人アカウントのプロファイル |
+| `claude_account` / `codex_account` | `agents.csv` の course の行 | Box をつないだ個人アカウントのフォルダ |
 
 - 学校の部品に置けるもの（時限・学期の既定、成績の読み方）は `modules/course/school.py`
 - 学校を選ばず時刻も書かないと、授業に時刻が付かない（朝の一覧に出ない）

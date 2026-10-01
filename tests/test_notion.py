@@ -177,5 +177,5 @@ def test_gateway_notion_uses_the_client_token_never_the_master(config):
     with pytest.raises(NotionError, match="KEI_AGENT_NOTION_GATEWAY_TOKEN"):
         gateway_notion("course", {}, config)
     # ホームを書いていない名前（研究のホームも空）は、ゲートウェイの利用者ではない
-    with pytest.raises(NotionError, match=r"\[notion\]"):
+    with pytest.raises(NotionError, match="notion 列にありません"):
         gateway_notion("research", {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}, config)

@@ -73,10 +73,8 @@ def assigned(path: Path) -> dict[str, bool]:
 
 
 def own_secrets_file(directory: Path, module: str) -> Path:
-    """そのモジュールのプロセスだけの秘密情報のファイル（共通のもののあとに読む。deploy/run-agent.sh）。
-    [process] secrets でほかのモジュールのものを借りていれば、そのファイル。"""
-    spec = modules.known().get(module)
-    return directory / (spec.secrets_file if spec is not None else f"kei-agent-{module}.zsh")
+    """そのモジュールのプロセスだけの秘密情報のファイル（共通のもののあとに読む。deploy/run-agent.sh）。"""
+    return directory / f"kei-agent-{module}.zsh"
 
 
 def check_secrets(config: Config) -> list[Finding]:
@@ -251,13 +249,13 @@ def check_notion(config: Config) -> list[Finding]:
         return [Finding(WARN, "Notion", "Notion のモジュールがオフ（研究ホーム・授業ホーム・共通ホームには残さない）")]
     notion = config.notion
     findings = []
-    for key, value, lost in (("hub_home", notion.hub_home, "Daily・振り返り・時間記録・予定カレンダー"),
-                             ("research_home", notion.research_home, "研究ホーム（Task・ノート・先行研究）"),
-                             ("course_home", notion.course_home, "授業ホーム（授業・課題）")):
+    for row, value, lost in (("overview", notion.hub_home, "Daily・振り返り・時間記録・予定カレンダー"),
+                             ("research", notion.research_home, "研究ホーム（Task・ノート・先行研究）"),
+                             ("course", notion.course_home, "授業ホーム（授業・課題）")):
         if value:
-            findings.append(Finding(OK, "Notion", f"[notion] {key} が書いてある"))
+            findings.append(Finding(OK, "Notion", f"agents.csv の {row} の行の notion が書いてある"))
         else:
-            findings.append(Finding(WARN, "Notion", f"[notion] {key} が空（{lost}を Notion に残さない）"))
+            findings.append(Finding(WARN, "Notion", f"agents.csv の {row} の行の notion が空（{lost}を Notion に残さない）"))
     return findings
 
 

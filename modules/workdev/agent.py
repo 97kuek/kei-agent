@@ -1,7 +1,7 @@
 """仕事の開発の担当プロセス（A2A のサーバー）。起動は共通のコマンド `kei-agent-module workdev`。
 
 できるのは、プロジェクトの作業場で provider を1回動かすこと（どの担当とも同じ `ask`）。会社のアカウントで動く
-（秘密情報は仕事のもの。module.toml の [process] secrets）。依頼は JSON で届く。
+（agents.csv の workdev の行の claude_account・codex_account）。依頼は JSON で届く。
 
     ask  {"channel_name": "work-billing", "prompt": "テストを直して", "session_id": null,
           "channel": "C1", "thread_ts": "1.2", "allowed_domains": ["example.com"]}
