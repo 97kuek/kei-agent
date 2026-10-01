@@ -2,9 +2,10 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import router, runner
-from kei_agent.execution_contract import prompt_version, resolve_contract
-from kei_agent.model_policy import UseCase, resolve
+from kei_agent import router
+from kei_agent.execution import runner
+from kei_agent.execution.execution_contract import prompt_version, resolve_contract
+from kei_agent.execution.model_policy import UseCase, resolve
 from kei_agent.workspaces import themes
 
 ROUTER = {"filesystem.deny_read", "filesystem.read"}
@@ -96,9 +97,9 @@ def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
 
 def test_only_agents_that_reach_notion_get_the_shared_notion_skill(config):
     """既存のページの書式を保つ skill は、Notion を使える担当（ホームを書いたもの）にだけ渡す。"""
-    from kei_agent.agent_policy import policy_of
     from kei_agent.configuration.config import NotionConfig
-    from kei_agent.execution_contract import shared_skill_dirs
+    from kei_agent.execution.agent_policy import policy_of
+    from kei_agent.execution.execution_contract import shared_skill_dirs
 
     notion = config.repo_root / "plugins" / "notion" / "skills"
     assert shared_skill_dirs(config, policy_of("research")) == (notion,)

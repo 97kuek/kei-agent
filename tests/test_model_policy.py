@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from kei_agent.model_policy import ModelPolicyError, UseCase, explicit_use_case, is_manual, resolve
+from kei_agent.execution.model_policy import ModelPolicyError, UseCase, explicit_use_case, is_manual, resolve
 
 
 @pytest.mark.parametrize("actor, provider, use_case, model, effort", [
@@ -33,7 +33,7 @@ def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_cas
 def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, store):
     """選んだ provider の固定のレシピになる。持ち主が [[manual-astra]] と書いたときだけ例外の最上位を使う。"""
     from kei_agent.configuration import settings
-    from kei_agent.model_policy import resolve_selected
+    from kei_agent.execution.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
     recipe = resolve_selected(config, store, "research", "research_execute")
@@ -55,7 +55,7 @@ def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, st
     ("claude", "claude-fable-5"),
 ])
 def test_only_approved_models_are_allowlisted(provider, model):
-    from kei_agent.model_policy import is_allowed_model
+    from kei_agent.execution.model_policy import is_allowed_model
 
     assert is_allowed_model(provider, model)
     assert not is_allowed_model(provider, "gpt-5.6-terra")
@@ -85,14 +85,14 @@ RESEARCH = frozenset({"research_extract", "research_design"})
     ('{"use_case":"work_decide","confidence":0.9}', WORK, "work_decide"),
 ])
 def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answer, allowed, expected):
-    from kei_agent.model_classifier import parse
+    from kei_agent.execution.model_classifier import parse
 
     assert parse(answer, allowed) == expected
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):
-    from kei_agent import model_classifier, runner
     from kei_agent.configuration import settings
+    from kei_agent.execution import model_classifier, runner
 
     settings.set_agent_provider(store, "research", "claude")
 
@@ -109,8 +109,9 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
 
 async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
     """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
-    from kei_agent import model_classifier, router, runner
+    from kei_agent import router
     from kei_agent.configuration import settings
+    from kei_agent.execution import model_classifier, runner
 
     seen = []
 
@@ -133,7 +134,7 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
 def test_every_actor_use_case_has_a_recipe_on_both_providers():
     """Claude でも Codex でも同じ担当が動く（知識の担当を足したときに、片方だけ忘れないように）。"""
     from kei_agent.configuration.config import model_actors
-    from kei_agent.model_policy import allowed_use_cases
+    from kei_agent.execution.model_policy import allowed_use_cases
 
     for actor in model_actors():
         for use_case in allowed_use_cases(actor):

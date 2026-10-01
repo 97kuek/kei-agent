@@ -11,10 +11,10 @@ import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 from test_schedule import FakeCourseAgent, due_item
 
-from kei_agent import runner
 from kei_agent.assistant import Assistant
+from kei_agent.execution import runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler, task_names
 from kei_agent.storage.notion_store import Note
 from kei_agent_modules.daily import texts

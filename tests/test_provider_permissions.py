@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent import runner
-from kei_agent.execution_contract import resolve_contract
-from kei_agent.guard import DEFAULT_DENY_READ
-from kei_agent.model_policy import UseCase, resolve
-from kei_agent.provider_permissions import CapabilityUnavailable, preflight
+from kei_agent.execution import runner
+from kei_agent.execution.execution_contract import resolve_contract
+from kei_agent.execution.guard import DEFAULT_DENY_READ
+from kei_agent.execution.model_policy import UseCase, resolve
+from kei_agent.execution.provider_permissions import CapabilityUnavailable, preflight
 from kei_agent.workspaces import themes
 
 

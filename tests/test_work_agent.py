@@ -141,7 +141,7 @@ def test_calendar_text_escapes_values_from_outlook():
 
 async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(config, store, monkeypatch):
     """予定の一覧も、共通の起動口で「読むだけ」の1回として動かす（会話は続けない）。"""
-    from kei_agent import runner
+    from kei_agent.execution import runner
     from kei_agent_modules.work import connector
 
     seen = {}
@@ -162,7 +162,7 @@ async def test_calendar_is_read_in_one_read_only_turn_of_the_shared_runner(confi
 
 
 async def test_calendar_failure_keeps_the_limit(config, store, monkeypatch):
-    from kei_agent import runner
+    from kei_agent.execution import runner
     from kei_agent_modules.work import connector
 
     async def run_model(*_args, **_kwargs):

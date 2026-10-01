@@ -2,7 +2,7 @@
 
 どのエージェントも、同じやり方で provider を動かす。
 
-- 起動は `kei_agent.runner.run_model` だけ。どこまで触れるかは制限の表（`kei_agent.agent_policy`）が決める
+- 起動は `kei_agent.execution.runner.run_model` だけ。どこまで触れるかは制限の表（`kei_agent.execution.agent_policy`）が決める
 - 依頼は JSON（`prompt`、`session_id`、`channel`、`thread_ts`、`read_only`、`use_case`、`provider`）
 - 用途は依頼に書いてあればそれ、無ければ担当の軽い分類器で決める
 - 途中の経過は固定の利用者向け状態だけをタスクの状態に流す。道具名や返答断片は流さない
@@ -19,11 +19,11 @@ from dataclasses import asdict
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 
-from kei_agent import runner
 from kei_agent.agents import FIELDS as RESULT_FIELDS
 from kei_agent.configuration.config import Config
-from kei_agent.model_classifier import classify
-from kei_agent.model_policy import ResolvedModel, is_manual, resolve, resolve_selected, use_case_of
+from kei_agent.execution import runner
+from kei_agent.execution.model_classifier import classify
+from kei_agent.execution.model_policy import ResolvedModel, is_manual, resolve, resolve_selected, use_case_of
 from kei_agent.workspaces.themes import Workspace
 from kei_agent_a2a import envelope
 

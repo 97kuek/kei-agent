@@ -11,8 +11,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from kei_agent import model_classifier, updates
+from kei_agent import updates
 from kei_agent.configuration import config as config_module
+from kei_agent.execution import model_classifier
 from kei_agent.framework import modules
 from kei_agent.storage.store import Store
 

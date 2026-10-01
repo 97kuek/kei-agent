@@ -7,10 +7,10 @@ import time
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 
-from kei_agent import runner
 from kei_agent.assistant import Assistant
+from kei_agent.execution import runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
 
 

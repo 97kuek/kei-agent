@@ -13,10 +13,11 @@ from pathlib import Path
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import guard, runner, updates
+from kei_agent import updates
 from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import AgentProfile
-from kei_agent.jobs import JobManager
+from kei_agent.execution import guard, runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.slack_text import strip_lines
 from kei_agent.testing.kit import settle
@@ -166,7 +167,7 @@ async def test_new_request_becomes_a_public_issue_and_plans_without_writing_code
     call, = claude.calls
     # 書けるのは相談の作業用のフォルダだけ。読めるのは Kei Agent のリポジトリ
     assert call["cwd"] == cfg.module_state("improve") / "talk" / "20.1" and call["cwd"].is_dir()
-    from kei_agent.agent_policy import policy_of
+    from kei_agent.execution.agent_policy import policy_of
     from kei_agent.workspaces.themes import ChannelKind, Workspace
     settings_json = guard.build_settings(cfg, Workspace("research-agent", ChannelKind.IMPROVE, call["cwd"],
                                                         module="improve"), policy_of("improve"))

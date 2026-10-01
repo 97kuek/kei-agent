@@ -8,9 +8,9 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 
-from kei_agent import runner
 from kei_agent.agents import FIELDS
-from kei_agent.model_classifier import UsageLimited
+from kei_agent.execution import runner
+from kei_agent.execution.model_classifier import UsageLimited
 from kei_agent_a2a import envelope, run
 from kei_agent_modules.course.agent import Executor as CourseExecutor
 from kei_agent_modules.research.agent import Executor as ResearchExecutor

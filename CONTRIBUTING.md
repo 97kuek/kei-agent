@@ -43,7 +43,7 @@ uv run python -m pytest
 - 文書は箇条書きと表を中心にし、同じことを2か所に書かない（片方からはリンクする）
 - 図は `docs/images/diagrams.py` を書き換えて `uv run python docs/images/diagrams.py` で作り直す
 - Notion の DB や項目の名前を変えたら、`notion.py`・`notion_store.py`・`notion_hub.py`・`modules/course/notion_setup.py` も合わせる
-- モデル名は `src/kei_agent/model_policy.py` と `module.toml` の `[use_cases]` にだけ書く
+- モデル名は `src/kei_agent/execution/model_policy.py` と `module.toml` の `[use_cases]` にだけ書く
 - Slack の権限・sandbox・柵（`guard.py`・`config.example.toml`・`deploy/`）の大きな変更は、先に Issue で相談する
 
 ## 書き方

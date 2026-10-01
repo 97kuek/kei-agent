@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from kei_agent import runner
+from kei_agent.execution import runner
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_store import Note, Task
 

@@ -14,8 +14,8 @@ from dataclasses import replace
 from datetime import datetime
 
 from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_actors
+from kei_agent.execution.guard import valid_domain
 from kei_agent.framework import modules
-from kei_agent.guard import valid_domain
 from kei_agent.storage.store import Store
 
 # Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）

@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
-from kei_agent import guard
+from kei_agent.execution import guard
 
 # Box のプレビューなどで、JSON-RPC の1行が標準の64KiBを超えることがある
 APP_SERVER_LINE_LIMIT = 8 * 1024 * 1024

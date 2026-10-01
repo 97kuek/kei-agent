@@ -34,5 +34,5 @@
 - 「だめ」「違う」なら、どう直したいかを聞いて、案を出し直す
 - 「やらなくていい」なら `🗑 見送り`（確かめ直さない）
 - 直さなくてよいと分かったら、そう伝えて確かめる。同意をもらったら `✅ 解決済み`、やらないと言われたら `🗑 見送り`
-- `src/kei_agent/guard.py`、`config.example.toml`、`deploy/` は直せない（柵なので、触れた差分は捨てられる）。要るときは人に頼む
+- `src/kei_agent/execution/guard.py`、`config.example.toml`、`deploy/` は直せない（柵なので、触れた差分は捨てられる）。要るときは人に頼む
 - 要望は要約して公開の GitHub issue にしてある。issue には Slack の文をそのまま載せない

@@ -7,12 +7,13 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent import guard, router, runner
-from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
+from kei_agent import router
 from kei_agent.configuration.config import load_config
-from kei_agent.execution_contract import resolve_contract
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
-from kei_agent.provider_permissions import CapabilityUnavailable, preflight
+from kei_agent.execution import guard, runner
+from kei_agent.execution.agent_policy import NOTION_READ_TOOLS, policy_of
+from kei_agent.execution.execution_contract import resolve_contract
+from kei_agent.execution.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
+from kei_agent.execution.provider_permissions import CapabilityUnavailable, preflight
 from kei_agent.storage.notion import gateway_client_token
 from kei_agent.workspaces import themes
 

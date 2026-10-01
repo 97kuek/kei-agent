@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from kei_agent import codex_apps
-from kei_agent.codex_apps import AppsUnavailable, app_ids, installed_apps, resolve_apps
+from kei_agent.execution import codex_apps
+from kei_agent.execution.codex_apps import AppsUnavailable, app_ids, installed_apps, resolve_apps
 
 
 def test_resolve_apps_maps_names_to_current_ids_and_rejects_uncallable_ones():

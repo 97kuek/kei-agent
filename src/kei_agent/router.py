@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from kei_agent import runner
 from kei_agent.configuration.config import Config
-from kei_agent.model_json import json_object
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
+from kei_agent.execution import runner
+from kei_agent.execution.model_json import json_object
+from kei_agent.execution.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
 from kei_agent.workspaces.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)

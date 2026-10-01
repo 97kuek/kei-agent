@@ -10,11 +10,12 @@ from datetime import datetime
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import a2a, model_classifier, model_policy, router, runner
-from kei_agent.agent_policy import policy_of
+from kei_agent import a2a, router
 from kei_agent.assistant import Assistant
+from kei_agent.execution import model_classifier, model_policy, runner
+from kei_agent.execution.agent_policy import policy_of
+from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
 from kei_agent.testing.kit import settle
 

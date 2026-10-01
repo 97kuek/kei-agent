@@ -15,12 +15,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from kei_agent import codex_apps, guard
-from kei_agent.agent_policy import NOTION_MCP, AgentPolicy
 from kei_agent.configuration.config import Config, path_without_venv
-from kei_agent.execution_contract import ExecutionContract, resolve_contract
-from kei_agent.model_policy import ResolvedModel, validate_resolved
-from kei_agent.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
+from kei_agent.execution import codex_apps, guard
+from kei_agent.execution.agent_policy import NOTION_MCP, AgentPolicy
+from kei_agent.execution.execution_contract import ExecutionContract, resolve_contract
+from kei_agent.execution.model_policy import ResolvedModel, validate_resolved
+from kei_agent.execution.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
 from kei_agent.storage.notion import gateway_client_token
 from kei_agent.workspaces.themes import Workspace
 

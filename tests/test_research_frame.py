@@ -9,12 +9,12 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
-from kei_agent import model_classifier, model_policy, runner
 from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import ConfigError, load_config
+from kei_agent.execution import model_classifier, model_policy, runner
+from kei_agent.execution.jobs import JobManager
+from kei_agent.execution.model_policy import ModelPolicyError
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
-from kei_agent.model_policy import ModelPolicyError
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
 

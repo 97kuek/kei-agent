@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fakes import FakeGitHub
 
-from kei_agent import model_classifier
 from kei_agent.configuration.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
+from kei_agent.execution import model_classifier
 from kei_agent.framework import modules
 from kei_agent.storage.store import Store
 
@@ -69,7 +69,7 @@ def research_use_case(prompt: str) -> str:
 @pytest.fixture(autouse=True)
 def no_pinned_models():
     """担当の表（agents.csv）で固定したモデルは load_config が覚える。前のテストのものを持ち越さない。"""
-    from kei_agent.model_policy import pin_models
+    from kei_agent.execution.model_policy import pin_models
 
     pin_models({})
     yield

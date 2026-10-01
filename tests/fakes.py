@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from kei_agent import ask
-from kei_agent.jobs import REQUESTS_DIR
+from kei_agent.execution.jobs import REQUESTS_DIR
 from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読めるように
     FakeAI,
     FakeHub,

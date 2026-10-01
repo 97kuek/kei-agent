@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from kei_agent import guard
 from kei_agent.configuration.config import Config
-from kei_agent.execution_contract import ExecutionContract
+from kei_agent.execution import guard
+from kei_agent.execution.execution_contract import ExecutionContract
 
 Runtime = Literal["claude_cli", "codex_cli"]
 PROFILE_NAME = "kei_agent_scoped"

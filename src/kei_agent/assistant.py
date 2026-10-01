@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, agents, api, ask, guard, router, runner, updates
+from kei_agent import a2a, agents, api, ask, router, updates
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -29,12 +29,10 @@ from kei_agent.auto_messages import (
 )
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
-from kei_agent.execution_contract import prompt_version
-from kei_agent.framework import modules, version
-from kei_agent.handoff import Handoff, strip_handoff
-from kei_agent.home import agent_labels
-from kei_agent.jobs import JobManager, missing_outputs
-from kei_agent.model_policy import (
+from kei_agent.execution import guard, runner
+from kei_agent.execution.execution_contract import prompt_version
+from kei_agent.execution.jobs import JobManager, missing_outputs
+from kei_agent.execution.model_policy import (
     PROVIDERS,
     ModelPolicyError,
     UseCase,
@@ -42,6 +40,9 @@ from kei_agent.model_policy import (
     is_manual,
     resolve,
 )
+from kei_agent.framework import modules, version
+from kei_agent.handoff import Handoff, strip_handoff
+from kei_agent.home import agent_labels
 from kei_agent.request import Request
 from kei_agent.response_output import (
     OutputError,
@@ -814,7 +815,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if use_case is None:
             use_case, prompt = explicit_use_case(actor, prompt)
         if use_case is None:
-            from kei_agent.model_classifier import UsageLimited, classify
+            from kei_agent.execution.model_classifier import UsageLimited, classify
             try:
                 use_case = await classify(self.config, self.store, actor, request_text or prompt,
                                           provider=provider)

@@ -9,12 +9,13 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
 import kei_agent.assistant as assistant_module
-from kei_agent import a2a, ask, router, runner
+from kei_agent import a2a, ask, router
 from kei_agent.assistant import Assistant
 from kei_agent.auto_messages import history_prompt
 from kei_agent.configuration import settings
-from kei_agent.execution_contract import prompt_version
-from kei_agent.jobs import JobManager
+from kei_agent.execution import runner
+from kei_agent.execution.execution_contract import prompt_version
+from kei_agent.execution.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.slack_text import split_text
 from kei_agent.testing.kit import settle
@@ -1655,7 +1656,7 @@ async def test_a_dead_voice_layer_does_not_break_slack(env):
 
 async def test_explicit_use_case_survives_the_handoff_memo(env, store, monkeypatch):
     """引き継いだスレッドの最初の回でも、先頭の [[research-design]] を読み取って分類器に回さない。"""
-    from kei_agent import model_classifier
+    from kei_agent.execution import model_classifier
 
     assistant, _, claude, _ = env
 

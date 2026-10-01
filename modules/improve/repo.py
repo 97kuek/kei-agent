@@ -217,7 +217,7 @@ FIX_PROMPT = """\
 [Kei Agent からの自動メッセージ] このスレッドで決まった直し方で、Kei Agent 自身のコードを直してください。
 
 - いまのディレクトリは、この作業のための git worktree です。ここの中だけを書き換えます
-- `src/kei_agent/guard.py`、`config.example.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
+- `src/kei_agent/execution/guard.py`、`config.example.toml`、`deploy/` は触らないでください（柵なので、触れた差分は捨てられます）
 - 直したら、直したところに関係するテストのファイル（`uv run --frozen --group agents pytest -q tests/test_<…>.py`）と
   `uvx ruff check src tests modules` を通してください。全体のテストは、この作業場ではソケットなどが使えず通らないので
   回さないでください（終わったあとに Kei Agent 本体が外で回します）

@@ -156,7 +156,7 @@ async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, 
 
 async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
     """本体は session_id などを添えた JSON で頼む。provider に渡すのは質問だけにする。"""
-    from kei_agent import runner
+    from kei_agent.execution import runner
     from kei_agent_a2a import run
 
     seen = {}

@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kei_agent.agent_policy import AgentPolicy
     from kei_agent.configuration.config import Config
+    from kei_agent.execution.agent_policy import AgentPolicy
     from kei_agent.workspaces.themes import Workspace
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
@@ -56,7 +56,7 @@ ACCOUNT_NOTION = "mcp__claude_ai_Notion"
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
 # config.example.toml は、新しく使う人の既定の柵（読ませない場所・接続先）になる。本物の設定はリポジトリの外
-PROTECTED_PATHS = ("src/kei_agent/guard.py", "config.example.toml", "deploy/")
+PROTECTED_PATHS = ("src/kei_agent/execution/guard.py", "config.example.toml", "deploy/")
 # 依存するライブラリが変わる差分。取り込む前の確認で、いちばん上に出す
 DEPENDENCY_PATHS = ("pyproject.toml", "uv.lock")
 # 差分に入っていてはいけない文字列（秘密情報）
@@ -113,7 +113,7 @@ def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> di
     アカウントの連携を使う担当はユーザー設定を読むので、そこに広い許可があっても効かないよう、
     表にない道具は名指しで断る。
     """
-    from kei_agent.agent_policy import NOTION_MCP
+    from kei_agent.execution.agent_policy import NOTION_MCP
 
     assert ws.cwd is not None
     allow: list[str] = []

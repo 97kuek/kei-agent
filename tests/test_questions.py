@@ -10,9 +10,9 @@ pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っ�
 
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import runner
 from kei_agent.assistant import Assistant
-from kei_agent.jobs import JobManager
+from kei_agent.execution import runner
+from kei_agent.execution.jobs import JobManager
 
 
 @pytest.fixture

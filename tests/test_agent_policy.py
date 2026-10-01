@@ -2,9 +2,9 @@
 
 import pytest
 
-from kei_agent.agent_policy import NOTION_READ_TOOLS, POLICIES, policy_of
 from kei_agent.configuration.config import model_actors
-from kei_agent.model_policy import UseCase
+from kei_agent.execution.agent_policy import NOTION_READ_TOOLS, POLICIES, policy_of
+from kei_agent.execution.model_policy import UseCase
 
 
 def test_every_actor_has_one_policy():

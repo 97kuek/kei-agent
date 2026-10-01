@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kei_agent import runner
 from kei_agent.a2a import Agent
-from kei_agent.agent_policy import policy_of
+from kei_agent.execution import runner
+from kei_agent.execution.agent_policy import policy_of
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 pytest.importorskip("uvicorn")
@@ -252,7 +252,7 @@ class FakeModel:
         self.calls = []
 
     async def __call__(self, config, request, prompt, on_activity=None):
-        from kei_agent.execution_contract import resolve_contract
+        from kei_agent.execution.execution_contract import resolve_contract
         self.calls.append({"use_case": request.recipe.use_case, "prompt": prompt,
                            "web": resolve_contract(config, request).policy.web})
         answer = self.answers[request.recipe.use_case]

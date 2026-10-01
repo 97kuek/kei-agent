@@ -1,10 +1,10 @@
-"""AI の返事から JSON を拾う（kei_agent.model_json）。振り分け・分類・担当のどれもが使う。"""
+"""AI の返事から JSON を拾う（kei_agent.execution.model_json）。振り分け・分類・担当のどれもが使う。"""
 
 import json
 
 import pytest
 
-from kei_agent.model_json import json_list, json_object
+from kei_agent.execution.model_json import json_list, json_object
 
 
 @pytest.mark.parametrize(("text", "expected"), [

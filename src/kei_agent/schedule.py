@@ -19,10 +19,11 @@ from datetime import time as dtime
 
 import aiohttp
 
-from kei_agent import briefing, jobs, maintenance
+from kei_agent import briefing, maintenance
 from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
+from kei_agent.execution import jobs
 from kei_agent.framework import modules, version
 from kei_agent.request import Request
 from kei_agent.slack_text import AWAITING_MARKER, clean_text, format_duration
@@ -377,7 +378,7 @@ async def _run_once(name: str, record: bool) -> None:
     from slack_sdk.web.async_client import AsyncWebClient
 
     from kei_agent.configuration.config import load_config
-    from kei_agent.jobs import JobManager
+    from kei_agent.execution.jobs import JobManager
     from kei_agent.storage.notion_hub import load_hub
     from kei_agent.storage.notion_store import load_notion
 

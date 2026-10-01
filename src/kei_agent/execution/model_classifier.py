@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from kei_agent import runner
 from kei_agent.configuration.config import Config
+from kei_agent.execution import runner
+from kei_agent.execution.model_json import json_object
+from kei_agent.execution.model_policy import ModelPolicyError, UseCase, resolve_classifier, use_case_of
 from kei_agent.framework import modules
-from kei_agent.model_json import json_object
-from kei_agent.model_policy import ModelPolicyError, UseCase, resolve_classifier, use_case_of
 from kei_agent.router import workspace
 
 

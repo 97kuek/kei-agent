@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from kei_agent.dates import weekday
-from kei_agent.jobs import log_tail, missing_outputs
+from kei_agent.execution.jobs import log_tail, missing_outputs
 from kei_agent.slack_text import DONE_PREFIX, FAILED_PREFIX, PROGRESS_PREFIX, clean_text, format_duration, message_text
 from kei_agent.storage.store import Job
 

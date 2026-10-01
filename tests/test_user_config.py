@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.execution_contract import prompt_text, prompt_version
+from kei_agent.execution.execution_contract import prompt_text, prompt_version
 
 
 def _home(tmp_path, config: str = "", profile: str | None = None, prompts: dict[str, str] | None = None):

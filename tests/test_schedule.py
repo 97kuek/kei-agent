@@ -5,11 +5,12 @@ from datetime import date, datetime, timedelta
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 
-from kei_agent import morning, runner
+from kei_agent import morning
 from kei_agent import schedule as schedule_module
 from kei_agent.assistant import Assistant
 from kei_agent.calendar_sync import SyncReport
-from kei_agent.jobs import JobManager
+from kei_agent.execution import runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.schedule import Scheduler, due_day
 from kei_agent.storage.notion_store import Note
 from kei_agent.testing.kit import settle

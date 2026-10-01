@@ -12,11 +12,12 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
-from kei_agent import api, guard, runner, updates
+from kei_agent import api, updates
 from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import ConfigError, load_config
+from kei_agent.execution import guard, runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -318,8 +319,8 @@ def test_the_fence_rejects_protected_paths_and_secrets(repo, path, text, problem
 
 async def test_check_change_uses_the_core_fence(env, repo):
     assistant, slack, claude = env
-    (repo / "src" / "kei_agent").mkdir()
-    (repo / "src" / "kei_agent" / "guard.py").write_text("# ゆるめる\n")
+    (repo / "src" / "kei_agent" / "execution").mkdir(parents=True)
+    (repo / "src" / "kei_agent" / "execution" / "guard.py").write_text("# ゆるめる\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "change")
 

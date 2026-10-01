@@ -9,7 +9,7 @@
     list-jobs   {}
     cancel-job / forget-job  {"task_id": 12}
 
-ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、本体（kei_agent.jobs）が覚えている。
+ジョブが「どのスレッドのものか」「できるはずのファイルは何か」は、本体（kei_agent.execution.jobs）が覚えている。
 ここは pueue の待ち行列を持つだけ。会話の続け方（session の付け替え、履歴の戻し）と Slack への見せ方も本体の仕事。
 """
 

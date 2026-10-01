@@ -13,12 +13,13 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import api, home, jobs
+from kei_agent import api, home
 from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import load_config
+from kei_agent.execution import jobs
+from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
 from kei_agent.storage.notion_hub import load_hub
 from kei_agent.storage.notion_store import load_notion

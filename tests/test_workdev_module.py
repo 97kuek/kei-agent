@@ -6,8 +6,8 @@ from dataclasses import replace
 import pytest
 from fakes import write_config
 
-from kei_agent.agent_policy import policy_of
 from kei_agent.configuration.config import load_config
+from kei_agent.execution.agent_policy import policy_of
 from kei_agent.framework import modules
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind

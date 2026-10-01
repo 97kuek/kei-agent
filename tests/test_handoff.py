@@ -7,10 +7,10 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import runner
 from kei_agent.assistant import Assistant
+from kei_agent.execution import runner
+from kei_agent.execution.jobs import JobManager
 from kei_agent.handoff import ACCEPT_ACTION, DECLINE_ACTION, handoff_title, split_memo, strip_handoff
-from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.testing.kit import settle
 
