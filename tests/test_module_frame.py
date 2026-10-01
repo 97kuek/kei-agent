@@ -16,7 +16,7 @@ from kei_agent.execution import model_classifier, model_policy, runner
 from kei_agent.execution.agent_policy import policy_of
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.schedule import Scheduler
+from kei_agent.scheduling.schedule import Scheduler
 from kei_agent.testing.kit import settle
 
 CALENDAR_TOML = '''api = 1
@@ -385,7 +385,7 @@ async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, mon
 
 
 async def test_module_agenda_goes_into_the_review_material(env, monkeypatch):
-    from kei_agent import digest
+    from kei_agent.scheduling import digest
 
     scheduler, assistant, slack, claude, agent = env
     builder = digest.DigestBuilder(assistant.config, assistant.store, assistant)

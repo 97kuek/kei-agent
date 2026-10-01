@@ -1,7 +1,7 @@
 import time
 from datetime import UTC, date, datetime
 
-from kei_agent import timelog
+from kei_agent.scheduling import timelog
 
 
 def test_week_start():

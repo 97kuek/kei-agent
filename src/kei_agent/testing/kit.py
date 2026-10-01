@@ -25,7 +25,7 @@ from kei_agent.configuration.config import load_config, model_actors
 from kei_agent.execution import model_classifier, runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.schedule import Scheduler
+from kei_agent.scheduling.schedule import Scheduler
 from kei_agent.storage.store import Store
 from kei_agent.testing.agents import FakeAgent, LocalAgent
 from kei_agent.testing.fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack

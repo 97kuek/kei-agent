@@ -5,13 +5,13 @@ from datetime import date, datetime, timedelta
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 
-from kei_agent import morning
-from kei_agent import schedule as schedule_module
 from kei_agent.assistant import Assistant
-from kei_agent.calendar_sync import SyncReport
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
-from kei_agent.schedule import Scheduler, due_day
+from kei_agent.scheduling import morning
+from kei_agent.scheduling import schedule as schedule_module
+from kei_agent.scheduling.calendar_sync import SyncReport
+from kei_agent.scheduling.schedule import Scheduler, due_day
 from kei_agent.storage.notion_store import Note
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -62,7 +62,7 @@ async def test_scheduler_says_once_when_offline_and_once_when_back(env, monkeypa
             raise outcome
 
     monkeypatch.setattr(scheduler, "tick", tick)
-    caplog.set_level("INFO", logger="kei_agent.schedule")
+    caplog.set_level("INFO", logger="kei_agent.scheduling.schedule")
     for _ in range(4):
         await scheduler.safe_tick(datetime(2026, 9, 26, 12, 0))
 
@@ -494,7 +494,7 @@ class FakeCourseAgent:
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent.dates import weekday
+        from kei_agent.scheduling.dates import weekday
         params = {**(json.loads(text) if text.startswith("{") else {}), **(params or {})}
         self.asked.append((skill, params))
         data = {}
@@ -609,7 +609,7 @@ async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypa
 
 async def test_review_digest_gathers_all_three_domains(env, config, store):
     """振り返りの材料には、研究だけでなく大学と仕事も入れる。"""
-    from kei_agent.digest import DigestBuilder
+    from kei_agent.scheduling.digest import DigestBuilder
 
     scheduler, assistant, slack, _ = env
     now = datetime.now().replace(hour=21, minute=0, second=0, microsecond=0)
@@ -659,7 +659,7 @@ def test_the_voice_layer_gets_a_week_not_just_today():
 
 async def test_digest_reads_yesterday_review_and_week_time_from_the_hub(env, config, store):
     """前日の振り返りは日別記録から、今週の時間は時間記録（時間記録のモジュール）と runs から読む（手元のファイルは見ない）。"""
-    from kei_agent.digest import DigestBuilder
+    from kei_agent.scheduling.digest import DigestBuilder
 
     _, assistant, *_ = env
     now = datetime(2026, 9, 18, 8, 0)
@@ -692,8 +692,8 @@ async def test_daily_digest_is_capped_and_does_not_ask_the_agents_again(env, con
 
     朝は朝のまとめですでに大学と仕事に聞いているので、材料づくりで二度聞かない（claude を無駄に動かさない）。
     """
-    from kei_agent import digest
-    from kei_agent.digest import DigestBuilder
+    from kei_agent.scheduling import digest
+    from kei_agent.scheduling.digest import DigestBuilder
 
     _, assistant, *_ = env
     course_agent, work_agent = assistant.agents["course"], assistant.agents["work"] = (

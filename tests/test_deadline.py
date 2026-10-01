@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from kei_agent import deadline, morning
+from kei_agent.scheduling import deadline, morning
 from kei_agent_modules.course import module as course
 
 

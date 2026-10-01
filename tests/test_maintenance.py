@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent import maintenance
 from kei_agent.app import setup_logging
+from kei_agent.scheduling import maintenance
 from kei_agent.workspaces import themes
 
 

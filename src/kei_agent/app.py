@@ -20,7 +20,7 @@ from kei_agent.configuration.config import load_config
 from kei_agent.execution import jobs
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.schedule import Scheduler
+from kei_agent.scheduling.schedule import Scheduler
 from kei_agent.storage.notion_hub import load_hub
 from kei_agent.storage.notion_store import load_notion
 from kei_agent.storage.store import Store

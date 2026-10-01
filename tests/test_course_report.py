@@ -73,7 +73,7 @@ def test_report_reads_the_last_seven_days(monkeypatch):
 
 def test_report_without_the_keys_says_so(monkeypatch):
     """鍵がなければ、何を入れればよいかを返す（黙って0時間にしない）。"""
-    from kei_agent.timelog import TogglError
+    from kei_agent.scheduling.timelog import TogglError
 
     monkeypatch.setattr(toggl_report, "load_toggl", lambda: None)
     with pytest.raises(TogglError, match="TOGGL_API_TOKEN"):

@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent.calendar_sync import (
+from kei_agent.scheduling.calendar_sync import (
     CalendarItem,
     CalendarSnapshot,
     IncompleteSnapshot,

@@ -15,7 +15,7 @@ from kei_agent.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.schedule import Scheduler, task_names
+from kei_agent.scheduling.schedule import Scheduler, task_names
 from kei_agent.storage.notion_store import Note
 from kei_agent_modules.daily import texts
 from kei_agent_modules.daily.module import daily_answer, review_answer
@@ -153,7 +153,7 @@ async def test_digest_lists_stalled_and_waiting_only_for_asked_active_channels(e
     """止まっているテーマ・返事待ちには、いま使っているチャンネルだけを出す。招待しただけで一度も依頼のないテーマは数えない。"""
     import os
 
-    from kei_agent.digest import DigestBuilder
+    from kei_agent.scheduling.digest import DigestBuilder
     scheduler, assistant, *_ = env
     make_theme(config, "old-theme")
     make_theme(config, "archived")

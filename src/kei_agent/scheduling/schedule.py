@@ -19,13 +19,13 @@ from datetime import time as dtime
 
 import aiohttp
 
-from kei_agent import briefing, maintenance
 from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
 from kei_agent.execution import jobs
 from kei_agent.framework import modules, version
 from kei_agent.request import Request
+from kei_agent.scheduling import briefing, maintenance
 from kei_agent.slack_text import AWAITING_MARKER, clean_text, format_duration
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_store import Task, parse_slack_permalink, summarize

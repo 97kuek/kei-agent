@@ -11,10 +11,10 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent import a2a
 from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.digest import DigestBuilder
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
+from kei_agent.scheduling.digest import DigestBuilder
 
 STAMP_TOML = '''api = 1
 name = "stamp"

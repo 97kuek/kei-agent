@@ -19,11 +19,11 @@ from kei_agent.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
+from kei_agent.scheduling.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
 from kei_agent.storage.store import Store
 from kei_agent.testing.kit import settle
-from kei_agent.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent_modules.time import commands, entries, importer
 from kei_agent_modules.time.entries import Entries
 

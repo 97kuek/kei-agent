@@ -2,7 +2,7 @@
 
 プロジェクト＝科目、エントリの説明＝課題名で突き合わせる（docs/architecture.md）。
 測るのは依頼者自身。ここでは足し合わせて返すだけで、計測の開始も停止もしない。
-Toggl の鍵は研究の時間記録と同じものを使う（`kei_agent.timelog`）。
+Toggl の鍵は研究の時間記録と同じものを使う（`kei_agent.scheduling.timelog`）。
 """
 
 from __future__ import annotations
