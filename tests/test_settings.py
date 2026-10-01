@@ -86,11 +86,11 @@ def test_home_provider_changes_only_named_agent(config, store):
 
 
 def test_profile_has_only_the_provider(config, store):
-    """使える道具と連携は制限の表が決める。profile が持つのは provider だけ。"""
+    """使える道具と連携は制限の表が決める。profile が持つのは provider と、担当の表で固定したモデルだけ。"""
     settings.set_agent_provider(store, "course", "codex")
     profile = settings.agent_profile(config, store, "course")
     assert profile.provider == "codex"
-    assert set(profile.__dataclass_fields__) == {"provider"}
+    assert set(profile.__dataclass_fields__) == {"provider", "model", "effort"}
 
 
 def test_changing_provider_updates_only_the_provider(config, store):

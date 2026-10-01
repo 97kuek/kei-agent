@@ -52,6 +52,9 @@ class AgentProfile:
 
     # provider は App Home で明示選択する。空文字は「まだ選んでいない」。
     provider: str = ""
+    # 担当の表（agents.csv）で固定したモデル。空なら module.toml の用途ごとの選び分け（model_policy.resolve）
+    model: str = ""
+    effort: str = ""
 
 
 def _default_agent_profiles() -> dict[str, AgentProfile]:
@@ -226,6 +229,8 @@ class Config:
     module_settings: dict[str, dict] = field(default_factory=dict)
     # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）を、研究テーマの置き場所に選べるか（既定は選べない）
     allow_protected_folders: bool = False
+    # 担当の表（agents.csv）を読んだときの場所。None なら config.toml の modules・[channels]・[agents] を使っている
+    agents_table: Path | None = None
 
     def settings(self, name: str) -> dict:
         """そのモジュールの設定（module.toml の [settings] の既定に、config.toml の [<名前>] を重ねたもの）。
@@ -334,6 +339,8 @@ TOP_LEVEL_KEYS = {
 }
 PATHS_KEYS = {"secrets"}
 AGENT_PROFILE_KEYS = {"provider"}
+# モデルを固定できるのは担当の表（agents.csv）だけ。config.toml の [agents] には provider だけを書く
+TABLE_PROFILE_KEYS = {"provider", "model", "effort"}
 # 設定に書かなかったときの置き場所。テストは conftest で一時フォルダに差し替え、本物の状態や研究データを触らない
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
@@ -399,41 +406,37 @@ def _a2a(data: dict, enabled: list[modules.ModuleSpec]) -> A2AConfig:
                      orchestrator=orchestrator)
 
 
-def _enabled_modules(data: dict, home: Path) -> list[modules.ModuleSpec]:
-    """設定の modules（書かなければ組み込み全部）を、知っているモジュールから選ぶ。利用者のモジュールもここで読む。"""
-    try:
-        modules.register_user_modules(home / "modules")
-    except modules.ModuleError as e:
-        raise ConfigError(str(e)) from None
+def _enabled_modules(data: dict, where: str = "config.toml の modules") -> list[modules.ModuleSpec]:
+    """設定の modules（書かなければ組み込み全部）を、知っているモジュールから選ぶ。where は直す場所（知らせに使う）。"""
     known = modules.known()
     names = data.get("modules", list(modules.builtin()))
     if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
         raise ConfigError("config.toml の modules は、モジュールの名前の配列にしてください（例: modules = [\"knowledge\"]）")
     unknown = [n for n in names if n not in known]
     if unknown:
-        raise ConfigError(f"config.toml の modules に知らないモジュールがあります: {', '.join(unknown)}"
+        raise ConfigError(f"{where} に知らないモジュールがあります: {', '.join(unknown)}"
                           f"（知っているもの: {', '.join(sorted(known)) or 'なし'}）")
     enabled = [known[n] for n in dict.fromkeys(names)]
     catch_all = [spec.name for spec in enabled if spec.catch_all]
     if len(catch_all) > 1:
         # ほかのどれにも当たらないチャンネル（研究テーマ）を受け持てるのは、オンのモジュールのうち1つだけ
         raise ConfigError(f"モジュール「{catch_all[0]}」と「{catch_all[1]}」が、どちらもほかのどれにも当たらないチャンネル（*）を"
-                          "受け持とうとしています。config.toml の modules でどちらかを外してください")
+                          f"受け持とうとしています。{where} でどちらかを外してください")
     for kind in modules.CORE_CHANNELS:
         owners = [spec.name for spec in enabled if kind in spec.core_channels]
         if len(owners) > 1:
             # 本体のチャンネルの会話を受け持てるのも、オンのモジュールのうち1つだけ
             raise ConfigError(f"モジュール「{owners[0]}」と「{owners[1]}」が、どちらも本体のチャンネル（{kind}）の会話を"
-                              "受け持とうとしています。config.toml の modules でどちらかを外してください")
+                              f"受け持とうとしています。{where} でどちらかを外してください")
     for schedule in modules.CORE_SCHEDULES:
         owners = [spec.name for spec in enabled if schedule in spec.core_schedules]
         if len(owners) > 1:
             raise ConfigError(f"モジュール「{owners[0]}」と「{owners[1]}」が、どちらも本体の定期処理（{schedule}）を"
-                              "受け持とうとしています。config.toml の modules でどちらかを外してください")
+                              f"受け持とうとしています。{where} でどちらかを外してください")
     for spec in enabled:
         missing = [r for r in spec.requires if r not in names]
         if missing:
-            raise ConfigError(f"モジュール「{spec.name}」には {', '.join(missing)} が要ります（config.toml の modules に足してください）")
+            raise ConfigError(f"モジュール「{spec.name}」には {', '.join(missing)} が要ります（{where} でオンにしてください）")
     # 使ってよいモデルの一覧はコアにある（model_policy）。読み込みの順番のため、ここで読む
     from kei_agent.model_policy import check_module_recipes
     for spec in enabled:
@@ -482,25 +485,31 @@ def _module_settings(data: dict) -> dict[str, dict]:
     return found
 
 
-def _agent_profiles(data: dict) -> dict[str, AgentProfile]:
-    """[agents.<name>] を読み、未指定の actor は provider 未選択にする。"""
+def _agent_profiles(data: dict, source: str = "config.toml") -> dict[str, AgentProfile]:
+    """[agents.<name>]（担当の表なら、その行）を読み、未指定の actor は provider 未選択にする。"""
     if not isinstance(data, dict):
         raise ConfigError("config.toml の [agents] はテーブルにしてください")
+    # 使ってよいモデルの一覧はコアにある（model_policy）。読み込みの順番のため、ここで読む
+    from kei_agent.model_policy import pin_error
+
     # 前の名前（[agents.self_fix]）は、今の名前（[agents.improve]）として読む。両方あれば今の名前を使う
     data = {**{LEGACY_ACTORS.get(name, name): raw for name, raw in data.items() if name in LEGACY_ACTORS},
             **{name: raw for name, raw in data.items() if name not in LEGACY_ACTORS}}
     unknown = sorted(set(data) - model_actors())
     if unknown:
-        raise ConfigError(f"config.toml の [agents] に知らないagentがあります: {', '.join(unknown)}")
+        raise ConfigError(f"{source} の [agents] に知らないagentがあります: {', '.join(unknown)}")
     profiles = _default_agent_profiles()
     for name, raw in data.items():
         if not isinstance(raw, dict):
             raise ConfigError(f"config.toml の [agents.{name}] はテーブルにしてください")
-        _check_keys(raw, AGENT_PROFILE_KEYS, f"[agents.{name}]")
-        provider = str(raw.get("provider", ""))
+        _check_keys(raw, AGENT_PROFILE_KEYS if source == "config.toml" else TABLE_PROFILE_KEYS, f"[agents.{name}]")
+        provider, model, effort = (str(raw.get(key, "")) for key in ("provider", "model", "effort"))
+        where = f"{source} の {name} の行" if source != "config.toml" else f"config.toml の [agents.{name}]"
         if provider not in {"", "claude", "codex"}:
-            raise ConfigError(f"config.toml の [agents.{name}].provider は claude、codex、または空文字にしてください")
-        profiles[name] = AgentProfile(provider=provider)
+            raise ConfigError(f"{where} の provider（engine）は claude、codex、または空にしてください")
+        if error := pin_error(name, provider, model, effort):
+            raise ConfigError(f"{where}: {error}")
+        profiles[name] = AgentProfile(provider=provider, model=model, effort=effort)
     return profiles
 
 
@@ -525,10 +534,26 @@ def config_home(env: dict[str, str] | None = None) -> Path:
     return config_path(env).parent
 
 
-def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> Config:
+def _with_table(data: dict, table: Path) -> dict:
+    """担当の表（agents.csv）があれば、その中身を config.toml の modules・[channels]・[agents] として重ねる。"""
+    from kei_agent import agents_table
+
+    both = [key for key in agents_table.REPLACED_KEYS if key in data]
+    if both:
+        raise ConfigError(f"{table.name} があるので、config.toml の {'・'.join(both)} は消してください"
+                          f"（モジュールのオンオフ・チャンネル・AI は {table.name} だけに書く）")
+    try:
+        return {**data, **agents_table.load(table)}
+    except agents_table.TableError as e:
+        raise ConfigError(str(e)) from None
+
+
+def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
+                agents_csv: Path | None = None) -> Config:
     """設定を読む。場所は path、環境変数 KEI_AGENT_CONFIG、利用者のフォルダの config.toml の順に探す。
 
     利用者のフォルダは KEI_AGENT_HOME か、設定ファイルのあるフォルダ（path を渡したとき）か、~/.config/kei-agent。
+    担当の表は、利用者のフォルダの agents.csv（agents_csv で別のファイルも読める）。
     """
     env = dict(os.environ) if env is None else env
     if path is None and env.get("KEI_AGENT_CONFIG"):
@@ -545,10 +570,20 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         # 書き方の誤りも設定の誤りとして知らせる（起動・kei-agent doctor・kei-agent module が同じように扱える）
         raise ConfigError(f"{path.name} の書き方が TOML として読めません: {e}") from None
 
+    try:
+        modules.register_user_modules(home / "modules")
+    except modules.ModuleError as e:
+        raise ConfigError(str(e)) from None
+    from kei_agent.agents_table import AGENTS_FILE
+
+    table = agents_csv or home / AGENTS_FILE
+    table = table if table.is_file() else None
+    if table is not None:
+        data = _with_table(data, table)
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
     sandbox = data.get("sandbox", {})
-    enabled = _enabled_modules(data, home)
+    enabled = _enabled_modules(data, table.name if table is not None else "config.toml の modules")
     # モジュールの設定は、そのモジュールの名前の表（[course] など）に書く
     module_settings = _module_settings(data)
     _check_keys(data, TOP_LEVEL_KEYS | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
@@ -586,7 +621,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
-        agent_profiles=_agent_profiles(data.get("agents", {})),
+        agent_profiles=_agent_profiles(data.get("agents", {}), table.name if table is not None else "config.toml"),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
@@ -603,7 +638,12 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None) -> 
         secrets_dir=secrets_dir,
         module_settings=module_settings,
         allow_protected_folders=allow_protected,
+        agents_table=table,
     )
+    # 表で固定したモデルは、モデルを決めるところ（model_policy.resolve）が引く
+    from kei_agent.model_policy import pin_models
+
+    pin_models(config.agent_profiles)
     # 研究テーマの置き場所（themes.toml）の書き間違いは、起動のときに理由を出して止める
     from kei_agent.themes import PlaceError, check_places
 

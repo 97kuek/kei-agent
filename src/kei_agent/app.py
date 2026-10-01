@@ -13,7 +13,7 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import api, home, jobs, modules, theme_invite
+from kei_agent import api, home, jobs, modules, settings, theme_invite
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config
 from kei_agent.jobs import JobManager
@@ -49,6 +49,8 @@ async def serve() -> None:
     config = load_config()
     config.research_root.mkdir(parents=True, exist_ok=True)
     store = Store(config.db_path)
+    for actor in settings.reset_agent_providers(config, store):
+        log.info("App Home で切り替えていた %s の AI を、%s の値に戻しました", actor, config.agents_table.name)
     for name, day in store.mark_interrupted_schedules():
         log.warning("前回の %s（%s）は途中で終わっていました。時間内ならやり直します", name, day)
     pueue = jobs.queue(config)

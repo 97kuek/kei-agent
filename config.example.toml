@@ -27,6 +27,9 @@ job_parallel = 1
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
+# 担当の表（agents.csv。例は agents.example.csv）を置くと、モジュールのオンオフ・チャンネル・AI はそこだけに書く。
+# そのときは下の modules・[agents]・[channels] を消す（kei-agent agents init が移して消す。deploy/README.md の「担当の表」）
+#
 # 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
 # ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）。
 # kei-agent module add / remove <名前> で書き換えられる（この行だけを変える）

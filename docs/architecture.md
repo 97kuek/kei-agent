@@ -89,7 +89,8 @@
 
 ### actor とモデル
 
-- AI の実行役（actor）ごとに、App Home で provider を選ぶ。既定は無く、選ぶまで動かない
+- AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine`（表が無ければ App Home）。既定は無く、選ぶまで動かない
+- モデルは用途ごとの表（下と [agents/](agents.md)）で決まる。`agents.csv` の `model`・`effort` を書いた担当だけ、明示の用途を除いてそのモデルにする（[deploy/README.md](../deploy/README.md#担当の表agentscsv)）
 - actor: `research` / `course` / `work` / `knowledge` / `router`（振り分け）/ `daily` / `improve`
 - 使ってよいモデルは `model_policy.py` にだけ置く。モジュールはその中からしか選べない
 

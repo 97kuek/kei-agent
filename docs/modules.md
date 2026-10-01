@@ -17,7 +17,7 @@ uv run kei-agent doctor                                 # 確かめる
 1. ひな形は `~/.config/kei-agent/modules/weather/` にできる。設定はまだ変えない
 2. `module.toml` の `description`、`module.py` の答え方、`weather.md`（指示書）を書く
 3. テストを通す。本物の Slack・AI・秘密情報には触れない
-4. `module add` でオンにし、起動し直す・チャンネルを作って招く・App Home で AI を選ぶ
+4. `module add` でオンにし、起動し直す・チャンネルを作って招く・AI を選ぶ（`agents.csv` の `engine` か App Home）
 5. Kei Agent に足して公開するなら `--builtin` でリポジトリの `modules/` に作り、プルリクエストにする（[CONTRIBUTING.md](../CONTRIBUTING.md)）
 
 ## フォルダの中身

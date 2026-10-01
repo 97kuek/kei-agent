@@ -1,0 +1,192 @@
+"""担当の表（agents.csv）: モジュールのオンオフ・チャンネル・AI の実行器とモデルを1か所で変える。"""
+
+import pytest
+
+from kei_agent import agents_command, cli, module_command, settings
+from kei_agent.agents_table import TableError, parse, with_enabled
+from kei_agent.config import ConfigError, load_config
+from kei_agent.model_policy import resolve
+from kei_agent.store import Store
+
+HEADER = "module,enabled,channels,engine,model,effort\n"
+
+
+def _home(tmp_path, table: str | None, config: str = ""):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / "config.toml").write_text(config, encoding="utf-8")
+    if table is not None:
+        (home / "agents.csv").write_text(table, encoding="utf-8")
+    return home
+
+
+def _load(home):
+    return load_config(env={"KEI_AGENT_HOME": str(home)})
+
+
+def test_the_table_decides_modules_channels_and_engines(tmp_path):
+    home = _home(tmp_path, HEADER + (
+        "router,true,,claude,,\n"
+        "overview,true,overview research-overview,,,\n"
+        "research,true,,codex,,\n"
+        "course,TRUE,#course uni,claude,claude-sonnet-5,high\n"
+        "work,false,work,claude,,\n"
+        "improve,true,kei-agent,claude,,\n"
+        "notion,true,,,,\n"))
+    config = _load(home)
+    assert config.agents_table.name == "agents.csv"
+    # 表に無いモジュールと、false のモジュールはオフ
+    assert config.modules == ("research", "course", "improve", "notion")
+    assert config.module_channels["course"] == ("course", "uni")
+    # 空欄のチャンネルは module.toml の既定
+    assert config.module_channels["theme"] == ("*",)
+    assert config.overview_channels == ("overview", "research-overview")
+    assert config.improve_channels == ("kei-agent",)
+    assert config.agent_profiles["research"].provider == "codex"
+    assert config.agent_profiles["course"].model == "claude-sonnet-5"
+    # 表に無い担当は未選択
+    assert config.agent_profiles["daily"].provider == ""
+
+
+def test_a_pinned_model_applies_to_every_use_case_except_manual_ones(tmp_path):
+    home = _home(tmp_path, HEADER + "research,true,,claude,claude-opus-5,max\n")
+    _load(home)
+    for case in ("research_extract", "research_design"):
+        recipe = resolve("research", "claude", case)
+        assert (recipe.model, recipe.reasoning_effort) == ("claude-opus-5", "max")
+    # 依頼者が明示したときだけの用途は、表のモデルにしない
+    assert resolve("research", "claude", "manual_fable", manual=True).model == "claude-fable-5"
+    # App Home で表と違う provider に一時的に切り替えたときは、用途ごとの選び分け
+    assert resolve("research", "codex", "research_extract").model == "gpt-6-luna"
+    # 空欄の担当は用途ごとの選び分けのまま
+    assert resolve("course", "claude", "course_degree_plan").model == "claude-opus-5"
+
+
+@pytest.mark.parametrize(("rows", "said"), [
+    ("research,true,,claude,gpt-6-sol,\n", "claude では gpt-6-sol を使えません"),
+    ("research,true,,claude,claude-fable-5,\n", "明示したときだけ"),
+    ("research,true,,codex,gpt-6-sol,max\n", "effort"),
+    ("research,true,,,claude-sonnet-5,\n", "engine も書いて"),
+    ("research,true,,claude,,high\n", "model も書いて"),
+    ("research,yes,,claude,,\n", "true か false"),
+    ("research,true,,gemini,,\n", "claude、codex"),
+    ("nothing,true,,,,\n", "知らないモジュール"),
+    ("research,true,,,,\nresearch,false,,,,\n", "2つあります"),
+    ("notion,true,,claude,,\n", "AI を使わない"),
+    ("notion,true,notion,,,\n", "チャンネルを持ちません"),
+    ("router,false,,claude,,\n", "オフにできません"),
+    ("overview,true,,claude,,\n", "engine・model・effort を書けません"),
+    ("course,true,course,uni,claude,,\n", "列が多すぎます"),
+])
+def test_mistakes_say_which_row_to_fix(tmp_path, rows, said):
+    home = _home(tmp_path, HEADER + rows)
+    with pytest.raises(ConfigError, match=said):
+        _load(home)
+
+
+def test_the_header_bom_and_comments(tmp_path):
+    with pytest.raises(TableError, match="1行目"):
+        parse("module,on\nresearch,true\n")
+    # Excel が付ける BOM と、# で始まる行・空の行は読み飛ばす
+    home = _home(tmp_path, None)
+    (home / "agents.csv").write_bytes(("﻿" + HEADER + "# メモ,,,,,\n\nknowledge,true,,codex,,\n").encode())
+    assert _load(home).modules == ("knowledge",)
+    (home / "agents.csv").write_bytes(HEADER.encode() + "knowledge,true,知識,,,\n".encode("shift_jis"))
+    with pytest.raises(ConfigError, match="UTF-8"):
+        _load(home)
+
+
+def test_the_same_things_cannot_also_be_in_config_toml(tmp_path):
+    home = _home(tmp_path, HEADER + "knowledge,true,,,,\n", 'modules = ["knowledge"]\n\n[agents.router]\nprovider = "claude"\n')
+    with pytest.raises(ConfigError, match="modules・agents は消してください"):
+        _load(home)
+
+
+def test_app_home_switches_are_temporary_when_the_table_is_used(tmp_path):
+    home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
+    config = _load(home)
+    store = Store(config.db_path)
+    settings.set_agent_provider(store, "knowledge", "claude")
+    assert settings.selected_provider(config, store, "knowledge") == "claude"
+    assert settings.table_provider(config, "knowledge") == "codex"
+    # 本体を起動し直すと、表の値に戻る
+    assert settings.reset_agent_providers(config, store) == ["knowledge"]
+    assert settings.selected_provider(config, store, "knowledge") == "codex"
+
+
+def test_app_home_choices_stay_without_the_table(config, store):
+    settings.set_agent_provider(store, "knowledge", "codex")
+    assert settings.reset_agent_providers(config, store) == []
+    assert settings.selected_provider(config, store, "knowledge") == "codex"
+    assert settings.table_provider(config, "knowledge") is None
+
+
+def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
+    text = HEADER + "knowledge,true,,codex,,\nwork,false,work,claude,,\n"
+    assert with_enabled(text, "work", True) == HEADER + "knowledge,true,,codex,,\nwork,true,work,claude,,\n"
+    assert with_enabled(text, "daily", True).endswith("daily,true,,,,\n")
+    home = _home(tmp_path, text)
+    env = {"KEI_AGENT_HOME": str(home)}
+    assert module_command.change("work", True, env=env, launchd=False) == 0
+    assert (home / "agents.csv").read_text() == with_enabled(text, "work", True)
+    assert (home / "agents.csv.bak").read_text() == text
+    assert module_command.change("knowledge", False, env=env, launchd=False) == 0
+    assert _load(home).modules == ("work",)
+    assert "enabled = false" in capsys.readouterr().out
+
+
+def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
+    from kei_agent.home import build_home
+
+    home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
+    config = _load(home)
+    store = Store(config.db_path)
+    text = str(build_home(config, store, [], True))
+    assert "agents.csv では" not in text
+    settings.set_agent_provider(store, "knowledge", "claude")
+    assert "agents.csv では Codex（起動し直すと戻る）" in str(build_home(config, store, [], True))
+
+
+def test_init_moves_the_config_into_the_table(tmp_path, capsys):
+    config_text = ('# わたしの設定\nmodules = ["research", "course", "knowledge"]\nhandoff_after_turns = 5\n\n'
+                   '[agents.research]\nprovider = "codex"\n\n[agents.router]\nprovider = "claude"\n\n'
+                   '[schedule]\ndaily = "07:30"\n\n[channels]\ncourse = ["uni"]\nimprove = ["kei-agent"]\n')
+    home = _home(tmp_path, None, config_text)
+    env = {"KEI_AGENT_HOME": str(home)}
+    before = _load(home)
+    # App Home で選んだ AI は、表の engine に書き写す（移したあとの起動で App Home の値は消える）
+    settings.set_agent_provider(Store(before.db_path), "course", "claude")
+    assert agents_command.init(env=env, dry_run=True) == 0
+    assert not (home / "agents.csv").exists()
+    assert agents_command.init(env=env) == 0
+    after = _load(home)
+    assert after.agents_table is not None
+    assert (after.modules, after.module_channels) == (before.modules, before.module_channels)
+    assert after.agent_profiles["research"].provider == "codex"
+    assert after.agent_profiles["course"].provider == "claude"
+    toml = (home / "config.toml").read_text()
+    assert "modules" not in toml and "[agents" not in toml and "[channels]" not in toml
+    assert 'daily = "07:30"' in toml and "handoff_after_turns = 5" in toml
+    assert (home / "config.toml.bak").read_text() == config_text
+    # もう表があれば、何もしない
+    assert agents_command.init(env=env) == 0
+    assert "もうあります" in capsys.readouterr().out
+
+
+def test_the_command_dispatches(monkeypatch):
+    seen = []
+    monkeypatch.setattr(agents_command, "init", lambda **kw: seen.append(kw) or 0)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["agents", "init", "--dry-run"])
+    assert e.value.code == 0 and seen == [{"dry_run": True}]
+
+
+def test_the_example_table_lists_every_builtin_module(tmp_path):
+    from kei_agent import modules
+    from kei_agent.config import REPO_ROOT
+
+    home = _home(tmp_path, (REPO_ROOT / "agents.example.csv").read_text(encoding="utf-8"))
+    config = _load(home)
+    assert set(config.modules) == set(modules.builtin())
+    # 例は AI を選んでいない状態で始まる（config.example.toml と同じ）
+    assert all(not p.provider and not p.model for p in config.agent_profiles.values())

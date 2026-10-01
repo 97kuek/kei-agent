@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from dataclasses import replace
 from datetime import datetime
 
 from kei_agent import modules
@@ -188,6 +189,7 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
 
 
 # actor ごとの provider。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
+# 担当の表（agents.csv）を使っているときは表が正で、App Home の値は本体を起動し直すまでの一時的なもの
 _PROFILE_PROVIDERS = frozenset({"claude", "codex"})
 
 
@@ -207,7 +209,26 @@ def selected_provider(config: Config, store: Store, actor: str) -> str:
     return _get(store, f"agent.{actor}.provider") or config.agent_profiles[actor].provider
 
 
+def table_provider(config: Config, actor: str) -> str | None:
+    """担当の表（agents.csv）に書いた provider。表を使っていなければ None。"""
+    return config.agent_profiles[actor].provider if config.agents_table is not None else None
+
+
+def reset_agent_providers(config: Config, store: Store) -> list[str]:
+    """担当の表を使っているとき、App Home で一時的に切り替えた provider を消して表に戻す（本体の起動のとき）。
+    戻した actor を返す。"""
+    if config.agents_table is None:
+        return []
+    reset = []
+    for actor in sorted(model_actors()):
+        key = f"agent.{actor}.provider"
+        if _get(store, key) is not None:
+            store.delete_setting(key)
+            reset.append(actor)
+    return reset
+
+
 def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
     if agent not in model_actors():
         raise ValueError(f"未知のagentです: {agent}")
-    return AgentProfile(provider=selected_provider(config, store, agent))
+    return replace(config.agent_profiles[agent], provider=selected_provider(config, store, agent))

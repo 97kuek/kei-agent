@@ -24,9 +24,27 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 
 | ファイル | 中身 |
 |---|---|
-| `config.toml` | 使うモジュール・チャンネル・Notion のホーム・時刻など。場所は `KEI_AGENT_HOME`・`KEI_AGENT_CONFIG` で変えられる |
+| `config.toml` | Notion のホーム・時刻・sandbox など。場所は `KEI_AGENT_HOME`・`KEI_AGENT_CONFIG` で変えられる |
+| `agents.csv` | 担当の表。モジュールのオンオフ・チャンネル・AI（下の「担当の表」）。無ければ `config.toml` の `modules`・`[channels]`・`[agents]` を読む |
 | `profile.md` | 話し方・所属・興味。会話する担当の指示書に足す |
 | `prompts/<名前>` | 指示書を丸ごと差し替えるとき |
+
+### 担当の表（`agents.csv`）
+
+- `cp agents.example.csv ~/.config/kei-agent/agents.csv` で作る。今の `config.toml` から移すときは `uv run kei-agent agents init`（`--dry-run` で見るだけ。前のものは `config.toml.bak`）
+- 1行に1つ。表に無いモジュールはオフ。Excel や Numbers で開いてよい（UTF-8 で保存する）
+
+| 列 | 書くこと |
+|---|---|
+| `module` | モジュールの名前。本体の行は `router`（振り分けの AI）と `overview`（研究全体のチャンネル） |
+| `enabled` | `true` / `false` |
+| `channels` | 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら `module.toml` の既定 |
+| `engine` | `claude` / `codex`。空欄の担当は動かない |
+| `model` / `effort` | ふだんは空欄（用途ごとに軽いモデルと重いモデルを選び分ける）。書くと、その担当の用途をすべてそのモデルにする（`[[manual-fable]]` などの明示の用途は除く）。使えるモデルは [architecture.md](../docs/architecture.md#actor-とモデル) |
+
+- 表があるときに `config.toml` へ `modules`・`[channels]`・`[agents]` を書くと、起動しない（書く場所を1つにする）
+- 変えたら `deploy/restart-all.sh` で起動し直す。書き間違いは起動と `kei-agent doctor` が行を示して知らせる
+- App Home で AI を切り替えると、本体を起動し直すまでの一時的なものになる（App Home に表の値を出す）
 
 ## 3. 秘密情報
 
@@ -142,7 +160,7 @@ sqlite3 -header -column "file:$HOME/.local/state/kei-agent/kei-agent.db?mode=ro"
    GROUP BY actor, use_case, model, effort ORDER BY 回数 DESC"
 ```
 
-- `module add` / `remove` は `config.toml` の `modules` の行だけを書き換え、前のものを `config.toml.bak` に残す
+- `module add` / `remove` は `agents.csv` の `enabled`（表が無ければ `config.toml` の `modules` の行）だけを書き換え、前のものを `.bak` に残す
 - 22:00 の保守: 研究のセッションの記録を90日で消し、使い終わった worktree を消し、`~/research` と `~/kei-agent` を非公開リポジトリに push する（50MB を超えるファイルは外す）
 - 別の Mac に移す: `research-data` を `~/research` に clone し、`sqlite3 ~/.local/state/kei-agent/kei-agent.db < ~/kei-agent/state/kei-agent.sql`
 
@@ -151,7 +169,7 @@ sqlite3 -header -column "file:$HOME/.local/state/kei-agent/kei-agent.db?mode=ro"
 | 症状 | 見るところ |
 |---|---|
 | 起動しない | `launchctl print gui/$(id -u)/com.kei-agent.assistant`、`launchd.log`。秘密情報のファイルが無いと止まる |
-| 返事が来ない | App Home で AI が選ばれているか。`kei-agent.log` |
+| 返事が来ない | `agents.csv` の `engine`（表が無ければ App Home）で AI が選ばれているか。`kei-agent.log` |
 | 担当だけ失敗する | `curl -s http://127.0.0.1:<番地>/.well-known/agent-card.json`、`<名前>-launchd.log`、`KEI_AGENT_A2A_TOKEN` が全部で同じか |
 | `can't open input file` | plist が古い起動スクリプトを指している。`deploy/install.sh <名前>` で登録し直す |
 | Notion がつながらない | `curl -s http://127.0.0.1:8791/health`、`notion-launchd.log`、`KEI_AGENT_NOTION_GATEWAY_TOKEN` が全部で同じか |

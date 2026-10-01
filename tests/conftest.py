@@ -66,6 +66,16 @@ def research_use_case(prompt: str) -> str:
 
 
 @pytest.fixture(autouse=True)
+def no_pinned_models():
+    """担当の表（agents.csv）で固定したモデルは load_config が覚える。前のテストのものを持ち越さない。"""
+    from kei_agent.model_policy import pin_models
+
+    pin_models({})
+    yield
+    pin_models({})
+
+
+@pytest.fixture(autouse=True)
 def fake_model_classifier(monkeypatch):
     """通常の unit test は本物の CLI を起動せず、既存の用途判定だけを再現する。"""
     async def module(_config, _store, spec, prompt: str, *, provider=None):

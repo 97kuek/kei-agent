@@ -22,6 +22,11 @@ ALLOWED_MODELS = {
 }
 # 依頼者が明示したときだけ使うモデル（用途の manual = true でしか書けない）
 MANUAL_ONLY_MODELS = {"codex": frozenset({"gpt-6-astra"}), "claude": frozenset({"claude-fable-5"})}
+# 担当の表（agents.csv）で書ける effort。空は CLI の既定（Claude では考えない）
+ALLOWED_EFFORTS = {
+    "codex": frozenset({"", "minimal", "low", "medium", "high", "xhigh"}),
+    "claude": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
+}
 # 依頼の頭で用途を指定する書き方（[[research-design]]。名前の _ は - で書く）
 _EXPLICIT = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 
@@ -101,6 +106,38 @@ def check_module_recipes(spec: modules.ModuleSpec) -> None:
                                   "（manual = true）でしか使えません")
 
 
+# 担当の表（agents.csv）で固定したモデル。actor → (provider, model, effort)。load_config が入れ直す
+_PINS: dict[str, tuple[str, str, str]] = {}
+
+
+def pin_error(actor: str, provider: str, model: str, effort: str) -> str:
+    """表で固定するモデルの書き間違い（無ければ空）。"""
+    if not model:
+        return "effort を書くときは model も書いてください" if effort else ""
+    if provider not in PROVIDERS:
+        return "model を書くときは engine も書いてください"
+    if model in MANUAL_ONLY_MODELS.get(provider, ()):
+        return f"{model} は依頼者が明示したときだけのモデルなので、固定できません"
+    if not is_allowed_model(provider, model):
+        return f"{provider} では {model} を使えません（使えるのは {', '.join(sorted(ALLOWED_MODELS[provider] - MANUAL_ONLY_MODELS[provider]))}）"
+    if effort not in ALLOWED_EFFORTS[provider]:
+        return f"{provider} の effort は {', '.join(sorted(ALLOWED_EFFORTS[provider] - {''}))} か空にしてください: {effort}"
+    return ""
+
+
+def pin_models(profiles: dict) -> None:
+    """表で固定したモデルを覚える（AgentProfile の model が空でないもの）。前のものは捨てる。"""
+    _PINS.clear()
+    _PINS.update({actor: (p.provider, p.model, p.effort) for actor, p in profiles.items() if p.model})
+
+
+def pinned(actor: str, provider: str) -> tuple[str, str] | None:
+    """その actor を provider で動かすときに固定したモデル (model, effort)。表の engine と違う provider なら None
+    （App Home で一時的に切り替えたときは、module.toml の用途ごとの選び分けに戻る）。"""
+    pin = _PINS.get(actor)
+    return pin[1:] if pin is not None and pin[0] == provider else None
+
+
 def is_allowed_model(provider: str, model: str) -> bool:
     return model in ALLOWED_MODELS.get(provider, ())
 
@@ -137,13 +174,15 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
     case = use_case_of(use_case)
     if case not in allowed_use_cases(actor):
         raise ModelPolicyError(f"{actor} では {case} を使えません")
-    found = _recipe(provider, case)
+    manual_case = is_manual(case)
+    # 表で固定したモデルは、依頼者が明示したときだけの用途には効かせない
+    found = (None if manual_case else pinned(actor, provider)) or _recipe(provider, case)
     if found is None:
         raise ModelPolicyError(f"{actor} では {case} を {provider} で使えません")
     model, effort = found
     if not is_allowed_model(provider, model):
         raise ModelPolicyError(f"許可されていない model です: {model}")
-    if is_manual(case):
+    if manual_case:
         # 手動指定だけの用途（module.toml の manual = true）
         if not manual:
             raise ModelPolicyError(f"{case} は依頼者による手動指定だけで使えます")

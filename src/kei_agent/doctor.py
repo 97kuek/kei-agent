@@ -49,9 +49,11 @@ def check_config(env: dict[str, str] | None = None) -> tuple[Config | None, list
     try:
         config = load_config(env=env)
     except ConfigError as e:
-        return None, [Finding(ERROR, "設定", f"設定を読めない: {e}", "config.toml を直してから、もう一度点検する")]
+        return None, [Finding(ERROR, "設定", f"設定を読めない: {e}",
+                              "config.toml（あれば agents.csv も）を直してから、もう一度点検する")]
     names = "、".join(config.modules) or "なし"
-    return config, [Finding(OK, "設定", f"設定を読めた（モジュール {len(config.modules)}: {names}）")]
+    source = f"。モジュール・チャンネル・AI は {config.agents_table.name}" if config.agents_table is not None else ""
+    return config, [Finding(OK, "設定", f"設定を読めた（モジュール {len(config.modules)}: {names}{source}）")]
 
 
 # 秘密情報
@@ -138,10 +140,21 @@ def check_ai(config: Config, which: Callable[[str], str | None] = shutil.which) 
     labels = home.agent_labels(config)
     providers = chosen_providers(config)
     findings = []
+    table = config.agents_table
     unset = [labels[actor] for actor, provider in providers.items() if not provider]
     if unset:
         findings.append(Finding(ERROR, "AI", f"AI が選ばれていない担当: {'、'.join(unset)}",
-                                "Slack の App Home で、担当ごとに Claude か Codex を選ぶ"))
+                                f"{table.name} の engine 列に claude か codex を書く" if table is not None
+                                else "Slack の App Home で、担当ごとに Claude か Codex を選ぶ"))
+    if table is not None:
+        moved = [f"{labels[a]}（{p}）" for a, p in providers.items() if p and p != config.agent_profiles[a].provider]
+        if moved:
+            findings.append(Finding(WARN, "AI", f"App Home で {table.name} と違う AI に切り替えている: {'、'.join(moved)}",
+                                    "本体を起動し直すと表の値に戻る。ずっと使うなら表の engine を書き換える"))
+        pins = [f"{labels[a]}（{p.model}{' ' + p.effort if p.effort else ''}）"
+                for a, p in config.agent_profiles.items() if p.model and a in labels]
+        if pins:
+            findings.append(Finding(OK, "AI", f"{table.name} でモデルを固定している担当: {'、'.join(pins)}"))
     for provider in sorted({p for p in providers.values() if p}):
         command = {"claude": "claude", "codex": "codex"}[provider]
         where = which(command)

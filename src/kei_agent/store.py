@@ -724,6 +724,10 @@ class Store:
             self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
                               "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
+    def delete_setting(self, key: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
     # 一度だけ知らせるもの
 
     def noticed(self, key: str) -> bool:

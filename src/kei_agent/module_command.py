@@ -2,7 +2,7 @@
 
 - `list` … 知っているモジュール（組み込みと、利用者のフォルダの modules/）と、オンかどうか、持っているもの
 - `add <名前>` / `remove <名前>` … config.toml の `modules` を書き換え（ほかの行とコメントは残す。書く前に、新しい設定を
-  読めるか確かめる。前の設定は config.toml.bak に残す）、常駐を持つモジュールなら launchd に登録する・外す。
+  読めるか確かめる。前の設定は config.toml.bak に残す）。担当の表（agents.csv）があれば、その行の enabled を書き換える、常駐を持つモジュールなら launchd に登録する・外す。
   そのあとにやること（起動し直す、manifest の貼り直し、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ
 
 `modules` を書いていない設定は、組み込みのモジュールを全部使う。そこで足す・外すときは、今の一覧を書き出してから変える。
@@ -18,7 +18,7 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
-from kei_agent import module_scaffold, modules
+from kei_agent import agents_table, module_scaffold, modules
 from kei_agent.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 
 # 書き足すときに添える行
@@ -75,13 +75,17 @@ def with_modules(text: str, names: list[str]) -> str:
     return "".join([*head, COMMENT + "\n", line + "\n", *(["\n"] if tail else []), *tail])
 
 
-def check_text(path: Path, text: str, env: dict[str, str], home: Path) -> Config:
+def check_text(path: Path, text: str, env: dict[str, str], home: Path, *, table: Path | None = None) -> Config:
     """その中身の設定を読めるか確かめる（同じフォルダの一時ファイルで。自分のモジュールと themes.toml も読む）。
-    読めなければ ConfigError。"""
-    trial = path.with_name(f".{path.name}.trial")
+    table を渡すと、text は担当の表（agents.csv）の中身。読めなければ ConfigError。"""
+    target = table or path
+    trial = target.with_name(f".{target.name}.trial")
     trial.write_text(text, encoding="utf-8")
+    env = {**env, "KEI_AGENT_HOME": str(home)}
     try:
-        return load_config(path=trial, env={**env, "KEI_AGENT_HOME": str(home)})
+        if table is not None:
+            return load_config(path=path, env=env, agents_csv=trial)
+        return load_config(path=trial, env=env)
     finally:
         trial.unlink(missing_ok=True)
 
@@ -151,7 +155,10 @@ def next_steps(spec: modules.ModuleSpec, config: Config, added: bool) -> list[st
         steps.append(f"設定できる項目（config.toml の [{spec.name}]）: " + "、".join(spec.settings))
     if spec.port is not None:
         steps.append(f"そのプロセスだけの秘密情報があれば kei-agent-{spec.name}.zsh に書く（秘密情報の置き場所に。任意）")
-    if spec.actor is not None:
+    if spec.actor is not None and config.agents_table is not None:
+        if not config.agent_profiles[spec.name].provider:
+            steps.append(f"{config.agents_table.name} の {spec.name} の行の engine に claude か codex を書く")
+    elif spec.actor is not None:
         steps.append(f"Slack の App Home で「{spec.label}」の AI（Claude か Codex）を選ぶ")
     return steps
 
@@ -174,11 +181,18 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
     if spec is None:
         print(f"❌ 知らないモジュール: {name}（kei-agent module list で見る）")
         return 1
-    text = path.read_text(encoding="utf-8")
+    table = home / agents_table.AGENTS_FILE
+    table = table if table.is_file() else None
+    target = table or path
     try:
-        names = current(text)
-    except ConfigError as e:
-        print(f"❌ 設定を読めない（{path.name}）: {e}")
+        if table is not None:
+            text = agents_table.read_text(table)
+            names = agents_table.parse(text)["modules"]
+        else:
+            text = path.read_text(encoding="utf-8")
+            names = current(text)
+    except (ConfigError, agents_table.TableError) as e:
+        print(f"❌ 設定を読めない（{target.name}）: {e}")
         return 1
     names = list(modules.builtin()) if names is None else names
     if (name in names) == add:
@@ -187,25 +201,29 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
     # 足すときは後ろに付ける（名前の順に並んでいれば、その順を保つ）
     new_names = ([*names, name] if names != sorted(names) else sorted([*names, name])) if add else \
         [n for n in names if n != name]
-    new_text = with_modules(text, new_names)
-    if not only_modules_changed(text, new_text, new_names):
-        print(f"❌ modules の行をうまく書き換えられないので、書き換えなかった（{path} の modules を手で直してください）")
-        return 1
+    if table is not None:
+        new_text = agents_table.with_enabled(text, name, add)
+    else:
+        new_text = with_modules(text, new_names)
+        if not only_modules_changed(text, new_text, new_names):
+            print(f"❌ modules の行をうまく書き換えられないので、書き換えなかった（{path} の modules を手で直してください）")
+            return 1
     try:
-        config = check_text(path, new_text, env, home)
+        config = check_text(path, new_text, env, home, table=table)
     except ConfigError as e:
         print(f"❌ この変更では設定を読めなくなるので、書き換えなかった: {e}")
         return 1
     verb = "足す" if add else "外す"
-    print(f"モジュール「{name}」（{spec.label}）を{verb}: modules = {new_names}")
+    print(f"モジュール「{name}」（{spec.label}）を{verb}: "
+          + (f"{table.name} の {name} の行を enabled = {'true' if add else 'false'}" if table else f"modules = {new_names}"))
     if dry_run:
         print("（--dry-run なので、書き換えていない）")
         return 0
-    path.with_name(path.name + ".bak").write_text(text, encoding="utf-8")
-    tmp = path.with_name(f".{path.name}.new")
+    target.with_name(target.name + ".bak").write_text(text, encoding="utf-8")
+    tmp = target.with_name(f".{target.name}.new")
     tmp.write_text(new_text, encoding="utf-8")
-    os.replace(tmp, path)
-    print(f"✅ {path} を書き換えた（前のものは {path.name}.bak）")
+    os.replace(tmp, target)
+    print(f"✅ {target} を書き換えた（前のものは {target.name}.bak）")
     steps = next_steps(spec, config, add)
     if spec.port is not None:
         if launchd and installer(name, not add):
