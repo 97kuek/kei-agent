@@ -14,9 +14,8 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
 - `async on_reaction(event, added) -> bool` … リアクションの付け外し（Slack の reaction_added の中身）。
   自分の投稿へのものなら扱って True を返す（ほかのモジュールと 🌙 には回らない）
 - `async run_schedule(name, day) -> dict` … module.toml の [schedules] の処理（day は YYYY-MM-DD）。
-  返した辞書は記録に残り、{"status": "error"} なら朝の一覧の「うまくいかなかったこと」に載る。[schedules] があれば必須
+  返した辞書は記録に残り、{"status": "error"} なら朝の Daily のときに #00_kei-agent へ知らせる。[schedules] があれば必須
 - `async tick(now)` … 毎分呼ばれる見回り（締切の知らせなど）。間隔はモジュールが決める（例: 1時間に1回だけ見る）
-- `morning_notes(day) -> list[str]` … 朝の一覧（Daily の投稿）に足す行
 - `async agenda(days, kinds=None) -> list[dict] | None` … これから days 日の、時刻のある予定。朝の一覧・
   声のレイヤ・振り返りの材料に載る。kinds が来たら、その種類だけでよい（重い読み取りを省ける）。1件は
   会議 `{"kind": "meeting", "subject", "start": "YYYY-MM-DDTHH:MM", "end", "location", "url", "id", "source"}`
@@ -542,11 +541,11 @@ class Core:
     async def morning(self, now: datetime) -> Morning:
         """朝の一覧（今日の予定を時刻順に1通。Slack にそのまま出せる形）。
 
-        集めるのは、モジュールの取り込み（prepare）・予定（agenda）・朝の一覧の行（morning_notes）と、前回の Daily から
-        うまくいかなかった定期処理。会議は出典ごとに共通ホームの予定カレンダーにも写し、声には1週間ぶんの予定を
+        集めるのは、モジュールの取り込み（prepare）・予定（agenda）。前回の Daily からうまくいかなかった定期処理は
+        #00_kei-agent に知らせる。会議は出典ごとに共通ホームの予定カレンダーにも写し、声には1週間ぶんの予定を
         出来事（schedule）で渡す。Slack に出せたら mark_shown(notices) を呼ぶ。
         """
-        return await briefing.build(self._assistant, now, skip=self.name)
+        return await briefing.build(self._assistant, now)
 
     def mark_shown(self, notices) -> None:
         """朝の一覧を Slack に出せたあとに呼ぶ（出した締切を、24時間前の知らせで繰り返さないための目印を残す）。"""

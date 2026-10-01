@@ -95,18 +95,6 @@ class Module:
     async def run_schedule(self, name: str, day: str) -> dict:
         return await (self.literature(day) if name == "literature" else self.reading(day))
 
-    def morning_notes(self, day: str) -> list[str]:
-        """今朝の先行研究の新着と読みもの（昨日の分を、今朝のもののように載せない）。"""
-        notes = []
-        themes = self.core.schedule_detail("literature", day).get("themes") or {}
-        posted = [name for name, got in themes.items() if got.get("status") == "posted"]
-        if posted:
-            notes.append("先行研究の新着: " + "、".join(f"#{name}" for name in posted))
-        reading = self.core.schedule_detail("reading", day)
-        if reading.get("status") == "posted" and reading.get("channel"):
-            notes.append(f"読みもの: {reading.get('count')}件（<#{reading['channel']}>）")
-        return notes
-
     # 先行研究の新着
 
     async def literature(self, day: str) -> dict:

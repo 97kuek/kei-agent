@@ -3,7 +3,6 @@
 import json
 import sys
 import time
-from datetime import datetime
 
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
@@ -101,8 +100,6 @@ async def test_literature_goes_through_the_knowledge_agent(env, config, store):
     assert assistant.notion.papers["arXiv:2609.00001"]["themes"] == ["vlm"]
     # このスレッドの続きは知識の担当が答える
     assert store.thread_agent("C1", detail["themes"]["vlm"]["thread_ts"]) == "knowledge"
-    assert "先行研究の新着: #vlm" in scheduler.morning_notes(datetime(2026, 9, 19, 8, 0))
-    assert not any("先行研究" in note for note in scheduler.morning_notes(datetime(2026, 9, 20, 8, 0)))
 
 
 async def test_literature_without_notion_does_not_ask_the_agent(env):
@@ -150,9 +147,6 @@ async def test_reading_posts_one_message_per_article(env, config, store):
     row = store.module_record("knowledge", "post", f"C40:{posts[0]['ts']}")
     assert row["expires_at"] == pytest.approx(time.time() + 30 * 86400, abs=60)
     assert detail == {"status": "posted", "count": 2, "channel": "C40", "failed_sources": []}
-    assert "読みもの: 2件（<#C40>）" in scheduler.morning_notes(datetime(2026, 9, 26, 8, 0))
-    # 今朝の分がまだ無ければ、昨日の分は載せない
-    assert not any("読みもの" in note for note in scheduler.morning_notes(datetime(2026, 9, 27, 8, 0)))
 
 
 async def test_a_thumbs_up_saves_the_article_and_guides_the_next_picks(env, config, store):

@@ -2459,3 +2459,23 @@ async def test_a_deferred_question_in_a_paper_thread_follows_the_knowledge_provi
 
     assert len(agent.asked) == 2 and agent.asked[1]["prompt"].endswith("2番を詳しく")
     assert not any("自動で再実行しなかった" in text for text in slack.texts())
+
+
+async def test_troubles_in_a_row_become_one_message_that_says_notion_was_down(config, store):
+    """Notion が止まると続けて失敗する。30分のうちの問題は最初の1通に書き足す（通知が鳴るのは1回）。"""
+    from kei_agent import assistant as assistant_module
+
+    slack = FakeSlack({"C0": "kei-agent"})
+    assistant = Assistant(config, store, slack, None, "xoxb", "UBOT")
+    down = ': POST /data_sources/abc/query: 503 {"code": "service_unavailable"}'
+    await assistant.notify_trouble("Daily の材料を Notion から読めませんでした" + down)
+    await assistant.notify_trouble("Retro & Planning を日別記録に保存できませんでした" + down)
+    posts = [kw for name, kw in slack.calls if name == "chat_postMessage"]
+    updates = [kw for name, kw in slack.calls if name == "chat_update"]
+    assert len(posts) == 1 and len(updates) == 1
+    assert "（2件）（どれも Notion が一時的に応答しなかったため" in updates[0]["text"]
+    assert "• Retro & Planning を日別記録に保存できませんでした" in updates[0]["text"]
+    # 時間がたてば、新しい1通にする
+    assistant._trouble["at"] -= assistant_module.TROUBLE_GROUP_SECONDS
+    await assistant.notify_trouble("ほかの問題")
+    assert len([1 for name, _ in slack.calls if name == "chat_postMessage"]) == 2

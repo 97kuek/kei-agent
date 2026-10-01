@@ -120,9 +120,9 @@ class Module:
         answer = await self._write("daily_write", "daily",
                                    texts.daily_prompt(day, texts.material(digest, DIGEST_CHARS)))
         title = f"Daily {day_label(day)}"
-        # 朝に読むものを1通にまとめる。チャンネルには今日の時系列、スレッドに Daily の中身
+        # チャンネルには今日の予定だけ、スレッドに Daily の見出しと中身
         morning = await self.core.morning(datetime.now())
-        thread_ts = await self.core.publish(channel, f"{morning.text}\n\n🌅 {title}", answer or failure_text("daily"))
+        thread_ts = await self.core.publish(channel, morning.text, f"**🌅 {title}**\n\n{answer or failure_text('daily')}")
         self.core.mark_shown(morning.notices)
         note = await self._save(channel, thread_ts, title, "Daily", day, answer) if answer else None
         return {"status": "posted" if answer else "error", "thread_ts": thread_ts,

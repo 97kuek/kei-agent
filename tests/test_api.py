@@ -3,7 +3,6 @@
 import asyncio
 import json
 from dataclasses import replace
-from datetime import datetime
 
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
@@ -48,10 +47,6 @@ class Module:
 
     async def run_schedule(self, name: str, day: str) -> dict:
         return {"status": "done", "count": len(self.core.records.items("memo"))}
-
-    def morning_notes(self, day: str) -> list[str]:
-        detail = self.core.schedule_detail("tidy", day)
-        return [f"メモ: {detail['count']}件"] if detail else []
 
     async def on_reaction(self, event: dict, added: bool) -> bool:
         item = event.get("item") or {}
@@ -112,7 +107,7 @@ async def test_a_broken_module_says_so_instead_of_staying_silent(env, store):
     assert any("#memo の依頼の処理が落ちました" in text for text in slack.texts())
 
 
-async def test_a_user_module_runs_its_schedule_in_order_and_adds_morning_notes(env, config):
+async def test_a_user_module_runs_its_schedule_in_order(env, config):
     scheduler, assistant, slack = env
     await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": "<@UBOT> 牛乳を買う"})
     await settle(assistant)
@@ -120,8 +115,6 @@ async def test_a_user_module_runs_its_schedule_in_order_and_adds_morning_notes(e
     assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily", "review",
                                            "maintenance")
     assert await scheduler.run_task("tidy", "2026-09-27") == {"status": "done", "count": 1}
-    assert "メモ: 1件" in scheduler.morning_notes(datetime(2026, 9, 27, 8, 0))
-    assert not any(note.startswith("メモ") for note in scheduler.morning_notes(datetime(2026, 9, 28, 8, 0)))
 
 
 async def test_reactions_go_to_the_module_that_owns_the_post(env, store):

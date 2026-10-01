@@ -1,7 +1,7 @@
 """朝の一覧（今日の予定を時刻順に1通）を組み立てる。本体の窓口 core.morning と、本体の定期処理から使う。
 
-集めるもの: モジュールの取り込み（prepare）、予定（agenda）、朝の一覧の行（morning_notes）、前回の Daily から
-うまくいかなかった定期処理。会議は出典ごとに共通ホームの予定カレンダーにも写し、声のレイヤには1週間ぶんの予定を
+集めるもの: モジュールの取り込み（prepare）、予定（agenda）。前回の Daily からうまくいかなかった定期処理は、
+一覧には載せず #00_kei-agent に知らせる。会議は出典ごとに共通ホームの予定カレンダーにも写し、声のレイヤには1週間ぶんの予定を
 出来事（schedule）で渡す。文の組み立ては morning.py。
 """
 
@@ -64,18 +64,11 @@ def failure_note(assistant: Assistant, now: datetime, failed_now: list[str] | No
     Daily とレトプラが何日も Notion に残っていなかったのに、気づけなかった（2026-09-26）。
     """
     failed = settings.failed_schedules(assistant.config, assistant.store, now) + (failed_now or [])
-    return f"⚠️ うまくいかなかったこと: {'、'.join(dict.fromkeys(failed))}" if failed else ""
+    return f"前回の Daily から今朝までに、うまくいかなかったこと（{'、'.join(dict.fromkeys(failed))}）" if failed else ""
 
 
-def notes(assistant: Assistant, now: datetime, failed_now: list[str] | None = None, skip: str = "") -> list[str]:
-    """時刻の無いもの（モジュールの今朝の分、うまくいかなかったこと）を、1行ずつ。"""
-    found = assistant.module_notes(now.date().isoformat(), skip)
-    failure = failure_note(assistant, now, failed_now)
-    return [*found, failure] if failure else found
-
-
-async def build(assistant: Assistant, now: datetime, skip: str = "") -> Morning:
-    """朝の一覧（今日の時系列）。集められなかったものは黙って飛ばす。skip は行を足さないモジュール（呼んだモジュール）。"""
+async def build(assistant: Assistant, now: datetime) -> Morning:
+    """朝の一覧（今日の時系列）。集められなかったものは飛ばし、うまくいかなかったことは #00_kei-agent に知らせる。"""
     detail: dict = {}
     classes: list[dict] = []
     dues: list[dict] = []
@@ -112,5 +105,6 @@ async def build(assistant: Assistant, now: datetime, skip: str = "") -> Morning:
         for e in morning.upcoming(classes, events, dues, now, days=VOICE_DAYS)])
     failed_now = ["会議の書き込み"] if "error" in synced.values() else []
     failed_now += prepared + [f"{label}の予定の読み取り" for label in unread]
-    text = morning.text(classes, events, dues, now, notes(assistant, now, failed_now, skip))
-    return Morning(text, detail, tuple(notices))
+    if failure := failure_note(assistant, now, failed_now):
+        await assistant.notify_trouble(failure)
+    return Morning(morning.text(classes, events, dues, now), detail, tuple(notices))

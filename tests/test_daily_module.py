@@ -118,7 +118,8 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert "返事が要る" in text and "中間発表" in text
     header, body = slack.posted()
     # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
-    assert header["channel"] == "C5" and header["text"].endswith("🌅 Daily 9/18（金）")
+    # チャンネルには予定だけ、Daily の見出しはスレッドの先頭
+    assert header["channel"] == "C5" and header["text"].startswith("☀️") and "Daily" not in header["text"]
     assert header["text"].startswith("☀️")
     note = assistant.hub.notes[-1]
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
@@ -135,7 +136,7 @@ async def test_daily_posts_only_four_bold_sections(env):
 
     assert result["status"] == "posted"
     assert "手順を確認" not in "\n".join(slack.texts())
-    assert slack.texts()[1] == DAILY_REPLY
+    assert slack.texts()[1] == f"**🌅 Daily 9/24（木）**\n\n{DAILY_REPLY}"
 
 
 async def test_invalid_daily_is_not_saved_to_notion(env):
@@ -258,7 +259,7 @@ async def test_daily_without_hub_still_posts_and_says_so(env, config):
     result = await daily(assistant).daily("2026-09-24")
 
     assert result["status"] == "posted" and result["notion_url"] is None
-    assert DAILY_REPLY in slack.texts()
+    assert f"**🌅 Daily 9/24（木）**\n\n{DAILY_REPLY}" in slack.texts()
     assert any("Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in t
                for t in slack.texts())
     assert not (config.overview_dir / "daily").exists()

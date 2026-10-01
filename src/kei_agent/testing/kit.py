@@ -312,10 +312,6 @@ class ModuleKit:
         await self.scheduler.module_ticks(now or datetime.now())
         await self.settle()
 
-    def morning(self, now: datetime | None = None) -> list[str]:
-        """朝の一覧の行。"""
-        return self.scheduler.morning_notes(now or datetime.now())
-
     async def emit(self, kind: str, **fields) -> None:
         """出来事を知らせる（class Module の on_event に届く）。"""
         self.assistant.emit(kind, **fields)

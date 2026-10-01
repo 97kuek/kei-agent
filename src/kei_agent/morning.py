@@ -1,8 +1,10 @@
 """朝のまとめ（今日の時系列）。
 
 研究・授業・仕事で分けず、**時刻の早い順に1本**へ並べる。授業（Notion の「授業」＋学校の時限の時刻）、
-会議（Outlook）、締切（Moodle）を混ぜる。時刻の無いもの（今週の締切、先行研究の新着）は、
-下に一言ずつ添える。
+会議（Outlook）、締切（Moodle）を混ぜる。
+
+**下に添えていた行（このあとの締切・読みもの・うまくいかなかったこと）は、やめた**（2026-10-01）。
+予定だけを見たい。締切は前日・3日前の知らせ、読みものは知識のチャンネル、失敗は #00_kei-agent に出る。
 
 **1日の形を表す帯（`9時 .####...`）と空き時間の行は、やめた**（2026-09-22）。
 出してみたが、依頼者が手で消していた。時刻の一覧だけで足りる。
@@ -21,8 +23,6 @@ from kei_agent.slack_text import escape
 
 CLASS, MEETING, DUE = "🎓", "💼", "⏰"
 NOTHING = "今日は、時間の決まった予定がないよ。"
-# 下に添える「このあと」の締切を、いくつまで出すか
-MAX_LATER = 3
 
 
 @dataclass(frozen=True)
@@ -92,23 +92,6 @@ def soon(dues: list[dict], now: datetime, hours: int = 24) -> list[dict]:
     return [item for item in dues or [] if (at := parse_time(item.get("at", ""))) is not None and now <= at <= limit]
 
 
-def later(dues: list[dict], now: datetime, days: int = 7) -> str:
-    """今日より先の締切を1行で。"""
-    limit = (now + timedelta(days=days)).date()
-    found = []
-    for item in dues or []:
-        at = parse_time(item.get("at", ""))
-        if at and now.date() < deadline.day(at) <= limit:
-            found.append((at, item))
-    if not found:
-        return ""
-    found.sort(key=lambda pair: pair[0])
-    shown = "、".join(f"{deadline.day(at).month}/{deadline.day(at).day} {escape(item.get('title', ''))[:24]}"
-                     for at, item in found[:MAX_LATER])
-    rest = f"（ほか {len(found) - MAX_LATER} 件）" if len(found) > MAX_LATER else ""
-    return f"このあとの締切: {shown}{rest}"
-
-
 def soon_deadlines(dues: list[dict], now: datetime, days: int = 2) -> str:
     """いまから days 日後の終わりまでの締切（レトプラで明日の計画に使う）。無ければ空文字。"""
     limit = now.date() + timedelta(days=days)
@@ -124,17 +107,12 @@ def soon_deadlines(dues: list[dict], now: datetime, days: int = 2) -> str:
     return "\n".join(lines)
 
 
-def text(classes: list[dict], events: list[dict], dues: list[dict], now: datetime,
-         notes: list[str] | None = None) -> str:
-    """朝のまとめの本文（Slack にそのまま出せる形）。"""
+def text(classes: list[dict], events: list[dict], dues: list[dict], now: datetime) -> str:
+    """朝のまとめの本文（今日の予定だけ。Slack にそのまま出せる形）。"""
     lines = [f"☀️ {day_label(now)} の予定"]
     found = entries(classes, events, dues, now)
     if found:
         lines += [f"`{entry.span}` {entry.icon} {entry.text}" for entry in found]
     else:
         lines.append(NOTHING)
-    rest = [line for line in [later(dues, now), *(notes or [])] if line]
-    if rest:
-        lines.append("─")
-        lines += rest
     return "\n".join(lines)

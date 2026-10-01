@@ -291,12 +291,18 @@ async def test_an_unreadable_agenda_is_told_and_never_marks_the_calendar(env):
     assistant.hub.calendar.append({"id": "cal-0", "出典": "Google", "出典 ID": "g0", "名前": "前からある会議",
                                    "日付": "2026-09-29T10:00", "同期状態": "確認済み"})
     agent.broken = True
+    told = []
+
+    async def notify(text):
+        told.append(text)
+    assistant.notify_trouble = notify
 
     text, detail, _ = await scheduler.morning_text(datetime(2026, 9, 28, 8, 0))
 
     assert detail["agenda"] == {"synced": {}, "unread": ["予定"]}
     assert assistant.hub.calendar[0]["同期状態"] == "確認済み"          # 読めなかった日に「要確認」にしない
-    assert "予定の予定の読み取り" in text
+    # 読めなかったことは、朝の一覧ではなく #00_kei-agent に知らせる
+    assert "予定の予定の読み取り" not in text and any("予定の予定の読み取り" in t for t in told)
 
 
 async def test_module_agenda_goes_into_the_review_material(env):
@@ -399,7 +405,7 @@ async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, mon
     text, detail, notices = await scheduler.morning_text(now)
 
     assert "`10:40–12:20` 🎓 データベース" in text and "⏰ 締切: データベース 第3回レポート" in text
-    assert "うまくいかなかったこと: 課題の取り込み" in text
+    assert "うまくいかなかった" not in text and "─" not in text       # 一覧には予定だけ
     # 朝に出した締切は、そのモジュールの目印で記録する（24時間前の知らせで繰り返さない）
     assert notices == ["module.calendar.due:r1"]
     assert asked == [(7, None)]

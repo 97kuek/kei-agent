@@ -838,7 +838,7 @@ async def test_the_morning_says_what_went_wrong_since_the_last_daily(env):
 
     note = scheduler.failure_note(now, ["課題の取り込み"])
 
-    assert note == "⚠️ うまくいかなかったこと: Daily（Notion に残せず）、Retro & Planning、課題の取り込み"
+    assert note == "前回の Daily から今朝までに、うまくいかなかったこと（Daily（Notion に残せず）、Retro & Planning、課題の取り込み）"
     store.record_schedule("review", yesterday, {"status": "posted", "notion_url": "https://notion.so/r"})
     store.record_schedule("daily", yesterday, {"status": "posted", "notion_url": "https://notion.so/d"})
     assert scheduler.failure_note(now) == ""

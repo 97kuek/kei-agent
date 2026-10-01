@@ -156,7 +156,7 @@ class Module:
 | `tick(now)` | 毎分（間隔はモジュールが決める） |
 | `prepare(kind, day)` | Daily と振り返りの前。取り込み直す |
 | `agenda(days, kinds)` | 朝の一覧・振り返りの予定（会議・授業・締切）。読めなければ `None` |
-| `morning_notes(day)` / `material(now)` | 朝の一覧の行 / Daily と振り返りの材料 |
+| `material(now)` | Daily と振り返りの材料 |
 | `on_reaction(event, added)` | リアクション。`True` を返すと、ほかには回らない |
 | `on_event(kind, data)` | 出来事（下の表） |
 | `on_slash_command(name, body)` | スラッシュコマンド。返した文は本人にだけ見える。3秒以内に返す |

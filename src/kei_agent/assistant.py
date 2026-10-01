@@ -61,7 +61,7 @@ from kei_agent.response_output import (
     OutputError,
     finalize_conversation,
     safe_failure,
-    trouble_notice,
+    trouble_message,
 )
 from kei_agent.settings_actions import SettingsActions
 from kei_agent.slack_text import (
@@ -98,6 +98,8 @@ NOTIFY_AFTER_SECONDS = 60
 UNATTENDED_TRIGGERS = ("job",)
 # 名刺（エージェントのスキル）を読み直す間隔。入れ替えても、これだけたてば新しいスキルを使える
 SKILLS_TTL_SECONDS = 600
+# 問題の知らせは、前の知らせからこの秒数のうちに起きたものを、同じ1通に書き足す（通知が鳴るのは最初の1回）
+TROUBLE_GROUP_SECONDS = 30 * 60
 # 古い版の担当を起動し直してから、名刺を読み直すまでの秒数
 STALE_RECHECK_SECONDS = 20
 # スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
@@ -174,6 +176,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         self.bot_token = bot_token
         self.bot_user_id = bot_user_id
         self.semaphore = asyncio.Semaphore(config.max_concurrent_runs)
+        # 書き足している問題の知らせ（channel・ts・texts・at）
+        self._trouble: dict | None = None
+        self._trouble_lock = asyncio.Lock()
         # スレッドごとのロックは捨てずに残す。「待っている依頼がいるか」は release の直後に
         # 一瞬だけ「いない」と見えるので、そこで捨てると、待っていた依頼が別のロックを取り、
         # 同じスレッド（同じセッション）の claude が2本同時に走る
@@ -365,15 +370,27 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             log.warning("依頼者への通知を投稿できません", exc_info=True)
 
     async def notify_trouble(self, text: str) -> None:
-        """詳細はログに残し、改善チャンネルには何が起きたかを1行で知らせる（パスは名前だけ、長さは切る）。"""
+        """詳細はログに残し、改善チャンネルには何が起きたかを1行で知らせる（パスは名前だけ、長さは切る）。
+
+        Notion が止まると、同じ原因で続けていくつも失敗する。前の知らせから TROUBLE_GROUP_SECONDS のうちなら、
+        新しく投稿せずに前の1通へ書き足す（Slack は書き換えでは通知を鳴らさない）。
+        """
         log.warning(text)
         try:
             ids = await self.channel_ids()
             channel = next((ids[n] for n in self.config.improve_channels if n in ids), None)
-            if channel:
-                await self.slack.chat_postMessage(
-                    channel=channel,
-                    text=f"{FAILED_PREFIX} Kei Agent で確認が必要な問題が起きたよ: {trouble_notice(text)}")
+            if not channel:
+                return
+            async with self._trouble_lock:
+                now = time.time()
+                last = self._trouble
+                if last and last["channel"] == channel and now - last["at"] < TROUBLE_GROUP_SECONDS:
+                    last["texts"].append(text)
+                    last["at"] = now
+                    await self.slack.chat_update(channel=channel, ts=last["ts"], text=trouble_message(last["texts"]))
+                    return
+                posted = await self.slack.chat_postMessage(channel=channel, text=trouble_message([text]))
+                self._trouble = {"channel": channel, "ts": posted["ts"], "texts": [text], "at": now}
         except Exception:
             log.exception("Kei Agent の改善のチャンネルに知らせられません")
 
@@ -723,20 +740,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             if name in spec.slash_commands:
                 return str(await self.modules[module_name].on_slash_command(name, body) or "")
         return "このコマンドを受け持つモジュールがありません"
-
-    def module_notes(self, day: str, skip: str = "") -> list[str]:
-        """朝の一覧に足す、時刻の無い行（class Module の morning_notes）。作れなかったモジュールは飛ばす。"""
-        notes: list[str] = []
-        for name, module in self.modules.items():
-            morning_notes = getattr(module, "morning_notes", None)
-            if morning_notes is None or name == skip:
-                continue
-            try:
-                notes += [str(note) for note in morning_notes(day)]
-            except Exception:
-                # 朝の一覧は止めない
-                log.exception("モジュール「%s」の朝の一覧の行を作れませんでした", name)
-        return notes
 
     async def module_material(self, now: float, skip: str = "") -> list[str]:
         """Daily と振り返りの材料に、モジュールが足す行（class Module の material）。作れなかったモジュールは飛ばす。"""

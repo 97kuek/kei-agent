@@ -24,11 +24,10 @@ def test_the_morning_timeline_shows_tonights_midnight_deadline_at_24_00():
     assert not any("昨夜の課題" in line for line in lines)      # 土曜の 24:00 は、もう過ぎている
 
 
-def test_reminders_and_later_lines_use_the_previous_day():
+def test_reminders_use_the_previous_day():
     now = datetime(2026, 10, 24, 12, 0)
     item = {"id": "a", "at": "2026-10-26T00:00:00+09:00", "title": "Assignment A", "course": "情報"}
 
-    assert morning.later([item], now) == "このあとの締切: 10/25 Assignment A"
     assert "`10/25（日） 24:00` 情報 Assignment A" in morning.soon_deadlines([item], now, 2)
 
 

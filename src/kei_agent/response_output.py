@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from kei_agent.slack_text import FAILED_PREFIX
+
 FINAL_OPEN = "<<kei-agent-final>>"
 FINAL_CLOSE = "<<kei-agent-final-end>>"
 
@@ -131,6 +133,32 @@ def safe_failure(kind: str = "conversation") -> str:
                  "入り直してからもう一度頼んでね。",
     }
     return messages.get(kind, messages["conversation"])
+
+
+# Notion が一時的に応答しなかった（Notion の 5xx か、それを受けたゲートウェイの 503）
+_SERVER_DOWN = re.compile(r"\b50[0234]\b|service_unavailable|internal_server_error")
+_NOTION = re.compile(r"notion|/data_sources/|/pages/|/blocks/|/databases/", re.IGNORECASE)
+TROUBLE_HEAD = "Kei Agent で確認が必要な問題が起きたよ"
+# 1通にまとめて見せる件数（それより多ければ「ほか n 件」）
+TROUBLE_LINES = 8
+
+
+def notion_down(text: str) -> bool:
+    """Notion が一時的に応答しなかったための失敗か（少しすると直ることが多い）。"""
+    return bool(_SERVER_DOWN.search(text) and _NOTION.search(text))
+
+
+def trouble_message(texts: list[str]) -> str:
+    """続けて起きた問題を1通にした、改善チャンネルへの知らせ。どれも Notion の一時的な不調なら、そう添える。"""
+    lines = list(dict.fromkeys(trouble_notice(text) for text in texts))
+    why = "（どれも Notion が一時的に応答しなかったため。少しすると直ることが多いよ）" \
+        if all(notion_down(text) for text in texts) else ""
+    if len(lines) == 1:
+        return f"{FAILED_PREFIX} {TROUBLE_HEAD}: {lines[0]}{why}"
+    shown = [f"• {line}" for line in lines[:TROUBLE_LINES]]
+    if len(lines) > TROUBLE_LINES:
+        shown.append(f"• ほか {len(lines) - TROUBLE_LINES} 件（kei-agent.log）")
+    return f"{FAILED_PREFIX} {TROUBLE_HEAD}（{len(lines)}件）{why}\n" + "\n".join(shown)
 
 
 def trouble_notice(text: str, limit: int = 200) -> str:
