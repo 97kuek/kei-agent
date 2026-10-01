@@ -4,8 +4,9 @@
 設定（config.toml）・秘密情報（secrets/kei-agent.zsh と、プロセスだけのもの kei-agent-<名前>.zsh）を作る。
 
 1. 話し方とあなたのこと → profile.md
-2. 使うモジュール（できることを並べて選ぶ）、研究テーマの置き場所、Notion のホームのページ → config.toml
-3. AI（claude / codex があるか。担当ごとの AI は今までどおり App Home で選ぶ）
+2. 使うモジュール（できることを並べて選ぶ）と AI（claude / codex）→ agents.csv。
+   研究テーマの置き場所、Notion のホームのページ → config.toml
+3. AI（claude / codex があるか）
 4. Slack App（kei-agent manifest の出力を貼る手順と、作るチャンネル）
 5. 秘密情報（画面に出さずに聞き、本人だけが読めるファイルに書く。合言葉は作る。要るものは本体と module.toml の [secrets]）
 6. 常駐（聞いてから deploy/install.sh で launchd に登録する）
@@ -30,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import doctor, module_command, modules
+from kei_agent import agents_command, agents_table, doctor, module_command, modules
 from kei_agent.config import (
     EXAMPLE_CONFIG,
     PROFILE_FILE,
@@ -40,6 +41,7 @@ from kei_agent.config import (
     config_home,
     config_path,
     load_config,
+    model_actors,
 )
 
 EXAMPLE_PROFILE = REPO_ROOT / "profile.example.md"
@@ -52,7 +54,7 @@ PREFIXES = {"SLACK_BOT_TOKEN": ("xoxb-",), "SLACK_APP_TOKEN": ("xapp-",), "KEI_A
 FILE_WORDS = {"read": "ファイルを読む", "write": "ファイルに書く"}
 NOTION_WORDS = {"read": "Notion を読む", "write": "Notion に書く"}
 INTRO = """Kei Agent のはじめの設定。質問に答えると、{home} に次のものを作る:
-  profile.md（話し方とあなたのこと）、config.toml（使うモジュールなど）、secrets/（秘密情報）
+  profile.md（話し方とあなたのこと）、agents.csv（使うモジュールと AI）、config.toml（置き場所など）、secrets/（秘密情報）
 もうあるファイルは書き換えない。途中でやめても（Ctrl-C）作ったファイルは残り、もう一度動かすと残りから進む。"""
 SECRETS_HEADER = """# Kei Agent の秘密情報（kei-agent setup が作った）。本人だけが読める（chmod 600）まま置き、Git に入れない。
 # 書き方は deploy/README.md の「秘密情報」。# で始まる export の行は、まだ入れていないもの（# を外して値を書く）
@@ -194,13 +196,15 @@ def set_value(text: str, table: str, key: str, value: str) -> str:
     raise ConfigError(f"例の設定に {f'[{table}] の ' if table else ''}{key} が無い")
 
 
-def config_text(example: str, names: list[str], answers: dict[tuple[str, str], str]) -> str:
-    """例の設定（config.example.toml）の modules と、答えたところだけを書き換えたもの。"""
-    text = module_command.with_modules(example, names)
+def config_text(example: str, answers: dict[tuple[str, str], str]) -> str:
+    """例の設定（config.example.toml）から、担当の表に書くもの（modules・[channels]・[agents]）を除き、
+    答えたところだけを書き換えたもの。"""
+    text = agents_command.without_replaced(example, drop_notes=True)
     for (table, key), value in answers.items():
         text = set_value(text, table, key, value)
     expected = tomllib.loads(example)
-    expected["modules"] = names
+    for key in agents_table.REPLACED_KEYS:
+        expected.pop(key, None)
     for (table, key), value in answers.items():
         (expected[table] if table else expected)[key] = value
     if tomllib.loads(text) != expected:
@@ -208,8 +212,25 @@ def config_text(example: str, names: list[str], answers: dict[tuple[str, str], s
     return text
 
 
-def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str]) -> Config | None:
-    print("\n2. 使うモジュールと置き場所（config.toml）")
+def choose_engine(asker: Asker, which: Callable[[str], str | None]) -> str:
+    """担当の AI。入っているものが1つならそれ、両方なら聞く、無ければ空（あとで agents.csv の engine に書く）。"""
+    found = [name for name in modules.PROVIDERS if which(name)]
+    if not found:
+        print("  ⚠️ claude も codex も見つからないので、AI はまだ選ばない（入れたあと agents.csv の engine 列に書く）")
+        return ""
+    if len(found) == 1:
+        print(f"  AI は {found[0]}（見つかったもの。担当ごとに変えるときは agents.csv の engine 列）")
+        return found[0]
+    while True:
+        engine = asker.text("  担当の AI（claude か codex。担当ごとに変えるときは、あとで agents.csv の engine 列）", "claude")
+        if engine in found:
+            return engine
+        print("  claude か codex で答えてください")
+
+
+def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str],
+                which: Callable[[str], str | None] = shutil.which) -> Config | None:
+    print("\n2. 使うモジュールと AI（agents.csv）、置き場所（config.toml）")
     if path.exists():
         print(f"  もうある: {path}（書き換えない。足す・外すは kei-agent module add / remove）")
         try:
@@ -217,7 +238,15 @@ def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str]) -> Co
         except ConfigError as e:
             print(f"  ❌ 設定を読めない: {e}（直してから、もう一度 kei-agent setup）")
             return None
-    names = choose_modules(asker, modules.known())
+    table = home / agents_table.AGENTS_FILE
+    if table.exists():
+        print(f"  もうある: {table}（書き換えない。使うモジュールと AI はここに書いたもの）")
+        table_text = None
+    else:
+        names = choose_modules(asker, modules.known())
+        engine = choose_engine(asker, which)
+        table_text = agents_table.from_config({"modules": names}, {actor: engine for actor in model_actors()})
+    names = list(modules.known()) if table_text is None else names
     answers: dict[tuple[str, str], str] = {}
     if "research" in names:
         answers[("", "research_root")] = asker.text("  研究テーマの作業場を置く場所", "~/research")
@@ -230,14 +259,29 @@ def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str]) -> Co
             if found := ask_page(asker, f"  {label}"):
                 answers[("notion", key)] = found
     try:
-        text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), names, answers)
-        config = module_command.check_text(path, text, env, home)
+        text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), answers)
+        if table_text is None:
+            module_command.check_text(path, text, env, home)
+        else:
+            # 表と設定を、どちらもまだ書かずに一緒に確かめる
+            trials = {path.with_name(f".{path.name}.trial"): text, table.with_name(f".{table.name}.trial"): table_text}
+            try:
+                for trial, content in trials.items():
+                    trial.write_text(content, encoding="utf-8")
+                trial_toml, trial_csv = trials
+                load_config(path=trial_toml, env={**env, "KEI_AGENT_HOME": str(home)}, agents_csv=trial_csv)
+            finally:
+                for trial in trials:
+                    trial.unlink(missing_ok=True)
     except ConfigError as e:
         print(f"  ❌ この答えでは設定を読めないので、書かなかった: {e}")
         return None
+    if table_text is not None:
+        write_new(table, table_text)
+        print(f"  ✅ 書いた: {table}（モジュールのオンオフ・チャンネル・AI は、ここを書き換える）")
     write_new(path, text)
-    print(f"  ✅ 書いた: {path}（チャンネルの名前や時刻は、ここを直接書き換える）")
-    return config
+    print(f"  ✅ 書いた: {path}（時刻や Notion のホームは、ここを直接書き換える）")
+    return load_config(env=env)
 
 
 # 3. AI と 4. Slack
@@ -249,7 +293,7 @@ def step_ai(which: Callable[[str], str | None]) -> None:
         print(f"  ✅ 見つかった: {'、'.join(found)}（ログインしておく）")
     else:
         print("  ⚠️ claude も codex も見つからない。どちらかを入れて、ログインしておく")
-    print("  担当ごとの AI は、Kei Agent を動かしたあと Slack の App Home で選ぶ（選ぶまで、その担当は動かない）")
+    print("  担当ごとの AI は agents.csv の engine 列（空の担当は動かない）。App Home では一時的に切り替えられる")
 
 
 def channel_lines(config: Config) -> list[str]:
@@ -370,8 +414,9 @@ def _doctor(env: dict[str, str]) -> list[doctor.Finding]:
 
 
 def next_steps(config: Config) -> list[str]:
-    steps = ["Slack で、作ったチャンネルに Kei Agent を招く",
-             "Slack の App Home で、担当ごとの AI（Claude か Codex）を選ぶ"]
+    steps = ["Slack で、作ったチャンネルに Kei Agent を招く"]
+    if any(not p.provider for p in config.agent_profiles.values()):
+        steps.append("agents.csv の engine 列に、担当ごとの AI（claude か codex）を書く")
     if "notion" in config.modules:
         steps.append("Notion のホームのページをコネクト「Kei Agent」に共有し、ゲートウェイが動いてから DB を作る"
                      "（deploy/README.md の「5. Notion」）")
@@ -395,7 +440,7 @@ def run(asker: Asker | None = None, env: dict[str, str] | None = None, *,
         home.mkdir(parents=True, exist_ok=True)
         modules.register_user_modules(home / "modules")
         step_profile(asker, home)
-        config = step_config(asker, path, home, env)
+        config = step_config(asker, path, home, env, which)
         if config is None:
             return 1
         step_ai(which)

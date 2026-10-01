@@ -234,7 +234,8 @@
 
 | ファイル | 役目 |
 |---|---|
-| `cli.py`・`setup_command.py`・`doctor.py`・`slack_manifest.py`・`module_command.py`・`module_scaffold.py` | `kei-agent` のコマンド（setup・doctor・manifest・module） |
+| `cli.py`・`setup_command.py`・`doctor.py`・`slack_manifest.py`・`module_command.py`・`module_scaffold.py`・`agents_command.py` | `kei-agent` のコマンド（setup・doctor・manifest・module・agents） |
+| `agents_table.py` | 担当の表（`agents.csv`）を読んで、設定と同じ形にする |
 | `app.py`・`assistant.py` | 起動と Slack のイベント、依頼から返事までの本筋 |
 | `modules.py`・`api.py` | モジュールの定義の読み込みと、モジュールの窓口（`Core`） |
 | `router.py`・`agents.py`・`a2a.py`・`questions.py` | 振り分け、担当に頼む口、声からの問い合わせ口 |

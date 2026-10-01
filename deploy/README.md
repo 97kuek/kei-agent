@@ -18,7 +18,8 @@
 
 ```zsh
 mkdir -p ~/.config/kei-agent/secrets && chmod 700 ~/.config/kei-agent/secrets
-cp config.example.toml ~/.config/kei-agent/config.toml
+cp config.example.toml ~/.config/kei-agent/config.toml   # modules・[agents]・[channels] は消す
+cp agents.example.csv ~/.config/kei-agent/agents.csv
 cp profile.example.md ~/.config/kei-agent/profile.md
 ```
 
@@ -31,7 +32,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 
 ### 担当の表（`agents.csv`）
 
-- `cp agents.example.csv ~/.config/kei-agent/agents.csv` で作る。今の `config.toml` から移すときは `uv run kei-agent agents init`（`--dry-run` で見るだけ。前のものは `config.toml.bak`）
+- `setup` は、選んだモジュールと AI でこの表を作る。今の `config.toml` から移すときは `uv run kei-agent agents init`（`--dry-run` で見るだけ。前のものは `config.toml.bak`）
 - 1行に1つ。表に無いモジュールはオフ。Excel や Numbers で開いてよい（UTF-8 で保存する）
 
 | 列 | 書くこと |

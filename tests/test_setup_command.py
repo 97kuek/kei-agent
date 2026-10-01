@@ -71,8 +71,12 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     assert config.modules == ("course", "daily", "improve", "knowledge", "notion", "research", "time")
     assert config.research_root.name == "study" and config.notion.hub_home == PAGE and config.notion.research_home == ""
+    # モジュール・チャンネル・AI は担当の表に書き、config.toml には残さない（説明のコメントも）
+    assert config.agents_table.name == "agents.csv"
+    assert config.agent_profiles["research"].provider == "claude" and config.agent_profiles["router"].provider == "claude"
     text = (home / "config.toml").read_text(encoding="utf-8")
-    assert text.count("\n") == EXAMPLE_CONFIG.read_text(encoding="utf-8").count("\n")    # 行は増やさない
+    assert "modules =" not in text and "[agents" not in text and "[channels]" not in text
+    assert "provider は App Home" not in text and "\n\n\n" not in text
 
     common = home / "secrets" / "kei-agent.zsh"
     assert stat.S_IMODE(common.stat().st_mode) == 0o600 and stat.S_IMODE(common.parent.stat().st_mode) == 0o700
@@ -86,7 +90,8 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
     # 常駐は、ゲートウェイ → 担当 → 本体の順
     assert calls == [("notion", False), ("course", False), ("knowledge", False), ("research", False), ("", False)]
     assert BOT not in out and APP not in out and "ntn_1" not in out    # 秘密情報の値は画面に出さない
-    assert "点検した" in out and "App Home" in out and "#course: 大学" in out
+    assert "点検した" in out and "agents.csv" in out and "#course: 大学" in out
+    assert "engine 列に、担当ごと" not in out    # AI は選んであるので、このあとやることには出さない
 
 
 def test_files_that_exist_are_left_alone(tmp_path, capsys):
@@ -170,8 +175,8 @@ def test_the_example_config_must_be_rewritable():
         setup_command.set_value("[notion]\n", "notion", "hub_home", PAGE)
     text = setup_command.set_value('[notion]\nhub_home = ""  # 共通ホーム\n', "notion", "hub_home", PAGE)
     assert text == f'[notion]\nhub_home = "{PAGE}"  # 共通ホーム\n'
-    assert tomllib.loads(setup_command.config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), ["research"], {}))[
-        "modules"] == ["research"]
+    data = tomllib.loads(setup_command.config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), {("", "research_root"): "~/r"}))
+    assert data["research_root"] == "~/r" and not {"modules", "channels", "agents"} & set(data)
 
 
 def test_the_command_dispatches(monkeypatch):

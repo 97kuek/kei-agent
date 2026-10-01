@@ -32,7 +32,7 @@ git clone https://github.com/97kuek/kei-agent.git ~/src/kei-agent
 cd ~/src/kei-agent
 brew install pueue ffmpeg && brew services start pueue
 uv sync --all-groups
-uv run kei-agent setup     # 設定・プロフィール・秘密情報を作り、常駐の登録まで進む
+uv run kei-agent setup     # 担当の表（agents.csv）・設定・プロフィール・秘密情報を作り、常駐の登録まで進む
 uv run kei-agent doctor    # 困ったら点検（読むだけ）
 ```
 
