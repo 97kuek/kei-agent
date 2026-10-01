@@ -4,7 +4,7 @@ name = "course"
 label = "大学"
 description = "Moodle の課題を授業ホームに取り込み、締切を知らせる。授業と課題、Toggl の実績、Box の学部要項と過去問を読んで答える"
 
-# AI の実行役（provider は App Home で選ぶ）。個人のアカウントは kei-agent-course.zsh の CLAUDE_CONFIG_DIR / CODEX_HOME。
+# AI の実行役（provider は agents.csv の engine）。個人のアカウントは kei-agent-course.zsh の CLAUDE_CONFIG_DIR / CODEX_HOME。
 # Notion はゲートウェイの course として、授業ホームの中だけに届く。手元のファイル・コマンド・Web は使わない
 [actor]
 prompt = "course.md"
@@ -52,7 +52,7 @@ codex = { model = "gpt-6-sol", effort = "xhigh" }
 [process]
 port = 8787
 
-# チャンネル（番号を外した名前。設定の [channels] course で変えられる）
+# チャンネル（番号を外した名前。agents.csv の course の行の channels で変えられる）
 [channels]
 course = ["course"]
 

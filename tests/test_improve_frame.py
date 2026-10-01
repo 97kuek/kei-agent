@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
 from kei_agent import api, guard, modules, runner, themes, updates
 from kei_agent.assistant import Assistant
@@ -78,7 +78,7 @@ def _fixer(root, toml=FIXER_TOML, code=FIXER_CODE):
 def _home(tmp_path, text=""):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "config.toml").write_text(text, encoding="utf-8")
+    write_config(home / "config.toml", text)
     return home
 
 

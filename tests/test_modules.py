@@ -1,6 +1,7 @@
 """モジュールの定義（module.toml）と、設定の modules（docs/extensibility.md）。"""
 
 import pytest
+from fakes import write_config
 
 from kei_agent import home, modules, settings
 from kei_agent.config import ConfigError, load_config
@@ -34,7 +35,7 @@ def _module(root, name, text, code=None):
 def _config(tmp_path, text=""):
     home_dir = tmp_path / "home"
     home_dir.mkdir(exist_ok=True)
-    (home_dir / "config.toml").write_text(text, encoding="utf-8")
+    write_config(home_dir / "config.toml", text)
     return home_dir
 
 
@@ -168,10 +169,9 @@ def test_settings_stay_when_the_module_is_turned_off(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == () and config.settings("weather")["place"] == "早稲田"
-    # オフのモジュールのチャンネルの名前も、書いたまま残せる（使うのはオンのものだけ）
+    # オフのモジュールのチャンネルの名前も、表に書いたまま残せる（使うのはオンのものだけ）
     assert config.module_channels == {}
-    with pytest.raises(ConfigError, match="知らないキー"):
-        load_config(env={"KEI_AGENT_HOME": str(_config(tmp_path, '[channels]\nlab = ["x"]\n'))})
+    assert "work,false,office" in (home_dir / "agents.csv").read_text()
 
 
 def test_a_module_with_settings_cannot_take_the_name_of_a_core_table(tmp_path):

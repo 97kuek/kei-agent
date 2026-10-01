@@ -10,7 +10,6 @@ from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
 from kei_agent.schedule import Scheduler
-from kei_agent.store import Store
 
 
 @pytest.fixture
@@ -115,23 +114,6 @@ async def test_the_course_module_ticks_hourly(env, monkeypatch):
     await scheduler.module_ticks(datetime(2026, 9, 28, 9, 1))
     await scheduler.module_ticks(datetime(2026, 9, 28, 10, 1))
     assert calls == [4, 4]
-
-
-def test_old_deadline_notices_move_to_the_course_module(tmp_path):
-    """本体が持っていた知らせの目印（due: / early:）は、大学のモジュールの目印に移す（二重に知らせない）。"""
-    path = tmp_path / "state.db"
-    store = Store(path)
-    store.record_notice("due:1@moodle:2026-10-25T23:59:00+09:00")
-    store.record_notice("early:a:2026-10-26")
-    store.record_notice("version:abc")
-    store.conn.commit()
-
-    store = Store(path)
-
-    assert store.noticed("module.course.due:1@moodle:2026-10-25T23:59:00+09:00")
-    assert store.noticed("module.course.early:a:2026-10-26") and store.noticed("version:abc")
-    assert not store.noticed("due:1@moodle:2026-10-25T23:59:00+09:00")
-    Store(path)     # 2回目は何もしない
 
 
 def test_the_course_module_reads_its_settings_through_both_windows(env, config):

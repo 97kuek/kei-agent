@@ -134,7 +134,7 @@ def resolve(config: Config, channel_name: str) -> Workspace:
 
 
 def module_of_channel(config: Config, channel_name: str) -> str:
-    """そのチャンネルを持つ、オンのモジュールの名前（設定の [channels] で変えた名前も見る）。無ければ空文字。"""
+    """そのチャンネルを持つ、オンのモジュールの名前（agents.csv で変えた名前も見る）。無ければ空文字。"""
     for spec in modules.enabled(config.modules):
         if any(channel_name in config.module_channels.get(kind, ()) and channel_name != modules.ALL_CHANNELS
                for kind in spec.channels):

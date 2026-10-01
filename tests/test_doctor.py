@@ -4,6 +4,7 @@ import time
 from dataclasses import replace
 
 import pytest
+from fakes import write_config
 
 from kei_agent import cli, doctor, modules
 from kei_agent.config import AgentProfile
@@ -35,11 +36,11 @@ FULL = (f'export SLACK_BOT_TOKEN="{SECRET}"\nexport SLACK_APP_TOKEN="xapp-1"\nex
 def test_a_broken_config_is_the_only_finding(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
-    (home / "config.toml").write_text("modules = [\"nothing\"]\n", encoding="utf-8")
+    write_config(home / "config.toml", "modules = [\"nothing\"]\n")
     config, findings = doctor.check_config(env={"KEI_AGENT_HOME": str(home)})
     assert config is None and findings[0].level == ERROR and "nothing" in findings[0].text
     # TOML の書き方の誤りも、止まらずに設定の誤りとして出す
-    (home / "config.toml").write_text("modules = [\"course\"\n", encoding="utf-8")
+    write_config(home / "config.toml", "modules = [\"course\"\n")
     config, findings = doctor.check_config(env={"KEI_AGENT_HOME": str(home)})
     assert config is None and findings[0].level == ERROR and "TOML として読めません" in findings[0].text
 

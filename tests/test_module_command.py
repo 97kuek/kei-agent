@@ -1,16 +1,15 @@
 """モジュールのオン・オフ（`kei-agent module list / add / remove`。段階4の③）。"""
 
-import tomllib
-
 import pytest
+from fakes import write_config
 
-from kei_agent import cli, module_command
+from kei_agent import agents_table, cli, module_command
 
 
 def _home(tmp_path, text):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "config.toml").write_text(text, encoding="utf-8")
+    write_config(home / "config.toml", text)
     return home
 
 
@@ -27,88 +26,72 @@ def _stamp(home, requires=""):
                                       encoding="utf-8")
 
 
-# 設定の書き換え
+# 担当の表の書き換え
 
-def test_only_the_modules_line_changes():
-    text = '# わたしの設定\nmodules = ["course", "work"]  # 使うもの\nhandoff_after_turns = 8\n\n[schedule]\ndaily = "08:00"\n'
-    changed = module_command.with_modules(text, ["course"])
-    assert changed == '# わたしの設定\nmodules = ["course"]\nhandoff_after_turns = 8\n\n[schedule]\ndaily = "08:00"\n'
-    spread = 'modules = [\n  "course",\n  "work",\n]\nx = 1\n'
-    assert module_command.with_modules(spread, ["work"]) == 'modules = ["work"]\nx = 1\n'
+def _on(home):
+    return agents_table.load(home / "agents.csv")["modules"]
 
 
-def test_a_missing_modules_line_goes_before_the_first_table():
-    text = "# わたしの設定\nhandoff_after_turns = 8\n\n[schedule]\ndaily = \"08:00\"\n"
-    changed = module_command.with_modules(text, ["course"])
-    assert tomllib.loads(changed)["modules"] == ["course"] and tomllib.loads(changed)["schedule"]["daily"] == "08:00"
-    assert changed.startswith("# わたしの設定\nhandoff_after_turns = 8\n\n# 使うモジュール")
-    assert tomllib.loads(module_command.with_modules("x = 1", ["a"])) == {"x": 1, "modules": ["a"]}
-
-
-def test_adding_writes_a_checked_config_and_keeps_a_backup(tmp_path, capsys):
-    home = _home(tmp_path, '# わたしの設定\nmodules = ["research"]\n')
+def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
+    home = _home(tmp_path, 'modules = ["research"]\n')
+    before = (home / "agents.csv").read_text(encoding="utf-8")
     _stamp(home)
     calls = []
     code = module_command.change("stamp", True, env={"KEI_AGENT_HOME": str(home)},
                                  installer=lambda name, remove: calls.append((name, remove)) or True)
     out = capsys.readouterr().out
     assert code == 0
-    assert tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))["modules"] == ["research", "stamp"]
-    assert (home / "config.toml.bak").read_text(encoding="utf-8") == '# わたしの設定\nmodules = ["research"]\n'
+    assert _on(home) == ["research", "stamp"]
+    assert (home / "agents.csv.bak").read_text(encoding="utf-8") == before
     assert calls == []                                  # 常駐を持たないモジュールは launchd に触らない
     assert "#stamp" in out and "kei-agent manifest" in out and "[stamp]）: color" in out
-    assert not list(home.glob(".config.toml.*"))        # 確かめるための一時ファイルは残さない
+    assert not list(home.glob(".agents.csv.*"))         # 確かめるための一時ファイルは残さない
 
 
-def test_removing_a_module_with_a_process_unregisters_it(tmp_path, capsys):
-    home = _home(tmp_path, "")                          # modules を書いていない = 組み込みを全部使う
+def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
+    home = _home(tmp_path, "")                          # 表が無い = 組み込みを全部使う
     calls = []
     assert module_command.change("voice", False, env={"KEI_AGENT_HOME": str(home)},
                                  installer=lambda name, remove: calls.append((name, remove)) or True) == 0
-    names = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))["modules"]
-    assert "voice" not in names and "research" in names
-    assert calls == [("voice", True)] and "常駐（com.kei-agent.voice）を外した" in capsys.readouterr().out
+    names = _on(home)
+    assert "voice" not in names and "research" in names and not (home / "agents.csv.bak").exists()
+    out = capsys.readouterr().out
+    assert calls == [("voice", True)] and "常駐（com.kei-agent.voice）を外した" in out and "を作った" in out
 
 
-def test_the_order_and_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
+def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["course", "work"]\n')
     env = {"KEI_AGENT_HOME": str(home)}
     assert module_command.change("research", True, env=env, launchd=False) == 0
     assert "deploy/install.sh research" in capsys.readouterr().out     # 登録は自分で
-    assert module_command.current((home / "config.toml").read_text(encoding="utf-8")) == ["course", "research", "work"]
-    (home / "config.toml").write_text('modules = ["work", "course"]\n', encoding="utf-8")
+    assert set(_on(home)) == {"course", "research", "work"}
     assert module_command.change("voice", True, env=env, installer=lambda name, remove: False) == 0
     assert "deploy/install.sh voice" in capsys.readouterr().out         # 登録を変えられなかったとき
-    assert module_command.current((home / "config.toml").read_text(encoding="utf-8")) == ["work", "course", "voice"]
+    assert "voice" in _on(home)
 
 
 def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["notion", "stamp"]\n')
     _stamp(home, requires='"notion"')
-    before = (home / "config.toml").read_text(encoding="utf-8")
+    before = (home / "agents.csv").read_text(encoding="utf-8")
     assert module_command.change("notion", False, env={"KEI_AGENT_HOME": str(home)}) == 1
     assert "notion が要ります" in capsys.readouterr().out
-    assert (home / "config.toml").read_text(encoding="utf-8") == before and not (home / "config.toml.bak").exists()
+    assert (home / "agents.csv").read_text(encoding="utf-8") == before and not (home / "agents.csv.bak").exists()
 
 
-@pytest.mark.parametrize(("text", "said"), [
-    ('modules = ["research"\n', "TOML として読めません"),
-    ('modules = "research"\n', "名前の配列にしてください"),
-    # 複数行の文字の中にある modules は、書き換えると別のものが変わるので断る
-    ('note = """\nmodules = ["research"]\n"""\n', "うまく書き換えられない"),
-])
-def test_a_config_that_cannot_be_rewritten_is_left_alone(tmp_path, capsys, text, said):
-    home = _home(tmp_path, text)
+def test_a_broken_table_is_left_alone(tmp_path, capsys):
+    home = _home(tmp_path, "")
+    (home / "agents.csv").write_text("module,on\nresearch,true\n", encoding="utf-8")
     assert module_command.change("work", False, env={"KEI_AGENT_HOME": str(home)}) == 1
-    assert said in capsys.readouterr().out
-    assert (home / "config.toml").read_text(encoding="utf-8") == text and not (home / "config.toml.bak").exists()
+    assert "1行目" in capsys.readouterr().out
+    assert (home / "agents.csv").read_text(encoding="utf-8") == "module,on\nresearch,true\n"
 
 
 def test_dry_run_unknown_and_already_on(tmp_path, capsys):
     home = _home(tmp_path, 'modules = ["research"]\n')
     env = {"KEI_AGENT_HOME": str(home)}
     assert module_command.change("work", True, env=env, dry_run=True) == 0
-    assert tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))["modules"] == ["research"]
+    assert _on(home) == ["research"]
     assert module_command.change("nothing", True, env=env) == 1
     assert module_command.change("research", True, env=env) == 0
     out = capsys.readouterr().out

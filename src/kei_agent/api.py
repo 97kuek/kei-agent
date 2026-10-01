@@ -219,7 +219,7 @@ class Core:
 
     @property
     def provider(self) -> str:
-        """App Home で選んだ、このモジュールの実行役の provider（claude / codex）。選ばれていないか、実行役が無ければ空文字。"""
+        """選ばれている（agents.csv の engine）、このモジュールの実行役の provider（claude / codex）。選ばれていないか、実行役が無ければ空文字。"""
         if self.spec.actor is None:
             return ""
         return settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
@@ -265,7 +265,7 @@ class Core:
         return home.checkboxes(self.home_action_id(name), options, chosen)
 
     def channels(self, kind: str) -> tuple[str, ...]:
-        """その種類のチャンネルの名前（番号を外した名前。設定の [channels] で変えたものも）。module.toml の [channels] の
+        """その種類のチャンネルの名前（番号を外した名前。agents.csv で変えたものも）。module.toml の [channels] の
         種類と、本体のチャンネル（overview は研究全体、improve は Kei Agent のチャンネル）。"""
         config = self._assistant.config
         core = {"overview": config.overview_channels, "improve": config.improve_channels}

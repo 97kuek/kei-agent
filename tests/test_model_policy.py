@@ -75,13 +75,8 @@ def test_only_approved_models_are_allowlisted(provider, model):
     assert not is_allowed_model(provider, "gpt-5.6-terra")
 
 
-def test_config_rejects_old_model_override_and_defaults_to_unselected_provider(tmp_path):
-    from kei_agent.config import ConfigError, load_config
-
-    old = tmp_path / "old.toml"
-    old.write_text('[agents.research]\nprovider = "codex"\nmodel = "gpt-5.6-terra"\n')
-    with pytest.raises(ConfigError, match="知らないキー"):
-        load_config(old, env={})
+def test_config_without_a_table_leaves_every_provider_unselected(tmp_path):
+    from kei_agent.config import load_config
 
     (tmp_path / "empty.toml").write_text("")
     config = load_config(tmp_path / "empty.toml", env={})

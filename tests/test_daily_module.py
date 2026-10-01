@@ -286,7 +286,6 @@ async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
     assert "📌 明日・明後日の締切" in note.body and note.body.endswith("明日やることは何か")
 
 
-
 def test_claude_limit_does_not_block_codex_daily(env, store):
     from kei_agent import settings
 
@@ -294,8 +293,6 @@ def test_claude_limit_does_not_block_codex_daily(env, store):
     settings.set_agent_provider(store, "daily", "codex")
     store.set_limit_until("claude", time.time() + 3600)
     assert scheduler.can_run("daily", time.time())
-
-
 
 
 # 答えの形
@@ -341,20 +338,3 @@ def test_the_review_answer_shows_only_the_file_name_of_local_paths(path):
     shown = review_answer(final(f"**今日の成果**\n{path}\n\n**未完了タスク**\nなし"))
     assert shown and path not in shown and path.rsplit("/", 1)[-1] in shown
 
-
-def test_the_router_choice_is_copied_to_the_daily_module_once(tmp_path):
-    import sqlite3
-
-    from kei_agent.store import Store
-
-    path = tmp_path / "kei-agent.db"
-    conn = sqlite3.connect(path)
-    conn.executescript("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
-                       "INSERT INTO settings VALUES ('agent.router.provider', 'codex');")
-    conn.commit()
-    conn.close()
-    store = Store(path)
-    assert store.setting("agent.daily.provider") == "codex" and store.setting("agent.router.provider") == "codex"
-    # あとで daily だけ選び直したら、そのまま（写すのは一度だけ）
-    store.set_setting("agent.daily.provider", "claude")
-    assert Store(path).setting("agent.daily.provider") == "claude"

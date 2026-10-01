@@ -46,7 +46,7 @@ def ask_json(text: str) -> dict:
 
 
 async def recipe_for(config: Config, store, agent: str, ask: dict) -> ResolvedModel:
-    """その回の recipe。provider は依頼の指定（無ければ App Home の選択）、用途は依頼か分類から。
+    """その回の recipe。provider は依頼の指定（無ければ 選ばれている AI（agents.csv の engine））、用途は依頼か分類から。
 
     分類器が利用上限に当たったら UsageLimited、provider や用途が決まらなければ ModelPolicyError / ValueError。
     """

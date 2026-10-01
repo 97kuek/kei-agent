@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import agents_command, agents_table, doctor, module_command, modules
+from kei_agent import agents_table, doctor, module_command, modules
 from kei_agent.config import (
     EXAMPLE_CONFIG,
     PROFILE_FILE,
@@ -197,14 +197,11 @@ def set_value(text: str, table: str, key: str, value: str) -> str:
 
 
 def config_text(example: str, answers: dict[tuple[str, str], str]) -> str:
-    """例の設定（config.example.toml）から、担当の表に書くもの（modules・[channels]・[agents]）を除き、
-    答えたところだけを書き換えたもの。"""
-    text = agents_command.without_replaced(example, drop_notes=True)
+    """例の設定（config.example.toml）の、答えたところだけを書き換えたもの。"""
+    text = example
     for (table, key), value in answers.items():
         text = set_value(text, table, key, value)
     expected = tomllib.loads(example)
-    for key in agents_table.REPLACED_KEYS:
-        expected.pop(key, None)
     for (table, key), value in answers.items():
         (expected[table] if table else expected)[key] = value
     if tomllib.loads(text) != expected:
@@ -231,56 +228,59 @@ def choose_engine(asker: Asker, which: Callable[[str], str | None]) -> str:
 def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str],
                 which: Callable[[str], str | None] = shutil.which) -> Config | None:
     print("\n2. 使うモジュールと AI（agents.csv）、置き場所（config.toml）")
-    if path.exists():
-        print(f"  もうある: {path}（書き換えない。足す・外すは kei-agent module add / remove）")
-        try:
-            return load_config(env=env)
-        except ConfigError as e:
-            print(f"  ❌ 設定を読めない: {e}（直してから、もう一度 kei-agent setup）")
-            return None
     table = home / agents_table.AGENTS_FILE
+    table_text = text = None
     if table.exists():
-        print(f"  もうある: {table}（書き換えない。使うモジュールと AI はここに書いたもの）")
-        table_text = None
+        print(f"  もうある: {table}（書き換えない。足す・外すは kei-agent module add / remove）")
+        try:
+            names = agents_table.load(table)["modules"]
+        except agents_table.TableError as e:
+            print(f"  ❌ 表を読めない: {e}（直してから、もう一度 kei-agent setup）")
+            return None
     else:
         names = choose_modules(asker, modules.known())
         engine = choose_engine(asker, which)
         table_text = agents_table.from_config({"modules": names}, {actor: engine for actor in model_actors()})
-    names = list(modules.known()) if table_text is None else names
-    answers: dict[tuple[str, str], str] = {}
-    if "research" in names:
-        answers[("", "research_root")] = asker.text("  研究テーマの作業場を置く場所", "~/research")
-    if "notion" in names:
-        print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから config.toml の [notion] に書いてもよい）")
-        homes = [("hub_home", "共通ホーム（Daily・振り返り・予定・時間の記録）"),
-                 *([("research_home", "研究ホーム")] if "research" in names else []),
-                 *([("course_home", "授業ホーム")] if "course" in names else [])]
-        for key, label in homes:
-            if found := ask_page(asker, f"  {label}"):
-                answers[("notion", key)] = found
+    if path.exists():
+        print(f"  もうある: {path}（書き換えない）")
+    else:
+        answers: dict[tuple[str, str], str] = {}
+        if "research" in names:
+            answers[("", "research_root")] = asker.text("  研究テーマの作業場を置く場所", "~/research")
+        if "notion" in names:
+            print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから config.toml の [notion] に書いてもよい）")
+            homes = [("hub_home", "共通ホーム（Daily・振り返り・予定・時間の記録）"),
+                     *([("research_home", "研究ホーム")] if "research" in names else []),
+                     *([("course_home", "授業ホーム")] if "course" in names else [])]
+            for key, label in homes:
+                if found := ask_page(asker, f"  {label}"):
+                    answers[("notion", key)] = found
+        try:
+            text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), answers)
+        except ConfigError as e:
+            print(f"  ❌ この答えでは設定を読めないので、書かなかった: {e}")
+            return None
+    # 新しく書くものは、どちらもまだ書かずに一緒に確かめる
+    trials = {target.with_name(f".{target.name}.trial"): content
+              for target, content in ((path, text), (table, table_text)) if content is not None}
     try:
-        text = config_text(EXAMPLE_CONFIG.read_text(encoding="utf-8"), answers)
-        if table_text is None:
-            module_command.check_text(path, text, env, home)
-        else:
-            # 表と設定を、どちらもまだ書かずに一緒に確かめる
-            trials = {path.with_name(f".{path.name}.trial"): text, table.with_name(f".{table.name}.trial"): table_text}
-            try:
-                for trial, content in trials.items():
-                    trial.write_text(content, encoding="utf-8")
-                trial_toml, trial_csv = trials
-                load_config(path=trial_toml, env={**env, "KEI_AGENT_HOME": str(home)}, agents_csv=trial_csv)
-            finally:
-                for trial in trials:
-                    trial.unlink(missing_ok=True)
+        for trial, content in trials.items():
+            trial.write_text(content, encoding="utf-8")
+        load_config(path=path.with_name(f".{path.name}.trial") if text is not None else path,
+                    env={**env, "KEI_AGENT_HOME": str(home)},
+                    agents_csv=table.with_name(f".{table.name}.trial") if table_text is not None else None)
     except ConfigError as e:
-        print(f"  ❌ この答えでは設定を読めないので、書かなかった: {e}")
+        print(f"  ❌ 設定を読めないので、書かなかった: {e}（直してから、もう一度 kei-agent setup）")
         return None
+    finally:
+        for trial in trials:
+            trial.unlink(missing_ok=True)
     if table_text is not None:
         write_new(table, table_text)
         print(f"  ✅ 書いた: {table}（モジュールのオンオフ・チャンネル・AI は、ここを書き換える）")
-    write_new(path, text)
-    print(f"  ✅ 書いた: {path}（時刻や Notion のホームは、ここを直接書き換える）")
+    if text is not None:
+        write_new(path, text)
+        print(f"  ✅ 書いた: {path}（時刻や Notion のホームは、ここを直接書き換える）")
     return load_config(env=env)
 
 
@@ -455,7 +455,7 @@ def run(asker: Asker | None = None, env: dict[str, str] | None = None, *,
         return 130
     print("\n7. 点検（kei-agent doctor と同じ）")
     print(doctor.report(check(env)))
-    print("（常駐の登録や App Home での AI の選択の前は、ここに問題が出る。このあとやることを済ませてから、"
+    print("（常駐の登録や agents.csv での AI の選択の前は、ここに問題が出る。このあとやることを済ませてから、"
           "もう一度 uv run kei-agent doctor）")
     print("\nこのあとやること:")
     for step in next_steps(config):

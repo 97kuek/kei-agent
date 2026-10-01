@@ -8,7 +8,7 @@ description = "興味のある技術記事（朝の読みもの）と、研究�
 # あれば使う: Notion（先行研究 DB・読みもの DB・「収集」ページ）、研究（テーマの検索キーワードと前提）
 optional = ["notion", "research"]
 
-# AI の実行役（provider は App Home で選ぶ）。外の記事を読むので、Notion・コマンド・手元のファイルは持たない
+# AI の実行役（provider は agents.csv の engine）。外の記事を読むので、Notion・コマンド・手元のファイルは持たない
 [actor]
 prompt = "knowledge.md"
 files = "none"
@@ -38,7 +38,7 @@ codex = { model = "gpt-6-luna", effort = "medium" }
 [process]
 port = 8792
 
-# チャンネル（番号を外した名前。設定の [channels] knowledge で変えられる）
+# チャンネル（番号を外した名前。agents.csv の knowledge の行の channels で変えられる）
 [channels]
 knowledge = ["knowledge"]
 

@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import pytest
+from fakes import write_config
 
 from kei_agent import themes
 from kei_agent.agent_policy import policy_of
@@ -58,15 +59,6 @@ def test_unknown_config_key_is_reported(tmp_path):
         load_config(path, env={})
 
 
-def test_unknown_key_in_channels_is_reported(tmp_path):
-    """昔の theme_prefix が残っていても黙って無視しない（テーマのディレクトリが二重にできる）。"""
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    path.write_text('[channels]\ntheme_prefix = "theme-"\n')
-    with pytest.raises(ConfigError, match="theme_prefix"):
-        load_config(path, env={})
-
-
 def test_unknown_key_in_sandbox_is_reported(tmp_path):
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
@@ -110,8 +102,7 @@ def test_example_config_in_repo_loads_without_personal_values(tmp_path):
 
 def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path):
     from kei_agent.config import load_config
-    path = tmp_path / "config.toml"
-    path.write_text('[agents.research]\nprovider = "codex"\n')
+    path = write_config(tmp_path / "config.toml", '[agents.research]\nprovider = "codex"\n')
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"
     assert config.agent_profiles["research"].provider == "codex"
@@ -119,35 +110,28 @@ def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path)
     assert config.agent_profiles["course"].provider == ""
 
 
-def test_connectors_are_decided_by_the_policy_table_not_the_config(tmp_path):
-    """連携を config.toml でも宣言できると、制限の正本が2つになる。"""
-    from kei_agent.config import ConfigError, load_config
-    path = tmp_path / "config.toml"
-    path.write_text('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n')
-
-    with pytest.raises(ConfigError, match="connectors"):
-        load_config(path, env={})
-
-
 def test_old_model_recipe_configuration_is_rejected(tmp_path):
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
     path.write_text(
-        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\nreasoning_effort = "low"\n'
-        '[agents.research]\nprovider = "codex"\ndefault_recipe = "routine"\n'
-    )
+        '[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\nreasoning_effort = "low"\n')
     with pytest.raises(ConfigError, match="model_recipes"):
         load_config(path, env={})
 
 
-@pytest.mark.parametrize("connectors", ['"wandb"', '["wandb", "wandb"]'])
-def test_agent_profile_rejects_invalid_connector_declarations(tmp_path, connectors):
-    """非配列や重複を黙って許可して、意図しない connector を有効にする変更を捕捉する。"""
+def test_connectors_and_modules_in_config_toml_are_refused_with_how_to_move(tmp_path):
+    """連携は制限の表が決め、モジュール・チャンネル・AI は担当の表だけに書く。config.toml に残っていれば、移し方を示す。"""
     from kei_agent.config import ConfigError, load_config
     path = tmp_path / "config.toml"
-    path.write_text(f'[agents.research]\nconnectors = {connectors}\n')
-
-    with pytest.raises(ConfigError, match="connectors"):
+    for text in ('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n', 'modules = ["research"]\n',
+                 '[channels]\ntheme_prefix = "theme-"\n'):
+        path.write_text(text)
+        with pytest.raises(ConfigError, match="kei-agent agents init"):
+            load_config(path, env={})
+    # 表にも、AI の列のほかは書けない
+    write_config(path, "")
+    (tmp_path / "agents.csv").write_text("module,enabled,channels,engine,model,effort,connectors\nresearch,true,,codex,,,wandb\n")
+    with pytest.raises(ConfigError, match="1行目"):
         load_config(path, env={})
 
 

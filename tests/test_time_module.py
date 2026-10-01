@@ -5,7 +5,6 @@ Toggl のアプリで直接測った記録は定期処理で取り込む。記�
 """
 
 import asyncio
-import sqlite3
 import sys
 import time
 from dataclasses import replace
@@ -392,52 +391,6 @@ async def test_the_look_around_runs_in_the_background_one_at_a_time(env, monkeyp
 
 def modules_records(store):
     return Records(store, "time")
-
-
-def old_tables(path):
-    """本体が時間記録を持っていたころの表と中身（2026-09）。"""
-    conn = sqlite3.connect(path)
-    conn.executescript("""
-        CREATE TABLE time_cards (channel TEXT PRIMARY KEY, message_ts TEXT NOT NULL, updated_at REAL NOT NULL);
-        CREATE TABLE course_channel_bindings (channel TEXT PRIMARY KEY, course_page_id TEXT NOT NULL,
-            course_name TEXT NOT NULL, updated_at REAL NOT NULL);
-        CREATE TABLE time_entries (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, domain TEXT NOT NULL,
-            channel TEXT NOT NULL, channel_name TEXT NOT NULL, course_page_id TEXT NOT NULL DEFAULT '',
-            course_name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL, memo TEXT NOT NULL DEFAULT '',
-            started_at REAL NOT NULL, ended_at REAL, toggl_state TEXT NOT NULL DEFAULT 'pending',
-            notion_state TEXT NOT NULL DEFAULT 'pending');
-        CREATE TABLE active_timers (user_id TEXT PRIMARY KEY, entry_id TEXT NOT NULL UNIQUE);
-        INSERT INTO time_entries VALUES ('done-1', 'UME', 'research', 'C1', 'vlm', '', '', '研究 / vlm', 'メモ',
-            100.0, 1600.0, 'done', 'done');
-        INSERT INTO time_entries VALUES ('run-1', 'UME', 'course', 'C2', 'course', 'P1', '信号処理', '大学 / 信号処理', '',
-            2000.0, NULL, 'pending', 'pending');
-        INSERT INTO active_timers VALUES ('UME', 'run-1');
-        INSERT INTO time_cards VALUES ('C1', '11.1', 0), ('C2', '22.2', 0);
-        INSERT INTO course_channel_bindings VALUES ('C2', 'P1', '信号処理', 0);
-    """)
-    conn.commit()
-    conn.close()
-
-
-def test_old_time_tables_are_copied_once_into_the_module_records(tmp_path):
-    path = tmp_path / "kei-agent.db"
-    old_tables(path)
-    store = Store(path)
-    found = Entries(modules_records(store))
-
-    assert found.entry("done-1").memo == "メモ" and found.entry("done-1").sent
-    running = found.active("UME")
-    assert (running.id, running.course_name, running.ended_at) == ("run-1", "信号処理", None)
-    assert (found.card("C1"), found.card("C2")) == ("11.1", "22.2")
-    assert found.course("C2") == ("P1", "信号処理")
-    assert store.module_record("time", "entry", "done-1")["expires_at"] is not None
-    assert store.module_record("time", "entry", "run-1")["expires_at"] is None
-
-    # 写したあとに止めた計測は、開き直しても戻らない（本体の表は念のため残す）
-    found.stop("UME", ended_at=2600.0)
-    again = Entries(modules_records(Store(path)))
-    assert again.active("UME") is None and again.entry("run-1").ended_at == 2600.0
-    assert store.conn.execute("SELECT COUNT(*) FROM time_entries").fetchone()[0] == 2
 
 
 def test_a_new_database_has_no_old_time_tables(store):

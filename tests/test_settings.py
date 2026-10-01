@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+from fakes import write_config
+
 from kei_agent import settings
 from kei_agent.config import MaintenanceConfig, ScheduleConfig
 
@@ -103,7 +105,7 @@ def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
     from kei_agent.config import load_config
 
     path = tmp_path / "config.toml"
-    path.write_text('[channels]\nknowledge = ["knowledge", "reading"]\n\n[schedule]\nreading = "06:30"\n')
+    write_config(path, '[channels]\nknowledge = ["knowledge", "reading"]\n\n[schedule]\nreading = "06:30"\n')
     config = load_config(path, env={})
     assert config.module_channels["knowledge"] == ("knowledge", "reading")
     assert config.schedule.module_times["reading"] == "06:30"

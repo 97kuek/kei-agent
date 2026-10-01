@@ -8,7 +8,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
 from kei_agent import model_classifier, model_policy, modules, runner, themes
 from kei_agent.assistant import Assistant
@@ -69,7 +69,7 @@ def _lab(root, toml=LAB_TOML):
 def _home(tmp_path, text=""):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "config.toml").write_text(text, encoding="utf-8")
+    write_config(home / "config.toml", text)
     return home
 
 

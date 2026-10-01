@@ -8,7 +8,8 @@
 - model / effort … 空欄なら module.toml の用途ごとの選び分け。書けば、その担当の用途をすべてそのモデルにする
   （依頼者が明示したときだけの用途は除く）。使えるモデルは model_policy の一覧の中だけ
 
-この表があるときは、config.toml の modules・[channels]・[agents] を書かない（同じことを2か所に書かない）。
+config.toml には modules・[channels]・[agents] を書かない（書いてあれば、kei-agent agents init で移すよう知らせて止める）。
+表が無ければ、組み込みのモジュールを全部使い、AI は未選択。
 読んだ中身は、config.toml と同じ形（modules・channels・agents）にして load_config に渡す。
 """
 
@@ -157,9 +158,6 @@ def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
     on = data.get("modules", list(modules.builtin()))
     channels = data.get("channels", {})
     agents = data.get("agents", {})
-    if "self_fix" in agents and "improve" not in agents:
-        # 前の名前（[agents.self_fix]）は、今の名前で書き出す
-        agents = {**agents, "improve": agents["self_fix"]}
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(COLUMNS)
@@ -173,6 +171,8 @@ def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
     for name in [*on, *sorted(set(known) - set(on))]:
         spec = known.get(name)
         if spec is None:
+            # 知らないモジュールも行にする（読むときに、どの行が違うかを知らせる）
+            writer.writerow([name, "true", "", "", "", ""])
             continue
         kind = channel_kind(spec)
         row(name, name in on, channels.get(kind, ()) if kind else (), spec.actor is not None)

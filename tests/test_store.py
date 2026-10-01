@@ -99,35 +99,6 @@ def test_module_records_are_kept_per_module_and_expire(store):
     assert posts.items("post") == []
 
 
-def test_old_reading_posts_move_into_the_knowledge_module_records(tmp_path):
-    """2026-09 の reading_posts（朝の読みものの控え）は、開いたときに知識のモジュールの記録に写して消す。"""
-    import json
-    import sqlite3
-
-    from kei_agent.api import Records
-
-    path = tmp_path / "old.db"
-    conn = sqlite3.connect(path)
-    conn.executescript("""CREATE TABLE reading_posts (channel TEXT NOT NULL, ts TEXT NOT NULL, day TEXT NOT NULL,
-        item TEXT NOT NULL, posted_at REAL NOT NULL, liked_at REAL, notion_page_id TEXT, PRIMARY KEY (channel, ts));""")
-    conn.execute("INSERT INTO reading_posts VALUES ('C40', '1.1', '2026-09-27', ?, 1000.0, NULL, NULL)",
-                 (json.dumps({"title": "見ただけ"}),))
-    conn.execute("INSERT INTO reading_posts VALUES ('C40', '2.2', '2026-09-27', ?, 1000.0, 2000.0, 'page-1')",
-                 (json.dumps({"title": "👍 した"}),))
-    conn.commit()
-    conn.close()
-
-    store = Store(path)
-
-    posts = Records(store, "knowledge")
-    assert posts.get("post", "C40:2.2") == {"channel": "C40", "ts": "2.2", "day": "2026-09-27",
-                                           "item": {"title": "👍 した"}, "liked_at": 2000.0, "page": "page-1"}
-    assert store.module_record("knowledge", "post", "C40:1.1")["expires_at"] == 1000.0 + 30 * 86400
-    assert store.module_record("knowledge", "post", "C40:2.2")["expires_at"] is None
-    assert store.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reading_posts'").fetchone() is None
-    Store(path)     # 2回目は何もしない
-
-
 def test_runs_remember_the_actor_use_case_and_model(tmp_path):
     """走らせた記録に、担当・用途・provider・モデル・effort が残る（前からの記録には列だけ足す）。"""
     import sqlite3

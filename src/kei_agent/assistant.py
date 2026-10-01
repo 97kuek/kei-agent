@@ -810,7 +810,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         agent = self.agents.get(actor)
         provider = provider or settings.selected_provider(self.config, self.store, actor)
         if provider not in PROVIDERS:
-            # 分類器も動かせないので、ここで止めて App Home で選ぶよう伝える
+            # 分類器も動かせないので、ここで止めて agents.csv で選ぶよう伝える
             return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
         if use_case is None:
             use_case, prompt = explicit_use_case(actor, prompt)

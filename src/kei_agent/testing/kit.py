@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
-from kei_agent import model_classifier, modules, runner
+from kei_agent import agents_table, model_classifier, modules, runner
 from kei_agent.agents import Reply
 from kei_agent.assistant import Assistant
 from kei_agent.config import load_config, model_actors
@@ -71,7 +71,7 @@ class ModuleKit:
 
     - module: モジュールのフォルダ（利用者のモジュール）か、組み込みの名前
     - others: いっしょにオンにするモジュール（頼るモジュール [depends] requires は、書かなくてもオンにする）
-    - settings: このモジュールの設定（config.toml の [名前]）。config: 設定に足すもの（{"channels": {...}} など）
+    - settings: このモジュールの設定（config.toml の [名前]）。config: 設定に足すもの（{"channels": {...}} は担当の表へ）
     - local_agent: 担当プロセス（[process]）を、同じプロセスの中で agent.py の Executor で動かす（LocalAgent）。
       False か、a2a-sdk が入っていなければ FakeAgent（返事は kit.agent.reply で並べる）
 
@@ -103,7 +103,11 @@ class ModuleKit:
         self.spec = self._resolve(module, home / "modules")
         self.name = self.spec.name
         names = self._with_requires([self.name, *others])
-        (home / "config.toml").write_text(self._config_text(names, settings, extra), encoding="utf-8")
+        (home / "config.toml").write_text(self._config_text(settings, extra), encoding="utf-8")
+        # モジュールのオンオフ・チャンネル・AI は担当の表に（AI はどれも claude）
+        (home / agents_table.AGENTS_FILE).write_text(agents_table.from_config(
+            {"modules": names, "channels": extra.get("channels", {})},
+            {actor: "claude" for actor in model_actors()}), encoding="utf-8")
         self.config = load_config(env={"KEI_AGENT_HOME": str(home), "KEI_AGENT_ALLOWED_USER_ID": OWNER})
         self.store = Store(self.config.db_path)
         self.slack = FakeSlack(self._channel_map())
@@ -153,15 +157,14 @@ class ModuleKit:
             todo += list(spec.requires) if spec is not None else []
         return found
 
-    def _config_text(self, names: list[str], settings: dict, extra: dict) -> str:
-        lines = [f"modules = {toml_value(names)}"]
-        lines += [f"{key} = {toml_value(str(self.tmp / key))}" for key in PLACES]
+    def _config_text(self, settings: dict, extra: dict) -> str:
+        lines = [f"{key} = {toml_value(str(self.tmp / key))}" for key in PLACES]
         lines += [f"{key} = {toml_value(value)}" for key, value in extra.items() if not isinstance(value, dict)]
-        tables: dict[str, dict] = {f"agents.{actor}": {"provider": "claude"} for actor in sorted(model_actors())}
+        tables: dict[str, dict] = {}
         if settings:
             tables[self.name] = dict(settings)
         for key, value in extra.items():
-            if isinstance(value, dict):
+            if isinstance(value, dict) and key != "channels":
                 tables[key] = {**tables.get(key, {}), **value}
         for table, values in tables.items():
             lines += ["", f"[{table}]", *(f"{json.dumps(k, ensure_ascii=False)} = {toml_value(v)}"

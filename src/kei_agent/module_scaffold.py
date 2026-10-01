@@ -26,7 +26,7 @@ name = "${name}"
 label = "${label}"
 description = "${description}"
 ${actor}${process}
-# チャンネルの種類 = 既定の名前（番号を外した名前。設定の [channels] で変えられる）
+# チャンネルの種類 = 既定の名前（番号を外した名前。agents.csv の channels 列で変えられる）
 [channels]
 ${name} = ["${name}"]
 
@@ -50,7 +50,7 @@ ${name} = ["${name}"]
 ''')
 
 ACTOR = Template('''
-# AI の実行役（provider は App Home で選ぶ）。どこまで触れるかは、ここに書いたものが制限の表の行になる
+# AI の実行役（provider は agents.csv の engine）。どこまで触れるかは、ここに書いたものが制限の表の行になる
 [actor]
 prompt = "${name}.md"
 files = "none"                  # none / read / write（作業場のファイル）

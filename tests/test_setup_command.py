@@ -97,7 +97,8 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
 def test_files_that_exist_are_left_alone(tmp_path, capsys):
     home = tmp_path / "home"
     (home / "secrets").mkdir(parents=True)
-    (home / "config.toml").write_text('modules = ["research"]\n', encoding="utf-8")
+    (home / "config.toml").write_text("handoff_after_turns = 5\n", encoding="utf-8")
+    (home / "agents.csv").write_text("module,enabled,channels,engine,model,effort\nresearch,true,,claude,,\n", encoding="utf-8")
     (home / "profile.md").write_text("# わたしのプロフィール\n", encoding="utf-8")
     (home / "secrets" / "kei-agent.zsh").write_text("export SLACK_BOT_TOKEN='x'\n", encoding="utf-8")
     before = {path: path.read_text(encoding="utf-8") for path in home.rglob("*") if path.is_file()}
@@ -105,7 +106,7 @@ def test_files_that_exist_are_left_alone(tmp_path, capsys):
     code, _, calls = _run(tmp_path, script)
     out = capsys.readouterr().out
     assert code == 0 and {path: path.read_text(encoding="utf-8") for path in before} == before
-    assert out.count("もうある: ") == 3 and not any("話し方" in q or "外すモジュール" in q for q in script.asked)
+    assert out.count("もうある: ") == 4 and not any("話し方" in q or "外すモジュール" in q for q in script.asked)
     # 要る鍵がそろっていないので、常駐は登録しない（手順だけ出す）
     assert calls == [] and "要る鍵がそろっていない" in out and "deploy/install.sh research、deploy/install.sh" in out
 

@@ -2397,7 +2397,7 @@ async def test_unselected_provider_tells_where_to_choose(env, config):
     await settle(assistant)
 
     shown = "\n".join(slack.streamed() + slack.texts())
-    assert "App Home の設定で選んで" in shown and claude.calls == []
+    assert "agents.csv の engine 列に書いて" in shown and claude.calls == []
 
 
 async def test_knowledge_channel_and_paper_threads_go_to_the_knowledge_agent(env, store):

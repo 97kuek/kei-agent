@@ -7,7 +7,7 @@ description = "朝に今日の予定の一覧と Daily を、夜に振り返り�
 # 朝の一覧と材料を集めるのは本体の枠（core.morning・core.digest）で、ここは書いて出して残す
 core_schedules = ["daily", "review"]
 
-# AI の実行役（provider は App Home で選ぶ）。材料はプロンプトで渡し、研究全体の作業場（研究テーマのフォルダと
+# AI の実行役（provider は agents.csv の engine）。材料はプロンプトで渡し、研究全体の作業場（研究テーマのフォルダと
 # スレッドの記録）を読むだけ。何も書き換えず、コマンド・Web・Notion は使わない
 [actor]
 prompt = "daily.md"

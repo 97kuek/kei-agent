@@ -1,83 +1,26 @@
 """モジュールのオン・オフ（`kei-agent module list / add / remove`）。ひな形とテストは `new` / `test`（module_scaffold.py）。
 
 - `list` … 知っているモジュール（組み込みと、利用者のフォルダの modules/）と、オンかどうか、持っているもの
-- `add <名前>` / `remove <名前>` … config.toml の `modules` を書き換え（ほかの行とコメントは残す。書く前に、新しい設定を
-  読めるか確かめる。前の設定は config.toml.bak に残す）。担当の表（agents.csv）があれば、その行の enabled を書き換える、常駐を持つモジュールなら launchd に登録する・外す。
+- `add <名前>` / `remove <名前>` … 担当の表（agents.csv）のその行の enabled を書き換える（ほかの行は残す。書く前に、
+  新しい設定を読めるか確かめる。前の表は agents.csv.bak に残す。表が無ければ、組み込み全部がオンの表から作る）、常駐を持つモジュールなら launchd に登録する・外す。
   そのあとにやること（起動し直す、manifest の貼り直し、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ
-
-`modules` を書いていない設定は、組み込みのモジュールを全部使う。そこで足す・外すときは、今の一覧を書き出してから変える。
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
-import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
 from kei_agent import agents_table, module_scaffold, modules
 from kei_agent.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 
-# 書き足すときに添える行
-COMMENT = "# 使うモジュール（kei-agent module add / remove が書き換える。書かなければ組み込みを全部使う）"
-_TABLE = re.compile(r"^\s*\[")
-_MODULES = re.compile(r"^\s*modules\s*=")
-
-
-def _parse(text: str) -> dict:
-    try:
-        return tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"書き方が TOML として読めません: {e}") from None
-
-
-def current(text: str) -> list[str] | None:
-    """設定の modules（書いていなければ None）。読めない・名前の配列でないときは ConfigError。"""
-    data = _parse(text)
-    if "modules" not in data:
-        return None
-    value = data["modules"]
-    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
-        raise ConfigError('modules は、モジュールの名前の配列にしてください（例: modules = ["knowledge"]）')
-    return list(value)
-
-
-def only_modules_changed(text: str, new_text: str, names: list[str]) -> bool:
-    """書き換えた設定で、modules が names になり、ほかの中身は変わっていないか。"""
-    try:
-        before, after = _parse(text), _parse(new_text)
-    except ConfigError:
-        return False
-    before.pop("modules", None)
-    return after.pop("modules", None) == names and after == before
-
-
-def with_modules(text: str, names: list[str]) -> str:
-    """modules の行だけを names に書き換えた設定。無ければ、最初の表（[...]）の前に書き足す。"""
-    line = "modules = [" + ", ".join(f'"{name}"' for name in names) + "]"
-    lines = text.splitlines(keepends=True)
-    for start, row in enumerate(lines):
-        if _TABLE.match(row):
-            break
-        if _MODULES.match(row):
-            end = start
-            # 複数の行にまたがる配列は、閉じ括弧の行まで置き換える
-            while "]" not in lines[end].split("#", 1)[0] and end + 1 < len(lines):
-                end += 1
-            return "".join([*lines[:start], line + "\n", *lines[end + 1:]])
-    first_table = next((i for i, row in enumerate(lines) if _TABLE.match(row)), len(lines))
-    head, tail = lines[:first_table], lines[first_table:]
-    if head and not head[-1].endswith("\n"):
-        head[-1] += "\n"
-    return "".join([*head, COMMENT + "\n", line + "\n", *(["\n"] if tail else []), *tail])
-
 
 def check_text(path: Path, text: str, env: dict[str, str], home: Path, *, table: Path | None = None) -> Config:
     """その中身の設定を読めるか確かめる（同じフォルダの一時ファイルで。自分のモジュールと themes.toml も読む）。
-    table を渡すと、text は担当の表（agents.csv）の中身。読めなければ ConfigError。"""
+    table を渡すと、text は担当の表（agents.csv）の中身（table はまだ無くてよい）。読めなければ ConfigError。"""
     target = table or path
     trial = target.with_name(f".{target.name}.trial")
     trial.write_text(text, encoding="utf-8")
@@ -155,11 +98,8 @@ def next_steps(spec: modules.ModuleSpec, config: Config, added: bool) -> list[st
         steps.append(f"設定できる項目（config.toml の [{spec.name}]）: " + "、".join(spec.settings))
     if spec.port is not None:
         steps.append(f"そのプロセスだけの秘密情報があれば kei-agent-{spec.name}.zsh に書く（秘密情報の置き場所に。任意）")
-    if spec.actor is not None and config.agents_table is not None:
-        if not config.agent_profiles[spec.name].provider:
-            steps.append(f"{config.agents_table.name} の {spec.name} の行の engine に claude か codex を書く")
-    elif spec.actor is not None:
-        steps.append(f"Slack の App Home で「{spec.label}」の AI（Claude か Codex）を選ぶ")
+    if spec.actor is not None and not config.agent_profiles[spec.name].provider:
+        steps.append(f"agents.csv の {spec.name} の行の engine に claude か codex を書く")
     return steps
 
 
@@ -182,48 +122,34 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
         print(f"❌ 知らないモジュール: {name}（kei-agent module list で見る）")
         return 1
     table = home / agents_table.AGENTS_FILE
-    table = table if table.is_file() else None
-    target = table or path
+    existed = table.is_file()
     try:
-        if table is not None:
-            text = agents_table.read_text(table)
-            names = agents_table.parse(text)["modules"]
-        else:
-            text = path.read_text(encoding="utf-8")
-            names = current(text)
-    except (ConfigError, agents_table.TableError) as e:
-        print(f"❌ 設定を読めない（{target.name}）: {e}")
+        # 表が無ければ、今の動き（組み込み全部がオン、AI は未選択）と同じ表から始める
+        text = agents_table.read_text(table) if existed else agents_table.from_config({})
+        names = agents_table.parse(text)["modules"]
+    except agents_table.TableError as e:
+        print(f"❌ 設定を読めない（{table.name}）: {e}")
         return 1
-    names = list(modules.builtin()) if names is None else names
     if (name in names) == add:
         print(f"モジュール「{name}」はもう{'オン' if add else 'オフ'}です")
         return 0
-    # 足すときは後ろに付ける（名前の順に並んでいれば、その順を保つ）
-    new_names = ([*names, name] if names != sorted(names) else sorted([*names, name])) if add else \
-        [n for n in names if n != name]
-    if table is not None:
-        new_text = agents_table.with_enabled(text, name, add)
-    else:
-        new_text = with_modules(text, new_names)
-        if not only_modules_changed(text, new_text, new_names):
-            print(f"❌ modules の行をうまく書き換えられないので、書き換えなかった（{path} の modules を手で直してください）")
-            return 1
+    new_text = agents_table.with_enabled(text, name, add)
     try:
         config = check_text(path, new_text, env, home, table=table)
     except ConfigError as e:
         print(f"❌ この変更では設定を読めなくなるので、書き換えなかった: {e}")
         return 1
     verb = "足す" if add else "外す"
-    print(f"モジュール「{name}」（{spec.label}）を{verb}: "
-          + (f"{table.name} の {name} の行を enabled = {'true' if add else 'false'}" if table else f"modules = {new_names}"))
+    print(f"モジュール「{name}」（{spec.label}）を{verb}: {table.name} の {name} の行を enabled = {'true' if add else 'false'}")
     if dry_run:
         print("（--dry-run なので、書き換えていない）")
         return 0
-    target.with_name(target.name + ".bak").write_text(text, encoding="utf-8")
-    tmp = target.with_name(f".{target.name}.new")
+    if existed:
+        table.with_name(table.name + ".bak").write_text(text, encoding="utf-8")
+    tmp = table.with_name(f".{table.name}.new")
     tmp.write_text(new_text, encoding="utf-8")
-    os.replace(tmp, target)
-    print(f"✅ {target} を書き換えた（前のものは {target.name}.bak）")
+    os.replace(tmp, table)
+    print(f"✅ {table} を{'書き換えた（前のものは ' + table.name + '.bak）' if existed else '作った'}")
     steps = next_steps(spec, config, add)
     if spec.port is not None:
         if launchd and installer(name, not add):

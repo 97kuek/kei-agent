@@ -10,7 +10,7 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
   始まり、止めるときに止まる
 - `class Executor(SkillExecutor)` … `async handle(updater, metadata, text)` で仕事をこなす。
   `metadata["skill"]` が仕事の id、`text` が本文（本体の core.ask_agent が渡した材料の JSON）、
-  `metadata["provider"]` が App Home で選んだ provider。終わったら `await self.done(updater, 一言, data)`、
+  `metadata["provider"]` が選ばれている provider（agents.csv の engine）。終わったら `await self.done(updater, 一言, data)`、
   断るなら `await self.fail(updater, 理由)`。自由な質問（ASK）は `await self.answer(updater, text)` に渡すと、
   会話の続きも含めて、ほかの担当と同じ形で答える。`self.config` と `self.store` は土台が用意し、
   `self.records` はこのモジュールだけの記録（本体側の core.records と同じもの）
@@ -179,7 +179,7 @@ async def run_ai(config: Config, store, agent: str, use_case: str, prompt: str, 
     """その担当の用途（module.toml の [use_cases]）で AI を1回動かし、答えの本文を返す。
 
     作業場は読むだけ。どこまで触れるかは制限の表（module.toml の [actor] と、用途の offline）が決める。
-    provider を渡さなければ App Home の選択を使う。prompt_file を渡すと、指示書をそのファイル（モジュールの
+    provider を渡さなければ 選ばれている AI（agents.csv の engine）を使う。prompt_file を渡すと、指示書をそのファイル（モジュールの
     フォルダの中。利用者のフォルダの prompts/ に同じ名前があれば、そちら）に差し替える。profile を False に
     すると、依頼者のプロフィールを差し込まない（JSON だけを返す係など）。動かせなければ AIError。
     """

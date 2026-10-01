@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import json
 
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
@@ -12,7 +11,6 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
 from kei_agent.jobs import JobManager
-from kei_agent.store import Store
 
 
 @pytest.fixture
@@ -65,17 +63,3 @@ async def test_the_microphone_can_be_switched_even_while_notices_are_off(env):
     assert told == [("notify", {"kind": "listen", "on": True})]
     assert not assistant.modules["voice"].is_on("notify")
 
-
-def test_the_old_voice_switches_move_to_the_voice_module(tmp_path):
-    """本体が持っていた App Home の声のチェック（voice.enabled / voice.listening）は、声のモジュールの記録に移す。"""
-    path = tmp_path / "state.db"
-    store = Store(path)
-    store.set_setting("voice.enabled", "1")
-    store.set_setting("voice.listening", "0")
-
-    store = Store(path)
-
-    assert json.loads(store.module_record("voice", "switch", "notify")["value"]) == {"on": True}
-    assert json.loads(store.module_record("voice", "switch", "listen")["value"]) == {"on": False}
-    assert store.conn.execute("SELECT COUNT(*) FROM settings WHERE key LIKE 'voice.%'").fetchone()[0] == 0
-    Store(path)     # 2回目は何もしない

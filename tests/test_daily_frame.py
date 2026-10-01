@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, write_config
 
 from kei_agent import modules, runner
 from kei_agent.assistant import Assistant
@@ -122,7 +122,7 @@ def test_core_schedules_are_checked(tmp_path):
 def test_only_one_module_may_take_a_core_schedule(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
-    (home / "config.toml").write_text('modules = ["brief", "brief2"]\n', encoding="utf-8")
+    write_config(home / "config.toml", 'modules = ["brief", "brief2"]\n')
     _brief(home / "modules")
     other = _brief(home / "modules" / "x", BRIEF_TOML.replace('name = "brief"', 'name = "brief2"')
                    .replace("brief_write", "brief2_write"))

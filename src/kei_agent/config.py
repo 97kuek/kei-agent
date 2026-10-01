@@ -33,8 +33,6 @@ HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 AGENT_PLUGINS: frozenset[str] = frozenset()
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
 CORE_ACTORS = AGENT_PLUGINS | frozenset({"router"})
-# 前の名前の実行役（config.toml の [agents.<名前>] に残っていても読めるように）。自己改善はモジュール improve になった
-LEGACY_ACTORS = {"self_fix": "improve"}
 
 
 def model_actors() -> frozenset[str]:
@@ -50,7 +48,7 @@ class AgentProfile:
     Claude と Codex を同じ agent から切り替えられる。
     """
 
-    # provider は App Home で明示選択する。空文字は「まだ選んでいない」。
+    # provider は担当の表（agents.csv）の engine。空文字は「まだ選んでいない」。
     provider: str = ""
     # 担当の表（agents.csv）で固定したモデル。空なら module.toml の用途ごとの選び分け（model_policy.resolve）
     model: str = ""
@@ -334,13 +332,12 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "research_root", "agent_root", "course_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "agents", "handoff_after_turns", "channels", "sandbox",
-    "schedule", "maintenance", "a2a", "notion", "paths", "modules", "allow_protected_folders",
+    "job_poll_seconds", "job_parallel", "handoff_after_turns", "sandbox",
+    "schedule", "maintenance", "a2a", "notion", "paths", "allow_protected_folders",
 }
 PATHS_KEYS = {"secrets"}
-AGENT_PROFILE_KEYS = {"provider"}
-# モデルを固定できるのは担当の表（agents.csv）だけ。config.toml の [agents] には provider だけを書く
-TABLE_PROFILE_KEYS = {"provider", "model", "effort"}
+# 担当の表（agents.csv）の1行のうち、AI の列
+AGENT_PROFILE_KEYS = {"provider", "model", "effort"}
 # 設定に書かなかったときの置き場所。テストは conftest で一時フォルダに差し替え、本物の状態や研究データを触らない
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
@@ -406,12 +403,10 @@ def _a2a(data: dict, enabled: list[modules.ModuleSpec]) -> A2AConfig:
                      orchestrator=orchestrator)
 
 
-def _enabled_modules(data: dict, where: str = "config.toml の modules") -> list[modules.ModuleSpec]:
-    """設定の modules（書かなければ組み込み全部）を、知っているモジュールから選ぶ。where は直す場所（知らせに使う）。"""
+def _enabled_modules(data: dict, where: str) -> list[modules.ModuleSpec]:
+    """担当の表でオンにしたモジュール（表が無ければ組み込み全部）を選ぶ。where は直す場所（知らせに使う）。"""
     known = modules.known()
     names = data.get("modules", list(modules.builtin()))
-    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
-        raise ConfigError("config.toml の modules は、モジュールの名前の配列にしてください（例: modules = [\"knowledge\"]）")
     unknown = [n for n in names if n not in known]
     if unknown:
         raise ConfigError(f"{where} に知らないモジュールがあります: {', '.join(unknown)}"
@@ -464,7 +459,7 @@ def _module_settings(data: dict) -> dict[str, dict]:
     """
     found: dict[str, dict] = {}
     for name, spec in modules.known().items():
-        if name in TOP_LEVEL_KEYS:
+        if name in TOP_LEVEL_KEYS or name in ("modules", "channels", "agents"):
             if spec.settings:
                 raise ConfigError(f"モジュール「{name}」の設定が、config.toml の [{name}]（本体の設定）とぶつかります。"
                                   "モジュールの名前を変えてください")
@@ -485,30 +480,22 @@ def _module_settings(data: dict) -> dict[str, dict]:
     return found
 
 
-def _agent_profiles(data: dict, source: str = "config.toml") -> dict[str, AgentProfile]:
-    """[agents.<name>]（担当の表なら、その行）を読み、未指定の actor は provider 未選択にする。"""
-    if not isinstance(data, dict):
-        raise ConfigError("config.toml の [agents] はテーブルにしてください")
+def _agent_profiles(data: dict, where: str) -> dict[str, AgentProfile]:
+    """担当の表の AI の列を読み、表に無い actor は provider 未選択にする。"""
     # 使ってよいモデルの一覧はコアにある（model_policy）。読み込みの順番のため、ここで読む
     from kei_agent.model_policy import pin_error
 
-    # 前の名前（[agents.self_fix]）は、今の名前（[agents.improve]）として読む。両方あれば今の名前を使う
-    data = {**{LEGACY_ACTORS.get(name, name): raw for name, raw in data.items() if name in LEGACY_ACTORS},
-            **{name: raw for name, raw in data.items() if name not in LEGACY_ACTORS}}
     unknown = sorted(set(data) - model_actors())
     if unknown:
-        raise ConfigError(f"{source} の [agents] に知らないagentがあります: {', '.join(unknown)}")
+        raise ConfigError(f"{where} に AI を使わない行があります: {', '.join(unknown)}")
     profiles = _default_agent_profiles()
     for name, raw in data.items():
-        if not isinstance(raw, dict):
-            raise ConfigError(f"config.toml の [agents.{name}] はテーブルにしてください")
-        _check_keys(raw, AGENT_PROFILE_KEYS if source == "config.toml" else TABLE_PROFILE_KEYS, f"[agents.{name}]")
+        _check_keys(raw, AGENT_PROFILE_KEYS, f"{where} の {name}")
         provider, model, effort = (str(raw.get(key, "")) for key in ("provider", "model", "effort"))
-        where = f"{source} の {name} の行" if source != "config.toml" else f"config.toml の [agents.{name}]"
         if provider not in {"", "claude", "codex"}:
-            raise ConfigError(f"{where} の provider（engine）は claude、codex、または空にしてください")
+            raise ConfigError(f"{where} の {name} の行: engine は claude、codex、または空にしてください")
         if error := pin_error(name, provider, model, effort):
-            raise ConfigError(f"{where}: {error}")
+            raise ConfigError(f"{where} の {name} の行: {error}")
         profiles[name] = AgentProfile(provider=provider, model=model, effort=effort)
     return profiles
 
@@ -534,14 +521,19 @@ def config_home(env: dict[str, str] | None = None) -> Path:
     return config_path(env).parent
 
 
-def _with_table(data: dict, table: Path) -> dict:
-    """担当の表（agents.csv）があれば、その中身を config.toml の modules・[channels]・[agents] として重ねる。"""
+def _with_table(data: dict, table: Path | None) -> dict:
+    """担当の表（agents.csv）の中身を、modules・channels・agents として重ねる。表が無ければ、組み込み全部で AI は未選択。
+
+    モジュールのオンオフ・チャンネル・AI は表だけに書く。config.toml に残っていれば、移し方を示して止める。
+    """
     from kei_agent import agents_table
 
-    both = [key for key in agents_table.REPLACED_KEYS if key in data]
-    if both:
-        raise ConfigError(f"{table.name} があるので、config.toml の {'・'.join(both)} は消してください"
-                          f"（モジュールのオンオフ・チャンネル・AI は {table.name} だけに書く）")
+    old = [key for key in agents_table.REPLACED_KEYS if key in data]
+    if old:
+        raise ConfigError(f"config.toml の {'・'.join(old)} は、担当の表（{agents_table.AGENTS_FILE}）に移してください"
+                          "（uv run kei-agent agents init が移す）")
+    if table is None:
+        return data
     try:
         return {**data, **agents_table.load(table)}
     except agents_table.TableError as e:
@@ -578,15 +570,17 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
 
     table = agents_csv or home / AGENTS_FILE
     table = table if table.is_file() else None
-    if table is not None:
-        data = _with_table(data, table)
+    data = _with_table(data, table)
+    where = table.name if table is not None else AGENTS_FILE
     schedule = data.get("schedule", {})
     channels = data.get("channels", {})
     sandbox = data.get("sandbox", {})
-    enabled = _enabled_modules(data, table.name if table is not None else "config.toml の modules")
+    enabled = _enabled_modules(data, where)
     # モジュールの設定は、そのモジュールの名前の表（[course] など）に書く
     module_settings = _module_settings(data)
-    _check_keys(data, TOP_LEVEL_KEYS | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
+    # modules・channels・agents は担当の表から来たもの（config.toml に書いたものは _with_table が断った）
+    _check_keys(data, TOP_LEVEL_KEYS | {"modules", "channels", "agents"}
+                | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
     # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
                 "[channels]")
@@ -621,7 +615,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         run_timeout_minutes=int(data.get("run_timeout_minutes", 30)),
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
-        agent_profiles=_agent_profiles(data.get("agents", {}), table.name if table is not None else "config.toml"),
+        agent_profiles=_agent_profiles(data.get("agents", {}), where),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),

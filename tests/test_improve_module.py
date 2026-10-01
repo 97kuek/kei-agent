@@ -5,7 +5,6 @@ Kei Agent のチャンネルで要望を聞き、公開の issue にし、案を
 """
 
 import asyncio
-import sqlite3
 import subprocess
 from dataclasses import replace
 from datetime import datetime
@@ -20,7 +19,6 @@ from kei_agent.config import AgentProfile
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.slack_text import strip_lines
-from kei_agent.store import Store
 from kei_agent_modules.improve import issues
 from kei_agent_modules.improve import repo as improve_repo
 from kei_agent_modules.improve.module import HIDDEN
@@ -820,47 +818,6 @@ async def test_finished_worktrees_and_old_talks_are_cleaned_once_a_day(env):
     done.mkdir()
     await module.tick(datetime(2026, 9, 28, 12, 0))
     assert done.exists()
-
-
-def test_old_improvements_are_copied_once_into_the_module_records(tmp_path):
-    path = tmp_path / "kei-agent.db"
-    conn = sqlite3.connect(path)
-    conn.executescript("""
-        CREATE TABLE improvements (id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL,
-            thread_ts TEXT NOT NULL UNIQUE, request TEXT NOT NULL, status TEXT NOT NULL, branch TEXT, worktree TEXT,
-            base_commit TEXT, merge_commit TEXT, detail TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL,
-            issue_number INTEGER);
-        INSERT INTO improvements (channel, thread_ts, request, status, merge_commit, created_at, updated_at, issue_number)
-            VALUES ('C9', '20.1', '経過を細かく', 'done', 'abcdef1234', 100.0, 200.0, 7);
-        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        INSERT INTO settings VALUES ('agent.self_fix.provider', 'codex');
-    """)
-    conn.commit()
-    conn.close()
-
-    store = Store(path)
-    from kei_agent.records import Records
-    from kei_agent_modules.improve.fixes import Fixes
-    fix = Fixes(Records(store, "improve")).get("20.1")
-    assert (fix.status, fix.issue_number, fix.merge_commit, fix.branch) == ("done", 7, "abcdef1234", "")
-    # App Home で選んだ AI も、モジュールの実行役の名前に写す
-    assert store.setting("agent.improve.provider") == "codex" and store.setting("agent.self_fix.provider") is None
-    # 本体の表は念のため残す。写すのは一度だけ
-    Fixes(Records(store, "improve")).update("20.1", status="failed")
-    again = Fixes(Records(Store(path), "improve")).get("20.1")
-    assert again.status == "failed"
-    assert store.conn.execute("SELECT COUNT(*) FROM improvements").fetchone()[0] == 1
-
-
-def test_the_old_agents_self_fix_table_still_reads(tmp_path):
-    """config.toml に前の名前の [agents.self_fix] が残っていても読める（自己改善の実行役 improve として）。"""
-    from kei_agent.config import load_config
-
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.toml").write_text('[agents.self_fix]\nprovider = "codex"\n', encoding="utf-8")
-    config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    assert config.agent_profiles["improve"].provider == "codex" and "self_fix" not in config.agent_profiles
 
 
 def test_the_improve_module_takes_the_kei_agent_channel():

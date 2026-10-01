@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fakes import write_config
 
 from kei_agent import cli, modules, slack_manifest
 from kei_agent.config import load_config
@@ -14,7 +15,7 @@ REPO = Path(__file__).resolve().parents[1]
 def _config(tmp_path, text=""):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    (home / "config.toml").write_text(text, encoding="utf-8")
+    write_config(home / "config.toml", text)
     return load_config(env={"KEI_AGENT_HOME": str(home)})
 
 

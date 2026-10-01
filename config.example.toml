@@ -27,38 +27,8 @@ job_parallel = 1
 # （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
 handoff_after_turns = 8
 
-# 担当の表（agents.csv。例は agents.example.csv）を置くと、モジュールのオンオフ・チャンネル・AI はそこだけに書く。
-# そのときは下の modules・[agents]・[channels] を消す（kei-agent agents init が移して消す。deploy/README.md の「担当の表」）
-#
-# 使うモジュール（機能のまとまり。docs/extensibility.md）。組み込みはリポジトリの modules/、自分のものは
-# ~/.config/kei-agent/modules/ に置く。ここに書いたものだけが動く（書かなければ、組み込みを全部使う）。
-# kei-agent module add / remove <名前> で書き換えられる（この行だけを変える）
-modules = ["course", "daily", "improve", "knowledge", "notion", "research", "time", "voice", "work"]
-
-# agent ごとの実行器。provider は App Home で明示選択するまで空のままにする。
-# model と effort は用途別の固定方針（src/kei_agent/model_policy.py）、使える道具・連携・Notion の範囲は
-# 制限の表（src/kei_agent/agent_policy.py）で決まり、ここには書かない。
-# Claude / Codex の間、または上位 model への自動フォールバックはしない。
-[agents.research]
-provider = ""
-
-[agents.course]
-provider = ""
-
-[agents.work]
-provider = ""
-
-[agents.knowledge]
-provider = ""
-
-[agents.router]
-provider = ""
-
-[agents.daily]
-provider = ""
-
-[agents.improve]
-provider = ""
+# 使うモジュール・チャンネル・担当ごとの AI（engine・モデル）は、ここではなく担当の表 agents.csv に書く
+# （例は agents.example.csv。kei-agent setup が作る。書き方は deploy/README.md の「担当の表」）
 
 [schedule]
 # 決まった時刻の処理（ローカル時刻）。空文字 "" にすると、その処理を行わない
@@ -126,22 +96,6 @@ school = ""
 # prefixes = { "10_" = "research", "20_" = "course", "30_" = "work" }
 # 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
 # pick_course = ["course"]
-
-[channels]
-# 研究全体・中長期の方針: すべてのテーマを読むだけ。書き込みは _overview/ だけ
-overview = ["overview", "research-overview"]
-# Kei Agent のチャンネル: 困りごとの知らせ（本体）と、自己改善の相談（モジュール improve。要望は要約して公開の
-# GitHub issue にする。原文は Slack に残る）
-# チャンネル名の先頭の番号（`00_kei-agent` の `00_`）は外して照合するので、ここには番号を書かない
-improve = ["research-agent", "kei-agent"]
-# 大学: 授業と課題。依頼は大学エージェント（A2A）に取り次ぐ。作業用ディレクトリは作らない
-course = ["course"]
-# 仕事: 会社の予定など。依頼は仕事エージェント（A2A）に取り次ぐ
-work = ["work"]
-# 知識: 朝の読みもの（#40_knowledge）とその質問。依頼は知識エージェント（A2A）に取り次ぐ
-knowledge = ["knowledge"]
-# 上記以外で Kei Agent を招待したチャンネルは、研究テーマとして扱う（#vlm-counting → ~/research/vlm-counting/）
-# 個人用のチャンネルには Kei Agent を招待しない
 
 [sandbox]
 # Bash（sandbox内）から接続してよいドメイン

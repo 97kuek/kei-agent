@@ -22,7 +22,7 @@ from pathlib import Path
 
 # [channels] に書くと、ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ名前。受け持てるのは1つのモジュールだけ
 ALL_CHANNELS = "*"
-# 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は config.toml の [channels]）。
+# 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は agents.csv）。
 # improve は Kei Agent のチャンネル（#00_kei-agent）。困りごとの知らせは、受け持つモジュールが無くても本体が出す
 CORE_CHANNELS = ("improve",)
 # 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は設定の [schedule] と App Home のまま、
@@ -134,7 +134,7 @@ class ConnectorSpec:
 
 @dataclass(frozen=True)
 class ActorSpec:
-    """AI の実行役。provider は App Home で選び、どこまで触れるかはここに書いたものが制限の表の行になる。"""
+    """AI の実行役。provider は agents.csv の engine で選び、どこまで触れるかはここに書いたものが制限の表の行になる。"""
     prompt: str
     plugin: bool
     files: str
@@ -174,7 +174,7 @@ class ModuleSpec:
     port: int | None = None
     # その常駐のプロセスが A2A の担当ではない（service.py の serve で動く。Notion のゲートウェイなど）
     service: bool = False
-    # チャンネルの種類 → 既定の名前（番号を外した名前。設定の [channels] で変えられる）
+    # チャンネルの種類 → 既定の名前（番号を外した名前。agents.csv の channels 列で変えられる）
     channels: dict[str, tuple[str, ...]] = field(default_factory=dict)
     schedules: tuple[ScheduleSpec, ...] = ()
     # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）

@@ -7,7 +7,7 @@ description = "研究テーマのチャンネルで、テーマの作業場（~/
 [depends]
 optional = ["notion"]
 
-# AI の実行役（provider は App Home で選ぶ）。テーマの作業場の中で、コマンドも Web も使う。Notion は研究ホームの下だけ
+# AI の実行役（provider は agents.csv の engine）。テーマの作業場の中で、コマンドも Web も使う。Notion は研究ホームの下だけ
 [actor]
 prompt = "research.md"
 plugin = true

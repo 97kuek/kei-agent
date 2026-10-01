@@ -30,7 +30,7 @@ async def run_result(config: Config, store, agent: str, use_case: str, prompt: s
 
     folder を渡さなければ、担当の作業場を読むだけで動かす。folder を渡すと、そのフォルダの中で動かし、書き込みも
     そのフォルダの中だけ（書けるかどうかは、制限の表の files が決める）。workspace を渡すと、その作業場で読むだけで
-    動かす（研究全体の作業場など）。provider を渡さなければ App Home の選択。prompt_file は指示書の差し替え
+    動かす（研究全体の作業場など）。provider を渡さなければ 選ばれている AI（agents.csv の engine）。prompt_file は指示書の差し替え
     （モジュールのフォルダの中）、profile を False にすると依頼者のプロフィールを差し込まない（JSON だけを返す係など）。
     """
     try:

@@ -374,7 +374,7 @@ class Module:
             return
         if not self.core.provider:
             await self._post(req, "自己改善の AI（Claude か Codex）がまだ選ばれていないので、要望は GitHub の issue に"
-                                  "しなかったよ。App Home の設定で選んでね。")
+                                  "しなかったよ。agents.csv の improve の行の engine に書いてね。")
             return
         try:
             # 作って番号を残すまでは、入れ替え（再起動）を待たせる。途中で止まると issue が二重にできる

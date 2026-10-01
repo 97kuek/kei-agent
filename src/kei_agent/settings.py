@@ -188,8 +188,8 @@ def set_schedule(store: Store, name: str, hhmm: str, enabled: bool) -> None:
     _set(store, f"schedule.{name}.enabled", "1" if enabled else "0")
 
 
-# actor ごとの provider。App Home の値は config.toml を書き換えず、次の実行からだけ上書きする。
-# 担当の表（agents.csv）を使っているときは表が正で、App Home の値は本体を起動し直すまでの一時的なもの
+# actor ごとの provider。正は担当の表（agents.csv）の engine。App Home の値は表を書き換えず、
+# 本体を起動し直すまでの一時的な上書き
 _PROFILE_PROVIDERS = frozenset({"claude", "codex"})
 
 
@@ -209,16 +209,13 @@ def selected_provider(config: Config, store: Store, actor: str) -> str:
     return _get(store, f"agent.{actor}.provider") or config.agent_profiles[actor].provider
 
 
-def table_provider(config: Config, actor: str) -> str | None:
-    """担当の表（agents.csv）に書いた provider。表を使っていなければ None。"""
-    return config.agent_profiles[actor].provider if config.agents_table is not None else None
+def table_provider(config: Config, actor: str) -> str:
+    """担当の表（agents.csv）に書いた provider（App Home の一時的な切り替えの前のもの）。"""
+    return config.agent_profiles[actor].provider
 
 
-def reset_agent_providers(config: Config, store: Store) -> list[str]:
-    """担当の表を使っているとき、App Home で一時的に切り替えた provider を消して表に戻す（本体の起動のとき）。
-    戻した actor を返す。"""
-    if config.agents_table is None:
-        return []
+def reset_agent_providers(store: Store) -> list[str]:
+    """App Home で一時的に切り替えた provider を消して、担当の表に戻す（本体の起動のとき）。戻した actor を返す。"""
     reset = []
     for actor in sorted(model_actors()):
         key = f"agent.{actor}.provider"

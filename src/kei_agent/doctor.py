@@ -50,9 +50,9 @@ def check_config(env: dict[str, str] | None = None) -> tuple[Config | None, list
         config = load_config(env=env)
     except ConfigError as e:
         return None, [Finding(ERROR, "設定", f"設定を読めない: {e}",
-                              "config.toml（あれば agents.csv も）を直してから、もう一度点検する")]
+                              "config.toml か agents.csv を直してから、もう一度点検する")]
     names = "、".join(config.modules) or "なし"
-    source = f"。モジュール・チャンネル・AI は {config.agents_table.name}" if config.agents_table is not None else ""
+    source = "" if config.agents_table is not None else "。agents.csv が無いので、組み込みを全部使う"
     return config, [Finding(OK, "設定", f"設定を読めた（モジュール {len(config.modules)}: {names}{source}）")]
 
 
@@ -117,11 +117,11 @@ def check_secrets(config: Config) -> list[Finding]:
 
 # AI
 
-def chosen_providers(config: Config) -> dict[str, str]:
-    """実行役ごとの provider（App Home で選んだもの。無ければ config.toml の [agents]）。状態は読むだけで開く。"""
+def stored_providers(db: Path) -> dict[str, str]:
+    """App Home で一時的に切り替えた provider（actor → provider）。状態は読むだけで開く。"""
     picked: dict[str, str] = {}
-    if config.db_path.exists():
-        conn = sqlite3.connect(f"file:{config.db_path}?mode=ro", uri=True)
+    if db.exists():
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
             for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'agent.%.provider'"):
                 picked[key.split(".")[1]] = value
@@ -129,6 +129,12 @@ def chosen_providers(config: Config) -> dict[str, str]:
             pass
         finally:
             conn.close()
+    return picked
+
+
+def chosen_providers(config: Config) -> dict[str, str]:
+    """実行役ごとの provider（App Home で一時的に切り替えたもの。無ければ agents.csv）。"""
+    picked = stored_providers(config.db_path)
     found = {}
     for actor in home.agent_labels(config):
         profile = config.agent_profiles.get(actor)
@@ -140,21 +146,18 @@ def check_ai(config: Config, which: Callable[[str], str | None] = shutil.which) 
     labels = home.agent_labels(config)
     providers = chosen_providers(config)
     findings = []
-    table = config.agents_table
     unset = [labels[actor] for actor, provider in providers.items() if not provider]
     if unset:
         findings.append(Finding(ERROR, "AI", f"AI が選ばれていない担当: {'、'.join(unset)}",
-                                f"{table.name} の engine 列に claude か codex を書く" if table is not None
-                                else "Slack の App Home で、担当ごとに Claude か Codex を選ぶ"))
-    if table is not None:
-        moved = [f"{labels[a]}（{p}）" for a, p in providers.items() if p and p != config.agent_profiles[a].provider]
-        if moved:
-            findings.append(Finding(WARN, "AI", f"App Home で {table.name} と違う AI に切り替えている: {'、'.join(moved)}",
-                                    "本体を起動し直すと表の値に戻る。ずっと使うなら表の engine を書き換える"))
-        pins = [f"{labels[a]}（{p.model}{' ' + p.effort if p.effort else ''}）"
-                for a, p in config.agent_profiles.items() if p.model and a in labels]
-        if pins:
-            findings.append(Finding(OK, "AI", f"{table.name} でモデルを固定している担当: {'、'.join(pins)}"))
+                                "agents.csv の engine 列に claude か codex を書く（表が無ければ uv run kei-agent setup）"))
+    moved = [f"{labels[a]}（{p}）" for a, p in providers.items() if p and p != config.agent_profiles[a].provider]
+    if moved:
+        findings.append(Finding(WARN, "AI", f"App Home で agents.csv と違う AI に切り替えている: {'、'.join(moved)}",
+                                "本体を起動し直すと表の値に戻る。ずっと使うなら表の engine を書き換える"))
+    pins = [f"{labels[a]}（{p.model}{' ' + p.effort if p.effort else ''}）"
+            for a, p in config.agent_profiles.items() if p.model and a in labels]
+    if pins:
+        findings.append(Finding(OK, "AI", f"agents.csv でモデルを固定している担当: {'、'.join(pins)}"))
     for provider in sorted({p for p in providers.values() if p}):
         command = {"claude": "claude", "codex": "codex"}[provider]
         where = which(command)

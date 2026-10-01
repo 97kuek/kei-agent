@@ -33,7 +33,7 @@ TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "�
 
 
 def agent_labels(config: Config) -> dict[str, str]:
-    """App Home で AI を選ぶ実行役と表示名（本体の担当、使うモジュール、横断の係の順）。"""
+    """AI を選ぶ実行役と表示名（本体の担当、使うモジュール、横断の係の順）。"""
     labels = dict(CORE_AGENT_LABELS)
     labels.update({spec.name: spec.label for spec in modules.enabled(config.modules) if spec.actor})
     labels.update(CROSS_AGENT_LABELS)
@@ -118,9 +118,9 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
         if provider:
             select["initial_option"] = _option(provider.title(), provider)
         base = settings.table_provider(config, agent)
-        if base is not None and base != provider:
+        if base != provider:
             # 表（agents.csv）と違う AI で動いている。本体を起動し直すと表に戻る
-            label += f"\n_{config.agents_table.name} では {base.title() if base else '未選択'}（起動し直すと戻る）_"
+            label += f"\n_agents.csv では {base.title() if base else '未選択'}（起動し直すと戻る）_"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": label}, "accessory": select})
 
     names = settings.schedule_names(config)

@@ -39,7 +39,7 @@
 | 項目 | 中身 |
 |---|---|
 | つなぎ方 | Socket Mode。頼めるのは `KEI_AGENT_ALLOWED_USER_ID` の1人だけ |
-| チャンネル | 頭の番号を外して `[channels]` と照合する。当たらなければ研究テーマ |
+| チャンネル | 頭の番号を外して `agents.csv` の `channels` と照合する。当たらなければ研究テーマ |
 | 返事 | `chat.startStream` で流す。経過は `assistant.threads.setStatus`、状態は `agents.sessions.setStatus` |
 | 並行 | 違うスレッドは `max_concurrent_runs`（既定2）まで。同じスレッドは順番 |
 | 会話 | 1スレッド = 1会話（[agents.md](agents.md#どの担当にも共通)） |
@@ -89,7 +89,7 @@
 
 ### actor とモデル
 
-- AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine`（表が無ければ App Home）。既定は無く、選ぶまで動かない
+- AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine`。App Home の切り替えは起動し直すまでの一時的なもの。既定は無く、選ぶまで動かない
 - モデルは用途ごとの表（下と [agents/](agents.md)）で決まる。`agents.csv` の `model`・`effort` を書いた担当だけ、明示の用途を除いてそのモデルにする（[deploy/README.md](../deploy/README.md#担当の表agentscsv)）
 - actor: `research` / `course` / `work` / `knowledge` / `router`（振り分け）/ `daily` / `improve`
 - 使ってよいモデルは `model_policy.py` にだけ置く。モジュールはその中からしか選べない

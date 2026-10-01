@@ -98,11 +98,23 @@ def test_the_header_bom_and_comments(tmp_path):
 
 def test_the_same_things_cannot_also_be_in_config_toml(tmp_path):
     home = _home(tmp_path, HEADER + "knowledge,true,,,,\n", 'modules = ["knowledge"]\n\n[agents.router]\nprovider = "claude"\n')
-    with pytest.raises(ConfigError, match="modules・agents は消してください"):
+    with pytest.raises(ConfigError, match="modules・agents は、担当の表（agents.csv）に移してください.*agents init"):
+        _load(home)
+    # 表が無くても同じ（前の書き方のまま起動しない）
+    (home / "agents.csv").unlink()
+    with pytest.raises(ConfigError, match="agents init"):
         _load(home)
 
 
-def test_app_home_switches_are_temporary_when_the_table_is_used(tmp_path):
+def test_without_a_table_every_builtin_module_is_on_and_no_ai_is_chosen(tmp_path):
+    from kei_agent import modules
+
+    config = _load(_home(tmp_path, None))
+    assert config.agents_table is None and set(config.modules) == set(modules.builtin())
+    assert not any(p.provider for p in config.agent_profiles.values())
+
+
+def test_app_home_switches_are_temporary(tmp_path):
     home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
     config = _load(home)
     store = Store(config.db_path)
@@ -110,15 +122,9 @@ def test_app_home_switches_are_temporary_when_the_table_is_used(tmp_path):
     assert settings.selected_provider(config, store, "knowledge") == "claude"
     assert settings.table_provider(config, "knowledge") == "codex"
     # 本体を起動し直すと、表の値に戻る
-    assert settings.reset_agent_providers(config, store) == ["knowledge"]
+    assert settings.reset_agent_providers(store) == ["knowledge"]
     assert settings.selected_provider(config, store, "knowledge") == "codex"
-
-
-def test_app_home_choices_stay_without_the_table(config, store):
-    settings.set_agent_provider(store, "knowledge", "codex")
-    assert settings.reset_agent_providers(config, store) == []
-    assert settings.selected_provider(config, store, "knowledge") == "codex"
-    assert settings.table_provider(config, "knowledge") is None
+    assert settings.reset_agent_providers(store) == []
 
 
 def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
@@ -148,20 +154,22 @@ def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
 
 
 def test_init_moves_the_config_into_the_table(tmp_path, capsys):
-    config_text = ('# わたしの設定\nmodules = ["research", "course", "knowledge"]\nhandoff_after_turns = 5\n\n'
+    state = tmp_path / "state"
+    config_text = (f'# わたしの設定\nmodules = ["research", "course", "knowledge"]\nhandoff_after_turns = 5\n'
+                   f'state_dir = "{state}"\n\n'
                    '[agents.research]\nprovider = "codex"\n\n[agents.router]\nprovider = "claude"\n\n'
                    '[schedule]\ndaily = "07:30"\n\n[channels]\ncourse = ["uni"]\nimprove = ["kei-agent"]\n')
     home = _home(tmp_path, None, config_text)
     env = {"KEI_AGENT_HOME": str(home)}
-    before = _load(home)
     # App Home で選んだ AI は、表の engine に書き写す（移したあとの起動で App Home の値は消える）
-    settings.set_agent_provider(Store(before.db_path), "course", "claude")
+    settings.set_agent_provider(Store(state / "kei-agent.db"), "course", "claude")
     assert agents_command.init(env=env, dry_run=True) == 0
     assert not (home / "agents.csv").exists()
     assert agents_command.init(env=env) == 0
     after = _load(home)
     assert after.agents_table is not None
-    assert (after.modules, after.module_channels) == (before.modules, before.module_channels)
+    assert after.modules == ("research", "course", "knowledge")
+    assert after.module_channels["course"] == ("uni",) and after.improve_channels == ("kei-agent",)
     assert after.agent_profiles["research"].provider == "codex"
     assert after.agent_profiles["course"].provider == "claude"
     toml = (home / "config.toml").read_text()

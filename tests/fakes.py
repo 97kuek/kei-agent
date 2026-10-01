@@ -80,3 +80,23 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
         text = md.read_text().replace("## 検索キーワード\n", "## 検索キーワード\n\n" + "\n".join(f"- {k}" for k in keywords) + "\n", 1)
         md.write_text(text)
     return ws
+
+
+def write_config(path: Path, text: str) -> Path:
+    """config.toml を書く。モジュール・チャンネル・AI（modules・[channels]・[agents]）は、同じフォルダの agents.csv に分ける。"""
+    import tomllib
+
+    from kei_agent import agents_command, agents_table, modules
+
+    # 利用者のモジュール（同じフォルダの modules/）も、表の行にできるように読んでおく
+    modules.register_user_modules(path.parent / "modules")
+    try:
+        moved = any(key in tomllib.loads(text) for key in agents_table.REPLACED_KEYS)
+    except tomllib.TOMLDecodeError:
+        moved = False
+    if moved:
+        text, table = agents_command.split(text)
+        (path.parent / agents_table.AGENTS_FILE).write_text(table, encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path

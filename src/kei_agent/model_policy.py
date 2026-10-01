@@ -191,7 +191,7 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
 
 
 def resolve_selected(config, store, actor: str, use_case: UseCase | str, *, manual: bool = False) -> ResolvedModel:
-    """App Home で選択された provider から recipe を解決する。"""
+    """選ばれている provider（agents.csv の engine か、App Home の一時的な切り替え）から recipe を解決する。"""
     # settings は Config を import するため、循環 import を避けて遅延 import にする。
     from kei_agent.settings import selected_provider
 
