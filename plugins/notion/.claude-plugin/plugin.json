@@ -1,0 +1,5 @@
+{
+  "name": "kei-agent-notion",
+  "version": "0.1.0",
+  "description": "Notion を使える担当に共通の skill（既存のページの書式を保つ）"
+}

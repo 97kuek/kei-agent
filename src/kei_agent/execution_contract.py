@@ -26,12 +26,21 @@ class ExecutionContract:
     skill_dir: Path | None
     capabilities: frozenset[str]
     read_only: bool
+    # 担当のほかに渡す共通の skill（リポジトリの plugins/<名前>/skills。Notion を使える担当には notion）
+    shared_skill_dirs: tuple[Path, ...] = ()
+
+    @property
+    def skill_dirs(self) -> tuple[Path, ...]:
+        """この実行で渡す skill の置き場すべて（担当のものと共通のもの）。"""
+        return (*((self.skill_dir,) if self.skill_dir is not None else ()), *self.shared_skill_dirs)
 
 
-def prompt_fingerprint(prompt_text: str, skill_dir: Path | None) -> str:
+def prompt_fingerprint(prompt_text: str, *skill_dirs: Path | None) -> str:
     """会話の起動時に固定される指示と skill 内容の版。"""
     digest = hashlib.sha256(prompt_text.encode("utf-8"))
-    if skill_dir is not None and skill_dir.is_dir():
+    for skill_dir in skill_dirs:
+        if skill_dir is None or not skill_dir.is_dir():
+            continue
         for path in sorted(skill_dir.rglob("*")):
             if path.is_file():
                 digest.update(str(path.relative_to(skill_dir)).encode("utf-8"))
@@ -83,31 +92,45 @@ def skill_dir(config: Config, policy: AgentPolicy) -> Path | None:
     return config.agent_plugin_dir(policy.name) / "skills" if policy.plugin else None
 
 
+# 共通の skill の置き場（リポジトリの plugins/<名前>/。Claude には plugin、Codex には skills を渡す）
+SHARED_PLUGINS = "plugins"
+
+
+def shared_skill_dirs(config: Config, policy: AgentPolicy) -> tuple[Path, ...]:
+    """担当のほかに渡す共通の skill。Notion を使える担当には、既存のページの書式を保つ skill（plugins/notion）。"""
+    return (config.repo_root / SHARED_PLUGINS / "notion" / "skills",) if policy.notion != "none" else ()
+
+
+def _within_reach(config: Config, policy: AgentPolicy) -> AgentPolicy:
+    """Notion のホームを書いていない担当には、届かない Notion の道具を渡さない（config.toml の [notion]）。"""
+    if policy.notion != "none" and policy.name not in config.notion.client_homes():
+        return replace(policy, notion="none")
+    return policy
+
+
 def prompt_version(config: Config, actor: str, workspace: Workspace | None = None) -> str:
     """その担当の会話の指示・skill の版。変わったら、古い会話を再開しない。"""
-    policy = policy_of(actor)
+    policy = _within_reach(config, policy_of(actor))
+    skills = (skill_dir(config, policy), *shared_skill_dirs(config, policy))
     if workspace is None:
-        return prompt_fingerprint(prompt_text(config, config.prompt_file(policy.prompt, module=policy.name)),
-                                  skill_dir(config, policy))
-    return prompt_fingerprint(prompt_text(config, prompt_path(config, policy, workspace), workspace.profile),
-                              skill_dir(config, policy))
+        return prompt_fingerprint(prompt_text(config, config.prompt_file(policy.prompt, module=policy.name)), *skills)
+    return prompt_fingerprint(prompt_text(config, prompt_path(config, policy, workspace), workspace.profile), *skills)
 
 
 def resolve_contract(config: Config, request: ExecutionRequest) -> ExecutionContract:
     read_only = is_read_only(request)
-    policy = policy_of(request.recipe.actor, request.recipe.use_case, read_only=read_only)
-    if policy.notion != "none" and policy.name not in config.notion.client_homes():
-        # Notion のホームを書いていない担当には、届かない Notion の道具を渡さない（config.toml の [notion]）
-        policy = replace(policy, notion="none")
+    policy = _within_reach(config, policy_of(request.recipe.actor, request.recipe.use_case, read_only=read_only))
     text = prompt_text(config, prompt_path(config, policy, request.workspace), request.workspace.profile)
     skills = skill_dir(config, policy)
+    shared = shared_skill_dirs(config, policy)
     return ExecutionContract(
         workspace=request.workspace,
         recipe=request.recipe,
         policy=policy,
         prompt_text=text,
-        prompt_version=prompt_fingerprint(text, skills),
+        prompt_version=prompt_fingerprint(text, skills, *shared),
         skill_dir=skills,
         capabilities=required_capabilities(policy),
         read_only=read_only,
+        shared_skill_dirs=shared,
     )

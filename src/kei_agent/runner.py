@@ -165,8 +165,8 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
         "--settings", json.dumps(guard.build_settings(config, ws, policy), ensure_ascii=False),
         "--permission-mode", "dontAsk",
     ]
-    if contract.skill_dir:
-        cmd += ["--plugin-dir", str(contract.skill_dir.parent)]
+    for skills in contract.skill_dirs:
+        cmd += ["--plugin-dir", str(skills.parent)]
     mcp = notion_mcp_config(config) if policy.notion != "none" else {"mcpServers": {}}
     cmd += ["--mcp-config", json.dumps(mcp, ensure_ascii=False)]
     if not policy.connectors:
@@ -233,11 +233,11 @@ def codex_instructions_setting(text: str) -> str:
 
 
 def install_agent_skills(contract: ExecutionContract, cwd: os.PathLike[str]) -> None:
-    """この実行の agent skill だけを公開する。利用者所有の skill は触らない。"""
-    if contract.skill_dir is None:
+    """この実行の agent skill（担当のものと共通のもの）だけを公開する。利用者所有の skill は触らない。"""
+    if not contract.skill_dirs:
         clear_managed_skill_directory(Path(cwd))
         return
-    install_skill_directory(contract.skill_dir, Path(cwd))
+    install_skill_directory(contract.skill_dirs, Path(cwd))
 
 
 def _managed_skill_sources(manifest: Path) -> dict[str, Path]:
@@ -267,10 +267,12 @@ def clear_managed_skill_directory(cwd: Path) -> None:
         manifest.write_text("{}", encoding="utf-8")
 
 
-def install_skill_directory(source_root: Path, cwd: Path) -> None:
-    """指定された agent の skill ディレクトリだけを作業場へ反映する。"""
-    if not source_root.is_dir():
-        raise FileNotFoundError(f"agent skill directory is missing: {source_root}")
+def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) -> None:
+    """指定された skill ディレクトリ（1つか、いくつか）だけを作業場へ反映する。"""
+    source_roots = (source_roots,) if isinstance(source_roots, Path) else source_roots
+    for source_root in source_roots:
+        if not source_root.is_dir():
+            raise FileNotFoundError(f"agent skill directory is missing: {source_root}")
     target_root = cwd / ".agents" / "skills"
     target_root.mkdir(parents=True, exist_ok=True)
     manifest = target_root / ".kei-agent-managed-skills.json"
@@ -282,7 +284,7 @@ def install_skill_directory(source_root: Path, cwd: Path) -> None:
         elif target.exists() or target.is_symlink():
             raise RuntimeError(f"managed skill changed by another owner: {name}")
     new_managed: dict[str, str] = {}
-    for source in sorted(source_root.iterdir()):
+    for source in sorted(s for root in source_roots for s in root.iterdir()):
         if not source.is_dir() or not (source / "SKILL.md").is_file():
             continue
         target = target_root / source.name

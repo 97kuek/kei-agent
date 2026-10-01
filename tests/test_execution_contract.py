@@ -116,3 +116,22 @@ def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
     assert prompt_version(config, "lab") != first
     (folder / "lab.md").write_text("# 実験の担当（直した）\n", encoding="utf-8")
     assert len({first, prompt_version(config, "lab")}) == 2
+
+
+def test_only_agents_that_reach_notion_get_the_shared_notion_skill(config):
+    """既存のページの書式を保つ skill は、Notion を使える担当（ホームを書いたもの）にだけ渡す。"""
+    from dataclasses import replace
+
+    from kei_agent.agent_policy import policy_of
+    from kei_agent.config import NotionConfig
+    from kei_agent.execution_contract import shared_skill_dirs
+
+    notion = config.repo_root / "plugins" / "notion" / "skills"
+    assert shared_skill_dirs(config, policy_of("research")) == (notion,)
+    assert (notion / "keeping-notion-format" / "SKILL.md").is_file()
+    assert shared_skill_dirs(config, policy_of("work")) == ()                 # Notion を持たない担当
+    request = runner.ExecutionRequest(themes.resolve(config, "vlm"), resolve("research", "codex", "research_execute"),
+                                      None, "C1", "1.1")
+    assert resolve_contract(config, request).shared_skill_dirs == (notion,)
+    contract = resolve_contract(replace(config, notion=NotionConfig()), request)
+    assert contract.policy.notion == "none" and contract.shared_skill_dirs == ()  # ホームが無ければ渡さない

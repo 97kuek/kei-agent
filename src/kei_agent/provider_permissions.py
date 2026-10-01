@@ -53,8 +53,8 @@ def _filesystem(config: Config, contract: ExecutionContract) -> dict[str, str]:
         # PC 全体を拒否すると、Codex が自分を sandbox の中で起動できない（作業場の AGENTS.md を読むため）
         filesystem = {":root": "read", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny",
                       str(Path.home()): "deny", str(workspace.cwd): "read"}
-        if contract.skill_dir is not None:
-            filesystem[str(contract.skill_dir)] = "read"
+        for skills in contract.skill_dirs:
+            filesystem[str(skills)] = "read"
         return filesystem
     filesystem = {":root": "read", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny"}
     for root in guard.read_roots(config, workspace):

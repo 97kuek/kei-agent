@@ -105,7 +105,7 @@ def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skil
     assert user_skill.is_dir()
     assert {path.name for path in target.iterdir() if path.is_symlink()} == {
         path.name for path in course.skill_dir.iterdir() if (path / "SKILL.md").is_file()
-    }
+    } | {"keeping-notion-format"}                         # 大学は Notion を使うので、共通の skill も渡す
 
 
 def test_router_skill_installation_removes_previously_managed_agent_skills(config, tmp_path):
@@ -704,13 +704,13 @@ def test_parse_limit_moves_to_tomorrow_when_the_time_has_passed():
 
 
 def test_research_runner_loads_only_the_research_plugin(config):
-    """担当外の plugin（大学・仕事）を、同じ claude に読ませない。"""
+    """担当外の plugin（大学・仕事）を、同じ claude に読ませない。Notion を使えるので、共通の Notion の plugin は渡す。"""
     ws = themes.resolve(config, "vlm")
     cmd = runner.build_command(config, runner.ExecutionRequest(
         ws, resolve("research", "claude", "research_execute"), None, "", ""))
 
     loaded = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--plugin-dir"]
-    assert loaded == [str(config.repo_root / "modules" / "research" / "plugin")]
+    assert loaded == [str(config.repo_root / "modules" / "research" / "plugin"), str(config.repo_root / "plugins" / "notion")]
 
 
 def test_agent_plugin_dir_refuses_an_unknown_agent(config):

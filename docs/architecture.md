@@ -81,7 +81,7 @@
 
 - read-only（読むだけ）の実行は、書く・動かす手段を外す（声からの問い合わせ、分類など）
 - `offline = true` の用途は Web も外す（外の文・個人のデータ・外へ出す口を1回に揃えない）
-- plugin は担当の1つだけ。フック（`plugin/hooks/policy.py`）は安全違反を断る第二の防御で、Claude にも Codex にも掛ける
+- plugin は担当の1つと、共通のもの（リポジトリの `plugins/`）だけ。Notion を使える担当には `plugins/notion`（既存のページの書式を保つ skill）を足す。フック（`plugin/hooks/policy.py`）は担当の plugin のもので、安全違反を断る第二の防御として Claude にも Codex にも掛ける
 - Notion の MCP は `kei-notion`。合言葉は担当の名前で作る
 - 作業場の前提は `AGENTS.md` に置く（Codex が読む）。`CLAUDE.md` はそれを読み込む1行（Claude Code が読む）。Kei Agent が作った作業場の古い `CLAUDE.md` は、使うときに `AGENTS.md` へ移す。既存のフォルダの `CLAUDE.md` は動かさずに読む
 - 走らせた記録（SQLite の `runs`）に、担当・用途・provider・モデル・effort・かかった時間・費用・失敗を残す。担当のプロセスで決まった用途とモデルも、返事の封筒で本体に戻す
