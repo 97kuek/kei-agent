@@ -28,7 +28,7 @@ class SettingsActions:
 
         テーマ以外では受け付けない。ボタンで許可できるのは、ぴったりのドメイン名だけ。
         """
-        if ws.kind is not ChannelKind.THEME:
+        if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT):
             return []
         allowed = set(self.config.allowed_domains) | set(ws.allowed_domains)
         found: dict[str, str] = {}

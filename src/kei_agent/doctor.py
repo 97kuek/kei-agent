@@ -71,8 +71,10 @@ def assigned(path: Path) -> dict[str, bool]:
 
 
 def own_secrets_file(directory: Path, module: str) -> Path:
-    """そのモジュールのプロセスだけの秘密情報のファイル（共通のもののあとに読む。deploy/run-agent.sh）。"""
-    return directory / f"kei-agent-{module}.zsh"
+    """そのモジュールのプロセスだけの秘密情報のファイル（共通のもののあとに読む。deploy/run-agent.sh）。
+    [process] secrets でほかのモジュールのものを借りていれば、そのファイル。"""
+    spec = modules.known().get(module)
+    return directory / (spec.secrets_file if spec is not None else f"kei-agent-{module}.zsh")
 
 
 def check_secrets(config: Config) -> list[Finding]:

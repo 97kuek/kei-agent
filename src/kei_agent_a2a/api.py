@@ -154,12 +154,13 @@ def theme_folders(config: Config) -> dict[str, Path]:
 
 
 def channel_workspace(config: Config, channel_name: str, allowed_domains=(), *, create: bool = True) -> Workspace:
-    """研究テーマ（と研究全体）のチャンネルの作業場。core.work の ask に添えて届く channel_name と allowed_domains から作る。
+    """研究テーマ（と研究全体）・プロジェクトのチャンネルの作業場。core.work の ask に添えて届く channel_name と allowed_domains から作る。
 
     作業場の無いチャンネル（モジュールのチャンネルなど）なら ValueError。create なら、無ければ作る（読むだけの回は作らない）。
     """
     ws = themes.resolve(config, channel_name)
-    if ws.cwd is None or ws.kind not in (themes.ChannelKind.THEME, themes.ChannelKind.OVERVIEW):
+    if ws.cwd is None or ws.kind not in (themes.ChannelKind.THEME, themes.ChannelKind.OVERVIEW,
+                                         themes.ChannelKind.PROJECT):
         raise ValueError(f"#{ws.channel_name} には作業用ディレクトリがありません")
     ws = replace(ws, allowed_domains=tuple(allowed_domains or ()))
     if create:

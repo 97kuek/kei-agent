@@ -94,10 +94,12 @@ codex = { model = "gpt-6-luna", effort = "low" }
 [process]                       # 常駐のプロセス（持つなら）
 port = 8792                     # 127.0.0.1 のこの番地
 # kind = "service"              # A2A ではない口（service.py）
+# secrets = "work"              # 秘密情報のファイルを借りる（kei-agent-work.zsh。会社のアカウントの場所など）
 
 [channels]                      # チャンネルの種類 = 既定の名前（番号は外す）
 knowledge = ["knowledge"]
 # theme = ["*"]                 # ほかのどれでもないチャンネル（研究テーマ）
+# project = ["work-*"]          # 頭が一致するチャンネル（プロジェクト）。作業場は担当のフォルダの下の <頭を除いた名前>
 
 [schedules.reading]             # 定期処理
 label = "読みもの"

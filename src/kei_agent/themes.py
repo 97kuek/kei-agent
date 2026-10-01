@@ -59,6 +59,15 @@ Slack の #{name} チャンネルに対応する作業用ディレクトリ。Ke
 - それより短い処理は、その場で実行してよい
 """
 
+PROJECT_NOTES = """# プロジェクト: {name}
+
+Slack の #{name} チャンネルに対応する作業場。Kei Agent（Slack Bot）がここでコードを書き、コマンドを動かす。
+
+## 前提
+
+<!-- 何のプロジェクトか、言語とフレームワーク、テストの回し方、触ってはいけないところを書く -->
+"""
+
 OVERVIEW_NOTES = """# 研究全体・中長期の方針
 
 Slack の研究全体と中長期の方針のチャンネルに対応する作業用ディレクトリ。
@@ -72,6 +81,9 @@ class ChannelKind(Enum):
     IMPROVE = "improve"
     # モジュールのチャンネル（module.toml の [channels]）。そのモジュールの module.py に取り次ぐだけで、ファイルは持たない
     MODULE = "module"
+    # プロジェクトのチャンネル（[channels] に "work-*" のような頭）。研究テーマと同じく、チャンネルごとの作業場で
+    # 担当がファイルを書き、コマンドを動かす。作業場はその担当のフォルダ（agents.csv の folder）の下の <頭を除いた名前>
+    PROJECT = "project"
     # モジュールが自分のフォルダ（状態の置き場の modules/<名前>/ の中）で AI を動かすとき（core.run_ai の folder）。
     # 書き込めるのはその中だけ
     FOLDER = "folder"
@@ -134,6 +146,12 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     if not _SAFE_NAME.match(channel_name) or ".." in channel_name:
         raise ValueError(f"テーマ名に使えないチャンネル名です: {channel_name!r}")
     place = places(config).get(channel_name)
+    module, project = project_of_channel(config, channel_name)
+    if module:
+        if not _SAFE_NAME.match(project) or ".." in project:
+            raise ValueError(f"プロジェクト名に使えないチャンネル名です: {channel_name!r}")
+        return Workspace(channel_name, ChannelKind.PROJECT, place or config.module_workspace(module) / project,
+                         module=module, external=place is not None)
     return Workspace(channel_name, ChannelKind.THEME, place or config.research_root / channel_name,
                      module=catch_all_module(config), external=place is not None)
 
@@ -145,6 +163,17 @@ def module_of_channel(config: Config, channel_name: str) -> str:
                for kind in spec.channels):
             return spec.name
     return ""
+
+
+def project_of_channel(config: Config, channel_name: str) -> tuple[str, str]:
+    """頭が一致するチャンネル（プロジェクト）なら、受け持つオンのモジュールと、頭を除いた名前。違えば ("", "")。"""
+    for spec in modules.enabled(config.modules):
+        for kind in spec.channels:
+            for pattern in config.module_channels.get(kind, ()):
+                head = modules.channel_prefix(pattern)
+                if head and channel_name.startswith(head) and len(channel_name) > len(head):
+                    return spec.name, channel_name[len(head):]
+    return "", ""
 
 
 def core_channel_owner(config: Config, kind: str) -> str:
@@ -197,9 +226,17 @@ def all_themes(config: Config) -> dict[str, Path]:
         except ValueError:
             continue
     for name, path in sorted(places(config).items()):
-        if path.is_dir():
+        # themes.toml には、プロジェクトのチャンネルの既存のフォルダも入る（テーマではない）
+        if path.is_dir() and _is_theme(config, name):
             found[name] = path
     return found
+
+
+def _is_theme(config: Config, name: str) -> bool:
+    try:
+        return resolve(config, name).kind is ChannelKind.THEME
+    except ValueError:
+        return False
 
 
 def theme_dirs(config: Config) -> list[Path]:
@@ -376,6 +413,11 @@ def ensure_workspace(ws: Workspace) -> bool:
                 (ws.cwd / sub).mkdir(exist_ok=True)
         # 前提のメモがあれば、そのまま使う。無いときだけひな形を作る
         _ensure_notes(ws.cwd, THEME_NOTES.format(name=ws.channel_name), move=not ws.external)
+    elif ws.kind is ChannelKind.PROJECT:
+        # プロジェクトはたいてい Git のリポジトリ。Kei Agent の記録と受け渡しのフォルダは、その人の Git に混ぜない
+        (ws.cwd / STATE_DIR).mkdir(exist_ok=True)
+        _exclude_state_dir(ws.cwd, ("inputs", "outputs"))
+        _ensure_notes(ws.cwd, PROJECT_NOTES.format(name=ws.channel_name), move=not ws.external)
     elif ws.kind is ChannelKind.OVERVIEW:
         (ws.cwd / "outputs").mkdir(exist_ok=True)
         _ensure_notes(ws.cwd, OVERVIEW_NOTES, move=True)
@@ -386,16 +428,18 @@ def ensure_workspace(ws: Workspace) -> bool:
     return created
 
 
-def _exclude_state_dir(folder: Path) -> None:
-    """Git のリポジトリなら、Kei Agent の記録の置き場所（.kei-agent/）を .git/info/exclude に入れる（一度だけ）。"""
+def _exclude_state_dir(folder: Path, extra: tuple[str, ...] = ()) -> None:
+    """Git のリポジトリなら、Kei Agent の記録の置き場所（.kei-agent/）と extra のフォルダを .git/info/exclude に
+    入れる（一度だけ）。"""
     git = folder / ".git"
     if not git.is_dir():
         return
     exclude = git / "info" / "exclude"
-    line = f"/{STATE_DIR}/"
     current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-    if line in current.splitlines():
+    lines = [line for line in (f"/{name}/" for name in (STATE_DIR, *extra)) if line not in current.splitlines()]
+    if not lines:
         return
     exclude.parent.mkdir(parents=True, exist_ok=True)
     exclude.write_text(current + ("" if not current or current.endswith("\n") else "\n")
-                       + f"# Kei Agent の記録（スレッドの記録・ジョブの状態）\n{line}\n", encoding="utf-8")
+                       + "# Kei Agent の記録（スレッドの記録・ジョブの状態）と、受け渡しのフォルダ\n"
+                       + "".join(f"{line}\n" for line in lines), encoding="utf-8")

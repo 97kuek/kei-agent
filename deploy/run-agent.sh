@@ -18,7 +18,7 @@ fi
 
 require_secrets
 source "$SECRETS"
-AGENT_SECRETS="$SECRETS_DIR/kei-agent-$AGENT.zsh"
+AGENT_SECRETS="$SECRETS_DIR/kei-agent-$(module_secrets_name "$AGENT").zsh"
 [[ -r "$AGENT_SECRETS" ]] && source "$AGENT_SECRETS"
 # Notion の鍵（NOTION_TOKEN）を残すのは、Notion のモジュールのプロセス（ゲートウェイ）だけ
 if [[ "$AGENT" != "$NOTION_MODULE" ]]; then

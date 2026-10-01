@@ -68,6 +68,12 @@ def toml_value(value) -> str:
     raise TypeError(f"設定に書けない値です: {value!r}")
 
 
+def _example(name: str) -> str:
+    """チャンネルの書き方から、試しに使うチャンネルの名前（頭が一致する "work-*" なら "work-demo"）。"""
+    head = modules.channel_prefix(name)
+    return f"{head}demo" if head else name
+
+
 class ModuleKit:
     """モジュール1つを、本番と同じ読み方の設定と、偽物の Slack・AI・Notion・担当と一緒に動かす。
 
@@ -182,7 +188,7 @@ class ModuleKit:
                 if names == (modules.ALL_CHANNELS,):
                     found["C_THEME"] = "theme"
                 elif names:
-                    found[f"C_{kind.upper().replace('-', '_')}"] = names[0]
+                    found[f"C_{kind.upper().replace('-', '_')}"] = _example(names[0])
         return found
 
     def _agent_for(self, spec: modules.ModuleSpec, local: bool) -> FakeAgent | LocalAgent:
@@ -227,7 +233,7 @@ class ModuleKit:
             return self._home_channel()
         if key in self.slack.channels:
             return key
-        names = [key, *self.config.module_channels.get(key, ())[:1]]
+        names = [key, *(_example(n) for n in self.config.module_channels.get(key, ())[:1])]
         for channel_id, name in self.slack.channels.items():
             if name in names:
                 return channel_id

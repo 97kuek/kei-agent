@@ -22,6 +22,13 @@ from pathlib import Path
 
 # [channels] に書くと、ほかのどれにも当たらないチャンネル（研究テーマ）を受け持つ名前。受け持てるのは1つのモジュールだけ
 ALL_CHANNELS = "*"
+# 頭が一致するチャンネル（"work-*"）。プロジェクトのチャンネルで、作業場はその担当のフォルダの下の <頭を除いた名前>
+_PREFIX_CHANNEL = re.compile(r"^[a-z0-9][a-z0-9-]*-\*$")
+
+
+def channel_prefix(name: str) -> str:
+    """頭が一致するチャンネルの書き方（"work-*"）なら、その頭（"work-"）。違えば空文字。"""
+    return name[:-1] if _PREFIX_CHANNEL.match(name) else ""
 # 本体のチャンネルのうち、モジュールが会話を受け持てるもの（core_channels に書く。名前は agents.csv）。
 # improve は Kei Agent のチャンネル（#00_kei-agent）。困りごとの知らせは、受け持つモジュールが無くても本体が出す
 CORE_CHANNELS = ("improve",)
@@ -90,7 +97,7 @@ _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 PLUGIN_DIR = "plugin"
 _USE_CASE_KEYS = {"offline", "manual", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
-_PROCESS_KEYS = {"port", "kind"}
+_PROCESS_KEYS = {"port", "kind", "secrets"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
 PROCESS_KINDS = ("a2a", "service")
 _SCHEDULE_KEYS = {"label", "short", "default"}
@@ -189,6 +196,18 @@ class ModuleSpec:
     core_schedules: tuple[str, ...] = ()
     # 要る秘密情報（[secrets]。値は書かない）
     secrets: tuple[SecretSpec, ...] = ()
+    # プロセスが読む、自分だけの秘密情報のファイルの名前（kei-agent-<これ>.zsh）。[process] secrets で、ほかの
+    # モジュールのもの（仕事の開発なら仕事の、会社のアカウントの場所）を読める。書かなければ自分の名前
+    secrets_from: str = ""
+
+    @property
+    def secrets_file(self) -> str:
+        return f"kei-agent-{self.secrets_from or self.name}.zsh"
+
+    @property
+    def prefixes(self) -> dict[str, str]:
+        """頭が一致するチャンネル（プロジェクトのチャンネル）の頭 → チャンネルの種類（[channels] に "work-*"）。"""
+        return {channel_prefix(n): kind for kind, names in self.channels.items() for n in names if channel_prefix(n)}
 
     @property
     def catch_all(self) -> bool:
@@ -375,6 +394,9 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     port = process.get("port")
     if process and (not isinstance(port, int) or not 1024 <= port <= 65535):
         raise ModuleError(f"{where} の [process] port は 1024〜65535 の整数にしてください")
+    secrets_from = process.get("secrets", "")
+    if secrets_from and (not isinstance(secrets_from, str) or not _NAME.match(secrets_from)):
+        raise ModuleError(f"{where} の [process] secrets は、秘密情報のファイルを借りるモジュールの名前にしてください")
     kind = process.get("kind", "a2a")
     if kind not in PROCESS_KINDS:
         raise ModuleError(f"{where} の [process] kind は {' / '.join(PROCESS_KINDS)} のどれかにしてください")
@@ -386,6 +408,9 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     channels = {kind: _names(names, f"{where} の [channels] {kind}")
                 for kind, names in _table(data, "channels", where).items()}
     for kind, names in channels.items():
+        if any("*" in n and n != ALL_CHANNELS and not channel_prefix(n) for n in names):
+            raise ModuleError(f"{where} の [channels] {kind}: * を使えるのは、\"*\" だけか、\"work-*\" のように"
+                              "「英小文字・数字・- で - で終わる頭」のあと")
         if ALL_CHANNELS in names and names != (ALL_CHANNELS,):
             raise ModuleError(f"{where} の [channels] {kind}: \"{ALL_CHANNELS}\"（ほかのどれにも当たらないチャンネル）は、"
                               "それだけを書いてください")
@@ -426,7 +451,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
         settings=_settings(_table(data, "settings", where), where), slash_commands=slash, slash_hints=hints,
         core_channels=core_channels, core_schedules=core_schedules,
-        secrets=_secrets(_table(data, "secrets", where), where, bool(process)))
+        secrets=_secrets(_table(data, "secrets", where), where, bool(process)), secrets_from=secrets_from)
 
 
 def discover(directory: Path, builtin: bool = False) -> dict[str, ModuleSpec]:

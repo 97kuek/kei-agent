@@ -24,9 +24,12 @@ FOLDER_BLOCK = "folder"
 
 
 def choice_blocks(ws: Workspace, channel: str) -> list[dict]:
-    """置き場所の選び方（ボタン2つ）。"""
+    """置き場所の選び方（ボタン2つ）。研究テーマとプロジェクトのチャンネルで使う。"""
+    what = "テーマ" if ws.kind is ChannelKind.THEME else "プロジェクト"
+    # 毎晩 Git に保存するのは研究のフォルダ（~/research）だけ
+    saved = "（毎晩 Git に保存する）" if ws.kind is ChannelKind.THEME else ""
     return [
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"Kei Agent です。テーマ「{escape(ws.channel_name)}」のフォルダを決めてね。"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"Kei Agent です。{what}「{escape(ws.channel_name)}」のフォルダを決めてね。"}},
         {"type": "actions", "elements": [
             {"type": "button", "action_id": DEFAULT_ACTION, "value": channel, "style": "primary",
              "text": {"type": "plain_text", "text": "既定の場所に作る"}},
@@ -34,7 +37,7 @@ def choice_blocks(ws: Workspace, channel: str) -> list[dict]:
              "text": {"type": "plain_text", "text": "既存のフォルダを使う"}},
         ]},
         {"type": "context", "elements": [{"type": "mrkdwn", "text": (
-            f"既定の場所は `{ws.cwd}`（毎晩 Git に保存する）。既存のフォルダやリポジトリも使える"
+            f"既定の場所は `{ws.cwd}`{saved}。既存のフォルダやリポジトリも使える"
             "（そのフォルダの Git はあなたの管理のまま）")}]},
     ]
 
@@ -61,7 +64,8 @@ def folder_modal(channel: str, message_ts: str) -> dict:
 class ThemeInvite:
     async def ask_theme_place(self, channel: str, ws: Workspace) -> None:
         """まだフォルダの無い研究テーマに招かれた。置き場所を聞く。"""
-        await self.slack.chat_postMessage(channel=channel, text=f"テーマ「{ws.channel_name}」のフォルダを決めてね",
+        what = "テーマ" if ws.kind is ChannelKind.THEME else "プロジェクト"
+        await self.slack.chat_postMessage(channel=channel, text=f"{what}「{ws.channel_name}」のフォルダを決めてね",
                                           blocks=choice_blocks(ws, channel))
 
     async def on_theme_place_action(self, body: dict) -> None:
@@ -77,7 +81,7 @@ class ThemeInvite:
             await self.slack.views_open(trigger_id=body.get("trigger_id"), view=folder_modal(channel, message_ts))
             return
         ws = themes.resolve(self.config, await self.channel_name(channel))
-        if ws.kind is not ChannelKind.THEME:
+        if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT):
             return
         await self._settle_theme(channel, message_ts, ws, f"既定の場所 `{ws.cwd}` に作ったよ")
 
@@ -110,13 +114,16 @@ class ThemeInvite:
         had_notes = ws.cwd is not None and any((ws.cwd / name).exists() for name in (themes.NOTES_FILE, themes.CLAUDE_FILE))
         themes.ensure_workspace(ws)
         self.registered_themes.add(ws.channel_name)
-        await self.register_theme(channel, ws)
+        if ws.kind is ChannelKind.THEME:
+            # 研究ホームのテーマの行（プロジェクトは Notion に載せない）
+            await self.register_theme(channel, ws)
         if message_ts:
             try:
                 await self.slack.chat_update(channel=channel, ts=message_ts, text=done, blocks=[])
             except Exception:
                 log.warning("置き場所の選び方の投稿を書き換えられませんでした", exc_info=True)
         found = themes.notes_file(ws.cwd).name if ws.cwd is not None else themes.NOTES_FILE
-        premise = (f"前からある `{found}` を、研究の前提として使うね。" if had_notes
-                   else "研究の前提を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。")
+        what = "研究" if ws.kind is ChannelKind.THEME else "プロジェクト"
+        premise = (f"前からある `{found}` を、{what}の前提として使うね。" if had_notes
+                   else f"{what}の前提を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。")
         await self.slack.chat_postMessage(channel=channel, text=f"{done}\n{premise}")

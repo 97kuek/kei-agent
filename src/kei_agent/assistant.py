@@ -443,8 +443,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         except ValueError as e:
             await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
             return
-        if ws.kind is ChannelKind.THEME and not ws.external and ws.cwd is not None and not ws.cwd.exists():
-            # まだフォルダの無い研究テーマ: 置き場所を聞く（既定の場所に作る／既存のフォルダを使う。theme_invite.py）
+        if (ws.kind in (ChannelKind.THEME, ChannelKind.PROJECT) and not ws.external and ws.cwd is not None
+                and not ws.cwd.exists()):
+            # まだフォルダの無い研究テーマ・プロジェクト: 置き場所を聞く（既定の場所に作る／既存のフォルダを使う。theme_invite.py）
             await self.ask_theme_place(channel, ws)
             return
         created = themes.ensure_workspace(ws)
@@ -457,6 +458,11 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                 text += "\n" + welcome()
         elif ws.kind is ChannelKind.OVERVIEW:
             text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
+        elif ws.kind is ChannelKind.PROJECT:
+            state = "作りました" if created else "使います"
+            text = (f"Kei Agent です。このプロジェクトの作業場に `{ws.cwd}` を{state}。"
+                    f"{modules.known()[ws.module].label}の担当が、ここでコードを書いてコマンドを動かします。"
+                    "前提（言語・テストの回し方など）を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。")
         elif ws.kind is ChannelKind.MODULE:
             text = f"Kei Agent です。このチャンネルの用事は{modules.known()[ws.module].label}エージェントに取り次ぎます。"
             welcome = getattr(self.modules.get(ws.module), "welcome", None)
@@ -934,6 +940,12 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if ws.kind is ChannelKind.MODULE:
             await self._dispatch(req, themes.actor_of(ws), "")
             return None
+        if ws.kind is ChannelKind.PROJECT:
+            # プロジェクトのチャンネル。受け持つモジュール（仕事の開発など）が、作業場で答える
+            if not await self._dispatch(req, themes.actor_of(ws), ""):
+                await self.post(req, NO_THEME_OWNER)
+                await self.mark_answered(req, failed=True)
+            return self._work_results.pop(id(req), None)
         if ws.kind is ChannelKind.THEME and (owner := self.actor_for(req, ws)) in self.modules:
             # 研究テーマを受け持つモジュール（研究）が答える。作業場での会話の結果（core.work）は、夜間の Task の
             # ように結果を見て次を決める呼び出し元に返す
@@ -979,11 +991,11 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             folder.mkdir(parents=True, exist_ok=True)
             ws = replace(ws, cwd=folder)
         else:
-            if ws.kind is not ChannelKind.THEME or themes.actor_of(ws) != actor:
-                raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマのチャンネルではありません")
+            if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT) or themes.actor_of(ws) != actor:
+                raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマ・プロジェクトのチャンネルではありません")
             themes.ensure_workspace(ws)
             ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
-            if ws.channel_name not in self.registered_themes:
+            if ws.kind is ChannelKind.THEME and ws.channel_name not in self.registered_themes:
                 # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
                 self.registered_themes.add(ws.channel_name)
                 await self.register_theme(req.channel, ws)
