@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from kei_agent.agent_policy import AgentPolicy
     from kei_agent.configuration.config import Config
-    from kei_agent.themes import Workspace
+    from kei_agent.workspaces.themes import Workspace
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう。
@@ -95,12 +95,12 @@ def _abs_rule(tool: str, path: Path) -> str:
 
 def read_roots(config: Config, ws: Workspace) -> tuple[Path, ...]:
     """そのワークスペースで読んでよい範囲の根。書き込み先（Edit）は、これとは別に ws.cwd だけ。"""
-    from kei_agent.themes import ChannelKind
+    from kei_agent.workspaces.themes import ChannelKind
     assert ws.cwd is not None
     if ws.kind is ChannelKind.OVERVIEW:
         # 各テーマを読む。作業場は ~/research の外にあるので、そこも読めるようにする。既存のフォルダのテーマ
         # （themes.toml）も読む
-        from kei_agent.themes import places
+        from kei_agent.workspaces.themes import places
         return (config.research_root, ws.cwd, *places(config).values())
     if ws.kind is ChannelKind.IMPROVE:
         return (config.repo_root,)    # 案を考えるために Kei Agent のコードを読む。書き込みは作業用の一時ディレクトリだけ

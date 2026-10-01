@@ -12,14 +12,15 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
-from kei_agent import api, guard, runner, themes, updates
+from kei_agent import api, guard, runner, updates
 from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.framework import modules
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.testing.kit import settle
-from kei_agent.themes import ChannelKind
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.themes import ChannelKind
 
 FIXER_TOML = '''api = 1
 name = "fixer"

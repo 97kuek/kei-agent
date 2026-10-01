@@ -58,7 +58,7 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, briefing, dates, deadline, digest, guard, home, one_shot, router, themes
+from kei_agent import agents, briefing, dates, deadline, digest, guard, home, one_shot, router
 from kei_agent.agents import Reply
 from kei_agent.auto_messages import history_prompt
 from kei_agent.briefing import Morning
@@ -78,9 +78,10 @@ from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.slack_text import is_status_inquiry as _is_status_inquiry
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
-from kei_agent.theme_files import append_thread_log
 from kei_agent.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.updates import Update
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.theme_files import append_thread_log
 
 if TYPE_CHECKING:
     from kei_agent.assistant import Assistant

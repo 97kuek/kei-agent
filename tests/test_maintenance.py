@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent import maintenance, themes
+from kei_agent import maintenance
 from kei_agent.app import setup_logging
+from kei_agent.workspaces import themes
 
 
 def age(path, days):

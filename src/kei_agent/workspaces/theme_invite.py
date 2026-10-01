@@ -11,9 +11,9 @@ from __future__ import annotations
 import json
 import logging
 
-from kei_agent import themes
 from kei_agent.slack_text import escape
-from kei_agent.themes import ChannelKind, PlaceError, Workspace
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.themes import ChannelKind, PlaceError, Workspace
 
 log = logging.getLogger(__name__)
 

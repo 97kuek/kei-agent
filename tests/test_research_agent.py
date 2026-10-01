@@ -87,7 +87,7 @@ async def test_card_says_it_runs_claude_and_holds_the_jobs(server):
 
 async def test_the_orchestrator_gets_the_result_and_the_progress(server, config):
     """結果は RunResult に戻り、途中の経過は on_activity に届く。"""
-    from kei_agent import themes
+    from kei_agent.workspaces import themes
 
     base, claude = server
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("example.com",))
@@ -134,8 +134,8 @@ def test_to_result_keeps_only_what_it_knows():
 
 async def test_a_dead_agent_becomes_an_error_result(config):
     """つながらないエージェントは、エラーの RunResult になる（本体は普通の失敗として扱える）。"""
-    from kei_agent import themes
     from kei_agent.a2a import Agent as Client
+    from kei_agent.workspaces import themes
 
     ws = themes.resolve(config, "vlm")
     result = await agents.run_in_workspace(Client("http://127.0.0.1:1", timeout=3), ws, "やって", None, "", "",

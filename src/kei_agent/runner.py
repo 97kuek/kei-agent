@@ -22,7 +22,7 @@ from kei_agent.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.model_policy import ResolvedModel, validate_resolved
 from kei_agent.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
 from kei_agent.storage.notion import gateway_client_token
-from kei_agent.themes import Workspace
+from kei_agent.workspaces.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
 #   `Claude AI usage limit reached|<エポック秒>`

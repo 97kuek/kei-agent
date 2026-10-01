@@ -5,7 +5,7 @@
 import json
 from pathlib import Path
 
-from kei_agent import ask, themes
+from kei_agent import ask
 from kei_agent.jobs import REQUESTS_DIR
 from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読めるように
     FakeAI,
@@ -16,6 +16,7 @@ from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読め
     FakeSlack,
     check_notion_body,
 )
+from kei_agent.workspaces import themes
 
 # 前の名前（AI の偽物は Claude でも Codex でも同じ）
 FakeClaude = FakeAI

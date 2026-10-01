@@ -14,13 +14,13 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
-from kei_agent import themes
 from kei_agent.configuration.config import Config, load_config
 from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import ModelPolicyError
 from kei_agent.storage.records import Records
 from kei_agent.storage.store import Store
-from kei_agent.themes import Workspace
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.themes import Workspace
 from kei_agent_a2a import envelope, run
 
 log = logging.getLogger(__name__)

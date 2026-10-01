@@ -2,9 +2,10 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import router, runner, themes
+from kei_agent import router, runner
 from kei_agent.execution_contract import prompt_version, resolve_contract
 from kei_agent.model_policy import UseCase, resolve
+from kei_agent.workspaces import themes
 
 ROUTER = {"filesystem.deny_read", "filesystem.read"}
 RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.domain_allowlist",

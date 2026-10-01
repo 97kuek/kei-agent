@@ -39,7 +39,7 @@ from pathlib import Path
 from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentSkill
 
-from kei_agent import a2a, agents, ask, themes
+from kei_agent import a2a, agents, ask
 from kei_agent.agent_policy import policy_of
 from kei_agent.configuration.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
@@ -60,8 +60,9 @@ from kei_agent.storage.notion import (
 from kei_agent.storage.notion_store import markdown_to_blocks, plain_text, rich_text
 from kei_agent.storage.records import Records
 from kei_agent.storage.store import Store
-from kei_agent.themes import Workspace
 from kei_agent.timelog import Toggl, TogglError, load_toggl
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.themes import Workspace
 from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
 from kei_agent_a2a.run import progress
 

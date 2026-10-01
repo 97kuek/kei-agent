@@ -9,7 +9,7 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
 import kei_agent.assistant as assistant_module
-from kei_agent import a2a, ask, router, runner, themes
+from kei_agent import a2a, ask, router, runner
 from kei_agent.assistant import Assistant
 from kei_agent.auto_messages import history_prompt
 from kei_agent.configuration import settings
@@ -19,6 +19,7 @@ from kei_agent.request import Request
 from kei_agent.slack_text import split_text
 from kei_agent.testing.kit import settle
 from kei_agent.thread_ui import ThreadUI
+from kei_agent.workspaces import themes
 
 
 @pytest.fixture

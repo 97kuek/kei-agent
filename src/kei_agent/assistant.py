@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, agents, api, ask, guard, router, runner, themes, updates
+from kei_agent import a2a, agents, api, ask, guard, router, runner, updates
 from kei_agent.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -68,16 +68,17 @@ from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
 from kei_agent.storage.notion_store import NotionStore
 from kei_agent.storage.store import Store
-from kei_agent.theme_files import (
+from kei_agent.thread_ui import ThreadUI
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.theme_files import (
     append_thread_log,
     changed_files,
     download_files,
     snapshot_outputs,
     split_uploads,
 )
-from kei_agent.theme_invite import ThemeInvite
-from kei_agent.themes import ChannelKind, Workspace
-from kei_agent.thread_ui import ThreadUI
+from kei_agent.workspaces.theme_invite import ThemeInvite
+from kei_agent.workspaces.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)
 

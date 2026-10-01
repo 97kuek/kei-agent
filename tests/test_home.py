@@ -4,10 +4,11 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import home, runner, themes
+from kei_agent import home, runner
 from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.jobs import JobManager
+from kei_agent.workspaces import themes
 
 
 @pytest.fixture

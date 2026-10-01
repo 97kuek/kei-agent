@@ -17,7 +17,7 @@ from kei_agent.framework import modules
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.schedule import Scheduler, task_names
-from kei_agent.themes import ChannelKind
+from kei_agent.workspaces.themes import ChannelKind
 
 BRIEF_TOML = '''api = 1
 name = "brief"

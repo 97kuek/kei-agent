@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import logging
 
-from kei_agent import home, themes
+from kei_agent import home
 from kei_agent.auto_messages import domain_resume_prompt
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import HHMM
 from kei_agent.request import Request
-from kei_agent.themes import ChannelKind, Workspace
+from kei_agent.workspaces import themes
+from kei_agent.workspaces.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)
 

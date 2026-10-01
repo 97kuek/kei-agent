@@ -13,7 +13,7 @@ from kei_agent.model_policy import ResolvedModel, UseCase
 if TYPE_CHECKING:
     from kei_agent.configuration.config import Config
     from kei_agent.runner import ExecutionRequest
-    from kei_agent.themes import Workspace
+    from kei_agent.workspaces.themes import Workspace
 
 
 @dataclass(frozen=True)

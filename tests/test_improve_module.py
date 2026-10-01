@@ -167,7 +167,7 @@ async def test_new_request_becomes_a_public_issue_and_plans_without_writing_code
     # 書けるのは相談の作業用のフォルダだけ。読めるのは Kei Agent のリポジトリ
     assert call["cwd"] == cfg.module_state("improve") / "talk" / "20.1" and call["cwd"].is_dir()
     from kei_agent.agent_policy import policy_of
-    from kei_agent.themes import ChannelKind, Workspace
+    from kei_agent.workspaces.themes import ChannelKind, Workspace
     settings_json = guard.build_settings(cfg, Workspace("research-agent", ChannelKind.IMPROVE, call["cwd"],
                                                         module="improve"), policy_of("improve"))
     allow = settings_json["permissions"]["allow"]

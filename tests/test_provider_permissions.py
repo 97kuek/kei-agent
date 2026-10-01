@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent import runner, themes
+from kei_agent import runner
 from kei_agent.execution_contract import resolve_contract
 from kei_agent.guard import DEFAULT_DENY_READ
 from kei_agent.model_policy import UseCase, resolve
 from kei_agent.provider_permissions import CapabilityUnavailable, preflight
+from kei_agent.workspaces import themes
 
 
 def _contract(config, *, provider="codex", read_only=False):

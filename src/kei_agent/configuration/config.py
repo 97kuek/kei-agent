@@ -650,7 +650,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
 
     pin_models(config.agent_profiles)
     # 研究テーマの置き場所（themes.toml）の書き間違いは、起動のときに理由を出して止める
-    from kei_agent.themes import PlaceError, check_places
+    from kei_agent.workspaces.themes import PlaceError, check_places
 
     try:
         check_places(config)

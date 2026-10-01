@@ -17,9 +17,9 @@ import time
 from datetime import date
 from pathlib import Path
 
-from kei_agent import themes
 from kei_agent.configuration.config import Config
 from kei_agent.storage.store import Store
+from kei_agent.workspaces import themes
 
 STATE_DIR = "state"
 # GitHub が受け付けない大きさ。これより大きいファイルはコミットしない

@@ -4,7 +4,6 @@ import os
 import pytest
 from fakes import FakePueue, write_request
 
-from kei_agent import themes
 from kei_agent.jobs import (
     JobManager,
     JobRequestError,
@@ -14,6 +13,7 @@ from kei_agent.jobs import (
     log_tail,
     parse_request,
 )
+from kei_agent.workspaces import themes
 
 
 @pytest.fixture

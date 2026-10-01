@@ -24,7 +24,7 @@ from kei_agent.agents import FIELDS as RESULT_FIELDS
 from kei_agent.configuration.config import Config
 from kei_agent.model_classifier import classify
 from kei_agent.model_policy import ResolvedModel, is_manual, resolve, resolve_selected, use_case_of
-from kei_agent.themes import Workspace
+from kei_agent.workspaces.themes import Workspace
 from kei_agent_a2a import envelope
 
 log = logging.getLogger(__name__)

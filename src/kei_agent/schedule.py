@@ -19,7 +19,7 @@ from datetime import time as dtime
 
 import aiohttp
 
-from kei_agent import briefing, jobs, maintenance, themes
+from kei_agent import briefing, jobs, maintenance
 from kei_agent.assistant import Assistant
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
@@ -29,6 +29,7 @@ from kei_agent.slack_text import AWAITING_MARKER, clean_text, format_duration
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_store import Task, parse_slack_permalink, summarize
 from kei_agent.storage.store import Store
+from kei_agent.workspaces import themes
 
 log = logging.getLogger(__name__)
 
