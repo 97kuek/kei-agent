@@ -234,19 +234,16 @@
 
 ## コードの地図
 
-| ファイル | 役目 |
+`src/kei_agent/` は領域ごとのフォルダに分ける。モジュールが触れるのは、直下の窓口 `api.py`（`Core`）だけ。
+
+| 領域 | 中身 |
 |---|---|
-| `cli.py`・`setup_command.py`・`doctor.py`・`slack_manifest.py`・`module_command.py`・`module_scaffold.py`・`agents_command.py` | `kei-agent` のコマンド（setup・doctor・manifest・module・agents） |
-| `agents_table.py` | 担当の表（`agents.csv`）を読んで、設定と同じ形にする |
-| `app.py`・`assistant.py` | 起動と Slack のイベント、依頼から返事までの本筋 |
-| `modules.py`・`api.py` | モジュールの定義の読み込みと、モジュールの窓口（`Core`） |
-| `router.py`・`agents.py`・`a2a.py`・`questions.py` | 振り分け、担当に頼む口、声からの問い合わせ口 |
-| `model_policy.py`・`model_classifier.py` | 使ってよいモデルと、用途の分類 |
-| `agent_policy.py`・`execution_contract.py`・`runner.py` | 制限の表、実行の条件、AI の起動口 |
-| `response_output.py`・`guard.py` | 出力契約、柵 |
-| `store.py` | SQLite（スレッド・会話・ジョブ・定期処理・接続先・モジュールの記録） |
-| `schedule.py`・`briefing.py`・`digest.py` | 定期実行、朝の一覧、材料集め |
-| `notion.py`・`notion_store.py`・`notion_hub.py` | Notion のゲートウェイの使い方、研究ホーム、共通ホーム |
-| `home.py`・`settings.py`・`settings_actions.py` | App Home と設定 |
-| `updates.py`・`version.py` | 新しい版での起動し直し、動いている版 |
+| `configuration/` | `config.toml`・担当の表 `agents.csv`（`agents_table.py`）・App Home で変える値（`settings.py`）・起動スクリプトが知りたい場所 |
+| `storage/` | SQLite（`store.py`・`records.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`） |
+| `framework/` | モジュールの定義の読み込み（`modules.py`）、ひな形、動いている版 |
+| `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、置き場所の選び方、作業場のファイル |
+| `execution/` | AI の起動口（`runner.py`）、制限の表、使ってよいモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、ジョブ |
+| `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め、締切、毎晩の保守、予定カレンダー、時間 |
+| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、振り分け、出力契約、引き継ぎ、App Home、担当に頼む口（A2A） |
+| `operations/` | 起動（`app.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、取り込みと入れ替え |
 | `testing/` | モジュールのテストの道具（[modules.md](modules.md#テストの書き方kei_agenttesting)） |
