@@ -14,7 +14,7 @@ from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
 
 from kei_agent import guard, runner, themes
 from kei_agent.assistant import Assistant
-from kei_agent.config import ConfigError, load_config
+from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.jobs import JobManager
 from kei_agent.themes import ChannelKind, PlaceError
 

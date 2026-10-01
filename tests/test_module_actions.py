@@ -10,7 +10,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 
 from kei_agent import a2a, modules, runner
 from kei_agent.assistant import Assistant
-from kei_agent.config import ConfigError, load_config
+from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.digest import DigestBuilder
 from kei_agent.jobs import JobManager
 

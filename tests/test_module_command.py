@@ -3,7 +3,8 @@
 import pytest
 from fakes import write_config
 
-from kei_agent import agents_table, cli, module_command
+from kei_agent import cli, module_command
+from kei_agent.configuration import agents_table
 
 
 def _home(tmp_path, text):

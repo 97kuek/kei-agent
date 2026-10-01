@@ -167,7 +167,7 @@ def test_http_errors_carry_the_status(monkeypatch):
 def test_gateway_notion_uses_the_client_token_never_the_master(config):
     from dataclasses import replace
 
-    from kei_agent.config import NotionConfig
+    from kei_agent.configuration.config import NotionConfig
     from kei_agent.notion import gateway_client_token, gateway_notion
 
     config = replace(config, notion=NotionConfig(course_home="abc"))

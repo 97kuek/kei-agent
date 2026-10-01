@@ -21,7 +21,7 @@ from a2a.types import Part, TaskState
 
 from kei_agent import runner
 from kei_agent.agents import FIELDS as RESULT_FIELDS
-from kei_agent.config import Config
+from kei_agent.configuration.config import Config
 from kei_agent.model_classifier import classify
 from kei_agent.model_policy import ResolvedModel, is_manual, resolve, resolve_selected, use_case_of
 from kei_agent.themes import Workspace

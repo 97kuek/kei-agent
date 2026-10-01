@@ -2,8 +2,8 @@ from dataclasses import replace
 
 from fakes import write_config
 
-from kei_agent import settings
-from kei_agent.config import MaintenanceConfig, ScheduleConfig
+from kei_agent.configuration import settings
+from kei_agent.configuration.config import MaintenanceConfig, ScheduleConfig
 
 
 def test_domains_are_kept_per_theme(store):
@@ -85,7 +85,7 @@ def test_home_provider_changes_only_the_named_agents_provider(config, store):
 
 
 def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
 
     path = tmp_path / "config.toml"
     write_config(path, '[channels]\nknowledge = ["knowledge", "reading"]\n\n[schedule]\nreading = "06:30"\n')

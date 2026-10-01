@@ -32,7 +32,7 @@ def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_cas
 
 def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, store):
     """選んだ provider の固定のレシピになる。持ち主が [[manual-astra]] と書いたときだけ例外の最上位を使う。"""
-    from kei_agent import settings
+    from kei_agent.configuration import settings
     from kei_agent.model_policy import resolve_selected
 
     settings.set_agent_provider(store, "research", "codex")
@@ -62,7 +62,7 @@ def test_only_approved_models_are_allowlisted(provider, model):
 
 
 def test_config_without_a_table_leaves_every_provider_unselected(tmp_path):
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
 
     (tmp_path / "empty.toml").write_text("")
     config = load_config(tmp_path / "empty.toml", env={})
@@ -91,7 +91,8 @@ def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answe
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):
-    from kei_agent import model_classifier, runner, settings
+    from kei_agent import model_classifier, runner
+    from kei_agent.configuration import settings
 
     settings.set_agent_provider(store, "research", "claude")
 
@@ -108,7 +109,8 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
 
 async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
     """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
-    from kei_agent import model_classifier, router, runner, settings
+    from kei_agent import model_classifier, router, runner
+    from kei_agent.configuration import settings
 
     seen = []
 
@@ -130,7 +132,7 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
 
 def test_every_actor_use_case_has_a_recipe_on_both_providers():
     """Claude でも Codex でも同じ担当が動く（知識の担当を足したときに、片方だけ忘れないように）。"""
-    from kei_agent.config import model_actors
+    from kei_agent.configuration.config import model_actors
     from kei_agent.model_policy import allowed_use_cases
 
     for actor in model_actors():

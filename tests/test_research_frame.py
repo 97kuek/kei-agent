@@ -11,7 +11,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
 from kei_agent import model_classifier, model_policy, modules, runner, themes
 from kei_agent.assistant import Assistant
-from kei_agent.config import ConfigError, load_config
+from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.jobs import JobManager
 from kei_agent.model_policy import ModelPolicyError
 from kei_agent.testing.kit import settle

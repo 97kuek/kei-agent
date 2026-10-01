@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from kei_agent import deadline, modules, themes, timelog
-from kei_agent.config import Config
+from kei_agent.configuration.config import Config
 from kei_agent.dates import parse_time
 from kei_agent.notion import NotionError
 from kei_agent.slack_text import format_duration

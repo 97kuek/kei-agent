@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent import agents_command, cli, module_command, settings
-from kei_agent.agents_table import TableError, parse, with_enabled
-from kei_agent.config import ConfigError, load_config
+from kei_agent import agents_command, cli, module_command
+from kei_agent.configuration import settings
+from kei_agent.configuration.agents_table import TableError, parse, with_enabled
+from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.model_policy import resolve
 from kei_agent.store import Store
 
@@ -165,7 +166,7 @@ def test_the_folder_column_decides_where_agents_work(tmp_path):
     assert config.module_workspace("knowledge") == (tmp_path / "k").resolve()
     # 列が無い前の表は、既定の場所
     (tmp_path / "old").mkdir()
-    from kei_agent.config import DEFAULT_PATHS
+    from kei_agent.configuration.config import DEFAULT_PATHS
 
     old = _load(_home(tmp_path / "old", HEADER + "research,true,,claude,,\n"))
     assert old.research_root == Path(DEFAULT_PATHS["research_root"]).expanduser().resolve()
@@ -220,7 +221,7 @@ def test_the_command_dispatches(monkeypatch):
 
 def test_the_example_table_lists_every_builtin_module(tmp_path):
     from kei_agent import modules
-    from kei_agent.config import REPO_ROOT
+    from kei_agent.configuration.config import REPO_ROOT
 
     home = _home(tmp_path, (REPO_ROOT / "agents.example.csv").read_text(encoding="utf-8"))
     config = _load(home)

@@ -18,7 +18,7 @@ from pathlib import Path
 from kei_agent import modules
 from kei_agent.guard import DEFAULT_DENY_READ
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 # 利用者のもの（設定・プロフィール・指示書の差し替え・秘密情報）を置く場所
 DEFAULT_HOME = "~/.config/kei-agent"
 CONFIG_FILE = "config.toml"
@@ -529,7 +529,7 @@ def _with_table(data: dict, table: Path | None) -> dict:
 
     モジュールのオンオフ・チャンネル・AI は表だけに書く。config.toml に残っていれば、移し方を示して止める。
     """
-    from kei_agent import agents_table
+    from kei_agent.configuration import agents_table
 
     old = [key for key in agents_table.REPLACED_KEYS if key in data]
     if old:
@@ -574,7 +574,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         modules.register_user_modules(home / "modules")
     except modules.ModuleError as e:
         raise ConfigError(str(e)) from None
-    from kei_agent.agents_table import AGENTS_FILE
+    from kei_agent.configuration.agents_table import AGENTS_FILE
 
     table = agents_csv or home / AGENTS_FILE
     table = table if table.is_file() else None

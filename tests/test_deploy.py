@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent.config import REPO_ROOT
+from kei_agent.configuration.config import REPO_ROOT
 
 DEPLOY = REPO_ROOT / "deploy"
 # 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する。常駐のプロセスを持つモジュールで、
@@ -154,7 +154,7 @@ def _run_agent(home: Path, *args: str, common: str | None = "", own: dict[str, s
         entry.chmod(0o755)
     if secrets is not None:
         python = venv_bin / "python"
-        python.write_text(f'#!/bin/sh\n[ "$*" = "-m kei_agent.paths secrets" ] && echo "{secrets}"\n', encoding="utf-8")
+        python.write_text(f'#!/bin/sh\n[ "$*" = "-m kei_agent.configuration.paths secrets" ] && echo "{secrets}"\n', encoding="utf-8")
         python.chmod(0o755)
     return subprocess.run([ZSH, str(repo / "deploy" / "run-agent.sh"), *args], capture_output=True, encoding="utf-8",
                           env={"PATH": "/usr/bin:/bin", "HOME": str(home)})

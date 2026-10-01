@@ -17,7 +17,7 @@ from typing import Literal
 
 from kei_agent import codex_apps, guard
 from kei_agent.agent_policy import NOTION_MCP, AgentPolicy
-from kei_agent.config import Config, path_without_venv
+from kei_agent.configuration.config import Config, path_without_venv
 from kei_agent.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.model_policy import ResolvedModel, validate_resolved
 from kei_agent.notion import gateway_client_token

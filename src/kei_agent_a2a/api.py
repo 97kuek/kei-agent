@@ -41,7 +41,7 @@ from a2a.types import AgentSkill
 
 from kei_agent import a2a, agents, ask, modules, themes, version
 from kei_agent.agent_policy import policy_of
-from kei_agent.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
+from kei_agent.configuration.config import MAIN_CLIENT, Config, NotionConfig, load_config, notion_id
 from kei_agent.dates import WEEKDAYS, day_label, parse_time, weekday
 from kei_agent.jobs import CANCEL_JOB, FORGET_JOB, LIST_JOBS, SUBMIT_JOB, Pueue
 from kei_agent.model_json import json_list, json_object

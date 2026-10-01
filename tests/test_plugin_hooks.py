@@ -14,7 +14,7 @@ import sys
 import pytest
 
 from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
-from kei_agent.config import REPO_ROOT
+from kei_agent.configuration.config import REPO_ROOT
 
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
 PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin", "course": REPO_ROOT / "modules" / "course" / "plugin",

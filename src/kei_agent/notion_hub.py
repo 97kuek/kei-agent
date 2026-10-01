@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from kei_agent.config import notion_id
+from kei_agent.configuration.config import notion_id
 from kei_agent.notion import (
     BLOCKS_PER_REQUEST,
     GATEWAY_TOKEN_ENV,
@@ -881,7 +881,7 @@ def main() -> None:
     import argparse
     import sys
 
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
 
     parser = argparse.ArgumentParser(prog="kei-agent-hub-setup")
     parser.add_argument("--apply", action="store_true", help="確認済みの親ページへ変更を適用する")

@@ -9,7 +9,7 @@ from fakes import FakePueue, FakeSlack
 from kei_agent import runner
 from kei_agent.api import AIError, contains_secret
 from kei_agent.assistant import Assistant
-from kei_agent.config import AgentProfile
+from kei_agent.configuration.config import AgentProfile
 from kei_agent.jobs import JobManager
 from kei_agent_modules.improve import issues
 

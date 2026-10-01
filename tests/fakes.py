@@ -86,7 +86,8 @@ def write_config(path: Path, text: str) -> Path:
     """config.toml を書く。モジュール・チャンネル・AI（modules・[channels]・[agents]）は、同じフォルダの agents.csv に分ける。"""
     import tomllib
 
-    from kei_agent import agents_command, agents_table, modules
+    from kei_agent import agents_command, modules
+    from kei_agent.configuration import agents_table
 
     # 利用者のモジュール（同じフォルダの modules/）も、表の行にできるように読んでおく
     modules.register_user_modules(path.parent / "modules")

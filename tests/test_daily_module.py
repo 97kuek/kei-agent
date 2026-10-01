@@ -72,7 +72,7 @@ def test_the_daily_module_takes_daily_and_review(config):
     assert {u.name for u in spec.actor.use_cases} == {"daily_write", "review_write", "review_talk"}
     assert task_names(config)[-3:] == ("daily", "review", "maintenance")
     # モジュールがオフなら、Daily と振り返りは動かさない（App Home にも出さない）
-    from kei_agent import settings
+    from kei_agent.configuration import settings
     off = config.__class__(**{**config.__dict__, "modules": tuple(n for n in config.modules if n != "daily")})
     assert "daily" not in task_names(off) and "daily" not in settings.schedule_names(off)
 
@@ -280,7 +280,7 @@ async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
 
 
 def test_claude_limit_does_not_block_codex_daily(env, store):
-    from kei_agent import settings
+    from kei_agent.configuration import settings
 
     scheduler, _, *_ = env
     settings.set_agent_provider(store, "daily", "codex")

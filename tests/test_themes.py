@@ -77,7 +77,7 @@ def test_an_old_claude_md_moves_to_agents_md_but_not_in_someone_elses_folder(con
     ('[channels]\ntheme_prefix = "theme-"\n', "kei-agent agents init"),
 ])
 def test_wrong_config_is_refused_at_startup(tmp_path, text, match):
-    from kei_agent.config import ConfigError, load_config
+    from kei_agent.configuration.config import ConfigError, load_config
     path = tmp_path / "config.toml"
     path.write_text(text)
     with pytest.raises(ConfigError, match=match):
@@ -85,7 +85,7 @@ def test_wrong_config_is_refused_at_startup(tmp_path, text, match):
 
 
 def test_empty_schedule_time_means_off_and_agents_csv_takes_only_ai_columns(tmp_path):
-    from kei_agent.config import ConfigError, load_config
+    from kei_agent.configuration.config import ConfigError, load_config
     path = tmp_path / "config.toml"
     path.write_text('[schedule]\nreview = ""\n')
     assert load_config(path, env={}).schedule.review == ""
@@ -98,14 +98,14 @@ def test_empty_schedule_time_means_off_and_agents_csv_takes_only_ai_columns(tmp_
 
 def test_example_config_in_repo_loads_without_personal_values(tmp_path):
     """リポジトリには例の設定だけを置く。検査を通り、Notion のページ ID などの個人の値は空のまま。"""
-    from kei_agent.config import EXAMPLE_CONFIG, REPO_ROOT, load_config
+    from kei_agent.configuration.config import EXAMPLE_CONFIG, REPO_ROOT, load_config
     assert not (REPO_ROOT / "config.toml").is_file() or (REPO_ROOT / ".gitignore").read_text().count("/config.toml")
     config = load_config(EXAMPLE_CONFIG, env={})
     assert (config.notion.hub_home, config.notion.research_home, config.notion.course_home) == ("", "", "")
 
 
 def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path):
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
     path = write_config(tmp_path / "config.toml", '[agents.research]\nprovider = "codex"\n')
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"

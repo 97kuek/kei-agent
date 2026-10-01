@@ -19,7 +19,7 @@ import pytest
 from fakes import FakeNotionAPI
 
 from kei_agent import notion as notion_module
-from kei_agent.config import NotionConfig, notion_id
+from kei_agent.configuration.config import NotionConfig, notion_id
 from kei_agent.notion import Notion, NotionError, gateway_client_token
 from kei_agent_modules.notion.clients import Tokens, client_roots
 from kei_agent_modules.notion.config import load_gateway_config

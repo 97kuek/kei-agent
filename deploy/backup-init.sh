@@ -35,7 +35,7 @@ fi
 git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$OWNER/$NAME.git"
 
 # Kei Agent の状態を書き出してから、最初のコミットを作る
-(cd "$REPO" && uv run --frozen python -c 'from kei_agent.config import load_config; from kei_agent.maintenance import dump_state, exclude_large_files; c = load_config(); dump_state(c); exclude_large_files(c.research_root)')
+(cd "$REPO" && uv run --frozen python -c 'from kei_agent.configuration.config import load_config; from kei_agent.maintenance import dump_state, exclude_large_files; c = load_config(); dump_state(c); exclude_large_files(c.research_root)')
 git add -A
 git diff --cached --quiet || git commit -q -m "研究データの保存を始める"
 git push -q -u origin main

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent.config import REPO_ROOT
+from kei_agent.configuration.config import REPO_ROOT
 
 PLUGIN = REPO_ROOT / "plugin"
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/

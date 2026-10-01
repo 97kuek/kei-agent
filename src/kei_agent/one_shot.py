@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from kei_agent import runner, themes
-from kei_agent.config import Config
+from kei_agent.configuration.config import Config
 from kei_agent.model_policy import ModelPolicyError, resolve, resolve_selected
 from kei_agent.themes import ChannelKind, Workspace
 

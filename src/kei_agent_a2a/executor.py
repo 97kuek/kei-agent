@@ -15,7 +15,7 @@ from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, Task, TaskState, TaskStatus
 
 from kei_agent import themes
-from kei_agent.config import Config, load_config
+from kei_agent.configuration.config import Config, load_config
 from kei_agent.model_classifier import UsageLimited
 from kei_agent.model_policy import ModelPolicyError
 from kei_agent.records import Records

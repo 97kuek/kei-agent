@@ -15,7 +15,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 
 from kei_agent import guard, runner, updates
 from kei_agent.assistant import Assistant
-from kei_agent.config import AgentProfile
+from kei_agent.configuration.config import AgentProfile
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
 from kei_agent.slack_text import strip_lines

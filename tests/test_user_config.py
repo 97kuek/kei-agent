@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from kei_agent.config import ConfigError, load_config
+from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution_contract import prompt_text, prompt_version
 
 
@@ -107,7 +107,7 @@ def test_launch_scripts_can_ask_where_the_secrets_are(tmp_path):
     home = _home(tmp_path, f'[paths]\nsecrets = "{tmp_path / "local"}"\n')
 
     def ask(env_home):
-        return subprocess.run([sys.executable, "-m", "kei_agent.paths", "secrets"], capture_output=True, text=True,
+        return subprocess.run([sys.executable, "-m", "kei_agent.configuration.paths", "secrets"], capture_output=True, text=True,
                               check=True, env={"KEI_AGENT_HOME": str(env_home), "PATH": "/usr/bin:/bin"}).stdout.strip()
 
     assert ask(home) == str((tmp_path / "local").resolve())

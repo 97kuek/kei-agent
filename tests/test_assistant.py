@@ -9,9 +9,10 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
 import kei_agent.assistant as assistant_module
-from kei_agent import a2a, ask, router, runner, settings, themes
+from kei_agent import a2a, ask, router, runner, themes
 from kei_agent.assistant import Assistant
 from kei_agent.auto_messages import history_prompt
+from kei_agent.configuration import settings
 from kei_agent.execution_contract import prompt_version
 from kei_agent.jobs import JobManager
 from kei_agent.request import Request
@@ -1276,7 +1277,7 @@ async def test_improve_without_a_provider_says_to_choose_one(env, store):
     """自己改善の AI が選ばれていないときは「接続に失敗」ではなく、選ぶよう伝える。"""
     from dataclasses import replace
 
-    from kei_agent.config import AgentProfile
+    from kei_agent.configuration.config import AgentProfile
 
     assistant, slack, claude, _ = env
     assistant.config = replace(assistant.config, agent_profiles={

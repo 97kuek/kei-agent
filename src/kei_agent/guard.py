@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kei_agent.agent_policy import AgentPolicy
-    from kei_agent.config import Config
+    from kei_agent.configuration.config import Config
     from kei_agent.themes import Workspace
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、

@@ -15,7 +15,7 @@ import time
 import aiohttp
 
 from kei_agent import modules
-from kei_agent.config import Config, load_config
+from kei_agent.configuration.config import Config, load_config
 
 WAIT_SECONDS = 90
 POLL_SECONDS = 3

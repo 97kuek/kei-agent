@@ -19,17 +19,10 @@ from datetime import time as dtime
 
 import aiohttp
 
-from kei_agent import (
-    briefing,
-    jobs,
-    maintenance,
-    modules,
-    settings,
-    themes,
-    version,
-)
+from kei_agent import briefing, jobs, maintenance, modules, themes, version
 from kei_agent.assistant import Assistant
-from kei_agent.config import Config
+from kei_agent.configuration import settings
+from kei_agent.configuration.config import Config
 from kei_agent.notion import NotionError
 from kei_agent.notion_store import Task, parse_slack_permalink, summarize
 from kei_agent.request import Request
@@ -381,7 +374,7 @@ class Scheduler:
 async def _run_once(name: str, record: bool) -> None:
     from slack_sdk.web.async_client import AsyncWebClient
 
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
     from kei_agent.jobs import JobManager
     from kei_agent.notion_hub import load_hub
     from kei_agent.notion_store import load_notion
@@ -404,7 +397,7 @@ async def _run_once(name: str, record: bool) -> None:
 
 def main() -> None:
     """定期処理を今すぐ1回動かす（確認用）。"""
-    from kei_agent.config import load_config
+    from kei_agent.configuration.config import load_config
 
     parser = argparse.ArgumentParser(prog="kei-agent-schedule")
     parser.add_argument("name", choices=task_names(load_config()))

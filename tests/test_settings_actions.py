@@ -3,8 +3,9 @@
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import runner, settings
+from kei_agent import runner
 from kei_agent.assistant import Assistant
+from kei_agent.configuration import settings
 from kei_agent.jobs import JobManager
 
 

@@ -11,7 +11,7 @@ import argparse
 import json
 
 from kei_agent import modules
-from kei_agent.config import Config, load_config
+from kei_agent.configuration.config import Config, load_config
 
 HEADER = """# Slack App「Kei Agent」の manifest。kei-agent manifest が作る（組み込みのモジュールを全部オンにしたとき）。
 # https://api.slack.com/apps → Create New App → From a manifest で貼り付ける。

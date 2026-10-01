@@ -181,7 +181,7 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
 async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
     """App Home で変えた時刻は、再起動なしで次の tick から効く。止めた処理は動かさない。"""
     scheduler, *_ = env
-    from kei_agent import settings
+    from kei_agent.configuration import settings
     ran = []
     record_runs(monkeypatch, scheduler, ran)
     settings.set_schedule(scheduler.store, "daily", "07:30", True)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import subprocess
 
-from kei_agent.config import REPO_ROOT
+from kei_agent.configuration.config import REPO_ROOT
 
 UNKNOWN = "unknown"
 

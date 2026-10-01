@@ -4,8 +4,9 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent import home, runner, settings, themes
+from kei_agent import home, runner, themes
 from kei_agent.assistant import Assistant
+from kei_agent.configuration import settings
 from kei_agent.jobs import JobManager
 
 
@@ -47,7 +48,7 @@ def test_home_lists_theme_domains_and_schedule(config, store):
 
 
 def test_home_shows_agent_provider_controls(config, store):
-    from kei_agent.config import AgentProfile, model_actors
+    from kei_agent.configuration.config import AgentProfile, model_actors
 
     config = replace(config, agent_profiles={name: AgentProfile() for name in model_actors()})
     view = home.build_home(config, store, [], is_owner=True)

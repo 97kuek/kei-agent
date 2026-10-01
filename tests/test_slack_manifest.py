@@ -7,7 +7,7 @@ import pytest
 from fakes import write_config
 
 from kei_agent import cli, modules, slack_manifest
-from kei_agent.config import load_config
+from kei_agent.configuration.config import load_config
 
 REPO = Path(__file__).resolve().parents[1]
 

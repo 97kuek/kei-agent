@@ -6,7 +6,7 @@ import pytest
 from fakes import FakeGitHub
 
 from kei_agent import model_classifier, modules
-from kei_agent.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
+from kei_agent.configuration.config import REPO_ROOT, AgentProfile, Config, NotionConfig, model_actors
 from kei_agent.store import Store
 
 # 本物の秘密情報・状態・launchd・利用者のフォルダに触れないための柵は、モジュールを作る人と同じもの

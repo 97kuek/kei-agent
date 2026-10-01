@@ -7,7 +7,7 @@ import pytest
 from fakes import write_config
 
 from kei_agent import cli, doctor, modules
-from kei_agent.config import AgentProfile
+from kei_agent.configuration.config import AgentProfile
 from kei_agent.doctor import ERROR, OK, WARN
 
 SECRET = "xoxb-12345-" + "secretvalue"

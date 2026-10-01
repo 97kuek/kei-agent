@@ -14,8 +14,9 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from kei_agent import agents_table, module_scaffold, modules
-from kei_agent.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
+from kei_agent import module_scaffold, modules
+from kei_agent.configuration import agents_table
+from kei_agent.configuration.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 
 
 def check_text(path: Path, text: str, env: dict[str, str], home: Path, *, table: Path | None = None) -> Config:

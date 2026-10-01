@@ -119,7 +119,7 @@ async def test_the_endpoint_listens_only_on_localhost():
 
 
 def test_config_reads_the_orchestrator_address(tmp_path):
-    from kei_agent.config import ConfigError, load_config
+    from kei_agent.configuration.config import ConfigError, load_config
 
     path = tmp_path / "config.toml"
     path.write_text('[a2a]\norchestrator = "http://127.0.0.1:8786"\n')

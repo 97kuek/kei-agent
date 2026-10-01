@@ -60,7 +60,7 @@ def test_read_only_research_contract_does_not_request_write_and_reads_notion_onl
 
 def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
     """config.toml の [notion] にホームが無い担当には、届かない Notion の道具（ゲートウェイの MCP）を渡さない。"""
-    from kei_agent.config import NotionConfig
+    from kei_agent.configuration.config import NotionConfig
 
     request = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
                                       resolve("course", "claude", "course_explain"), None, "C1", "1.1")
@@ -96,7 +96,7 @@ def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
 def test_only_agents_that_reach_notion_get_the_shared_notion_skill(config):
     """既存のページの書式を保つ skill は、Notion を使える担当（ホームを書いたもの）にだけ渡す。"""
     from kei_agent.agent_policy import policy_of
-    from kei_agent.config import NotionConfig
+    from kei_agent.configuration.config import NotionConfig
     from kei_agent.execution_contract import shared_skill_dirs
 
     notion = config.repo_root / "plugins" / "notion" / "skills"

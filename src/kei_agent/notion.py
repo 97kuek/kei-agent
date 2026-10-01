@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from kei_agent.config import MAIN_CLIENT, Config, load_config, notion_id
+from kei_agent.configuration.config import MAIN_CLIENT, Config, load_config, notion_id
 
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2026-03-11"

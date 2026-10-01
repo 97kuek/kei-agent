@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent.config import Config, load_config
+from kei_agent.configuration.config import Config, load_config
 
 ASK_DIR = "asks"
 # Kei Agent が置かれた依頼を拾うまでの間隔（秒）

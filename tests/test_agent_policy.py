@@ -3,7 +3,7 @@
 import pytest
 
 from kei_agent.agent_policy import NOTION_READ_TOOLS, POLICIES, policy_of
-from kei_agent.config import model_actors
+from kei_agent.configuration.config import model_actors
 from kei_agent.model_policy import UseCase
 
 

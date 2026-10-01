@@ -10,7 +10,7 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/us
 secrets_dir() {
   local found=""
   if [[ -x "${REPO:-}/.venv/bin/python" ]]; then
-    found=$("$REPO/.venv/bin/python" -m kei_agent.paths secrets 2>/dev/null) || found=""
+    found=$("$REPO/.venv/bin/python" -m kei_agent.configuration.paths secrets 2>/dev/null) || found=""
   fi
   print -r -- "${found:-${KEI_AGENT_HOME:-$HOME/.config/kei-agent}/secrets}"
 }

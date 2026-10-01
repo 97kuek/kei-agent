@@ -58,24 +58,12 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import (
-    agents,
-    briefing,
-    dates,
-    deadline,
-    digest,
-    guard,
-    home,
-    modules,
-    one_shot,
-    router,
-    settings,
-    themes,
-)
+from kei_agent import agents, briefing, dates, deadline, digest, guard, home, modules, one_shot, router, themes
 from kei_agent.agents import Reply
 from kei_agent.auto_messages import history_prompt
 from kei_agent.briefing import Morning
 from kei_agent.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
+from kei_agent.configuration import settings
 from kei_agent.notion import NotionError
 from kei_agent.one_shot import AIError
 from kei_agent.records import Records

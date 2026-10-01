@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 
 from kei_agent import modules
-from kei_agent.config import Config
+from kei_agent.configuration.config import Config
 
 log = logging.getLogger(__name__)
 

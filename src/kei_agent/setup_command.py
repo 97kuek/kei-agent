@@ -31,8 +31,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kei_agent import agents_table, doctor, module_command, modules
-from kei_agent.config import (
+from kei_agent import doctor, module_command, modules
+from kei_agent.configuration import agents_table
+from kei_agent.configuration.config import (
     EXAMPLE_CONFIG,
     PROFILE_FILE,
     REPO_ROOT,

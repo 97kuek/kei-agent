@@ -6,7 +6,7 @@ import tomllib
 import pytest
 
 from kei_agent import cli, doctor, setup_command
-from kei_agent.config import EXAMPLE_CONFIG, load_config
+from kei_agent.configuration.config import EXAMPLE_CONFIG, load_config
 from kei_agent.setup_command import Asker
 
 BOT = "xoxb-1-" + "secretbot"

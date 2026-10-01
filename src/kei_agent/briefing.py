@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from kei_agent import morning, settings
+from kei_agent import morning
 from kei_agent.calendar_sync import JST, CalendarSnapshot, IncompleteSnapshot, outlook_items, sync_calendar
+from kei_agent.configuration import settings
 from kei_agent.notion import NotionError
 
 if TYPE_CHECKING:

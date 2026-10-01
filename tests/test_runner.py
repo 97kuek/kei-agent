@@ -9,7 +9,7 @@ import pytest
 
 from kei_agent import guard, router, runner, themes
 from kei_agent.agent_policy import NOTION_READ_TOOLS, policy_of
-from kei_agent.config import load_config
+from kei_agent.configuration.config import load_config
 from kei_agent.execution_contract import resolve_contract
 from kei_agent.model_policy import ModelPolicyError, UseCase, resolve, resolve_classifier
 from kei_agent.notion import gateway_client_token

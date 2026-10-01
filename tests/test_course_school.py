@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from kei_agent.config import load_config
+from kei_agent.configuration.config import load_config
 from kei_agent_modules.course import notion_setup, school
 from kei_agent_modules.course.academic_record import AcademicRecord
 

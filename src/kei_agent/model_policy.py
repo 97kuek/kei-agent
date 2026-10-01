@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from kei_agent import modules
-from kei_agent.config import AGENT_PLUGINS, ConfigError, model_actors
+from kei_agent.configuration.config import AGENT_PLUGINS, ConfigError, model_actors
 
 PROVIDERS = frozenset({"codex", "claude"})
 
@@ -193,7 +193,7 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
 def resolve_selected(config, store, actor: str, use_case: UseCase | str, *, manual: bool = False) -> ResolvedModel:
     """選ばれている provider（agents.csv の engine か、App Home の一時的な切り替え）から recipe を解決する。"""
     # settings は Config を import するため、循環 import を避けて遅延 import にする。
-    from kei_agent.settings import selected_provider
+    from kei_agent.configuration.settings import selected_provider
 
     return resolve(actor, selected_provider(config, store, actor), use_case, manual=manual)
 
@@ -214,7 +214,7 @@ def resolve_classifier(config, store, actor: str, *, provider: str | None = None
     """
     if not classifies(actor):
         raise ModelPolicyError(f"{actor} は軽量分類を使えません")
-    from kei_agent.settings import selected_provider
+    from kei_agent.configuration.settings import selected_provider
 
     provider = provider or selected_provider(config, store, actor)
     if provider not in PROVIDERS:

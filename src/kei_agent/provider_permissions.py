@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from kei_agent import guard
-from kei_agent.config import Config
+from kei_agent.configuration.config import Config
 from kei_agent.execution_contract import ExecutionContract
 
 Runtime = Literal["claude_cli", "codex_cli"]

@@ -13,7 +13,7 @@ from fakes import FakeNotionAPI
 from mcp import Client
 from test_notion_gateway import MASTER, area
 
-from kei_agent.config import NotionConfig, notion_id
+from kei_agent.configuration.config import NotionConfig, notion_id
 from kei_agent.notion import gateway_client_token
 from kei_agent_modules.notion import tools as service
 from kei_agent_modules.notion.clients import client_roots
