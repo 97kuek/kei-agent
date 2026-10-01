@@ -420,7 +420,7 @@ class RemotePueue:
         self.agent = agent
 
     async def _ask(self, skill: str, body: dict | None = None):
-        from kei_agent import agents
+        from kei_agent.conversation import agents
 
         reply = await agents.ask(self.agent, skill, text=json.dumps(body or {}, ensure_ascii=False))
         if not reply.ok:
@@ -454,7 +454,7 @@ class RemotePueue:
 def queue(config: Config) -> Pueue | RemotePueue:
     """ジョブの待ち行列。研究テーマを受け持つモジュールの担当プロセスがいれば、そちらの pueue を使う
     （いなければ、この Mac の pueue）。その担当は SUBMIT_JOB などの仕事を受ける。"""
-    from kei_agent import a2a
+    from kei_agent.conversation import a2a
 
     owner = themes.catch_all_module(config)
     url = config.a2a.url(owner) if owner else ""

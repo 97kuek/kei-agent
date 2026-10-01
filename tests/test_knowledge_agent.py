@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kei_agent.a2a import Agent
+from kei_agent.conversation.a2a import Agent
 from kei_agent.execution import runner
 from kei_agent.execution.agent_policy import policy_of
 

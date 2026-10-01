@@ -22,7 +22,7 @@ kei-agent = "kei_agent.cli:main"
 kei-agent-schedule = "kei_agent.scheduling.schedule:main"
 kei-agent-notion-setup = "kei_agent.storage.notion:main"
 kei-agent-hub-setup = "kei_agent.storage.notion_hub:main"
-kei-agent-ask = "kei_agent.ask:main"
+kei-agent-ask = "kei_agent.conversation.ask:main"
 # モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module knowledge
 kei-agent-module = "kei_agent_a2a.launch:main"
 

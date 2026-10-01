@@ -58,27 +58,27 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent import agents, home, router
-from kei_agent.agents import Reply
-from kei_agent.auto_messages import history_prompt
 from kei_agent.configuration import settings
-from kei_agent.execution import guard, one_shot
-from kei_agent.execution.one_shot import AIError
-from kei_agent.framework import modules
-from kei_agent.request import Request
-from kei_agent.response_output import (
+from kei_agent.conversation import agents, home, router
+from kei_agent.conversation.agents import Reply
+from kei_agent.conversation.auto_messages import history_prompt
+from kei_agent.conversation.request import Request
+from kei_agent.conversation.response_output import (
     OutputError,
     finalize_conversation,
     safe_failure,
     validate_sections,
     validate_structured_response,
 )
+from kei_agent.conversation.slack_text import FAILED_PREFIX, escape, split_text
+from kei_agent.conversation.slack_text import is_status_inquiry as _is_status_inquiry
+from kei_agent.execution import guard, one_shot
+from kei_agent.execution.one_shot import AIError
+from kei_agent.framework import modules
 from kei_agent.scheduling import briefing, dates, deadline, digest
 from kei_agent.scheduling.briefing import Morning
 from kei_agent.scheduling.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
-from kei_agent.slack_text import FAILED_PREFIX, escape, split_text
-from kei_agent.slack_text import is_status_inquiry as _is_status_inquiry
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
 from kei_agent.updates import Update
@@ -86,7 +86,7 @@ from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import append_thread_log
 
 if TYPE_CHECKING:
-    from kei_agent.assistant import Assistant
+    from kei_agent.conversation.assistant import Assistant
 
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION

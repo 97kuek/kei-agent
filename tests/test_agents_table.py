@@ -145,7 +145,7 @@ def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
 
 
 def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
-    from kei_agent.home import build_home
+    from kei_agent.conversation.home import build_home
 
     home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
     config = _load(home)

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.scheduling import morning
@@ -477,7 +477,7 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
 
 def envelope(text, data):
     """全エージェント共通の返事の封筒。"""
-    from kei_agent import a2a
+    from kei_agent.conversation import a2a
     body = {"ok": True, "text": text, "data": data, "limit_reset_at": None, "cost_usd": None}
     return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(body, ensure_ascii=False))
 
@@ -584,7 +584,7 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
 
 async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypatch):
     """一時的に一覧を取れなくても、1時間待たず次の tick で取り直す。"""
-    from kei_agent.agents import Reply
+    from kei_agent.conversation.agents import Reply
 
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "2-course"

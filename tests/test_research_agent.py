@@ -12,8 +12,8 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import agents
-from kei_agent.a2a import Agent
+from kei_agent.conversation import agents
+from kei_agent.conversation.a2a import Agent
 from kei_agent.execution import jobs, runner
 from kei_agent.framework import modules
 
@@ -135,7 +135,7 @@ def test_to_result_keeps_only_what_it_knows():
 
 async def test_a_dead_agent_becomes_an_error_result(config):
     """つながらないエージェントは、エラーの RunResult になる（本体は普通の失敗として扱える）。"""
-    from kei_agent.a2a import Agent as Client
+    from kei_agent.conversation.a2a import Agent as Client
     from kei_agent.workspaces import themes
 
     ws = themes.resolve(config, "vlm")

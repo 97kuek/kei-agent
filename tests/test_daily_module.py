@@ -11,7 +11,7 @@ import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 from test_schedule import FakeCourseAgent, due_item
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules

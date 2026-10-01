@@ -5,7 +5,7 @@
 import json
 from pathlib import Path
 
-from kei_agent import ask
+from kei_agent.conversation import ask
 from kei_agent.execution.jobs import REQUESTS_DIR
 from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読めるように
     FakeAI,
@@ -67,7 +67,7 @@ class FakeGitHub:
 
 
 def pending_asks(config) -> list[tuple[Path, dict]]:
-    """置かれている依頼（kei_agent.ask が書いたファイル）を古い順に。本番は claim_asks で拾う。"""
+    """置かれている依頼（kei_agent.conversation.ask が書いたファイル）を古い順に。本番は claim_asks で拾う。"""
     directory = ask.ask_dir(config)
     return [(path, json.loads(path.read_text(encoding="utf-8")))
             for path in sorted(directory.glob("*.json"))] if directory.is_dir() else []

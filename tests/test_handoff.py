@@ -7,11 +7,11 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
+from kei_agent.conversation.handoff import ACCEPT_ACTION, DECLINE_ACTION, handoff_title, split_memo, strip_handoff
+from kei_agent.conversation.request import Request
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
-from kei_agent.handoff import ACCEPT_ACTION, DECLINE_ACTION, handoff_title, split_memo, strip_handoff
-from kei_agent.request import Request
 from kei_agent.testing.kit import settle
 
 
@@ -166,7 +166,7 @@ async def test_a_broken_background_job_is_logged(env, caplog):
     async def broken():
         raise RuntimeError("こわれた")
 
-    with caplog.at_level(logging.ERROR, logger="kei_agent.assistant"):
+    with caplog.at_level(logging.ERROR, logger="kei_agent.conversation.assistant"):
         task = assistant.spawn(broken())
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)

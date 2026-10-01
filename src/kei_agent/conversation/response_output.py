@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from kei_agent.slack_text import FAILED_PREFIX
+from kei_agent.conversation.slack_text import FAILED_PREFIX
 
 FINAL_OPEN = "<<kei-agent-final>>"
 FINAL_CLOSE = "<<kei-agent-final-end>>"

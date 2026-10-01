@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 
-from kei_agent.agents import FIELDS
+from kei_agent.conversation.agents import FIELDS
 from kei_agent.execution import runner
 from kei_agent.execution.model_classifier import UsageLimited
 from kei_agent_a2a import envelope, run
@@ -152,7 +152,7 @@ async def test_execute_sends_only_the_fields_the_orchestrator_reads(config, monk
 
 async def test_the_recipe_comes_back_in_the_envelope(config, store, monkeypatch):
     """担当のプロセスで動かした担当・用途・モデル・effort は、封筒の data で本体に戻る（本体が記録に残す）。"""
-    from kei_agent import agents
+    from kei_agent.conversation import agents
 
     async def inner(_config, request, prompt, on_activity=None):
         return runner.RunResult(provider=request.recipe.provider, session_id="s-1",

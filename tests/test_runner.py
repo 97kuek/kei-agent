@@ -7,8 +7,8 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent import router
 from kei_agent.configuration.config import load_config
+from kei_agent.conversation import router
 from kei_agent.execution import guard, runner
 from kei_agent.execution.agent_policy import NOTION_READ_TOOLS, policy_of
 from kei_agent.execution.execution_contract import resolve_contract

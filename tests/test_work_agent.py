@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from kei_agent.a2a import Agent
+from kei_agent.conversation.a2a import Agent
 from kei_agent_modules.work import module as work
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")

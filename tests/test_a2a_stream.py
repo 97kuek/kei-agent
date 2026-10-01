@@ -5,7 +5,7 @@ import socket
 import pytest
 from aiohttp import web
 
-from kei_agent import a2a
+from kei_agent.conversation import a2a
 
 
 def _free_port() -> int:

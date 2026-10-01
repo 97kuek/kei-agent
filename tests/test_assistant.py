@@ -8,18 +8,18 @@ from unittest.mock import AsyncMock
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
-import kei_agent.assistant as assistant_module
-from kei_agent import a2a, ask, router
-from kei_agent.assistant import Assistant
-from kei_agent.auto_messages import history_prompt
+import kei_agent.conversation.assistant as assistant_module
 from kei_agent.configuration import settings
+from kei_agent.conversation import a2a, ask, router
+from kei_agent.conversation.assistant import Assistant
+from kei_agent.conversation.auto_messages import history_prompt
+from kei_agent.conversation.request import Request
+from kei_agent.conversation.slack_text import split_text
+from kei_agent.conversation.thread_ui import ThreadUI
 from kei_agent.execution import runner
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.jobs import JobManager
-from kei_agent.request import Request
-from kei_agent.slack_text import split_text
 from kei_agent.testing.kit import settle
-from kei_agent.thread_ui import ThreadUI
 from kei_agent.workspaces import themes
 
 
@@ -605,7 +605,7 @@ async def test_keeps_working_when_new_slack_apis_are_unavailable(env, monkeypatc
 
 def test_message_text_reads_messages_posted_as_markdown():
     """流して見せた返事や markdown_text の投稿は、text が空で blocks に入る。"""
-    from kei_agent.slack_text import message_text
+    from kei_agent.conversation.slack_text import message_text
 
     assert message_text({"text": "ふつうの投稿"}) == "ふつうの投稿"
     assert message_text({"text": "", "blocks": [{"type": "markdown", "text": "流した返事"}]}) == "流した返事"
@@ -615,7 +615,7 @@ def test_message_text_reads_messages_posted_as_markdown():
 
 def test_theme_runs_remembers_overlap():
     """outputs/ はテーマで共通なので、重なって動いたことを覚えておく。"""
-    from kei_agent.assistant import ThemeRuns
+    from kei_agent.conversation.assistant import ThemeRuns
 
     runs = ThemeRuns()
     runs.begin("vlm", "1.1")
@@ -1101,7 +1101,7 @@ async def test_attachments_are_passed_again_when_the_request_is_retried(env, sto
 @pytest.mark.parametrize("long_run", [False, True])
 async def test_limit_notice_mentions_the_owner_only_after_a_long_run(env, store, monkeypatch, long_run):
     """上限の回は返事待ちではない。App Home には、上限が明けるのを待っていると出す。"""
-    from kei_agent import home
+    from kei_agent.conversation import home
 
     assistant, slack, claude, _ = env
     if long_run:
@@ -1260,7 +1260,7 @@ async def test_course_limit_is_deferred_and_retried_like_research(course, store)
 
 async def test_every_agent_request_starts_with_todays_date(course, monkeypatch):
     """「今日の授業は？」に答えられるよう、どの担当への依頼にも今日の日付と曜日を先頭に付ける。"""
-    from kei_agent import auto_messages
+    from kei_agent.conversation import auto_messages
 
     monkeypatch.setattr(assistant_module, "today_line", auto_messages.today_line)
     assistant, slack, claude, _ = course
@@ -1437,7 +1437,7 @@ async def test_course_channel_tells_when_the_agent_is_down(course):
 
 async def test_course_channel_waits_out_a_restart_instead_of_failing(course, monkeypatch):
     """入れ替えの最中で一瞬つながらないだけなら、待ってやり直して失敗を見せない。"""
-    from kei_agent import agents
+    from kei_agent.conversation import agents
 
     assistant, slack, _, _ = course
     monkeypatch.setattr(agents, "RETRY_WAIT", 0)

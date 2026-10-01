@@ -1,6 +1,6 @@
 import pytest
 
-from kei_agent.slack_text import is_status_inquiry
+from kei_agent.conversation.slack_text import is_status_inquiry
 
 INQUIRIES = ["今どんな感じ？", "終わった?", "進捗どう?", "できました?", "まだ止まってる?", "状況は？", "どうなってる？",
              "どこまで進んだ？", "状況を教えて", "様子はどう？", "直った？"]

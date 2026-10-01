@@ -113,7 +113,7 @@ def no_date_line(monkeypatch):
 
     日付が付くことは test_assistant.py の専用のテストで確かめる。
     """
-    from kei_agent import assistant
+    from kei_agent.conversation import assistant
 
     monkeypatch.setattr(assistant, "today_line", lambda now=None: "")
 

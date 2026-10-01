@@ -228,7 +228,7 @@ async def test_job_lost_before_reaching_pueue_is_reported_failed(manager, store,
 
 async def test_finished_job_reports_the_files_that_are_missing(manager, theme):
     """終了コードが成功でも、できるはずのファイルが無ければ、成功として扱わない。"""
-    from kei_agent.auto_messages import expected_files_note
+    from kei_agent.conversation.auto_messages import expected_files_note
     from kei_agent.execution.jobs import missing_outputs
 
     assert parse_request(SUBMIT).expects == []

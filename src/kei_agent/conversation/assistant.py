@@ -19,39 +19,28 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import a2a, agents, api, ask, router, updates
-from kei_agent.auto_messages import (
+from kei_agent import api, updates
+from kei_agent.configuration import settings
+from kei_agent.configuration.config import Config
+from kei_agent.conversation import a2a, agents, ask, router
+from kei_agent.conversation.auto_messages import (
     history_prompt,
     interrupted_prompt,
     job_resume_prompt,
     job_status_label,
     today_line,
 )
-from kei_agent.configuration import settings
-from kei_agent.configuration.config import Config
-from kei_agent.execution import guard, runner
-from kei_agent.execution.execution_contract import prompt_version
-from kei_agent.execution.jobs import JobManager, missing_outputs
-from kei_agent.execution.model_policy import (
-    PROVIDERS,
-    ModelPolicyError,
-    UseCase,
-    explicit_use_case,
-    is_manual,
-    resolve,
-)
-from kei_agent.framework import modules, version
-from kei_agent.handoff import Handoff, strip_handoff
-from kei_agent.home import agent_labels
-from kei_agent.request import Request
-from kei_agent.response_output import (
+from kei_agent.conversation.handoff import Handoff, strip_handoff
+from kei_agent.conversation.home import agent_labels
+from kei_agent.conversation.request import Request
+from kei_agent.conversation.response_output import (
     OutputError,
     finalize_conversation,
     safe_failure,
     trouble_message,
 )
-from kei_agent.settings_actions import SettingsActions
-from kei_agent.slack_text import (
+from kei_agent.conversation.settings_actions import SettingsActions
+from kei_agent.conversation.slack_text import (
     AWAITING_MARKER,
     DONE_REACTION,
     FAILED_PREFIX,
@@ -65,11 +54,23 @@ from kei_agent.slack_text import (
     split_text,
     strip_lines,
 )
+from kei_agent.conversation.thread_ui import ThreadUI
+from kei_agent.execution import guard, runner
+from kei_agent.execution.execution_contract import prompt_version
+from kei_agent.execution.jobs import JobManager, missing_outputs
+from kei_agent.execution.model_policy import (
+    PROVIDERS,
+    ModelPolicyError,
+    UseCase,
+    explicit_use_case,
+    is_manual,
+    resolve,
+)
+from kei_agent.framework import modules, version
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
 from kei_agent.storage.notion_store import NotionStore
 from kei_agent.storage.store import Store
-from kei_agent.thread_ui import ThreadUI
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import (
     append_thread_log,

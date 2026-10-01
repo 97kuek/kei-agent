@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from kei_agent import router
+from kei_agent.conversation import router
 from kei_agent.execution import runner
 from kei_agent.execution.execution_contract import prompt_version, resolve_contract
 from kei_agent.execution.model_policy import UseCase, resolve

@@ -1,6 +1,6 @@
 import pytest
 
-from kei_agent.response_output import (
+from kei_agent.conversation.response_output import (
     OutputError,
     finalize_conversation,
     trouble_notice,

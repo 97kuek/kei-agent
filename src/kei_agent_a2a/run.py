@@ -19,8 +19,8 @@ from dataclasses import asdict
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Part, TaskState
 
-from kei_agent.agents import FIELDS as RESULT_FIELDS
 from kei_agent.configuration.config import Config
+from kei_agent.conversation.agents import FIELDS as RESULT_FIELDS
 from kei_agent.execution import runner
 from kei_agent.execution.model_classifier import classify
 from kei_agent.execution.model_policy import ResolvedModel, is_manual, resolve, resolve_selected, use_case_of

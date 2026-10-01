@@ -19,7 +19,7 @@ from kei_agent.scheduling.calendar_sync import JST, CalendarSnapshot, Incomplete
 from kei_agent.storage.notion import NotionError
 
 if TYPE_CHECKING:
-    from kei_agent.assistant import Assistant
+    from kei_agent.conversation.assistant import Assistant
 
 log = logging.getLogger(__name__)
 

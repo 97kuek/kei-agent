@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from kei_agent.slack_text import split_text
+from kei_agent.conversation.slack_text import split_text
 
 log = logging.getLogger(__name__)
 

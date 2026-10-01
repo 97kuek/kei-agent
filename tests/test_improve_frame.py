@@ -13,12 +13,12 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, write_config
 
 from kei_agent import api, updates
-from kei_agent.assistant import Assistant
 from kei_agent.configuration.config import ConfigError, load_config
+from kei_agent.conversation.assistant import Assistant
+from kei_agent.conversation.request import Request
 from kei_agent.execution import guard, runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
-from kei_agent.request import Request
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind

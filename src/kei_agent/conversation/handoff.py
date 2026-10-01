@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import logging
 
-from kei_agent.auto_messages import HANDOFF_MEMO_PROMPT, handoff_start_prompt
-from kei_agent.request import Request
-from kei_agent.slack_text import FAILED_PREFIX, HANDOFF_MARKER
+from kei_agent.conversation.auto_messages import HANDOFF_MEMO_PROMPT, handoff_start_prompt
+from kei_agent.conversation.request import Request
+from kei_agent.conversation.slack_text import FAILED_PREFIX, HANDOFF_MARKER
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import append_thread_log, thread_log_path
 from kei_agent.workspaces.themes import ChannelKind, Workspace

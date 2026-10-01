@@ -1,6 +1,6 @@
 """音声から、研究・授業・仕事の中身を聞く。担当を呼べるのは本体だけなので、本体の問い合わせ口に頼む。
 
-本体（kei_agent.questions）が provider の選択を確かめ、読むだけで担当に聞き、Slack と同じ出力の確認を
+本体（kei_agent.conversation.questions）が provider の選択を確かめ、読むだけで担当に聞き、Slack と同じ出力の確認を
 通した答えを返す（窓口の ask_orchestrator）。声のレイヤは担当の住所を持たない。provider 間のフォールバックはしない。
 """
 

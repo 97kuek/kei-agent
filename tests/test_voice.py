@@ -273,7 +273,7 @@ def test_a_job_is_not_handed_over_until_it_was_confirmed(config):
 def test_claiming_asks_skips_active_files_and_recovers_interrupted_ones(config):
     """通常の poll は別の処理が所有している依頼を奪わない。再起動後は、前回 claim 済みの依頼を
     もう一度処理できる。"""
-    from kei_agent import ask as asks
+    from kei_agent.conversation import ask as asks
 
     path = asks.write_ask(config, "amr-query", "学習曲線を描いて")
     claimed = asks.claim_asks(config)
@@ -293,7 +293,7 @@ def test_claiming_asks_skips_active_files_and_recovers_interrupted_ones(config):
 
 def test_writing_an_ask_fsyncs_a_temporary_file_before_exposing_json(config, monkeypatch):
     """consumer には、完全に書けた JSON だけを原子的に公開する。"""
-    from kei_agent import ask as asks
+    from kei_agent.conversation import ask as asks
 
     real_fsync, real_replace = asks.os.fsync, asks.os.replace
     events = []
@@ -753,7 +753,7 @@ async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
     """担当を呼べるのは本体だけ。声のレイヤは本体の `ask` に JSON で頼み、答えの文だけを受け取る。"""
     from dataclasses import replace
 
-    from kei_agent import agents
+    from kei_agent.conversation import agents
     from kei_agent_modules.voice.handoff import Handoff
     from kei_agent_modules.voice.tools import Tools
 

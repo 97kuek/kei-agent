@@ -6,8 +6,8 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent import a2a
-from kei_agent.assistant import Assistant
+from kei_agent.conversation import a2a
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules

@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
@@ -33,7 +33,7 @@ class FakeCourseAgent:
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent import a2a
+        from kei_agent.conversation import a2a
         self.asked.append(skill)
         return a2a.TaskResult(state="TASK_STATE_COMPLETED" if self.ok else "TASK_STATE_FAILED", text=json.dumps(
             {"ok": self.ok, "text": "済", "data": {"added": self.added, "updated": self.updated},
@@ -85,7 +85,7 @@ async def test_new_and_changed_assignments_are_posted_with_a_count_heading(env, 
 
 async def test_the_course_module_ticks_hourly(env, monkeypatch):
     """見回りは毎分呼ばれるが、締切を見に行くのは1時間に1回。"""
-    from kei_agent.agents import Reply
+    from kei_agent.conversation.agents import Reply
 
     scheduler, assistant, slack = env
     module = assistant.modules["course"]

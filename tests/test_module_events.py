@@ -10,7 +10,7 @@ from dataclasses import replace
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
@@ -211,7 +211,7 @@ async def test_a_module_process_can_ask_the_orchestrator(config, monkeypatch):
 def test_a_module_process_can_leave_a_request_for_the_orchestrator(config):
     """Slack の外からの依頼は、本体が拾う置き場に置く（本体がテーマのチャンネルにスレッドを立てる）。"""
     pytest.importorskip("a2a", reason="担当プロセスは a2a-sdk で動く")
-    from kei_agent import ask
+    from kei_agent.conversation import ask
     from kei_agent_a2a import api
 
     api.put_request(config, "vlm", "図を直して")

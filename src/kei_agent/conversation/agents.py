@@ -15,8 +15,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from kei_agent import a2a
 from kei_agent.configuration.config import Config
+from kei_agent.conversation import a2a
 from kei_agent.execution import runner
 
 log = logging.getLogger(__name__)

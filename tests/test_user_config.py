@@ -73,7 +73,7 @@ def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_
     assert course.rstrip().endswith("## 依頼者のプロフィール\n\n## 話し方\n\n- 一人称は「僕」")
     assert "# プロフィール" not in course and "書き方の説明" not in course     # 題とコメントは差し込まない
     # JSON だけを返す係は、作業場で差し込まないと決める（振り分け・分類の作業場と、知識の選別・要約の回）
-    from kei_agent import router
+    from kei_agent.conversation import router
     ws = router.workspace(config)
     assert ws.profile is False and "依頼者のプロフィール" not in prompt_text(config, ws.system_prompt, ws.profile)
     digest = config.prompt_file("knowledge-digest.md", module="knowledge")

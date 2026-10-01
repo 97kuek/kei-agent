@@ -13,10 +13,11 @@ from pathlib import Path
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from kei_agent import api, home
-from kei_agent.assistant import Assistant
+from kei_agent import api
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import load_config
+from kei_agent.conversation import home
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import jobs
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
@@ -179,7 +180,7 @@ async def serve() -> None:
         schedule_loop = asyncio.create_task(Scheduler(config, store, assistant).loop())
         if config.a2a.orchestrator:
             # 声のレイヤからの問い合わせ口（担当を呼べるのは本体だけ。questions.py）
-            from kei_agent import questions
+            from kei_agent.conversation import questions
             questions_loop = asyncio.create_task(questions.serve(assistant, config.a2a.orchestrator))
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()

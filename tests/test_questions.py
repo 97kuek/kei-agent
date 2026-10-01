@@ -1,4 +1,4 @@
-"""声のレイヤからの問い合わせ（本体の A2A の口、kei_agent.questions と Assistant.answer_question）。"""
+"""声のレイヤからの問い合わせ（本体の A2A の口、kei_agent.conversation.questions と Assistant.answer_question）。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っ�
 
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent.assistant import Assistant
+from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 
@@ -33,7 +33,7 @@ class _Agent:
         self.asked: list[dict] = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent import a2a
+        from kei_agent.conversation import a2a
 
         self.asked.append(json.loads(text))
         return a2a.TaskResult(state="TASK_STATE_COMPLETED", text="", status_text=json.dumps({
@@ -77,7 +77,7 @@ async def test_broken_answer_is_replaced_by_the_fixed_failure_text(assistant):
 
 
 async def test_executor_passes_the_question_to_the_assistant():
-    from kei_agent.questions import NO_QUESTION, QuestionExecutor
+    from kei_agent.conversation.questions import NO_QUESTION, QuestionExecutor
 
     class _Assistant:
         async def answer_question(self, actor, question, theme=""):
@@ -106,7 +106,7 @@ async def test_executor_passes_the_question_to_the_assistant():
 
 
 async def test_the_endpoint_listens_only_on_localhost():
-    from kei_agent import questions
+    from kei_agent.conversation import questions
 
     troubles = []
 

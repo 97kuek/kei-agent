@@ -109,8 +109,8 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
 
 async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
     """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
-    from kei_agent import router
     from kei_agent.configuration import settings
+    from kei_agent.conversation import router
     from kei_agent.execution import model_classifier, runner
 
     seen = []
