@@ -17,9 +17,8 @@ from kei_agent.configuration.config import AgentProfile
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import strip_lines
-from kei_agent.execution import guard, runner
+from kei_agent.execution import guard, runner, updates
 from kei_agent.execution.jobs import JobManager
-from kei_agent.operations import updates
 from kei_agent.testing.kit import settle
 from kei_agent_modules.improve import issues
 from kei_agent_modules.improve import repo as improve_repo

@@ -5,8 +5,8 @@ import socket
 
 import pytest
 
-from kei_agent.framework import module_scaffold, modules
-from kei_agent.operations import module_command
+from kei_agent.framework import modules
+from kei_agent.operations import module_command, module_scaffold
 
 
 def _env(tmp_path):

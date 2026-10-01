@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent.configuration import settings
 from kei_agent.configuration.agents_table import TableError, parse, with_enabled
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.model_policy import resolve
 from kei_agent.operations import agents_command, cli, module_command
+from kei_agent.storage import settings
 from kei_agent.storage.store import Store
 
 HEADER = "module,enabled,channels,engine,model,effort\n"

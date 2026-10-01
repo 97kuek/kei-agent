@@ -8,18 +8,13 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from dataclasses import replace
 from datetime import datetime
 
 from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_actors
-from kei_agent.execution.guard import valid_domain
 from kei_agent.framework import modules
 from kei_agent.storage.store import Store
-
-# Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）
-CONNECT_MARKER = "🔒 接続:"
 
 # 本体の定期処理（名前 → 見出し、App Home の短い名前）。モジュールのものは module.toml の [schedules] から足す
 CORE_SCHEDULES = {
@@ -78,7 +73,6 @@ def _known_schedule(name: str) -> bool:
     """本体か、知っているどれかのモジュールの定期処理か（Slack のボタンから届いた名前を確かめる）。"""
     return name in CORE_SCHEDULES or any(s.name == name for spec in modules.known().values() for s in spec.schedules)
 
-_REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[）)])?\s*$")
 
 
 # テーマごとの接続先
@@ -107,20 +101,7 @@ def drop_theme(store: Store, theme: str) -> None:
     store.remove_theme_domains(theme)
 
 
-# Claude からの接続の申し出
-
-def parse_connect_requests(text: str) -> list[tuple[str, str]]:
-    """返答の `🔒 接続: <ドメイン>（理由）` を拾う。ぴったりのドメイン名でないものは捨てる。"""
-    found: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        m = _REQUEST.match(line.strip())
-        if not m:
-            continue
-        domain = m.group(1).lower()
-        if valid_domain(domain) and domain not in [d for d, _ in found]:
-            found.append((domain, (m.group(2) or "").strip()))
-    return found
-
+# Claude からの接続の申し出（返答から拾うのは conversation.settings_actions.parse_connect_requests）
 
 def add_request(store: Store, channel: str, thread_ts: str, theme: str, domain: str, reason: str) -> int:
     return store.add_domain_request(channel, thread_ts, theme, domain, reason)

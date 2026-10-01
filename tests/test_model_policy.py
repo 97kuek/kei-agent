@@ -32,8 +32,8 @@ def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_cas
 
 def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, store):
     """選んだ provider の固定のレシピになる。持ち主が [[manual-astra]] と書いたときだけ例外の最上位を使う。"""
-    from kei_agent.configuration import settings
     from kei_agent.execution.model_policy import resolve_selected
+    from kei_agent.storage import settings
 
     settings.set_agent_provider(store, "research", "codex")
     recipe = resolve_selected(config, store, "research", "research_execute")
@@ -91,8 +91,8 @@ def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answe
 
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):
-    from kei_agent.configuration import settings
     from kei_agent.execution import model_classifier, runner
+    from kei_agent.storage import settings
 
     settings.set_agent_provider(store, "research", "claude")
 
@@ -109,9 +109,9 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
 
 async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
     """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
-    from kei_agent.configuration import settings
     from kei_agent.conversation import router
     from kei_agent.execution import model_classifier, runner
+    from kei_agent.storage import settings
 
     seen = []
 

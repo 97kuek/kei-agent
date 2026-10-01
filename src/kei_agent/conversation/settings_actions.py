@@ -6,14 +6,34 @@ Assistant に混ぜて使う。self.slack、self.store、self.config、self.subm
 from __future__ import annotations
 
 import logging
+import re
 
-from kei_agent.configuration import settings
 from kei_agent.configuration.config import HHMM
 from kei_agent.conversation import home
 from kei_agent.conversation.auto_messages import domain_resume_prompt
 from kei_agent.conversation.request import Request
+from kei_agent.execution.guard import valid_domain
+from kei_agent.storage import settings
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind, Workspace
+
+# Claude がつながらなかったときに、返答の最後に書く行（prompts/system.md）
+CONNECT_MARKER = "🔒 接続:"
+_REQUEST = re.compile(rf"^{re.escape(CONNECT_MARKER)}\s*(\S+?)\s*(?:[（(](.*?)[）)])?\s*$")
+
+
+def parse_connect_requests(text: str) -> list[tuple[str, str]]:
+    """返答の `🔒 接続: <ドメイン>（理由）` を拾う。ぴったりのドメイン名でないものは捨てる。"""
+    found: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        m = _REQUEST.match(line.strip())
+        if not m:
+            continue
+        domain = m.group(1).lower()
+        if valid_domain(domain) and domain not in [d for d, _ in found]:
+            found.append((domain, (m.group(2) or "").strip()))
+    return found
+
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +54,9 @@ class SettingsActions:
             return []
         allowed = set(self.config.allowed_domains) | set(ws.allowed_domains)
         found: dict[str, str] = {}
-        for domain, reason in [*settings.parse_connect_requests(text), *from_tools]:
+        for domain, reason in [*parse_connect_requests(text), *from_tools]:
             domain = domain.strip().lower()
-            if settings.valid_domain(domain) and domain not in allowed and domain not in found:
+            if valid_domain(domain) and domain not in allowed and domain not in found:
                 found[domain] = reason
         return list(found.items())
 
@@ -161,7 +181,7 @@ class SettingsActions:
         theme, domain = home.read_add_domain(body.get("view", {}))
         if theme not in self._theme_names():
             return {"theme": "テーマを選んでください"}
-        if not settings.valid_domain(domain, allow_wildcard=True):
+        if not valid_domain(domain, allow_wildcard=True):
             return {"domain": "zenodo.org や *.example.com のように、ドメイン名だけを書いてください"}
         settings.allow_domain(self.store, theme, domain, "App Home から追加")
         await self.publish_home(user)

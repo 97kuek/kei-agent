@@ -12,9 +12,8 @@ import os
 from pathlib import Path
 
 from kei_agent.configuration import config as config_module
-from kei_agent.execution import model_classifier
+from kei_agent.execution import model_classifier, updates
 from kei_agent.framework import modules
-from kei_agent.operations import updates
 from kei_agent.storage.store import Store
 
 # これらで始まる名前と、モジュールの module.toml の [secrets] に書いてある名前は、テストのあいだ環境変数から外す

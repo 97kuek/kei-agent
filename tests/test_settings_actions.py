@@ -3,10 +3,10 @@
 import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack
 
-from kei_agent.configuration import settings
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
+from kei_agent.storage import settings
 
 
 @pytest.fixture

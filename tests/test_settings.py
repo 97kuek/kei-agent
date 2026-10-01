@@ -2,8 +2,10 @@ from dataclasses import replace
 
 from fakes import write_config
 
-from kei_agent.configuration import settings
 from kei_agent.configuration.config import MaintenanceConfig, ScheduleConfig
+from kei_agent.conversation import settings_actions
+from kei_agent.execution import guard
+from kei_agent.storage import settings
 
 
 def test_domains_are_kept_per_theme(store):
@@ -34,19 +36,19 @@ def test_parse_connect_requests_takes_only_exact_domain_names():
         "🔒 接続: localhost（手元）",
         "🔒 接続: huggingface.co (重み)",
     ])
-    assert settings.parse_connect_requests(text) == [
+    assert settings_actions.parse_connect_requests(text) == [
         ("zenodo.org", "CASTELLA の特徴量を落とすため"),
         ("huggingface.co", "重み"),
     ]
 
 
 def test_valid_domain():
-    assert settings.valid_domain("zenodo.org")
-    assert settings.valid_domain("objects.githubusercontent.com")
-    assert not settings.valid_domain("*.github.com")
-    assert settings.valid_domain("*.github.com", allow_wildcard=True)
-    assert not settings.valid_domain("*", allow_wildcard=True)
-    assert not settings.valid_domain("zenodo.org/records")
+    assert guard.valid_domain("zenodo.org")
+    assert guard.valid_domain("objects.githubusercontent.com")
+    assert not guard.valid_domain("*.github.com")
+    assert guard.valid_domain("*.github.com", allow_wildcard=True)
+    assert not guard.valid_domain("*", allow_wildcard=True)
+    assert not guard.valid_domain("zenodo.org/records")
 
 
 def test_domain_request_is_resolved_once(store):

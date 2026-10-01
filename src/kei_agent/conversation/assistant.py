@@ -20,9 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from kei_agent import api
-from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
-from kei_agent.conversation import a2a, agents, ask, router
+from kei_agent.conversation import ask, router
 from kei_agent.conversation.auto_messages import (
     history_prompt,
     interrupted_prompt,
@@ -54,8 +53,9 @@ from kei_agent.conversation.slack_text import (
     split_text,
     strip_lines,
 )
+from kei_agent.conversation.theme_invite import ThemeInvite
 from kei_agent.conversation.thread_ui import ThreadUI
-from kei_agent.execution import guard, runner
+from kei_agent.execution import a2a, agents, guard, runner, updates
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.jobs import JobManager, missing_outputs
 from kei_agent.execution.model_policy import (
@@ -67,7 +67,7 @@ from kei_agent.execution.model_policy import (
     resolve,
 )
 from kei_agent.framework import modules, version
-from kei_agent.operations import updates
+from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
 from kei_agent.storage.notion_store import NotionStore
@@ -80,7 +80,6 @@ from kei_agent.workspaces.theme_files import (
     snapshot_outputs,
     split_uploads,
 )
-from kei_agent.workspaces.theme_invite import ThemeInvite
 from kei_agent.workspaces.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)

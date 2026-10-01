@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 # sandbox の中の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、
 # 環境変数からトークンを外しても、置き場所のファイルはそのまま読めてしまう。
-# 使うたびに更新するトークン（`<state_dir>/secrets`）は state_dir で変わるので、config.py で足す
+# 使うたびに更新するトークン（`<state_dir>/secrets`）は state_dir で変わるので、denied_reads で足す
 DEFAULT_DENY_READ = (
     "~/.config/kei-agent/secrets",   # Kei Agent の秘密情報の既定の置き場所（config.toml の [paths] secrets）
     "~/.config/zsh/local",   # 作者の環境の秘密情報の置き場所（[paths] secrets で指している）
@@ -33,6 +33,18 @@ DEFAULT_DENY_READ = (
     "~/.git-credentials",
     "~/.config/git/credentials",
 )
+
+def denied_reads(config: Config) -> tuple[Path, ...]:
+    """sandbox の中から読ませない場所。config.toml の [sandbox] deny_read（書かなければ上の既定と、使うたびに更新する
+    トークン（Box など）の置き場 <state_dir>/secrets）に、秘密情報の置き場所を必ず足す（書き換えていても外せない）。"""
+    if config.deny_read is not None:
+        found = list(config.deny_read)
+    else:
+        found = [Path(p).expanduser().resolve() for p in DEFAULT_DENY_READ] + [config.state_dir / "secrets"]
+    if config.secrets_dir is not None and config.secrets_dir not in found:
+        found.append(config.secrets_dir)
+    return tuple(dict.fromkeys(found))
+
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする。
 # Notion の鍵（NOTION_TOKEN）もゲートウェイの親の合言葉（KEI_AGENT_NOTION_GATEWAY_TOKEN）も、どの子にも渡さない。
@@ -139,7 +151,7 @@ def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> di
         allow += connector.claude_names()
     deny = [# 秘密情報の置き場所。sandbox は Bash にしか効かないので、読む道具（Read・Grep・Glob）でも塞ぐ。
             # フォルダ（~/.ssh）とファイル（~/.netrc）の両方の書き方で書く
-            *(rule for path in config.deny_read for rule in (f"Read(/{path})", _abs_rule("Read", path))),
+            *(rule for path in denied_reads(config) for rule in (f"Read(/{path})", _abs_rule("Read", path))),
             *(SEARCH_TOOLS if policy.files == "none" else ()),
             *(EDIT_TOOLS if policy.files != "write" else ()),
             *(() if policy.shell else ("Bash",)),
@@ -167,7 +179,7 @@ def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
             "filesystem": {
                 "allowWrite": [str(p) for p in config.allow_write],
                 # sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞ぐ
-                "denyRead": [str(p) for p in config.deny_read],
+                "denyRead": [str(p) for p in denied_reads(config)],
             },
         },
         "permissions": claude_permissions(config, ws, policy),

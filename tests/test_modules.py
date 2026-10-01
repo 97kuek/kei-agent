@@ -3,11 +3,11 @@
 import pytest
 from fakes import write_config
 
-from kei_agent.configuration import settings
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation import home
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import task_names
+from kei_agent.storage import settings
 
 WEATHER = '''api = 1
 name = "weather"

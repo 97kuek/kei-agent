@@ -63,7 +63,7 @@ def _filesystem(config: Config, contract: ExecutionContract) -> dict[str, str]:
         filesystem[str(workspace.cwd)] = "write"
         for root in config.allow_write:
             filesystem[str(root)] = "write"
-    for denied in config.deny_read:
+    for denied in guard.denied_reads(config):
         filesystem[str(denied)] = "deny"
     return filesystem
 

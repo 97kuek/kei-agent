@@ -10,9 +10,9 @@ from datetime import datetime
 import pytest
 from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
 
-from kei_agent.conversation import a2a, router
+from kei_agent.conversation import router
 from kei_agent.conversation.assistant import Assistant
-from kei_agent.execution import model_classifier, model_policy, runner
+from kei_agent.execution import a2a, model_classifier, model_policy, runner
 from kei_agent.execution.agent_policy import policy_of
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules

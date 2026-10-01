@@ -753,7 +753,7 @@ async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
     """担当を呼べるのは本体だけ。声のレイヤは本体の `ask` に JSON で頼み、答えの文だけを受け取る。"""
     from dataclasses import replace
 
-    from kei_agent.conversation import agents
+    from kei_agent.execution import agents
     from kei_agent_modules.voice.handoff import Handoff
     from kei_agent_modules.voice.tools import Tools
 

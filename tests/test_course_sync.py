@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っている（uv run --group course）")
 
-from kei_agent.scheduling.dates import weekday
+from kei_agent.conversation.dates import weekday
 from kei_agent_modules.course import notion_sync, school
 from kei_agent_modules.course.ics import Event
 

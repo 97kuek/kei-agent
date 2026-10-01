@@ -15,7 +15,6 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from kei_agent.execution.guard import DEFAULT_DENY_READ
 from kei_agent.framework import modules
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -209,7 +208,8 @@ class Config:
     handoff_after_turns: int = 8
     allowed_domains: tuple[str, ...] = ()
     allow_write: tuple[Path, ...] = ()
-    deny_read: tuple[Path, ...] = ()
+    # config.toml の [sandbox] deny_read（書かなければ None）。実際に読ませない場所は柵が決める（guard.denied_reads）
+    deny_read: tuple[Path, ...] | None = None
     claude_bin: str = "claude"
     codex_bin: str = "codex"
     pueue_bin: str = "pueue"
@@ -601,11 +601,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     _check_times(schedule, data.get("maintenance", {}), tuple(s.name for s in module_schedules))
     state_dir = _expand(data.get("state_dir", DEFAULT_PATHS["state_dir"]))
     secrets_dir = _expand(paths.get("secrets", str(home / "secrets")))
-    # 既定の読ませない場所には、使うたびに更新するトークン（Box など）の置き場も足す。
-    # 秘密情報の置き場所は、deny_read を書き換えていても必ず足す
-    deny_read = [*sandbox.get("deny_read", (*DEFAULT_DENY_READ, str(state_dir / "secrets")))]
-    if str(secrets_dir) not in {str(_expand(p)) for p in deny_read}:
-        deny_read.append(str(secrets_dir))
     allow_protected = data.get("allow_protected_folders", False)
     if not isinstance(allow_protected, bool):
         raise ConfigError("config.toml の allow_protected_folders は true か false にしてください")
@@ -630,7 +625,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
-        deny_read=tuple(_expand(p) for p in deny_read),
+        deny_read=tuple(_expand(p) for p in sandbox["deny_read"]) if "deny_read" in sandbox else None,
         claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),
         codex_bin=env.get("KEI_AGENT_CODEX_BIN", "codex"),
         pueue_bin=env.get("KEI_AGENT_PUEUE_BIN", "pueue"),

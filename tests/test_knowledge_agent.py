@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kei_agent.conversation.a2a import Agent
 from kei_agent.execution import runner
+from kei_agent.execution.a2a import Agent
 from kei_agent.execution.agent_policy import policy_of
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")

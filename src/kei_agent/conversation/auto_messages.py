@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from kei_agent.conversation.dates import weekday
 from kei_agent.conversation.slack_text import (
     DONE_PREFIX,
     FAILED_PREFIX,
@@ -13,7 +14,6 @@ from kei_agent.conversation.slack_text import (
     message_text,
 )
 from kei_agent.execution.jobs import log_tail, missing_outputs
-from kei_agent.scheduling.dates import weekday
 from kei_agent.storage.store import Job
 
 HEADER = "[Kei Agent からの自動メッセージ]"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from kei_agent.conversation.a2a import TaskResult
+from kei_agent.execution.a2a import TaskResult
 
 COMPLETED, FAILED = "TASK_STATE_COMPLETED", "TASK_STATE_FAILED"
 

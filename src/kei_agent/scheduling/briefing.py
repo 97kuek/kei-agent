@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from kei_agent.configuration import settings
 from kei_agent.scheduling import morning
 from kei_agent.scheduling.calendar_sync import JST, CalendarSnapshot, IncompleteSnapshot, outlook_items, sync_calendar
+from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 
 if TYPE_CHECKING:

@@ -58,9 +58,7 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent.configuration import settings
-from kei_agent.conversation import agents, home, router
-from kei_agent.conversation.agents import Reply
+from kei_agent.conversation import dates, home, router
 from kei_agent.conversation.auto_messages import history_prompt
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.response_output import (
@@ -72,14 +70,16 @@ from kei_agent.conversation.response_output import (
 )
 from kei_agent.conversation.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.conversation.slack_text import is_status_inquiry as _is_status_inquiry
-from kei_agent.execution import guard, one_shot
+from kei_agent.execution import agents, guard, one_shot
+from kei_agent.execution.agents import Reply
 from kei_agent.execution.one_shot import AIError
+from kei_agent.execution.updates import Update
 from kei_agent.framework import modules
-from kei_agent.operations.updates import Update
-from kei_agent.scheduling import briefing, dates, deadline, digest
+from kei_agent.scheduling import briefing, deadline, digest
 from kei_agent.scheduling.briefing import Morning
 from kei_agent.scheduling.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
+from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
 from kei_agent.workspaces import themes

@@ -64,10 +64,10 @@ def test_settings_limit_theme_to_its_directory_and_block_secrets(config):
     assert settings["sandbox"]["allowUnsandboxedCommands"] is False
     assert settings["sandbox"]["network"]["allowedDomains"] == ["export.arxiv.org"]
     filesystem = settings["sandbox"]["filesystem"]
-    assert filesystem["denyRead"] == [str(p) for p in config.deny_read]
+    assert filesystem["denyRead"] == [str(p) for p in guard.denied_reads(config)]
     assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
     # sandbox は Bash にしか効かない。Read・Grep・Glob からも、同じ場所を読ませない
-    for path in config.deny_read:
+    for path in guard.denied_reads(config):
         assert f"Read(/{path}/**)" in deny and f"Read(/{path})" in deny
     # 研究ホームだけに届くゲートウェイは使える。アカウントに付いた Notion 連携はホームの外まで届くので断る
     assert "mcp__kei-notion" in allow
@@ -93,7 +93,7 @@ def test_default_deny_read_covers_keys_profiles_and_the_state_dir(tmp_path):
     """研究の Bash から、鍵・大学や仕事の連携を付けたプロファイル・状態の秘密情報を読ませない。"""
     toml = tmp_path / "config.toml"
     toml.write_text(f'state_dir = "{tmp_path / "state"}"\n')
-    deny_read = load_config(toml, env={}).deny_read
+    deny_read = guard.denied_reads(load_config(toml, env={}))
     paths = [str(p) for p in deny_read]
     for suffix in ("/.ssh", "/.aws", "/.claude", "/.claude-personal", "/.claude-work"):
         assert any(p.endswith(suffix) for p in paths), suffix

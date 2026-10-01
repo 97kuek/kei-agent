@@ -9,16 +9,16 @@ import pytest
 from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
 
 import kei_agent.conversation.assistant as assistant_module
-from kei_agent.configuration import settings
-from kei_agent.conversation import a2a, ask, router
+from kei_agent.conversation import ask, router
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.auto_messages import history_prompt
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import split_text
 from kei_agent.conversation.thread_ui import ThreadUI
-from kei_agent.execution import runner
+from kei_agent.execution import a2a, runner
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.jobs import JobManager
+from kei_agent.storage import settings
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
 
@@ -1437,7 +1437,7 @@ async def test_course_channel_tells_when_the_agent_is_down(course):
 
 async def test_course_channel_waits_out_a_restart_instead_of_failing(course, monkeypatch):
     """入れ替えの最中で一瞬つながらないだけなら、待ってやり直して失敗を見せない。"""
-    from kei_agent.conversation import agents
+    from kei_agent.execution import agents
 
     assistant, slack, _, _ = course
     monkeypatch.setattr(agents, "RETRY_WAIT", 0)

@@ -20,9 +20,9 @@ from pathlib import Path
 
 from kei_agent.configuration import agents_table
 from kei_agent.configuration.config import load_config, model_actors
-from kei_agent.conversation.agents import Reply
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import model_classifier, runner
+from kei_agent.execution.agents import Reply
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler

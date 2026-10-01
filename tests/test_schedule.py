@@ -183,7 +183,7 @@ async def test_tick_runs_each_task_once_per_day(env, monkeypatch):
 async def test_tick_follows_times_changed_in_slack(env, monkeypatch):
     """App Home で変えた時刻は、再起動なしで次の tick から効く。止めた処理は動かさない。"""
     scheduler, *_ = env
-    from kei_agent.configuration import settings
+    from kei_agent.storage import settings
     ran = []
     record_runs(monkeypatch, scheduler, ran)
     settings.set_schedule(scheduler.store, "daily", "07:30", True)
@@ -477,7 +477,7 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
 
 def envelope(text, data):
     """全エージェント共通の返事の封筒。"""
-    from kei_agent.conversation import a2a
+    from kei_agent.execution import a2a
     body = {"ok": True, "text": text, "data": data, "limit_reset_at": None, "cost_usd": None}
     return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(body, ensure_ascii=False))
 
@@ -494,7 +494,7 @@ class FakeCourseAgent:
         self.asked = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent.scheduling.dates import weekday
+        from kei_agent.conversation.dates import weekday
         params = {**(json.loads(text) if text.startswith("{") else {}), **(params or {})}
         self.asked.append((skill, params))
         data = {}
@@ -584,7 +584,7 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
 
 async def test_due_check_retries_immediately_after_the_agent_fails(env, monkeypatch):
     """一時的に一覧を取れなくても、1時間待たず次の tick で取り直す。"""
-    from kei_agent.conversation.agents import Reply
+    from kei_agent.execution.agents import Reply
 
     scheduler, assistant, slack, _ = env
     slack.channels["C7"] = "2-course"

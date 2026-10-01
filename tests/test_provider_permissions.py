@@ -5,7 +5,7 @@ import pytest
 
 from kei_agent.execution import runner
 from kei_agent.execution.execution_contract import resolve_contract
-from kei_agent.execution.guard import DEFAULT_DENY_READ
+from kei_agent.execution.guard import DEFAULT_DENY_READ, denied_reads
 from kei_agent.execution.model_policy import UseCase, resolve
 from kei_agent.execution.provider_permissions import CapabilityUnavailable, preflight
 from kei_agent.workspaces import themes
@@ -32,7 +32,7 @@ def test_codex_profile_carves_out_secret_reads_and_scopes_writes(config):
     profile = preflight(config, contract, "codex_cli")
 
     assert profile.filesystem[":root"] == "read"
-    assert profile.filesystem[str(config.deny_read[0])] == "deny"
+    assert profile.filesystem[str(denied_reads(config)[0])] == "deny"
     assert profile.filesystem[str(config.research_root / "vlm")] == "write"
     assert profile.network_domains == {"export.arxiv.org": "allow"}
     assert "features.network_proxy=true" in profile.config_overrides

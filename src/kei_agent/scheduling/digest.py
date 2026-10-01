@@ -12,10 +12,10 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from kei_agent.configuration.config import Config
+from kei_agent.conversation.dates import parse_time
 from kei_agent.conversation.slack_text import format_duration
 from kei_agent.framework import modules
 from kei_agent.scheduling import deadline, timelog
-from kei_agent.scheduling.dates import parse_time
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.store import Store
 from kei_agent.workspaces import themes

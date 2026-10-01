@@ -10,6 +10,7 @@ import pytest
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.execution_contract import prompt_text, prompt_version
+from kei_agent.execution.guard import denied_reads
 
 
 def _home(tmp_path, config: str = "", profile: str | None = None, prompts: dict[str, str] | None = None):
@@ -39,14 +40,14 @@ def test_config_comes_from_the_user_folder_and_says_how_to_start_without_one(tmp
 def test_secrets_folder_is_configurable_and_never_readable_by_the_ai(tmp_path):
     home = _home(tmp_path)
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    assert config.secrets_dir == (home / "secrets").resolve() and config.secrets_dir in config.deny_read
+    assert config.secrets_dir == (home / "secrets").resolve() and config.secrets_dir in denied_reads(config)
     chosen = tmp_path / "local"
     home_b = tmp_path / "b"
     home_b.mkdir()
     # deny_read を自分で書いていても、選んだ秘密情報の置き場所は必ず読ませない
     (home_b / "config.toml").write_text(f'[paths]\nsecrets = "{chosen}"\n\n[sandbox]\ndeny_read = ["~/.ssh"]\n')
     config = load_config(env={"KEI_AGENT_HOME": str(home_b)})
-    assert config.secrets_dir == chosen.resolve() and chosen.resolve() in config.deny_read
+    assert config.secrets_dir == chosen.resolve() and chosen.resolve() in denied_reads(config)
     (home_b / "config.toml").write_text('[paths]\nsecret = "x"\n')
     with pytest.raises(ConfigError, match=r"\[paths\] に知らないキー"):
         load_config(env={"KEI_AGENT_HOME": str(home_b)})

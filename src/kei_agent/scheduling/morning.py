@@ -17,9 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from kei_agent.conversation.dates import day_label, parse_time
 from kei_agent.conversation.slack_text import escape
 from kei_agent.scheduling import deadline
-from kei_agent.scheduling.dates import day_label, parse_time
 
 CLASS, MEETING, DUE = "🎓", "💼", "⏰"
 NOTHING = "今日は、時間の決まった予定がないよ。"

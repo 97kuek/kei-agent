@@ -45,7 +45,7 @@ class FakeKnowledgeAgent:
         self.asked: list[tuple[str, dict]] = []
 
     async def stream(self, skill, text="", params=None, on_progress=None):
-        from kei_agent.conversation import a2a
+        from kei_agent.execution import a2a
         self.asked.append((skill, json.loads(text)))
         data = self.replies.pop(0) if self.replies else {"items": []}
         return a2a.TaskResult(state="TASK_STATE_COMPLETED", text=json.dumps(

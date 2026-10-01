@@ -19,7 +19,6 @@ from datetime import time as dtime
 
 import aiohttp
 
-from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
@@ -27,6 +26,7 @@ from kei_agent.conversation.slack_text import AWAITING_MARKER, clean_text, forma
 from kei_agent.execution import jobs
 from kei_agent.framework import modules, version
 from kei_agent.scheduling import briefing, maintenance
+from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_store import Task, parse_slack_permalink, summarize
 from kei_agent.storage.store import Store
