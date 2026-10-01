@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from kei_agent.app import setup_logging
+from kei_agent.operations.app import setup_logging
 from kei_agent.scheduling import maintenance
 from kei_agent.workspaces import themes
 
@@ -117,7 +117,7 @@ def test_setup_logging_rotates_file(tmp_path):
 
 def test_repeated_slack_reconnect_failures_are_thinned_out():
     """ネットが切れている間、Slack の接続は数秒ごとに失敗を書く。同じものは10分に1行だけ残し、省いた数を添える。"""
-    from kei_agent.app import RepeatFilter
+    from kei_agent.operations.app import RepeatFilter
 
     kept = []
     thin = RepeatFilter(("Failed to check the current session",), seconds=600)

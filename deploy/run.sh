@@ -14,7 +14,7 @@ export KEI_AGENT_LOG_FILE="$HOME/Library/Logs/kei-agent/kei-agent.log"
 trim_launchd_log launchd.log
 cd "$REPO"
 
-# Kei Agent が自分を入れ替えたあとの起動（src/kei_agent/updates.py）。
+# Kei Agent が自分を入れ替えたあとの起動（src/kei_agent/operations/updates.py）。
 # 新しい版が Slack につながれば update-pending は消える。消えないまま起動を繰り返したら、前の版に戻す。
 STATE="${KEI_AGENT_STATE_DIR:-$HOME/.local/state/kei-agent}"
 PENDING="$STATE/update-pending"

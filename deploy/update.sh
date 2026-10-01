@@ -48,4 +48,4 @@ done
 
 # 全部を起動し直して（ゲートウェイ → 担当 → 本体）、新しい版で動いているかを確かめる
 "$REPO/deploy/restart-all.sh"
-"$REPO/.venv/bin/python" -m kei_agent.deploy_check "$commit"
+"$REPO/.venv/bin/python" -m kei_agent.operations.deploy_check "$commit"

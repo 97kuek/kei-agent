@@ -59,7 +59,7 @@ async def stale(config: Config, expected: str, wait: float = WAIT_SECONDS) -> di
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="python -m kei_agent.deploy_check")
+    parser = argparse.ArgumentParser(prog="python -m kei_agent.operations.deploy_check")
     parser.add_argument("commit", help="動いているはずの版（git rev-parse --short=12 HEAD）")
     args = parser.parse_args()
     config = load_config()

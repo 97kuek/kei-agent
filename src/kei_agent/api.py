@@ -75,13 +75,13 @@ from kei_agent.conversation.slack_text import is_status_inquiry as _is_status_in
 from kei_agent.execution import guard, one_shot
 from kei_agent.execution.one_shot import AIError
 from kei_agent.framework import modules
+from kei_agent.operations.updates import Update
 from kei_agent.scheduling import briefing, dates, deadline, digest
 from kei_agent.scheduling.briefing import Morning
 from kei_agent.scheduling.calendar_sync import JST, CalendarItem, CalendarSnapshot, IncompleteSnapshot, sync_calendar
 from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
-from kei_agent.updates import Update
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import append_thread_log
 

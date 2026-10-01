@@ -296,7 +296,7 @@ def test_update_reinstalls_only_changed_plists_restarts_all_and_checks_the_versi
     # 全部を起動し直してから（本体は最後）、新しい版で動いているかを確かめる
     kicks = [call for call in calls if call.startswith("launchctl kickstart")]
     assert kicks[-1] == f"launchctl kickstart -k gui/{uid}/com.kei-agent.assistant"
-    assert calls[-1] == f"python -m kei_agent.deploy_check {commit}"
+    assert calls[-1] == f"python -m kei_agent.operations.deploy_check {commit}"
 
 
 @needs_zsh

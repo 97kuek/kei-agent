@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from kei_agent import api, updates
+from kei_agent import api
 from kei_agent.configuration import settings
 from kei_agent.configuration.config import Config
 from kei_agent.conversation import a2a, agents, ask, router
@@ -67,6 +67,7 @@ from kei_agent.execution.model_policy import (
     resolve,
 )
 from kei_agent.framework import modules, version
+from kei_agent.operations import updates
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
 from kei_agent.storage.notion_store import NotionStore

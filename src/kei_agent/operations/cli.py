@@ -27,29 +27,29 @@ USAGE = """使い方: kei-agent [コマンド]
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else list(argv)
     if not argv:
-        from kei_agent import app
+        from kei_agent.operations import app
 
         app.main()
         return
     command, rest = argv[0], argv[1:]
     if command == "setup":
-        from kei_agent import setup_command
+        from kei_agent.operations import setup_command
 
         raise SystemExit(setup_command.main(rest))
     if command == "doctor":
-        from kei_agent import doctor
+        from kei_agent.operations import doctor
 
         raise SystemExit(doctor.main(rest))
     if command == "manifest":
-        from kei_agent import slack_manifest
+        from kei_agent.operations import slack_manifest
 
         raise SystemExit(slack_manifest.main(rest))
     if command == "module":
-        from kei_agent import module_command
+        from kei_agent.operations import module_command
 
         raise SystemExit(module_command.main(rest))
     if command == "agents":
-        from kei_agent import agents_command
+        from kei_agent.operations import agents_command
 
         raise SystemExit(agents_command.main(rest))
     if command in ("-h", "--help", "help"):

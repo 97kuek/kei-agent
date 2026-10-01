@@ -100,7 +100,7 @@ def init(*, env: dict[str, str] | None = None, dry_run: bool = False) -> int:
         print(f"❌ 今の設定を読めない: {e}")
         return 1
     # App Home で選んだ AI（SQLite）。表に移したあとは起動のときに消えるので、表に書き写す
-    from kei_agent.doctor import stored_providers
+    from kei_agent.operations.doctor import stored_providers
 
     state_dir = _expand(str(data.get("state_dir", DEFAULT_PATHS["state_dir"])))
     providers = stored_providers(state_dir / "kei-agent.db")

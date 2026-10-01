@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from fakes import write_config
 
-from kei_agent import cli, slack_manifest
 from kei_agent.configuration.config import load_config
 from kei_agent.framework import modules
+from kei_agent.operations import cli, slack_manifest
 
 REPO = Path(__file__).resolve().parents[1]
 

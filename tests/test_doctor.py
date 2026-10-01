@@ -6,10 +6,10 @@ from dataclasses import replace
 import pytest
 from fakes import write_config
 
-from kei_agent import cli, doctor
 from kei_agent.configuration.config import AgentProfile
-from kei_agent.doctor import ERROR, OK, WARN
 from kei_agent.framework import modules
+from kei_agent.operations import cli, doctor
+from kei_agent.operations.doctor import ERROR, OK, WARN
 
 SECRET = "xoxb-12345-" + "secretvalue"
 
@@ -173,7 +173,7 @@ def test_the_report_hides_what_works_unless_asked():
 
 
 def test_the_command_runs_the_app_without_arguments(monkeypatch):
-    from kei_agent import app
+    from kei_agent.operations import app
 
     ran = []
     monkeypatch.setattr(app, "main", lambda: ran.append("app"))

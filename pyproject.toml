@@ -18,7 +18,7 @@ dependencies = [
 
 [project.scripts]
 # 何も付けなければ Kei Agent を動かす。kei-agent doctor で点検（kei_agent/cli.py）
-kei-agent = "kei_agent.cli:main"
+kei-agent = "kei_agent.operations.cli:main"
 kei-agent-schedule = "kei_agent.scheduling.schedule:main"
 kei-agent-notion-setup = "kei_agent.storage.notion:main"
 kei-agent-hub-setup = "kei_agent.storage.notion_hub:main"

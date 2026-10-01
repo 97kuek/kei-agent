@@ -1,6 +1,6 @@
-"""デプロイのあと、全部のプロセスが新しい版で動いているかの確かめ（kei_agent.deploy_check）。"""
+"""デプロイのあと、全部のプロセスが新しい版で動いているかの確かめ（kei_agent.operations.deploy_check）。"""
 
-from kei_agent import deploy_check
+from kei_agent.operations import deploy_check
 
 
 def test_every_process_is_checked(config):
