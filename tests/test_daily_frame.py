@@ -1,7 +1,7 @@
 """モジュールの枠の広がり（段階3の Daily・振り返りの①）。Daily と振り返りを載せ替える前に、利用者のモジュールで確かめる。
 
 本体の定期処理を受け持つ（core_schedules）、朝の一覧（core.morning）、材料（core.digest）、研究全体を読んで AI を動かす
-（core.run_ai の overview）、見出しとスレッドに出す（core.publish）、振り返りの結論を日別記録に足す（collect_conclusions）。
+（core.run_ai の overview）、見出しとスレッドに出す（core.publish）。
 """
 
 import asyncio
@@ -64,8 +64,6 @@ class Module:
         thread_ts = await self.core.publish(channel, header, final_answer(text))
         if name == "daily":
             self.core.mark_shown(morning.notices)
-        else:
-            self.core.collect_conclusions(channel, thread_ts, "page-1")
         return {"status": "posted", "thread_ts": thread_ts}
 '''
 
@@ -166,15 +164,6 @@ async def test_the_digest_holds_the_core_records_and_other_modules_material(env)
     for section in ("## やり取りのあったスレッド", "## 終わったジョブ", "## 夜間の Task", "## Kei Agent の稼働（今週）",
                     "## 時間（今週）"):
         assert section in material
-
-
-async def test_conclusions_pasted_in_the_review_thread_go_to_the_daily_record(env):
-    scheduler, assistant, slack, claude = env
-    detail = await scheduler.run_task("review", "2026-09-28")
-    await assistant.on_message({"channel": "C5", "user": "UME", "ts": "99.1", "thread_ts": detail["thread_ts"],
-                                "text": "結論: 順番が効く"})
-    await settle(assistant)
-    assert assistant.hub.appended == [("page-1", "結論: 順番が効く")]
 
 
 async def test_a_limit_pauses_the_schedules_and_is_reported_as_an_error(env):

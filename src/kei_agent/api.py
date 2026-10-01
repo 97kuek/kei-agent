@@ -360,7 +360,7 @@ class Core:
         self._assistant.store.upsert_thread(channel, ts, channel_name, None)
 
     def claim_thread(self, channel: str, ts: str, channel_name: str) -> None:
-        """そのスレッドの続きを、このモジュールの on_message が受ける（研究テーマのチャンネルでも）。"""
+        """そのスレッドの続きを、このモジュールの on_message が受ける（研究テーマ・研究全体のチャンネルでも）。"""
         self.watch_thread(channel, ts, channel_name)
         self._assistant.store.set_agent_session(channel, ts, self.name, "")
 
@@ -592,10 +592,6 @@ class Core:
             for chunk in split_text(text):
                 await assistant.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, markdown_text=chunk)
         return thread_ts
-
-    def collect_conclusions(self, channel: str, thread_ts: str, page_id: str) -> None:
-        """そのスレッド（振り返り）に依頼者が貼った結論を、共通ホームの日別記録のページに書き足すようにする。"""
-        self._assistant.store.link_notion(channel, thread_ts, page_id, "review")
 
     # 共通ホームの予定カレンダー
 

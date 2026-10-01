@@ -5,7 +5,8 @@
 - Daily: 研究全体のチャンネルに、今日の予定の一覧（core.morning）を見出しにして出し、そのスレッドに Daily を書く。
   材料は前回の Daily から（core.digest）。共通ホームの日別記録に1日1行で残す
 - 振り返り（Retro & Planning）: 今日の成果と未完了を書き、スレッドに明日・明後日の締切を並べる。日別記録のレトプラに
-  残し、あとからスレッドに貼られた結論も同じ行に足す（core.collect_conclusions）
+  残す。そのあとスレッドで今日学んだこと・助言を聞き、スレッドを引き取って（core.claim_thread）会話する。AI が聞き返して
+  言語化し、まとまったら確かめずに共通ホームの「学びのノート」に1件1ページで残し、日別記録のレトプラにも題とリンクを足す
 
 AI は研究全体の作業場を読むだけで動かす（研究テーマのフォルダとスレッドの記録を読める）。答えが決まった形でなければ
 Slack には出さず、日別記録にも残さない。
@@ -13,6 +14,7 @@ Slack には出さず、日別記録にも残さない。
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import date, datetime, timedelta
@@ -23,6 +25,7 @@ from kei_agent.api import (
     AIError,
     Core,
     NotionError,
+    Request,
     checked_sections,
     day_label,
     due_clock,
@@ -67,9 +70,85 @@ def review_answer(text: str) -> str:
     return f"{shown}\n\n{texts.NIGHT_QUESTION}" if shown else ""
 
 
+# 振り返りのスレッドの記録（日付・日別記録のページ・残した学び）と、会話を受け付ける日数
+RETRO = "retro"
+RETRO_KEEP_DAYS = 7
+
+
+def learnings_of(text: str) -> tuple[str, list[dict]]:
+    """会話の答えを、Slack に出す本文と、整理した学び（合図の行のあとの JSON）に分ける。学びが無ければ空のリスト。"""
+    body = final_answer(text).strip()
+    head, marker, rest = body.partition(texts.LEARNING_MARKER)
+    if not marker:
+        return body, []
+    rest = rest.strip()
+    try:
+        items = json.loads(rest) if rest else []
+    except ValueError:
+        # JSON のあとに説明が続いたときは、最初の行だけを読む
+        try:
+            items = json.loads(rest.splitlines()[0])
+        except ValueError:
+            items = []
+    items = [item for item in items if isinstance(item, dict) and str(item.get("title") or "").strip()] \
+        if isinstance(items, list) else []
+    return head.strip(), items[:3]
+
+
 class Module:
     def __init__(self, core: Core):
         self.core = core
+
+    async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
+        """振り返りのスレッドの返事（学びの会話）。聞き返すか、まとまったら学びのノートに残す。"""
+        retro = self.core.records.get(RETRO, req.thread_ts)
+        if retro is None:
+            await self.core.reply(req, "このスレッドの振り返りは、もう受け付けていないよ。")
+            return
+        history = await self.core.thread_history(req.channel, req.thread_ts)
+        try:
+            text = await self.core.run_ai("review_talk", texts.talk_prompt(
+                retro["day"], history, [item["title"] for item in retro.get("saved") or []], req.text),
+                overview=True, trigger="review")
+        except AIError as e:
+            log.warning("振り返りの会話を続けられませんでした: %s", e)
+            await self.core.reply(req, failure_text("review"), failed=True)
+            return
+        body, items = learnings_of(text)
+        if not items:
+            await self.core.reply(req, body or failure_text("review"), failed=not body)
+            return
+        saved = await self._keep(req, retro, items)
+        lines = [f"• <{item['url']}|{escape(item['title'])}>" if item.get("url") else f"• {escape(item['title'])}"
+                 for item in saved]
+        done = "📒 学びのノートに残したよ。直したいときは、ここに書いてね。\n" + "\n".join(lines) if saved else ""
+        await self.core.reply(req, "\n\n".join(part for part in (body, done) if part) or failure_text("review"),
+                              failed=not saved)
+
+    async def _keep(self, req: Request, retro: dict, items: list[dict]) -> list[dict]:
+        """学びを学びのノートに入れ、日別記録のレトプラに題とリンクを足す。前に残したもの（直したとき）は捨てる。"""
+        hub = self.core.hub
+        if hub is None or not hub.has_learning_db:
+            await self.core.notify_trouble("学びのノートに残せませんでした。共通 Notion ホームの共有と "
+                                           "kei-agent-hub-setup --apply を確認してください")
+            return []
+        link = await self.core.permalink(req.channel, req.thread_ts)
+        saved = []
+        try:
+            for old in retro.get("saved") or []:
+                await self.core.to_thread(hub.trash_page, old["id"])
+            for item in items:
+                page_id, url = await self.core.to_thread(hub.add_learning, item, retro["day"], link)
+                saved.append({"id": page_id, "url": url, "title": str(item["title"]).strip()})
+            if retro.get("note"):
+                summary = "\n".join(f"- [{item['title']}]({item['url']})" if item["url"] else f"- {item['title']}"
+                                    for item in saved)
+                await self.core.to_thread(hub.append_review_conclusion, retro["note"], f"学びのノート\n{summary}",
+                                          datetime.now(), req.message_ts)
+        except NotionError as e:
+            await self.core.notify_trouble(f"学びのノートに残せませんでした: {e}")
+        self.core.records.update(RETRO, req.thread_ts, saved=saved)
+        return saved
 
     async def run_schedule(self, name: str, day: str) -> dict:
         if name == "daily":
@@ -150,8 +229,10 @@ class Module:
         if answer:
             note = await self._save(channel, thread_ts, title, "振り返り", day,
                                     "\n\n".join(part for part in (answer, deadlines, texts.REVIEW_QUESTIONS) if part))
-            if note:
-                # このスレッドに貼られた結論を、同じ行のレトプラに足す
-                self.core.collect_conclusions(channel, thread_ts, note.id)
+        # 今日学んだこと・助言を聞き、返事はこのモジュールが受ける（学びの会話。on_message）
+        await self.core.post(channel, texts.RETRO_QUESTION, thread_ts=thread_ts)
+        self.core.claim_thread(channel, thread_ts, await self.core.channel_name(channel))
+        self.core.records.put(RETRO, thread_ts, {"day": day, "note": note.id if note else "", "saved": []},
+                              keep_days=RETRO_KEEP_DAYS)
         return {"status": "posted" if answer else "error", "thread_ts": thread_ts,
                 "notion_url": note.url if note else None, "prepared": prepared}

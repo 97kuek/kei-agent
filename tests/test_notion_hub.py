@@ -130,7 +130,7 @@ class FakeHubNotion:
         self.writes.append((method, path, body))
         if method == "POST" and path == "/databases":
             title = body["title"][0]["text"]["content"]
-            prefix = {"日別記録": "daily", "時間記録": "time", "読みもの": "reading"}[title]
+            prefix = {"日別記録": "daily", "時間記録": "time", "読みもの": "reading", "学びのノート": "learning"}[title]
             db_id, ds_id = f"{prefix}-db", f"{prefix}-ds"
             self.blocks["home"].append(self.child_db(db_id, title))
             self.databases[db_id] = {"id": db_id, "parent": {"type": "page_id", "page_id": "home"},

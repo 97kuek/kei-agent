@@ -26,3 +26,8 @@ codex = { model = "gpt-6-luna", effort = "medium" }
 [use_cases.review_write]
 claude = { model = "claude-opus-5", effort = "high" }
 codex = { model = "gpt-6-sol", effort = "high" }
+
+# 振り返りのスレッドでの会話（学んだこと・助言を聞き返して言語化し、学びのノートに残す）
+[use_cases.review_talk]
+claude = { model = "claude-sonnet-5", effort = "medium" }
+codex = { model = "gpt-6-luna", effort = "medium" }

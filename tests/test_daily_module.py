@@ -69,7 +69,7 @@ def test_the_daily_module_takes_daily_and_review(config):
     spec = modules.builtin()["daily"]
     assert spec.core_schedules == ("daily", "review") and spec.port is None
     assert (spec.actor.files, spec.actor.shell, spec.actor.web) == ("read", False, False)
-    assert {u.name for u in spec.actor.use_cases} == {"daily_write", "review_write"}
+    assert {u.name for u in spec.actor.use_cases} == {"daily_write", "review_write", "review_talk"}
     assert task_names(config)[-3:] == ("daily", "review", "maintenance")
     # モジュールがオフなら、Daily と振り返りは動かさない（App Home にも出さない）
     from kei_agent import settings
@@ -187,7 +187,7 @@ async def test_digest_skips_theme_never_asked(env, config, store):
     assert "just-invited" not in stalled and "なし" in stalled
 
 
-async def test_review_is_saved_only_to_the_day_row_and_syncs_conclusion(env, config, store):
+async def test_review_is_saved_to_the_day_row_and_asks_what_was_learned(env, config, store):
     scheduler, assistant, slack, claude = env
     claude.behaviors = [{"text": REVIEW_REPLY}]
     await daily(assistant).review("2026-09-18")
@@ -202,17 +202,52 @@ async def test_review_is_saved_only_to_the_day_row_and_syncs_conclusion(env, con
     assert note.kind == "振り返り" and note.body.startswith(REVIEW_REPLY)
     assert "振り返りの問い" in note.body and "明日やることは何か" in note.body
     assert "振り返りの問い" not in "".join(texts)
-    assert len(texts) == 2
+    # 最後に、今日学んだこと・助言を聞く（返事は振り返りの担当が受ける）
+    assert texts[2].startswith("今日、職場や学校で学んだこと") and len(texts) == 3
     assert assistant.notion.notes == []
-
-    await assistant.on_message({"channel": "C5", "user": "UME", "ts": "1001.5", "thread_ts": "1001.000",
-                                "text": "条件Bの差は質問の順番で説明できる"})
-    while assistant.tasks:
-        import asyncio
-        await asyncio.gather(*list(assistant.tasks))
-    (page_id, conclusion), = assistant.hub.appended
-    assert page_id == note.id and "条件Bの差は質問の順番で説明できる" in conclusion
     assert not (config.overview_dir / "reviews").exists()
+
+
+async def _talk(assistant, text, ts):
+    import asyncio
+    await assistant.on_message({"channel": "C5", "user": "UME", "ts": ts, "thread_ts": "1001.000", "text": text})
+    while assistant.tasks:
+        await asyncio.gather(*list(assistant.tasks))
+
+
+LEARNED = ('<<kei-agent-final>>\nレビューは結論から書く、を残すね。\n📒 学び\n'
+           '[{"title": "レビューは結論から書く", "field": "仕事", "kind": "助言", "source": "上司との1on1", '
+           '"scene": "設計レビュー", "lesson": "先に結論を言うと議論が速い", "next": "次の資料で1行目に結論"}]\n'
+           '<<kei-agent-final-end>>')
+
+
+async def test_the_review_thread_turns_what_was_learned_into_notes(env):
+    """振り返りのスレッドでは、AI が聞き返して言語化し、まとまったら確かめずに学びのノートに残す。"""
+    scheduler, assistant, slack, claude = env
+    claude.behaviors = [{"text": REVIEW_REPLY}]
+    await daily(assistant).review("2026-09-18")
+    note = assistant.hub.notes[-1]
+
+    claude.behaviors = [{"text": "<<kei-agent-final>>\nどんな場面だった？\n<<kei-agent-final-end>>"}]
+    await _talk(assistant, "上司にレビューは結論からと言われた", "1001.5")
+    assert slack.texts()[-1] == "どんな場面だった？"
+    call = claude.calls[-1]
+    assert call["actor"] == "daily" and call["use_case"] == "review_talk"        # 研究の担当ではなく振り返りの担当
+    assert "上司にレビューは結論からと言われた" in call["prompt"]
+
+    claude.behaviors = [{"text": LEARNED}]
+    await _talk(assistant, "設計レビューのとき", "1001.6")
+    (page_id, kept), = assistant.hub.learnings.items()
+    assert kept["day"] == "2026-09-18" and kept["item"]["kind"] == "助言"
+    shown = slack.texts()[-1]
+    assert "📒 学びのノートに残したよ" in shown and "レビューは結論から書く" in shown and "[{" not in shown
+    (row, summary), = assistant.hub.appended                                      # 日別記録にも題とリンク
+    assert row == note.id and "レビューは結論から書く" in summary
+
+    # 「直して」で、前に残したものは捨てて差し替える
+    claude.behaviors = [{"text": LEARNED.replace("1行目に結論", "冒頭で結論")}]
+    await _talk(assistant, "次にどう使うかを直して", "1001.7")
+    assert assistant.hub.trashed == [page_id] and len(assistant.hub.learnings) == 2
 
 
 async def test_review_never_posts_model_progress_narration(env):
@@ -232,7 +267,8 @@ async def test_review_does_not_post_extra_footer(env):
 
     await daily(assistant).review("2026-09-23")
 
-    assert slack.texts() == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
+    assert slack.texts()[:2] == ["🌙 Retro & Planning 9/23（水）", REVIEW_REPLY]
+    assert len(slack.texts()) == 3 and slack.texts()[2].startswith("今日、職場や学校で学んだこと")
 
 
 async def test_review_without_hub_never_writes_research_notes(env, config):
@@ -246,8 +282,8 @@ async def test_review_without_hub_never_writes_research_notes(env, config):
     assert assistant.notion.notes == []
     # Slack には出し、日別記録に残せなかったことを知らせる。代わりのファイルは作らない
     assert REVIEW_REPLY in slack.texts()
-    notice = slack.posted()[-1]
-    assert notice["channel"] == "C9" and "日別記録に保存できませんでした" in notice["text"]
+    notice, = [kw for kw in slack.posted() if kw["channel"] == "C9"]
+    assert "日別記録に保存できませんでした" in notice["text"]
     assert not (config.overview_dir / "reviews").exists()
 
 

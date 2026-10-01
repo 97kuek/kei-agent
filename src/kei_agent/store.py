@@ -37,13 +37,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at REAL,
     reported INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS notion_links (
-    channel TEXT NOT NULL,
-    thread_ts TEXT NOT NULL,
-    page_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    PRIMARY KEY (channel, thread_ts)
-);
 CREATE TABLE IF NOT EXISTS schedule_runs (
     name TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -402,20 +395,6 @@ class Store:
     def last_activity_by_channel_name(self) -> dict[str, float]:
         rows = self.conn.execute("SELECT channel_name, MAX(updated_at) AS last FROM threads GROUP BY channel_name")
         return {r["channel_name"]: r["last"] for r in rows}
-
-    # Slack のスレッドと Notion のページの対応（振り返りのスレッドなど）
-
-    def link_notion(self, channel: str, thread_ts: str, page_id: str, kind: str) -> None:
-        with self.conn:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO notion_links (channel, thread_ts, page_id, kind) VALUES (?, ?, ?, ?)",
-                (channel, thread_ts, page_id, kind),
-            )
-
-    def notion_link(self, channel: str, thread_ts: str) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM notion_links WHERE channel = ? AND thread_ts = ?", (channel, thread_ts)
-        ).fetchone()
 
     # schedule
 

@@ -764,6 +764,16 @@ class FakeHub:
         self.readings[page_id] = {"item": item, "day": day}
         return page_id
 
+    has_learning_db = True
+
+    def add_learning(self, item, day, link=""):
+        """学びのノートに入れる（learnings に ページ ID → 中身）。"""
+        if not hasattr(self, "learnings"):
+            self.learnings = {}
+        page_id = f"learning-{len(self.learnings) + 1}"
+        self.learnings[page_id] = {"item": item, "day": day, "link": link}
+        return page_id, f"https://notion.example/{page_id}"
+
     def trash_page(self, page_id):
         self.trashed.append(page_id)
 

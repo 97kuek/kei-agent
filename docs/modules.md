@@ -180,7 +180,7 @@ class Module:
 | 担当と AI | `run_ai`（1回）・`work`（作業場で会話）・`converse`（担当と会話）・`ask_agent`・`tell_agent`・`pick_skill`・`ask_module` |
 | 記録と設定 | `records`（`put`・`get`・`update`・`items`・`delete`）・`settings`・`schedule_detail`・`state_dir` |
 | ボタンと App Home | `action_id`・`view_id`・`home_action_id`・`home_checkboxes`・`selected_values` |
-| Daily・振り返り | `morning`・`mark_shown`・`digest`・`gather_prepare`・`gather_agenda`・`publish`・`collect_conclusions`・`last_ran` |
+| Daily・振り返り | `morning`・`mark_shown`・`digest`・`gather_prepare`・`gather_agenda`・`publish`・`last_ran` |
 | そのほか | `emit`・`spawn`・`notify_trouble`・`notice_once`・`sync_calendar`・`themes`・`provider`・`contains_secret`・`is_status_inquiry`・`checked_sections`・`final_answer` |
 | 自分を直す（自己改善） | `repo_root`・`check_change`・`restart_for_update`・`last_update`・`busy` |
 

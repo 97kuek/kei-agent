@@ -930,6 +930,10 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                 await self.post(req, NO_IMPROVE_OWNER)
                 await self.mark_answered(req, failed=True)
             return None
+        if ws.kind is ChannelKind.OVERVIEW and (owner := self.actor_for(req, ws)) != themes.actor_of(ws) \
+                and await self._dispatch(req, owner, ""):
+            # 研究全体のチャンネルで、モジュールが引き取ったスレッド（振り返りの会話など）
+            return None
         if ws.kind is ChannelKind.OVERVIEW and await self.route_overview(req):
             return None
         if ws.kind in (ChannelKind.THEME, ChannelKind.OVERVIEW) and themes.actor_of(ws) not in self.modules:
@@ -1035,9 +1039,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
     def actor_for(self, req: Request, ws: Workspace) -> str:
-        """その依頼に答える担当。テーマのチャンネルでも、モジュールが引き取ったスレッド（朝の論文の新着など）は、
-        そのモジュールが答える（api.Core.claim_thread）。"""
-        if ws.kind is ChannelKind.THEME:
+        """その依頼に答える担当。テーマと研究全体のチャンネルでも、モジュールが引き取ったスレッド（朝の論文の新着、
+        振り返りの会話など）は、そのモジュールが答える（api.Core.claim_thread）。"""
+        if ws.kind in (ChannelKind.THEME, ChannelKind.OVERVIEW):
             owner = self.store.thread_agent(req.channel, req.thread_ts)
             if owner in self.modules:
                 return owner
@@ -1208,7 +1212,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         if awaiting:
             self.emit("awaiting", theme=req.channel_name)
-        await self.sync_review_conclusion(req)
         await self._reply(req, ws, ui, result, awaiting, hide)
         await self._attach_outputs(req, ws.cwd, before)
         await self.mark_answered(req, result.is_error)
@@ -1455,22 +1458,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         if skipped:
             names = "\n".join(f"• `{p.relative_to(cwd)}`" for p in skipped)
             await self.post(req, f"添付しなかったファイル（数か大きさの上限を超えたもの）:\n{names}")
-
-    async def sync_review_conclusion(self, req: Request) -> None:
-        """振り返りのスレッドに貼られた結論を、Notion の振り返りページにも追記する。"""
-        if req.trigger != "message":
-            return
-        link = self.store.notion_link(req.channel, req.thread_ts)
-        if link is None or link["kind"] != "review" or not req.text.strip():
-            return
-        if self.hub is None:
-            await self.notify_trouble("振り返りの結論を日別記録に保存できません。共通 Notion ホームの共有を確認してください")
-            return
-        try:
-            await asyncio.to_thread(self.hub.append_review_conclusion, link["page_id"], req.text,
-                                    datetime.now(), req.message_ts)
-        except NotionError as e:
-            await self.notify_trouble(f"振り返りの結論を Notion に追記できませんでした: {e}")
 
     # Slack の外からの依頼（声のレイヤなど。docs/architecture.md）
 

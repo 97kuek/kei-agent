@@ -131,6 +131,20 @@ READING_PROPERTIES = {
 }
 
 
+# 振り返りの会話で言語化した学び（職場・学校で学んだこと、大切な助言）。1件1ページで、本文は場面・学んだこと・次にどう使うか
+LEARNING_TITLE = "学びのノート"
+LEARNING_FIELDS = ("仕事", "大学", "研究", "そのほか")
+LEARNING_KINDS = ("学び", "助言", "気づき")
+LEARNING_PROPERTIES = {
+    "名前": {"title": {}},
+    "日付": {"date": {}},
+    "分野": {"select": {"options": [{"name": name} for name in LEARNING_FIELDS]}},
+    "種類": {"select": {"options": [{"name": name} for name in LEARNING_KINDS]}},
+    "出典": {"rich_text": {}},
+    "Slack": {"url": {}},
+}
+
+
 def section_blocks(markdown: str) -> list[dict]:
     """日別記録の区画に入れるブロック。見出し2は区画の区切りなので、本文の見出し1・2は3にそろえる。"""
     blocks = []
@@ -158,6 +172,8 @@ class HubState:
     time_chart_view_id: str = ""
     reading_db_id: str = ""
     reading_ds_id: str = ""
+    learning_db_id: str = ""
+    learning_ds_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -382,11 +398,13 @@ class HubSetup:
         calendar, daily, tasks, assignments, views = self._preflight()
         time_source = self._owned_source(TIME_TITLE, TIME_PROPERTIES)
         reading = self._owned_source(READING_TITLE, READING_PROPERTIES)
+        learning = self._owned_source(LEARNING_TITLE, LEARNING_PROPERTIES)
         return [
             f"今月の予定／予定カレンダー: {calendar.database_id}",
             f"日別記録: {daily.database_id if daily else '未作成'}",
             f"時間記録: {time_source.database_id if time_source else '未作成'}",
             f"読みもの: {reading.database_id if reading else '未作成（--apply で作る）'}",
+            f"学びのノート: {learning.database_id if learning else '未作成（--apply で作る）'}",
             f"研究 Task: {tasks.database_id}",
             f"授業課題: {assignments.database_id}",
             f"親ページのリンクドビュー: {', '.join(views) if views else '未作成'}",
@@ -455,6 +473,7 @@ class HubSetup:
             })
         time_source = self._ensure_source(TIME_TITLE, TIME_PROPERTIES)
         reading = self._ensure_source(READING_TITLE, READING_PROPERTIES, icon="📰")
+        learning = self._ensure_source(LEARNING_TITLE, LEARNING_PROPERTIES, icon="📒")
         saved_chart = ""
         if self.state_path.exists():
             saved_chart = HubState(**json.loads(self.state_path.read_text(encoding="utf-8"))).time_chart_view_id
@@ -464,7 +483,8 @@ class HubSetup:
                          tasks.data_source_id, assignments.data_source_id,
                          views["研究 Task"]["id"], views["授業課題"]["id"], daily_view_id,
                          time_source.database_id, time_source.data_source_id, chart_id,
-                         reading_db_id=reading.database_id, reading_ds_id=reading.data_source_id)
+                         reading_db_id=reading.database_id, reading_ds_id=reading.data_source_id,
+                         learning_db_id=learning.database_id, learning_ds_id=learning.data_source_id)
         write_json_atomic(self.state_path, state.__dict__)
         return state
 
@@ -495,7 +515,8 @@ class HubStore:
                 if props.get(name, {}).get("type") != kind:
                     problems.append(f"{label} の「{name}」が {kind} ではありません")
         for label, ds_id, spec_of in (("時間記録", self.state.time_ds_id, TIME_PROPERTIES),
-                                      (READING_TITLE, self.state.reading_ds_id, READING_PROPERTIES)):
+                                      (READING_TITLE, self.state.reading_ds_id, READING_PROPERTIES),
+                                      (LEARNING_TITLE, self.state.learning_ds_id, LEARNING_PROPERTIES)):
             if not ds_id:
                 continue
             props = self.notion.request("GET", f"/data_sources/{ds_id}").get("properties", {})
@@ -681,6 +702,38 @@ class HubStore:
             "properties": properties})
         return page["id"]
 
+    # 学びのノート
+
+    @property
+    def has_learning_db(self) -> bool:
+        """「学びのノート」が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
+        return bool(self.state.learning_ds_id)
+
+    def add_learning(self, item: dict, day: str, link: str = "") -> tuple[str, str]:
+        """振り返りの会話で整理した学びを1件、「学びのノート」に入れる。返り値は (ページ ID, URL)。
+
+        item は title・field（仕事・大学・研究・そのほか）・kind（学び・助言・気づき）・source（出典）・
+        scene（場面）・lesson（学んだこと）・next（次にどう使うか）。
+        """
+        if not self.state.learning_ds_id:
+            raise NotionError("学びのノートが未作成です。kei-agent-hub-setup --apply を実行してください")
+        field = str(item.get("field") or "")
+        kind = str(item.get("kind") or "")
+        properties = {
+            "名前": {"title": rich_text(str(item.get("title") or "").strip()[:200] or "（題なし）")},
+            "日付": {"date": {"start": day}},
+            "分野": {"select": {"name": field if field in LEARNING_FIELDS else LEARNING_FIELDS[-1]}},
+            "種類": {"select": {"name": kind if kind in LEARNING_KINDS else LEARNING_KINDS[0]}},
+            "出典": {"rich_text": rich_text(str(item.get("source") or "").strip()[:500])},
+            "Slack": {"url": link or None},
+        }
+        body = "\n\n".join(f"## {heading}\n{str(item.get(key) or '').strip() or '（なし）'}"
+                            for heading, key in (("場面", "scene"), ("学んだこと", "lesson"), ("次にどう使うか", "next")))
+        page = self.notion.request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": self.state.learning_ds_id},
+            "properties": properties, "children": markdown_to_blocks(body)})
+        return page["id"], str(page.get("url") or "")
+
     def trash_page(self, page_id: str) -> None:
         """ページをゴミ箱に入れる（Notion の画面から戻せる）。"""
         self.notion.request("PATCH", f"/pages/{page_id}", {"in_trash": True})
@@ -846,7 +899,7 @@ def main() -> None:
         if args.apply:
             state = setup.run()
             print(f"適用完了: 日別記録 {state.daily_ds_id}、カレンダー {state.calendar_ds_id}、"
-                  f"時間記録 {state.time_ds_id}、読みもの {state.reading_ds_id}")
+                  f"時間記録 {state.time_ds_id}、読みもの {state.reading_ds_id}、学びのノート {state.learning_ds_id}")
             for warning in setup.warnings:
                 print(f"注意: {warning}")
         else:
