@@ -93,7 +93,8 @@ def next_steps(spec: modules.ModuleSpec, config: Config, added: bool) -> list[st
     channels = [name for kind in spec.channels for name in config.module_channels.get(kind, ())
                 if name != modules.ALL_CHANNELS]
     if channels:
-        steps.append("チャンネルを作って Kei Agent を招く: " + "、".join(f"#{name}" for name in channels))
+        shown = [f"#{modules.channel_prefix(name)}<名前>" if modules.channel_prefix(name) else f"#{name}" for name in channels]
+        steps.append("チャンネルを作って Kei Agent を招く: " + "、".join(shown))
     if spec.settings:
         steps.append(f"設定できる項目（config.toml の [{spec.name}]）: " + "、".join(spec.settings))
     if spec.port is not None:
