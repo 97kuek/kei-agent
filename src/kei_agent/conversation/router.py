@@ -14,14 +14,13 @@ from dataclasses import dataclass, field
 
 from kei_agent.configuration.config import Config
 from kei_agent.execution import runner
+from kei_agent.execution.model_classifier import workspace
 from kei_agent.execution.model_json import json_object
 from kei_agent.execution.model_policy import ModelPolicyError, UseCase, resolve, resolve_selected
-from kei_agent.workspaces.themes import ChannelKind, Workspace
 
 log = logging.getLogger(__name__)
 
 # 判定の上限時間。モデルは provider 別 recipe から解決する。
-TIMEOUT_MINUTES = 2
 ASK = "ask"
 # 「どのエージェントでもない（本体が自分で答える）」を選ばせるための名前
 SELF = "self"
@@ -84,19 +83,6 @@ def parse(text: str, allowed: set[str]) -> Choice:
     if isinstance(data.get("limit"), int) and 1 <= data["limit"] <= MAX_LIMIT:
         params["limit"] = data["limit"]
     return Choice(agent=agent, skill=skill or ASK, params=params)
-
-
-def workspace(config: Config, actor: str = "router") -> Workspace:
-    """判定だけを動かす場所（何も書かないが、claude は作業場を要る）。
-
-    Codex は作業場に担当 agent の skill を置くので、分類は actor ごとに別の場所にする
-    （research と course の分類が同時に走っても、同じ skill の置き場を取り合わない）。
-    """
-    cwd = config.state_dir / "router" if actor == "router" else config.state_dir / "classifier" / actor
-    cwd.mkdir(parents=True, exist_ok=True)
-    return Workspace("router", ChannelKind.ROUTER, cwd, timeout_minutes=TIMEOUT_MINUTES,
-                     # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
-                     system_prompt=config.prompt_file("router.md"), profile=False)
 
 
 async def pick(config: Config, skills: list[dict], text: str, *, store=None) -> Choice:

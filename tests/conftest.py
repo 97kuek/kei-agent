@@ -69,7 +69,7 @@ def research_use_case(prompt: str) -> str:
 @pytest.fixture(autouse=True)
 def no_pinned_models():
     """担当の表（agents.csv）で固定したモデルは load_config が覚える。前のテストのものを持ち越さない。"""
-    from kei_agent.execution.model_policy import pin_models
+    from kei_agent.framework.models import pin_models
 
     pin_models({})
     yield

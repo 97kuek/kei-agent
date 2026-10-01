@@ -113,7 +113,8 @@ def test_a_broken_themes_toml_stops_the_start(tmp_path):
 
 
 def test_icloud_folders_get_a_warning(tmp_path, monkeypatch):
-    monkeypatch.setattr(themes, "ICLOUD_DRIVE", tmp_path / "Mobile Documents")
+    from kei_agent.configuration import places
+    monkeypatch.setattr(places, "ICLOUD_DRIVE", tmp_path / "Mobile Documents")
     (tmp_path / "Mobile Documents" / "work").mkdir(parents=True)
     assert "iCloud" in themes.icloud_warning(tmp_path / "Mobile Documents" / "work")
     assert themes.icloud_warning(tmp_path) == ""

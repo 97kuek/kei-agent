@@ -93,7 +93,7 @@
 - AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine`。App Home の切り替えは起動し直すまでの一時的なもの。既定は無く、選ぶまで動かない
 - モデルは用途ごとの表（下と [agents/](agents.md)）で決まる。`agents.csv` の `model`・`effort` を書いた担当だけ、明示の用途を除いてそのモデルにする（[deploy/README.md](../deploy/README.md#担当の表agentscsv)）
 - actor: `research` / `course` / `work` / `knowledge` / `router`（振り分け）/ `daily` / `improve`
-- 使ってよいモデルは `model_policy.py` にだけ置く。モジュールはその中からしか選べない
+- 使ってよいモデルは `framework/models.py` にだけ置く。モジュールはその中からしか選べない（用途ごとに選ぶのは `execution/model_policy.py`）
 
 | provider | 使ってよいモデル |
 |---|---|
@@ -236,14 +236,18 @@
 
 `src/kei_agent/` は領域ごとのフォルダに分ける。モジュールが触れるのは、直下の窓口 `api.py`（`Core`）だけ。
 
+- 依存の向きは一方向: モジュールの枠・設定 ← 記録 ← 作業場 ← AI の実行 ← 会話 ← 予定 ← 窓口 ← 運用
+- 下の層から上の層は読み込まない（型の注釈だけは別）。破ると `tests/test_layers.py` が落ちる
+- 例外は1つ: 会話の本体（`assistant.py`）は、モジュールを迎え入れるために窓口の `Core` を作る
+
 | 領域 | 中身 |
 |---|---|
-| `configuration/` | `config.toml`・担当の表 `agents.csv`（`agents_table.py`）・App Home で変える値（`settings.py`）・起動スクリプトが知りたい場所 |
-| `storage/` | SQLite（`store.py`・`records.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`） |
-| `framework/` | モジュールの定義の読み込み（`modules.py`）、ひな形、動いている版 |
-| `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、置き場所の選び方、作業場のファイル |
-| `execution/` | AI の起動口（`runner.py`）、制限の表、使ってよいモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、ジョブ |
+| `configuration/` | `config.toml`・担当の表 `agents.csv`（`agents_table.py`）・既存のフォルダの対応 `themes.toml` とチャンネル名の決まり（`places.py`）・起動スクリプトが知りたい場所 |
+| `storage/` | SQLite（`store.py`・`records.py`・App Home で変えた値 `settings.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`） |
+| `framework/` | モジュールの定義の読み込み（`modules.py`）、使ってよいモデルの一覧とその確かめ（`models.py`）、動いている版 |
+| `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
+| `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |
 | `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め、締切、毎晩の保守、予定カレンダー、時間 |
-| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、振り分け、出力契約、引き継ぎ、App Home、担当に頼む口（A2A） |
-| `operations/` | 起動（`app.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、取り込みと入れ替え |
+| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
+| `operations/` | 起動（`app.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、モジュールのひな形、取り込みの確かめ |
 | `testing/` | モジュールのテストの道具（[modules.md](modules.md#テストの書き方kei_agenttesting)） |

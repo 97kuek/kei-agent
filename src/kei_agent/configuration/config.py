@@ -436,9 +436,12 @@ def _enabled_modules(data: dict, where: str) -> list[modules.ModuleSpec]:
         if missing:
             raise ConfigError(f"モジュール「{spec.name}」には {', '.join(missing)} が要ります（{where} でオンにしてください）")
     # 使ってよいモデルの一覧はコアにある（model_policy）。読み込みの順番のため、ここで読む
-    from kei_agent.execution.model_policy import check_module_recipes
+    from kei_agent.framework.models import ModelCatalogError, check_module_recipes
     for spec in enabled:
-        check_module_recipes(spec)
+        try:
+            check_module_recipes(spec)
+        except ModelCatalogError as e:
+            raise ConfigError(str(e)) from None
     return enabled
 
 
@@ -486,7 +489,7 @@ def _module_settings(data: dict) -> dict[str, dict]:
 def _agent_profiles(data: dict, where: str) -> dict[str, AgentProfile]:
     """担当の表の AI の列を読み、表に無い actor は provider 未選択にする。"""
     # 使ってよいモデルの一覧はコアにある（model_policy）。読み込みの順番のため、ここで読む
-    from kei_agent.execution.model_policy import pin_error
+    from kei_agent.framework.models import pin_error
 
     unknown = sorted(set(data) - model_actors())
     if unknown:
@@ -641,11 +644,11 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         agents_table=table,
     )
     # 表で固定したモデルは、モデルを決めるところ（model_policy.resolve）が引く
-    from kei_agent.execution.model_policy import pin_models
+    from kei_agent.framework.models import pin_models
 
     pin_models(config.agent_profiles)
     # 研究テーマの置き場所（themes.toml）の書き間違いは、起動のときに理由を出して止める
-    from kei_agent.workspaces.themes import PlaceError, check_places
+    from kei_agent.configuration.places import PlaceError, check_places
 
     try:
         check_places(config)

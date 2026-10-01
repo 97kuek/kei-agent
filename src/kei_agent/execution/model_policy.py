@@ -11,22 +11,18 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from kei_agent.configuration.config import AGENT_PLUGINS, ConfigError, model_actors
+from kei_agent.configuration.config import AGENT_PLUGINS, model_actors
 from kei_agent.framework import modules
+from kei_agent.framework.models import (  # noqa: F401  モデルの一覧と確かめは、モジュールの枠に置く
+    ALLOWED_EFFORTS,
+    ALLOWED_MODELS,
+    CORE_USE_CASES,
+    MANUAL_ONLY_MODELS,
+    PROVIDERS,
+    is_allowed_model,
+    pinned,
+)
 
-PROVIDERS = frozenset({"codex", "claude"})
-
-ALLOWED_MODELS = {
-    "codex": frozenset({"gpt-6-luna", "gpt-6-sol", "gpt-6-astra"}),
-    "claude": frozenset({"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "claude-fable-5"}),
-}
-# 依頼者が明示したときだけ使うモデル（用途の manual = true でしか書けない）
-MANUAL_ONLY_MODELS = {"codex": frozenset({"gpt-6-astra"}), "claude": frozenset({"claude-fable-5"})}
-# 担当の表（agents.csv）で書ける effort。空は CLI の既定（Claude では考えない）
-ALLOWED_EFFORTS = {
-    "codex": frozenset({"", "minimal", "low", "medium", "high", "xhigh"}),
-    "claude": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
-}
 # 依頼の頭で用途を指定する書き方（[[research-design]]。名前の _ は - で書く）
 _EXPLICIT = re.compile(r"^\s*\[\[([a-z][a-z0-9-]{0,39})\]\]\s*", re.IGNORECASE)
 
@@ -37,6 +33,10 @@ class ModelPolicyError(ValueError):
 
 class UseCase(StrEnum):
     ROUTING = "routing"
+
+
+# コアの用途の名前は、モジュールの用途とぶつからないよう framework.models にも書いてある
+assert {case.value for case in UseCase} == set(CORE_USE_CASES)
 
 
 @dataclass(frozen=True)
@@ -90,56 +90,6 @@ def _recipe(provider: str, use_case: UseCase | str) -> tuple[str, str] | None:
         return None
     spec = next(u for u in owner.actor.use_cases if u.name == use_case)
     return spec.recipes.get(provider)
-
-
-def check_module_recipes(spec: modules.ModuleSpec) -> None:
-    """モジュールの用途は、コアの用途と名前がぶつからず、モデルはコアの一覧の中にあること（設定を読むときに確かめる）。"""
-    for use_case in spec.actor.use_cases if spec.actor else ():
-        if use_case.name in UseCase.__members__.values():
-            raise ConfigError(f"モジュール「{spec.name}」の用途 {use_case.name} は、コアの用途と同じ名前です")
-        for provider, (model, _effort) in use_case.recipes.items():
-            if not is_allowed_model(provider, model):
-                raise ConfigError(f"モジュール「{spec.name}」の用途 {use_case.name} の {provider} のモデル {model} は使えません"
-                                  f"（使えるのは {', '.join(sorted(ALLOWED_MODELS[provider]))}）")
-            if model in MANUAL_ONLY_MODELS.get(provider, ()) and not use_case.manual:
-                raise ConfigError(f"モジュール「{spec.name}」の用途 {use_case.name} の {model} は、依頼者が明示したときだけの用途"
-                                  "（manual = true）でしか使えません")
-
-
-# 担当の表（agents.csv）で固定したモデル。actor → (provider, model, effort)。load_config が入れ直す
-_PINS: dict[str, tuple[str, str, str]] = {}
-
-
-def pin_error(actor: str, provider: str, model: str, effort: str) -> str:
-    """表で固定するモデルの書き間違い（無ければ空）。"""
-    if not model:
-        return "effort を書くときは model も書いてください" if effort else ""
-    if provider not in PROVIDERS:
-        return "model を書くときは engine も書いてください"
-    if model in MANUAL_ONLY_MODELS.get(provider, ()):
-        return f"{model} は依頼者が明示したときだけのモデルなので、固定できません"
-    if not is_allowed_model(provider, model):
-        return f"{provider} では {model} を使えません（使えるのは {', '.join(sorted(ALLOWED_MODELS[provider] - MANUAL_ONLY_MODELS[provider]))}）"
-    if effort not in ALLOWED_EFFORTS[provider]:
-        return f"{provider} の effort は {', '.join(sorted(ALLOWED_EFFORTS[provider] - {''}))} か空にしてください: {effort}"
-    return ""
-
-
-def pin_models(profiles: dict) -> None:
-    """表で固定したモデルを覚える（AgentProfile の model が空でないもの）。前のものは捨てる。"""
-    _PINS.clear()
-    _PINS.update({actor: (p.provider, p.model, p.effort) for actor, p in profiles.items() if p.model})
-
-
-def pinned(actor: str, provider: str) -> tuple[str, str] | None:
-    """その actor を provider で動かすときに固定したモデル (model, effort)。表の engine と違う provider なら None
-    （App Home で一時的に切り替えたときは、module.toml の用途ごとの選び分けに戻る）。"""
-    pin = _PINS.get(actor)
-    return pin[1:] if pin is not None and pin[0] == provider else None
-
-
-def is_allowed_model(provider: str, model: str) -> bool:
-    return model in ALLOWED_MODELS.get(provider, ())
 
 
 def is_manual(use_case: UseCase | str) -> bool:

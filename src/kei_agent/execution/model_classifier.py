@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 from kei_agent.configuration.config import Config
-from kei_agent.conversation.router import workspace
 from kei_agent.execution import runner
 from kei_agent.execution.model_json import json_object
 from kei_agent.execution.model_policy import ModelPolicyError, UseCase, resolve_classifier, use_case_of
 from kei_agent.framework import modules
+from kei_agent.workspaces.themes import ChannelKind, Workspace
+
+# 振り分け・分類の1回の上限（分）
+TIMEOUT_MINUTES = 2
+
+
+def workspace(config: Config, actor: str = "router") -> Workspace:
+    """判定だけを動かす場所（何も書かないが、claude は作業場を要る）。
+
+    Codex は作業場に担当 agent の skill を置くので、分類は actor ごとに別の場所にする
+    （research と course の分類が同時に走っても、同じ skill の置き場を取り合わない）。
+    """
+    cwd = config.state_dir / "router" if actor == "router" else config.state_dir / "classifier" / actor
+    cwd.mkdir(parents=True, exist_ok=True)
+    return Workspace("router", ChannelKind.ROUTER, cwd, timeout_minutes=TIMEOUT_MINUTES,
+                     # 研究用のシステムプロンプトは要らない（分類だけなので、短いものに差し替える）
+                     system_prompt=config.prompt_file("router.md"), profile=False)
 
 
 class UsageLimited(RuntimeError):

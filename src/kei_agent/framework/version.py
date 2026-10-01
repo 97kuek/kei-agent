@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
-from kei_agent.configuration.config import REPO_ROOT
+# リポジトリ（src/kei_agent/framework/ の3つ上）
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 UNKNOWN = "unknown"
 
