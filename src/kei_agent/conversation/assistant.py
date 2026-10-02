@@ -1083,8 +1083,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         （投稿はしない）。進み具合を聞かれただけなら、止まっている理由をその場で答える。そのスレッドの担当の AI が
         もう上限でなければ（明けた・別の provider に切り替えた）、何もしない（False。予約を取り消して動かす）。
         """
-        pending = [(deferred_id, payload) for deferred_id, payload in self.store.pending_deferred("request")
-                   if payload.get("channel") == req.channel and payload.get("thread_ts") == req.thread_ts]
+        pending = self.store.pending_deferred_for(req.channel, req.thread_ts)
         if not pending:
             return False
         try:
@@ -1121,8 +1120,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
 
         依頼者が「続けて」と書いたあとに、同じ依頼が裏でもう一度走ると、二重に作業してしまう。
         """
-        canceled = [i for i, payload in self.store.pending_deferred("request")
-                    if payload.get("channel") == req.channel and payload.get("thread_ts") == req.thread_ts]
+        canceled = [deferred_id for deferred_id, _ in self.store.pending_deferred_for(req.channel, req.thread_ts)]
         for deferred_id in canceled:
             self.store.finish_deferred(deferred_id)
         if canceled:

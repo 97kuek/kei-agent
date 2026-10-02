@@ -17,6 +17,7 @@ from datetime import date
 
 from kei_agent_a2a.api import (
     ASK,
+    WEEKDAYS,
     AgentSkill,
     NotionError,
     SkillExecutor,
@@ -125,7 +126,7 @@ def asked_weekday(text: str) -> str:
         value = (json.loads(text) or {}).get("weekday")
     except (TypeError, ValueError, AttributeError):
         return ""
-    return value if isinstance(value, str) and len(value) == 1 and value in "月火水木金土日" else ""
+    return value if isinstance(value, str) and len(value) == 1 and value in WEEKDAYS else ""
 
 
 def due_data(events: list[Event], days: int) -> dict:

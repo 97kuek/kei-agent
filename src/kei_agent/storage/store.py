@@ -321,6 +321,11 @@ class Store:
             "SELECT id, payload FROM deferred_runs WHERE kind = ? AND done = 0 ORDER BY id", (kind,)).fetchall()
         return [(r["id"], json.loads(r["payload"])) for r in rows]
 
+    def pending_deferred_for(self, channel: str, thread_ts: str) -> list[tuple[int, dict]]:
+        """そのスレッドの、まだやり直していない依頼（上限で止まったもの）。"""
+        return [(deferred_id, payload) for deferred_id, payload in self.pending_deferred("request")
+                if payload.get("channel") == channel and payload.get("thread_ts") == thread_ts]
+
     def finish_deferred(self, deferred_id: int) -> None:
         with self.conn:
             self.conn.execute("UPDATE deferred_runs SET done = 1 WHERE id = ?", (deferred_id,))
