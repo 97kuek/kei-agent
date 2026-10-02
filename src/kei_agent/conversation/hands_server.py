@@ -25,6 +25,9 @@ MCP_PATH = "/mcp"
 # 読むだけの道具の印（ChatGPT は、この印の無い道具を書き込みとして扱い、プランによっては使わせない）
 READ_ONLY = ToolAnnotations(read_only_hint=True)
 HEALTH_PATH = "/health"
+# OAuth の案内の場所。この口は OAuth を使わないので、合言葉なしでも「無い」（404）と答える
+# （OpenAI のトンネルの点検は、合言葉を付けずにここを見て、404 なら OAuth なしの口と見なす）
+WELL_KNOWN = "/.well-known/"
 INSTRUCTIONS = (
     "Kei Agent の手。作業場（研究テーマ・プロジェクト・大学・仕事・知識）で Claude Code か Codex を動かす。"
     "まず workspaces で頼める作業場を見て、run で頼む。重さは light（抜き出し・要約）・normal（ふつうの作業）・"
@@ -79,7 +82,8 @@ class TokenAuth:
         self.token = token
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["path"].rstrip("/") == HEALTH_PATH:
+        path = scope.get("path", "")
+        if scope["type"] != "http" or path.rstrip("/") == HEALTH_PATH or path.startswith(WELL_KNOWN):
             await self.app(scope, receive, send)
             return
         given = Headers(scope=scope).get("authorization", "").removeprefix("Bearer ").strip()

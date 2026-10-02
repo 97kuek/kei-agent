@@ -111,6 +111,8 @@ async def test_the_door_checks_the_password(hands):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
         assert (await client.get("/health")).status_code == 200
+        # OAuth は使わない（トンネルの点検は、合言葉なしで 404 を見る）
+        assert (await client.get("/.well-known/oauth-protected-resource/mcp")).status_code == 404
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
         headers = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
         assert (await client.post("/mcp", json=body, headers=headers)).status_code == 401
