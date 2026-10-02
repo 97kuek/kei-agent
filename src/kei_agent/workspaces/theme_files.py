@@ -55,7 +55,11 @@ def append_thread_log(cwd: Path, channel_name: str, thread_ts: str, who: str, te
     path = thread_log_path(cwd, thread_ts)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        started = datetime.fromtimestamp(float(thread_ts)).strftime("%Y-%m-%d %H:%M")
+        try:
+            started = datetime.fromtimestamp(float(thread_ts)).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            # 手の口の会話の番号（Slack のスレッドではない）。始まりは今
+            started = datetime.now().strftime("%Y-%m-%d %H:%M")
         path.write_text(f"# #{channel_name} のスレッド（{started} 開始）\n", encoding="utf-8")
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with path.open("a", encoding="utf-8") as f:

@@ -1,4 +1,9 @@
-"""Kei Agent の起動: Slack Bolt（Socket Mode）の受け口と、ジョブの定期確認。"""
+"""Kei Agent の起動: Slack Bolt（Socket Mode）の受け口と、ジョブの定期確認。
+
+Slack のトークン（SLACK_BOT_TOKEN・SLACK_APP_TOKEN）が無ければ、Slack につながずに起動する。Slack の受け口は頭
+（OpenAI Dots）が受け持ち、本体は手の口・定期処理・ジョブだけを動かす。Slack に出すつもりの投稿は知らせとして
+ため（conversation/outbox.py）、頭が手の口の notices で読む。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +33,7 @@ from kei_agent.storage.store import Store
 log = logging.getLogger("kei_agent")
 
 REQUIRED_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "KEI_AGENT_ALLOWED_USER_ID")
+SLACK_ENV = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
 # Slack につながるのを待つ上限。超えたら落ちて、launchd に起動し直してもらう
 CONNECT_TIMEOUT_SECONDS = 120
 
@@ -44,8 +50,15 @@ def _slash(assistant: Assistant, command: str):
     return handler
 
 
+def without_slack(env: dict[str, str] | None = None) -> bool:
+    """Slack につながずに起動するか（Slack のトークンがどちらも無い）。片方だけなら書き忘れなので止める。"""
+    env = dict(os.environ) if env is None else env
+    return not any(env.get(k) for k in SLACK_ENV)
+
+
 async def serve() -> None:
-    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
+    headless = without_slack()
+    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)] if not headless else []
     if missing:
         sys.exit(f"環境変数が設定されていません: {', '.join(missing)}（deploy/README.md を参照）")
 
@@ -56,6 +69,9 @@ async def serve() -> None:
         log.warning("前回の %s（%s）は途中で終わっていました。時間内ならやり直します", name, day)
     pueue = jobs.queue(config)
     await pueue.ensure_group()
+    if headless:
+        await serve_without_slack(config, store, pueue)
+        return
 
     app = AsyncApp(token=os.environ["SLACK_BOT_TOKEN"])
     auth = await app.client.auth_test()
@@ -136,17 +152,39 @@ async def serve() -> None:
         else:
             await ack()
 
-    job_loop = asyncio.create_task(assistant.job_loop())
-    ask_loop = asyncio.create_task(assistant.ask_loop())
-    schedule_loop: asyncio.Task | None = None
-    questions_loop: asyncio.Task | None = None
-    hands_loop: asyncio.Task | None = None
     log.info("Kei Agent を起動しました（bot user: %s, research_root: %s, Notion: %s）",
              auth["user_id"], config.research_root, "あり" if assistant.notion else "なし")
     handler = AsyncSocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     try:
         # つながらないまま止まると、入れ替えに失敗しても誰も気づけない。時間を切って落ちる
         await asyncio.wait_for(handler.connect_async(), CONNECT_TIMEOUT_SECONDS)
+        await run_until_restart(config, store, assistant)
+    finally:
+        await handler.close_async()
+
+
+async def serve_without_slack(config, store, pueue) -> None:
+    """Slack につながずに動かす。Slack の代わりに知らせの置き場（Outbox）を渡す。"""
+    from kei_agent.conversation.outbox import Outbox
+
+    assistant = Assistant(config=config, store=store, slack=Outbox(config, store),
+                          jobs=JobManager(config, store, pueue), bot_token="", bot_user_id="",
+                          notion=load_notion(config), hub=load_hub(config))
+    log.info("Kei Agent を Slack につながずに起動しました（research_root: %s, Notion: %s）。"
+             "知らせは手の口の notices で頭に渡します", config.research_root, "あり" if assistant.notion else "なし")
+    if not config.hands_url:
+        log.warning("手の口（config.toml の [hands] url）が無いので、頭から呼べません")
+    await run_until_restart(config, store, assistant)
+
+
+async def run_until_restart(config, store, assistant: Assistant) -> None:
+    """起動したあとの確かめと、裏で回すもの（ジョブ・声・定期処理・手の口）。起動し直しを頼まれるまで待つ。"""
+    job_loop = asyncio.create_task(assistant.job_loop())
+    ask_loop = asyncio.create_task(assistant.ask_loop())
+    schedule_loop: asyncio.Task | None = None
+    questions_loop: asyncio.Task | None = None
+    hands_loop: asyncio.Task | None = None
+    try:
         # 入れ替えたあとの起動なら、その結果を読んで印を消す（消さないと deploy/run.sh が前の版に戻す。updates.py）
         assistant.take_update()
         # モジュールの、起動したときの処理（class Module の on_start。自己改善なら、入れ替えの結果を取り込みのスレッドに
@@ -176,7 +214,6 @@ async def serve() -> None:
         for loop in (schedule_loop, questions_loop, hands_loop):
             if loop is not None:
                 loop.cancel()
-        await handler.close_async()
 
 
 LOG_MAX_BYTES = 5 * 1024 * 1024

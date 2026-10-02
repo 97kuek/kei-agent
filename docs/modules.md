@@ -155,6 +155,7 @@ class Module:
 | `agenda(days, kinds)` | 朝の一覧・振り返りの予定（会議・授業・締切）。読めなければ `None` |
 | `material(now)` | Daily と振り返りの材料 |
 | `head_materials(days)` | 頭（手の口の道具）に渡す材料。種類 → 項目の dict（知識の `reading` など） |
+| `head_action(name, params)` | 頭（手の口の道具）から頼まれた操作。受け持たない名前なら `None`、受け付けられなければ `ValueError`（時間記録の `timer` など） |
 | `on_reaction(event, added)` | リアクション。`True` を返すと、ほかには回らない |
 | `on_event(kind, data)` | 出来事（下の表） |
 | `on_slash_command(name, body)` | スラッシュコマンド。返した文は本人にだけ見える。3秒以内に返す |

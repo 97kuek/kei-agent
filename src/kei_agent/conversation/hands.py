@@ -6,7 +6,10 @@ Slack の受け口と並ぶ、もう1つの入口（GitHub issue #17）。AI を
 - run … 作業場・頼みごと・重さ（light / normal / deep）・AI（任意）・会話の番号（任意）で AI を動かす。
   SHORT_SECONDS のうちに終われば答えを、終わらなければ受付番号を返して裏で続ける
 - status … 受付番号の作業の様子と結果
-- post … 研究全体のチャンネルに、Kei Agent の名前で投稿する（頭の予定で動かす Daily など）。ほかのチャンネルには出せない
+- post … 研究全体のチャンネルに、Kei Agent の名前で投稿する（頭の予定で動かす Daily など）。ほかのチャンネルには出せない。
+  Slack につないでいないときは断る（頭が自分の名前で出す）
+- notices … Slack につないでいないとき、本体とモジュールが Slack に出すつもりだった知らせ（ジョブが終わった・
+  困りごと・課題の新着など。conversation/outbox.py）。頭が読んで、自分の名前で Slack に出す
 
 返すのは決まった項目（本文・状態・会話の番号・できたファイル）。状態は done（終わった）・needs_input（返事待ち。
 本文に確認が書いてある）・failed（失敗）・accepted（受け付けた。status で見る）・running（まだ動いている）。
@@ -34,7 +37,7 @@ from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.records import Records
 from kei_agent.workspaces import themes
-from kei_agent.workspaces.theme_files import changed_files, snapshot_outputs
+from kei_agent.workspaces.theme_files import append_thread_log, changed_files, snapshot_outputs
 from kei_agent.workspaces.themes import ChannelKind
 
 log = logging.getLogger(__name__)
@@ -45,6 +48,8 @@ CHANNEL = "mcp"
 SHORT_SECONDS = 20
 # 受付番号の結果を残す日数
 KEEP_DAYS = 7
+# read_file で返す長さと、put_file で受け取る長さ
+FILE_CHARS = 100_000
 # 作業場を本体に持つ種類（研究テーマ・プロジェクト・研究全体）。ほかは担当のプロセスに頼む
 WORKSPACE_KINDS = (ChannelKind.THEME, ChannelKind.PROJECT, ChannelKind.OVERVIEW)
 
@@ -217,6 +222,9 @@ class Hands:
                 if ws.kind in WORKSPACE_KINDS:
                     themes.ensure_workspace(ws)
                     before = snapshot_outputs(ws.cwd) if ws.cwd is not None else {}
+                if ws.cwd is not None:
+                    # やり取りを作業場に残す（Slack の受け口と同じ置き場所。会話の番号ごとに1ファイル）
+                    append_thread_log(ws.cwd, ws.channel_name, conversation, "依頼者", request)
                 result = await self._attempt(replace(plan, ws=ws), today_line() + request, session_id, conversation)
                 if result.session_missing:
                     result = await self._attempt(replace(plan, ws=ws), today_line() + request, None, conversation)
@@ -229,6 +237,8 @@ class Hands:
                                                        assistant.limit_until(result.limit_reset_at)))
         if not result.is_error and result.session_id:
             store.set_session(CHANNEL, conversation, actor, provider, result.session_id, version)
+        if ws.kind in WORKSPACE_KINDS and ws.cwd is not None and (shown := _text(result)):
+            append_thread_log(ws.cwd, ws.channel_name, conversation, "Kei Agent", shown)
         files = []
         if ws.kind in WORKSPACE_KINDS and ws.cwd is not None:
             for path in changed_files(before, snapshot_outputs(ws.cwd)):
@@ -244,6 +254,79 @@ class Hands:
             return await self.assistant.run_agent(plan.ws, prompt, session_id, CHANNEL, conversation, **options)
         return await self.assistant.ask_agent(plan.ws.module, prompt, session_id, CHANNEL, conversation, **options)
 
+    # 作業場を作る（Slack でチャンネルに Kei Agent を招いたときと同じ。研究テーマとプロジェクト）
+
+    async def create_workspace(self, name: str, folder: str = "") -> dict:
+        """研究テーマかプロジェクトの作業場を作る。folder を渡すと、既存のフォルダを使う（themes.toml に書く）。
+        研究テーマは研究ホームにも登録する。もうあれば作らずに、その場所を返す。"""
+        from kei_agent.configuration.places import PlaceError
+
+        name = themes.theme_name(name.strip())
+        try:
+            ws = themes.resolve(self.config, name)
+            if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT):
+                raise HandsError(f"{name} は研究テーマやプロジェクトの名前ではありません（担当のチャンネルの名前です）")
+            if folder.strip() and (ws.cwd is None or not ws.cwd.exists()):
+                themes.save_place(self.config, name, themes.check_place(self.config, folder.strip()))
+                ws = themes.resolve(self.config, name)
+        except (ValueError, PlaceError) as e:
+            raise HandsError(str(e)) from None
+        if ws.cwd is None:
+            raise HandsError(f"{name} の作業場の場所が決まりません")
+        created = themes.ensure_workspace(ws)
+        if ws.kind is ChannelKind.THEME:
+            self.assistant.registered_themes.add(ws.channel_name)
+            await self.assistant.register_theme("", ws)
+        return {"name": ws.channel_name, "kind": "研究テーマ" if ws.kind is ChannelKind.THEME else "プロジェクト",
+                "folder": str(ws.cwd), "created": created}
+
+    # 時間を測る（Slack の /toggl とカードの代わり。時間記録のモジュール）
+
+    async def timer(self, action: str, domain: str = "", label: str = "") -> dict:
+        """計測を始める（前の計測は止める）・止める・今の様子。止めた記録は Toggl と共通ホームの「時間記録」へ送る。"""
+        if action not in ("start", "stop", "status"):
+            raise HandsError("action は start / stop / status のどれかにしてください")
+        try:
+            return await self.assistant.module_head_action("timer", {"action": action, "domain": domain, "label": label})
+        except ValueError as e:
+            raise HandsError(str(e)) from None
+
+    # ファイル（Slack の添付の代わり。頭が渡したものは inputs/ に置き、作業でできた outputs/ のものを読む）
+
+    def _folder(self, workspace: str):
+        try:
+            ws = themes.resolve(self.config, workspace)
+        except ValueError as e:
+            raise HandsError(str(e)) from None
+        if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT) or ws.cwd is None or not ws.cwd.is_dir():
+            raise HandsError(f"{workspace} にはファイルを置けません（研究テーマとプロジェクトの作業場だけ）")
+        return ws.cwd.resolve()
+
+    def put_file(self, workspace: str, name: str, content: str) -> dict:
+        """頭が渡した文のファイルを、作業場の inputs/ に置く。run の頼みごとで、そのパスを伝える。"""
+        folder = self._folder(workspace)
+        inputs = folder / "inputs"
+        dest = (inputs / name).resolve()
+        if dest.parent != inputs or not name.strip() or name.startswith("."):
+            raise HandsError("ファイルの名前は、フォルダを含まない名前にしてください")
+        if len(content) > FILE_CHARS:
+            raise HandsError(f"ファイルは {FILE_CHARS} 字までです")
+        inputs.mkdir(exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        return {"path": str(dest.relative_to(folder))}
+
+    def read_file(self, workspace: str, path: str) -> dict:
+        """作業場の outputs/ にできたファイルの中身（run の files に出たもの。文のファイルだけ）。"""
+        folder = self._folder(workspace)
+        target = (folder / path).resolve()
+        if not target.is_relative_to(folder / "outputs") or not target.is_file():
+            raise HandsError(f"{path} は読めません（作業場の outputs/ にあるファイルだけ）")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise HandsError(f"{path} は文のファイルではないので読めません（作業場で開いてください）") from None
+        return {"path": str(target.relative_to(folder)), "text": text[:FILE_CHARS], "truncated": len(text) > FILE_CHARS}
+
     # 様子
 
     # 研究全体のチャンネルへの投稿（頭の予定で動かす Daily などを、Kei Agent の名前で出す）
@@ -253,6 +336,8 @@ class Hands:
         出せるのは研究全体のチャンネルだけ（頭はチャンネルを選べない）。"""
         if not text.strip():
             raise HandsError("投稿する本文が空です")
+        if self._outbox() is not None:
+            raise HandsError("Kei Agent は Slack につないでいません。Slack には自分の Slack 連携で出してください")
         name = self.config.overview_channels[0]
         channel = (await self.assistant.channel_ids()).get(name)
         if not channel:
@@ -268,6 +353,24 @@ class Hands:
                                          unfurl_media=False)
         log.info("手の口から研究全体のチャンネルに投稿しました（%s）", ts)
         return {"channel": name, "ts": ts, "link": await self.assistant.permalink(channel, ts)}
+
+    # 知らせ（Slack につないでいないとき、本体とモジュールが Slack に出すつもりだったもの）
+
+    def _outbox(self):
+        from kei_agent.conversation.outbox import Outbox
+        return self.assistant.slack if isinstance(self.assistant.slack, Outbox) else None
+
+    def notices(self) -> dict:
+        """まだ渡していない知らせ（古い順）。渡したものは、書き換えられない限り次からは返さない。
+        Slack につないでいる間は、Kei Agent が自分で Slack に出しているので空。"""
+        outbox = self._outbox()
+        if outbox is None:
+            return {"notices": [], "slack": True}
+        found = outbox.pending()
+        outbox.mark_delivered([item["id"] for item in found])
+        return {"notices": [{k: item[k] for k in ("id", "channel", "thread_ts", "thread", "text")}
+                            | {"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(item["at"]))}
+                            for item in found], "slack": False}
 
     def status(self, ticket: str) -> dict:
         found = self.records.get("ticket", ticket)

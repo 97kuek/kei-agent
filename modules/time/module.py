@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import suppress
 from datetime import date, datetime, timedelta
 
@@ -86,6 +87,28 @@ class Module:
         self.core.spawn(self._after_change(started=entry, stopped=previous, post_cards=False))
         switched = f"（{previous.description} は止めたよ）" if previous else ""
         return f"▶️ 始めたよ: {entry.description}{switched}"
+
+    # 頭（手の口の timer）から測る。カードは置かない（Slack にいないとき、カードは知らせにたまるだけになる）
+
+    async def head_action(self, name: str, params: dict) -> dict | None:
+        if name != "timer":
+            return None
+        action = str(params.get("action") or "")
+        user_id = self.core.owner_id
+        stopped = None
+        if action == "start":
+            domain, label = str(params.get("domain") or ""), str(params.get("label") or "").strip()
+            if domain not in DOMAINS or not label:
+                raise ValueError(f"始めるときは domain（{' / '.join(DOMAINS)}）と label（テーマや科目の名前）を渡してください")
+            # チャンネルの代わりに、領域とラベルの組を置き場所にする（大学の科目もラベルの名前で残す）
+            _, stopped = self.entries.start(user_id, domain, f"{domain}:{label}", label)
+        elif action == "stop":
+            stopped = self.entries.stop(user_id)
+        elif action != "status":
+            raise ValueError("action は start / stop / status のどれかにしてください")
+        if stopped is not None:
+            await self._sync(stopped)
+        return {"running": _shown(self.entries.active(user_id)), "stopped": _shown(stopped)}
 
     # カードのボタンと画面
 
@@ -331,3 +354,11 @@ class Module:
         if url := hub.time_url():
             lines.append(f"- 時間記録（週ごとのグラフ）: {url}")
         return lines
+
+
+def _shown(entry: Entry | None) -> dict | None:
+    """頭に見せる計測（説明・始めた時刻・分）。"""
+    if entry is None:
+        return None
+    return {"description": entry.description, "started": datetime.fromtimestamp(entry.started_at).strftime("%H:%M"),
+            "minutes": entry.minutes if entry.ended_at is not None else int((time.time() - entry.started_at) // 60)}

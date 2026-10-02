@@ -38,6 +38,8 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
   欄の下に出す理由を {block_id: 文} で返すと、画面を閉じない
 - `async material(now) -> list[str]` … Daily と振り返りの材料に足す行（今週の時間など）
 - `async head_materials(days) -> dict[str, list[dict]]` … 頭（手の口）に渡す材料。種類 → 項目（知識なら reading）。手元の記録から作る
+- `async head_action(name, params) -> dict | None` … 頭（手の口の道具）から頼まれた操作（時間記録なら timer）。受け持たない
+  名前なら None。受け付けられないときは ValueError（理由は本文。頭にそのまま返る）
 - `async on_start()` … 起動して Slack につながったあと（Kei Agent を入れ替えたあとの起動なら、その結果は
   core.last_update() で受け取れる。途中で止まった作業の後始末など）
 - `welcome() -> str` … モジュールのチャンネル（と core_channels の本体のチャンネル）に招かれたときの案内（できること）
@@ -218,6 +220,11 @@ class Core:
         if self.spec.actor is None:
             return ""
         return settings.selected_provider(self._assistant.config, self.name)
+
+    @property
+    def owner_id(self) -> str:
+        """依頼者の Slack の ID（KEI_AGENT_ALLOWED_USER_ID）。頭から頼まれた操作も、この人のものとして記録する。"""
+        return self._assistant.config.allowed_user_id or "owner"
 
     @property
     def settings(self) -> dict:

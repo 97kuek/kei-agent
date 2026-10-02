@@ -38,7 +38,7 @@ INSTRUCTIONS = (
     "仕事（会社のデータ。仕事の担当と、そのプロジェクト work-*）は外へ出られないので、外の情報が要るなら頭が調べて request に入れる。"
     "続きを頼むときは、前の結果の conversation を渡す。"
     "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
-    "Slack の研究全体のチャンネルに出すときは post を使う（Kei Agent の名前で出る）。"
+    "Kei Agent が Slack につないでいないときは、Kei Agent からの知らせを notices で読み、自分の名前で Slack に出す。"
     "status が accepted なら、あとで status に ticket を渡して結果を見る。needs_input なら、本文の確認に答えて、"
     "同じ conversation で run する。担当・アカウント・届く範囲は作業場から決まり、変えられない"
 )
@@ -87,6 +87,48 @@ def build_mcp(hands: Hands) -> MCPServer:
             return await hands.post(text, details)
         except HandsError as e:
             raise ToolError(str(e)) from None
+
+    @mcp.tool(description="研究テーマかプロジェクト（work-<名前> など）の作業場を作る（Slack でチャンネルを作って Kei Agent を"
+                          "招いていた代わり）。folder を渡すと既存のフォルダを使う。研究テーマは研究ホームにも登録する。"
+                          "もうあれば作らない。返すのは name・kind・folder・created")
+    async def create_workspace(name: str, folder: str = "") -> dict[str, Any]:
+        try:
+            return await hands.create_workspace(name, folder)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
+    @mcp.tool(description="時間を測る（Toggl）。action は start（domain は research・course・work、label はテーマや科目の名前。"
+                          "動いている計測は止める）・stop・status。止めた記録は Toggl と Notion の時間記録に送る。"
+                          "返すのは running（いま測っているもの）と stopped（止めたもの）。description・started・minutes")
+    async def timer(action: str, domain: str = "", label: str = "") -> dict[str, Any]:
+        try:
+            return await hands.timer(action, domain, label)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
+    @mcp.tool(description="作業場（研究テーマ・プロジェクト）の inputs/ に、文のファイルを置く（Slack の添付を渡すとき）。"
+                          "name はフォルダを含まない名前、content は中身。返す path を run の頼みごとに書いて伝える")
+    async def put_file(workspace: str, name: str, content: str) -> dict[str, Any]:
+        try:
+            return hands.put_file(workspace, name, content)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
+    @mcp.tool(annotations=READ_ONLY,
+              description="作業場の outputs/ にできたファイル（run の files に出たもの）の中身。文のファイルだけ。"
+                          "path は run の files の path。返すのは path・text・truncated（長すぎて切ったか）")
+    async def read_file(workspace: str, path: str) -> dict[str, Any]:
+        try:
+            return hands.read_file(workspace, path)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
+    @mcp.tool(description="Kei Agent が Slack に出すつもりだった知らせ（ジョブが終わった・困りごと・課題の新着など）のうち、"
+                          "まだ渡していないもの（古い順）。一度渡したものは、書き換えられない限り次からは返さない。"
+                          "notices の1件は id・channel（出すつもりだったチャンネル）・thread_ts・thread（スレッドの親の本文）・"
+                          "text・at。slack が true なら、Kei Agent が自分で Slack に出しているので空")
+    async def notices() -> dict[str, Any]:
+        return hands.notices()
 
     assistant = hands.assistant
 

@@ -82,11 +82,16 @@
 | `reading` | 知識の担当がこの 1〜7 日に出した読みもの（👍 したか、保存したか）。モジュールの `head_materials` |
 | `recent` | この 1〜168 時間の動き（スレッド・担当ごとの実行と失敗・手の口の頼みごと・終わったジョブ）。本文の抜き出しは研究テーマと研究全体のスレッドだけ |
 | `jobs` | 研究のジョブ（動いているものと、2日のうちに終わったもの） |
-| `post` | 研究全体のチャンネル（`overview`）に Kei Agent の名前で投稿する。`text` はチャンネルに、`details` はそのスレッドに。ほかのチャンネルには出せない。返信は研究全体のスレッドとして受ける |
+| `post` | 研究全体のチャンネル（`overview`）に Kei Agent の名前で投稿する。Slack につないでいないときは断る |
+| `notices` | Slack につないでいないとき、本体とモジュールが Slack に出すつもりだった知らせ（まだ渡していないもの。`conversation/outbox.py`） |
+| `create_workspace` | 研究テーマ・プロジェクトの作業場を作る（既存のフォルダも使える）。研究テーマは研究ホームにも登録する |
+| `put_file` / `read_file` | 作業場の `inputs/` に文のファイルを置く／`outputs/` のファイルを読む（Slack の添付の代わり） |
+| `timer` | 時間を測る（開始・停止・様子）。止めた記録は Toggl と時間記録へ。時間記録のモジュールの `head_action` |
 
 - 返す項目: `status`（`done`・`needs_input`・`failed`・`accepted`・`running`）・`text`・`conversation`・`files`（作業場の `outputs/` にできたもの）・`ticket`
 - 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
-- 会話は `mcp` という名前のチャンネルとして記録する（Slack のスレッドとは混ざらない）
+- 会話は `mcp` という名前のチャンネルとして記録する（Slack のスレッドとは混ざらない）。研究テーマ・プロジェクトでは、やり取りを作業場の `.kei-agent/threads/<会話の番号>.md` にも残す（Slack の受け口と同じ置き場所）
+- Slack のトークンが無いと、本体は Slack につながずに動く。Slack に出すつもりの投稿は `Outbox`（`conversation/outbox.py`）にため、頭が `notices` で読む。リアクション・作業中の表示・App Home・ボタンは何もしない（[dots.md](dots.md)）
 - ChatGPT（Dots）からは、OpenAI の Secure MCP Tunnel を通して届く。トンネルのプログラム（`tunnel-client`。`deploy/run-tunnel.sh` が launchd で動かす）がこの Mac から OpenAI へ出ていき、届いた呼び出しに合言葉を付けて手の口へ渡す。番号は `[hands] tunnel`、鍵はトンネルだけの `kei-agent-tunnel.zsh`。手の口は OAuth を使わず、`/.well-known/` には本文の無い 404 を返す
 - ChatGPT の MCP のアプリは、作ったときの道具の一覧を使い続ける（あとでサーバーが道具を増やしても、読み直しに来るだけで見える一覧は変わらない）。道具を足したり変えたりしたら、ChatGPT で MCP を作り直す
 

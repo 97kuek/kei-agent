@@ -188,6 +188,14 @@ class ModuleBridge:
                 log.exception("モジュール「%s」の材料を作れませんでした", name)
         return lines
 
+    async def module_head_action(self, name: str, params: dict) -> dict:
+        """頭（手の口）から頼まれた操作（class Module の head_action）。受け持つモジュールが無ければ ValueError。"""
+        for module in self.modules.values():
+            act = getattr(module, "head_action", None)
+            if callable(act) and (done := await act(name, params)) is not None:
+                return done
+        raise ValueError(f"「{name}」を受け持つモジュールがありません（オフかもしれません）")
+
     async def module_head_materials(self, days: int) -> dict[str, list[dict]]:
         """頭（手の口）に渡す材料（class Module の head_materials）。種類 → 項目。作れなかったモジュールは飛ばす。
 

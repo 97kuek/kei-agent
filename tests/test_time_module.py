@@ -549,3 +549,32 @@ async def test_the_cards_command_posts_only_where_cards_are_missing(config, stor
 def test_the_cards_command_needs_the_slack_token(capsys):
     assert commands.cards_main([]) == 1
     assert "SLACK_BOT_TOKEN" in capsys.readouterr().out
+
+
+# 頭（手の口の timer）から測る
+
+async def test_the_head_starts_and_stops_a_timer_without_cards(env, config):
+    assistant, module, slack = env
+    from kei_agent.conversation.hands import Hands
+    h = Hands(assistant)
+    started = await h.timer("start", "research", "vlm")
+    assert started["running"]["description"] == "研究 / vlm"
+    switched = await h.timer("start", "course", "線形代数")
+    assert switched["running"]["description"] == "大学 / 線形代数" and switched["stopped"]["description"] == "研究 / vlm"
+    stopped = await h.timer("stop")
+    await settle(assistant)
+    assert stopped["running"] is None and stopped["stopped"]["description"] == "大学 / 線形代数"
+    assert (await h.timer("status"))["running"] is None
+    # カードは置かない（Slack にいないとき、カードの投稿は知らせにたまるだけになる）
+    assert slack.posted() == []
+
+
+async def test_the_head_timer_checks_its_words(env):
+    assistant, *_ = env
+    from kei_agent.conversation.hands import Hands, HandsError
+    with pytest.raises(HandsError):
+        await Hands(assistant).timer("start", "play", "x")
+    with pytest.raises(HandsError):
+        await Hands(assistant).timer("start", "research", "")
+    with pytest.raises(HandsError):
+        await Hands(assistant).timer("jump")

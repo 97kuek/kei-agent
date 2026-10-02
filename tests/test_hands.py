@@ -249,3 +249,78 @@ async def test_post_is_on_the_door_and_takes_no_channel(config, store):
     tools = {t.name: t for t in await build_mcp(Hands(assistant)).list_tools()}
     assert "channel" not in tools["post"].input_schema["properties"]
     assert not (tools["post"].annotations and tools["post"].annotations.read_only_hint)
+
+
+async def test_notices_hand_over_what_kei_agent_would_have_posted_once(config, store):
+    from kei_agent.conversation.outbox import Outbox
+    assistant, _ = make_assistant(config, store)
+    assistant.slack = Outbox(config, store)
+    await assistant.slack.chat_postMessage(channel="vlm", text="🧪 評価が終わったよ")
+    h = Hands(assistant)
+    first = h.notices()
+    assert [(n["channel"], n["text"]) for n in first["notices"]] == [("vlm", "🧪 評価が終わったよ")]
+    assert h.notices()["notices"] == []
+
+
+async def test_notices_are_empty_while_kei_agent_is_on_slack(hands):
+    h, _ = hands
+    assert h.notices() == {"notices": [], "slack": True}
+
+
+async def test_post_is_refused_without_slack(config, store):
+    from kei_agent.conversation.outbox import Outbox
+    assistant, _ = make_assistant(config, store)
+    assistant.slack = Outbox(config, store)
+    with pytest.raises(HandsError, match="Slack"):
+        await Hands(assistant).post("今日の予定")
+
+
+async def test_run_keeps_the_exchange_in_the_workspace_thread_log(hands, config):
+    h, claude = hands
+    claude.answer(final_answer("評価は 0.82 だった"))
+    out = await h.run("vlm", "評価して", conversation="1790932570.682239")
+    log = (config.research_root / "vlm" / ".kei-agent" / "threads" / "1790932570.682239.md").read_text()
+    assert out["status"] == "done" and "評価して" in log and "評価は 0.82 だった" in log
+    # Slack のスレッドではない会話の番号でも残す
+    await h.run("vlm", "続き", conversation="c-abc")
+    assert (config.research_root / "vlm" / ".kei-agent" / "threads" / "c-abc.md").is_file()
+
+
+async def test_files_go_in_through_inputs_and_come_out_of_outputs_only(hands, config):
+    h, _ = hands
+    saved = h.put_file("vlm", "メモ.txt", "見てほしい表")
+    assert saved == {"path": "inputs/メモ.txt"}
+    assert (config.research_root / "vlm" / "inputs" / "メモ.txt").read_text() == "見てほしい表"
+    (config.research_root / "vlm" / "outputs").mkdir(exist_ok=True)
+    (config.research_root / "vlm" / "outputs" / "結果.md").write_text("# 結果")
+    assert h.read_file("vlm", "outputs/結果.md") == {"path": "outputs/結果.md", "text": "# 結果", "truncated": False}
+    for bad in ("inputs/メモ.txt", "outputs/../notes.md", "/etc/hosts"):
+        with pytest.raises(HandsError):
+            h.read_file("vlm", bad)
+    with pytest.raises(HandsError):
+        h.put_file("vlm", "../外.txt", "x")
+
+
+async def test_create_workspace_makes_a_theme_folder_once(hands, config):
+    h, _ = hands
+    made = await h.create_workspace("depth")
+    assert made["name"] == "depth" and made["kind"] == "研究テーマ" and made["created"]
+    assert (config.research_root / "depth").is_dir()
+    assert (await h.create_workspace("depth"))["created"] is False
+    assert "depth" in {item["name"] for item in h.workspaces()}
+
+
+async def test_create_workspace_can_use_an_existing_folder(hands, config, tmp_path):
+    h, _ = hands
+    (tmp_path / "user").mkdir()
+    h.assistant.config = config = replace(config, user_dir=tmp_path / "user")
+    folder = tmp_path / "既存" / "slam"
+    folder.mkdir(parents=True)
+    made = await h.create_workspace("slam", str(folder))
+    assert made["folder"] == str(folder.resolve()) and not (config.research_root / "slam").exists()
+
+
+async def test_create_workspace_refuses_agent_channels(hands):
+    h, _ = hands
+    with pytest.raises(HandsError):
+        await h.create_workspace("course")
