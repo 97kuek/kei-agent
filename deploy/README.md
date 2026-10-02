@@ -158,7 +158,7 @@ gh auth status                                      # 要望を GitHub issue に
 頭（Claude Code・Codex、いずれ OpenAI Dots）から作業場で AI を動かす口。使うときだけ開く。
 
 1. `config.toml` に `[hands]` の `url = "http://127.0.0.1:8785"` を書き、`KEI_AGENT_HANDS_TOKEN` を置いて `deploy/restart-all.sh`
-2. 頭に登録する（合言葉はシェルの環境変数から渡す。ファイルに書き写さない）
+2. 頭に登録する（合言葉はシェルの環境変数から渡す。ファイルに書き写さない）。担当が使うアカウントのフォルダ（`agents.csv` の `claude_account`）の user の範囲には登録しない。アカウントの連携を使う担当（仕事）は user の MCP も読むので、担当から手の口が見えてしまう
 
 ```zsh
 claude mcp add -s user --transport http kei-agent-hands http://127.0.0.1:8785/mcp \
