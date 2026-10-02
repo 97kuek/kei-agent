@@ -1,10 +1,9 @@
 """要望を、要約した公開の GitHub issue にする（自己改善のモジュールの issues.py）。"""
 
-import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import make_assistant
+from fakes import git, make_assistant
 
 from kei_agent.api import AIError, contains_secret
 from kei_agent.configuration.config import AgentProfile
@@ -146,10 +145,6 @@ async def test_summarize_refuses_when_the_ai_cannot_run(error):
 ])
 def test_repository_comes_from_the_origin_url(url, slug):
     assert issues.parse_slug(url) == slug
-
-
-def git(repo, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
 async def test_repo_slug_reads_the_origin_of_the_repository(tmp_path):

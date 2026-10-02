@@ -10,14 +10,12 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from fakes import FakeAI, make_assistant
+from fakes import FakeAI, final_answer, make_assistant
 
 from kei_agent.conversation import hands as hands_module
 from kei_agent.conversation.hands import Hands, HandsError
 from kei_agent.execution import runner
 from kei_agent.operations.hands_server import build_app, build_mcp
-
-FINAL = "<<kei-agent-final>>\n{}\n<<kei-agent-final-end>>"
 
 
 @pytest.fixture
@@ -42,7 +40,7 @@ def test_workspaces_list_themes_and_agents_with_what_the_head_may_choose(hands):
 
 async def test_a_short_run_answers_in_place_and_a_conversation_continues(hands):
     h, claude = hands
-    claude.answer(FINAL.format("図を作りました"), session_id="sess-9",
+    claude.answer(final_answer("図を作りました"), session_id="sess-9",
                   side_effect=lambda cwd: (cwd / "outputs").mkdir(exist_ok=True) or (cwd / "outputs" / "a.png").write_bytes(b"x"))
     first = await h.run("vlm", "図を作って", weight="deep")
     assert (first["status"], first["text"]) == ("done", "図を作りました")
@@ -50,17 +48,17 @@ async def test_a_short_run_answers_in_place_and_a_conversation_continues(hands):
     call = claude.calls[-1]
     assert (call["actor"], call["use_case"], call["session_id"]) == ("research", "research_design", None)  # 重さ → 用途
     # 会話の番号を渡すと、同じ会話（セッション）の続き。渡さなければ新しい会話
-    claude.answer(FINAL.format("色を変えました"))
+    claude.answer(final_answer("色を変えました"))
     again = await h.run("vlm", "色を変えて", conversation=first["conversation"])
     assert again["status"] == "done" and claude.calls[-1]["session_id"] == "sess-9"
-    claude.answer(FINAL.format("別の話"))
+    claude.answer(final_answer("別の話"))
     await h.run("vlm", "別の話")
     assert claude.calls[-1]["session_id"] is None
 
 
 async def test_questions_come_back_as_needs_input_and_failures_as_failed(hands):
     h, claude = hands
-    claude.answer(FINAL.format("どちらにする？\n❓ 確認: A と B のどちら？"))
+    claude.answer(final_answer("どちらにする？\n❓ 確認: A と B のどちら？"))
     assert (await h.run("vlm", "直して"))["status"] == "needs_input"
     claude.answer("", is_error=True, errors=["こわれた"])
     failed = await h.run("vlm", "直して")
@@ -77,7 +75,7 @@ async def test_a_long_run_returns_a_ticket_and_status_shows_the_result(hands, mo
         await gate.wait()
         return await real(*args, **kwargs)
     monkeypatch.setattr(runner, "run_model", slow)
-    claude.answer(FINAL.format("終わりました"))
+    claude.answer(final_answer("終わりました"))
     accepted = await h.run("vlm", "長い実験を回して")
     assert accepted["status"] == "accepted"
     assert h.status(accepted["ticket"])["status"] == "running"
@@ -122,7 +120,7 @@ async def test_the_door_checks_the_password(hands):
 async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
     """道具が別のスレッドで動くと、記録の SQLite が使えない（作ったスレッドでしか使えない）。"""
     h, claude = hands
-    claude.answer(FINAL.format("済みました"))
+    claude.answer(final_answer("済みました"))
     mcp = build_mcp(h)
 
     async def call(name, args):

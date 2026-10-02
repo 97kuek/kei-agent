@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fakes import FakeAI, make_assistant
+from fakes import FakeAI, git, make_assistant
 
 from kei_agent.configuration.config import AgentProfile
 from kei_agent.conversation.request import Request
@@ -21,10 +21,6 @@ from kei_agent.testing.kit import settle
 from kei_agent_modules.improve import issues
 from kei_agent_modules.improve import repo as improve_repo
 from kei_agent_modules.improve.module import HIDDEN
-
-
-def git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 @pytest.fixture

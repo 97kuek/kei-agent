@@ -8,7 +8,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, make_assistant
+from fakes import FakeAI, home_action, make_assistant
 
 from kei_agent.execution import runner
 from kei_agent.framework import modules
@@ -80,10 +80,6 @@ def _published(slack):
     return [kw for name, kw in slack.calls if name == "views_publish"][-1]["view"]
 
 
-def _action(action_id, user="UME", **extra):
-    return {"user": {"id": user}, "trigger_id": "trig", "actions": [{"action_id": action_id, **extra}]}
-
-
 async def test_a_module_puts_its_own_items_on_app_home_and_handles_them(env, store):
     """モジュールの項目は、表示名の見出しの下に並ぶ。押されたらそのモジュールが扱い、App Home を作り直す。"""
     assistant, slack = env
@@ -93,7 +89,7 @@ async def test_a_module_puts_its_own_items_on_app_home_and_handles_them(env, sto
     light, = blocks[title + 1]["elements"]
     assert light["action_id"] == "kei_agent_home_module:lamp:light" and "initial_options" not in light
 
-    await assistant.on_home_action(_action(light["action_id"], selected_options=[{"value": "on"}]))
+    await assistant.on_home_action(home_action(light["action_id"], selected_options=[{"value": "on"}]))
     assert assistant.cores["lamp"].records.get("switch", "light") == {"on": True}
     light, = [e for b in _published(slack)["blocks"] for e in b.get("elements", [])
               if e.get("action_id") == "kei_agent_home_module:lamp:light"]
@@ -103,7 +99,7 @@ async def test_a_module_puts_its_own_items_on_app_home_and_handles_them(env, sto
 async def test_module_items_are_for_the_owner_and_a_broken_one_is_left_out(env, monkeypatch):
     """ほかの人には見せず、押されても扱わない。1つのモジュールの項目が作れなくても、App Home は出す。"""
     assistant, slack = env
-    await assistant.on_home_action(_action("kei_agent_home_module:lamp:light", user="USOMEONE",
+    await assistant.on_home_action(home_action("kei_agent_home_module:lamp:light", user="USOMEONE",
                                            selected_options=[{"value": "on"}]))
     assert assistant.cores["lamp"].records.get("switch", "light") is None
     await assistant.publish_home("USOMEONE")

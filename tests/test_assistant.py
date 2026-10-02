@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack, make_assistant, pending_asks, write_request
+from fakes import FakeAI, FakePueue, FakeSlack, final_answer, make_assistant, pending_asks, write_request
 
 import kei_agent.conversation.assistant as assistant_module
 from kei_agent.conversation import ask, router
@@ -90,11 +90,7 @@ def _ask_result(data):
                                                   "limit_reset_at": data.get("limit_reset_at"), "cost_usd": None}))
 
 
-def _final(text):
-    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
-
-
-ANSWER = _final("答えだよ")
+ANSWER = final_answer("答えだよ")
 
 
 class _Agent:
@@ -163,7 +159,7 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
 
 
 @pytest.mark.parametrize(("behavior", "shown", "hidden"), [
-    ({"text": "まず材料を確認します。\n" + _final("僕が調べた結果、できたよ。")}, "僕が調べた結果、できたよ。",
+    ({"text": "まず材料を確認します。\n" + final_answer("僕が調べた結果、できたよ。")}, "僕が調べた結果、できたよ。",
      "まず材料を確認します。"),
     ({"text": "材料を確認してから返します", "raw": True}, "返答を利用者向けの形に整えられなかったよ",
      "材料を確認してから返します"),
@@ -1170,7 +1166,7 @@ async def test_course_channel_sends_free_questions_to_ask(course, store):
     """定型に当てはまらない質問は ask に回し、大学エージェント自身の claude が答える。"""
     assistant, slack, claude, _ = course
     agent = assistant.agents["course"] = _Agent(_ask_result({
-        "session_id": "course-1", "text": _final("過去問は Box の Personal/過去問 にあるよ"), "is_error": False,
+        "session_id": "course-1", "text": final_answer("過去問は Box の Personal/過去問 にあるよ"), "is_error": False,
         "provider": "claude"}), activity="box_search: 過去問")
 
     await mention(assistant, "情報セキュリティBの過去問ある？", ts="11.2", channel="C7")
@@ -1198,7 +1194,7 @@ async def test_course_answers_mention_the_owner_like_research(course, monkeypatc
     if long_run:
         monkeypatch.setattr(assistant_module, "NOTIFY_AFTER_SECONDS", -1)
     assistant.agents["course"] = _AskAgent("http://127.0.0.1:8787", [
-        {"session_id": "course-1", "text": _final(answer), "is_error": False, "provider": "claude"}])
+        {"session_id": "course-1", "text": final_answer(answer), "is_error": False, "provider": "claude"}])
     await mention(assistant, "過去問ある？", ts="11.2", channel="C7")
     assert [said in m for m in _mentions(slack)] == ([True] if said else [])
 
@@ -1462,7 +1458,7 @@ async def test_claude_runs_through_the_research_agent_when_configured(env, store
     """[a2a] research_url を書くと、claude は研究エージェント経由で動く（本体の中では動かさない）。"""
     assistant, slack, claude, _ = env
     agent = assistant.agents["research"] = _Agent(_ask_result(
-        {"text": _final("できたよ"), "session_id": "sess-7", "is_error": False}),
+        {"text": final_answer("できたよ"), "session_id": "sess-7", "is_error": False}),
         base_url="http://127.0.0.1:8788", activity="Bash: 図を描く")
 
     await mention(assistant, "図を作って", ts="13.1")

@@ -2,12 +2,12 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import pytest
+from fakes import git
 
 from kei_agent.operations.app import setup_logging
 from kei_agent.scheduling import maintenance
@@ -53,10 +53,6 @@ def test_exclude_large_files_rewrites_its_own_block(tmp_path):
 
     text = (tmp_path / ".git" / "info" / "exclude").read_text()
     assert "# 手で書いた行" in text and "big.bin" not in text
-
-
-def git(cwd, *args):
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
 def pushed_repo(path, remote, files):

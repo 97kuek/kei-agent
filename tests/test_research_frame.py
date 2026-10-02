@@ -7,7 +7,7 @@
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, make_assistant, write_config
+from fakes import FakeAI, make_assistant, make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution import model_classifier, model_policy, runner
@@ -66,13 +66,6 @@ def _lab(root, toml=LAB_TOML):
     return folder
 
 
-def _home(tmp_path, text=""):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return home
-
-
 # 用途の手動指定
 
 def test_a_manual_use_case_is_chosen_only_by_name(tmp_path):
@@ -118,7 +111,7 @@ async def test_the_classifier_never_picks_a_manual_use_case(tmp_path, config, st
 ])
 def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, message):
     """いちばん強いモデル（fable・astra）は手動指定の用途でしか書けない。自由な質問の既定にも手動指定は使えない。"""
-    home = _home(tmp_path, 'modules = ["lab"]\n')
+    home = make_home(tmp_path, 'modules = ["lab"]\n')
     _lab(home / "modules", LAB_TOML.replace(*change))
     with pytest.raises((ConfigError, modules.ModuleError), match=message):
         load_config(env={"KEI_AGENT_HOME": str(home)})
@@ -127,7 +120,7 @@ def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, mes
 # ほかのどれにも当たらないチャンネル
 
 def test_one_module_can_take_every_unclaimed_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["course", "lab"]\n')
+    home = make_home(tmp_path, 'modules = ["course", "lab"]\n')
     _lab(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "1-vlm-counting")
@@ -142,7 +135,7 @@ def test_one_module_can_take_every_unclaimed_channel(tmp_path):
 
 def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
     """受け持てるのは、オンのモジュールのうち1つだけ（研究をオフにすれば、自分のモジュールに受け持たせられる）。"""
-    home = _home(tmp_path, 'modules = ["lab", "lab2"]\n')
+    home = make_home(tmp_path, 'modules = ["lab", "lab2"]\n')
     _lab(home / "modules")
     other = home / "modules" / "lab2"
     other.mkdir()

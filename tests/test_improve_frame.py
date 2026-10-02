@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, make_assistant, write_config
+from fakes import FakeAI, make_assistant, make_home
 
 from kei_agent import api
 from kei_agent.configuration.config import ConfigError, load_config
@@ -77,13 +77,6 @@ def _fixer(root, toml=FIXER_TOML, code=FIXER_CODE):
     return folder
 
 
-def _home(tmp_path, text=""):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return home
-
-
 class RecordingClaude(FakeAI):
     """どの担当・用途・作業場で、書き込みを許して動かしたかも覚える。"""
 
@@ -115,7 +108,7 @@ def req(text="直して", ts="20.1"):
 # 本体のチャンネルの会話を受け持つ
 
 def test_a_module_takes_the_kei_agent_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["fixer"]\n')
+    home = make_home(tmp_path, 'modules = ["fixer"]\n')
     _fixer(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "0-kei-agent")
@@ -135,7 +128,7 @@ def test_only_known_core_channels_can_be_taken(tmp_path):
 
 
 def test_only_one_module_may_take_a_core_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["fixer", "fixer2"]\n')
+    home = make_home(tmp_path, 'modules = ["fixer", "fixer2"]\n')
     _fixer(home / "modules")
     other = _fixer(home / "modules" / "x", FIXER_TOML.replace('name = "fixer"', 'name = "fixer2"')
                    .replace("fixer_", "fixer2_"))

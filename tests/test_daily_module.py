@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, make_theme
+from fakes import FakeAI, FakeHub, FakeNotion, final_answer, make_assistant, make_theme
 from test_schedule import FakeCourseAgent, due_item
 
 from kei_agent.execution import runner
@@ -42,10 +42,6 @@ DAILY_REPLY = """**今日のタスク**
 def material(prompt: str) -> str:
     """プロンプトに入れた材料の部分だけ。"""
     return prompt.split(texts.MATERIAL_START, 1)[1].split(texts.MATERIAL_END, 1)[0]
-
-
-def final(text: str) -> str:
-    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
 
 
 @pytest.fixture
@@ -120,7 +116,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
 
 async def test_the_scheduler_posts_only_the_four_bold_sections_of_daily(env, store):
     scheduler, assistant, slack, claude = env
-    claude.behaviors = [{"text": "手順を確認します\n" + final(DAILY_REPLY)}]
+    claude.behaviors = [{"text": "手順を確認します\n" + final_answer(DAILY_REPLY)}]
 
     result = await scheduler.run_task("daily", "2026-09-24")
 
@@ -130,7 +126,7 @@ async def test_the_scheduler_posts_only_the_four_bold_sections_of_daily(env, sto
 
 
 @pytest.mark.parametrize(("task", "day", "text", "notice"), [
-    ("daily", "2026-09-24", final("*今日のタスク*\nなし"), ""),       # 4つの見出しがそろっていない
+    ("daily", "2026-09-24", final_answer("*今日のタスク*\nなし"), ""),       # 4つの見出しがそろっていない
     ("review", "2026-09-23", "まず材料を確認します。\n" + REVIEW_REPLY,  # 途中の独り言が混ざっている
      "振り返りを利用者向けの形に整えられなかったよ"),
 ])
@@ -289,22 +285,22 @@ def test_claude_limit_does_not_block_codex_daily(env, store):
 # 答えの形
 
 def test_the_daily_answer_needs_the_four_sections():
-    assert daily_answer(final(DAILY_REPLY)) == DAILY_REPLY
-    assert daily_answer(final("*今日のタスク*\nなし")) == ""
+    assert daily_answer(final_answer(DAILY_REPLY)) == DAILY_REPLY
+    assert daily_answer(final_answer("*今日のタスク*\nなし")) == ""
     assert daily_answer("marker のない答え") == ""
 
 
 def test_the_review_answer_adds_the_night_question_when_missing():
     body = "**今日の成果**\n- 実験を回した\n\n\n**未完了タスク**\nなし"
     expected = "**今日の成果**\n- 実験を回した\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？"
-    assert review_answer(final(body)) == expected
-    assert review_answer(final(body + "\n\n夜間に実行したいタスクはありますか？")) == expected
-    assert review_answer(final(REVIEW_REPLY)) == REVIEW_REPLY
+    assert review_answer(final_answer(body)) == expected
+    assert review_answer(final_answer(body + "\n\n夜間に実行したいタスクはありますか？")) == expected
+    assert review_answer(final_answer(REVIEW_REPLY)) == REVIEW_REPLY
     # Web のリンクと、作業場の中のファイル名は通す
     linked = REVIEW_REPLY.replace("なし", "資料: https://example.com/notes", 1)
-    assert review_answer(final(linked)) == linked
+    assert review_answer(final_answer(linked)) == linked
     named = REVIEW_REPLY.replace("なし", "振り返りを reviews/2026-09-24.md にまとめた", 1)
-    assert review_answer(final(named)) == named
+    assert review_answer(final_answer(named)) == named
 
 
 @pytest.mark.parametrize("text", [
@@ -316,13 +312,13 @@ def test_the_review_answer_adds_the_night_question_when_missing():
     "**今日の成果**\nSkill を使って調査中です。\n\n**未完了タスク**\nなし\n\n夜間に実行したいタスクはありますか？",
 ])
 def test_the_review_answer_refuses_other_shapes(text):
-    assert review_answer(final(text)) == ""
+    assert review_answer(final_answer(text)) == ""
 
 
 @pytest.mark.parametrize("path", ["/Users/keitaro/private", "/tmp/private.md", "file:///private/private.md",
                                   "~/.config/private"])
 def test_the_review_answer_shows_only_the_file_name_of_local_paths(path):
     """手元のパスは、答えごと捨てずにファイル名だけにする（Slack にも日別記録にも、場所を出さない）。"""
-    shown = review_answer(final(f"**今日の成果**\n{path}\n\n**未完了タスク**\nなし"))
+    shown = review_answer(final_answer(f"**今日の成果**\n{path}\n\n**未完了タスク**\nなし"))
     assert shown and path not in shown and path.rsplit("/", 1)[-1] in shown
 
