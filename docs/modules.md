@@ -40,7 +40,7 @@ uv run kei-agent doctor                                 # 確かめる
 - 同じフォルダのファイルは `from . import texts` のように読める
 - 枠の版は `api = 1`。合わない版のモジュールは読み込まない
 - できること（`[actor]` の `files`・`shell`・`web`・`notion`・連携の道具）を超えることは、コアが実行のときに止める
-- AI に書かせてよいのは、自分のフォルダ（`core.state_dir`）か、`files = "write"` のときの作業場だけ
+- AI に書かせてよいのは、自分のフォルダ（`core.state_dir`）か、作業場だけ
 - 秘密情報は `[secrets]` に名前と説明だけを書く。値はコード・ログ・Slack に出さない
 - 指示書の返答は `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間だけが Slack に出る。印が無いと答えが空になる
 - 名前は英小文字・数字・-（フォルダの名前と同じ）
