@@ -17,16 +17,15 @@ from kei_agent.execution.provider_permissions import CapabilityUnavailable, pref
 from kei_agent.workspaces import themes
 
 ACTORS = {"research": "research_execute", "course": "course_explain", "work": "work_single_source",
-          "knowledge": "knowledge_answer", "workdev": "workdev_execute"}
+          "knowledge": "knowledge_answer"}
 
 
 def _accounts(config, tmp_path):
-    """仕事と仕事の開発は会社、大学は個人のアカウント。仕事の開発の作業場は ~/work のつもりの場所。"""
+    """仕事は会社、大学は個人のアカウント。仕事のプロジェクトの作業場は ~/work のつもりの場所。"""
     profiles = dict(config.agent_profiles)
-    for name, folder in (("work", "claude-work"), ("workdev", "claude-work"), ("course", "claude-personal")):
+    for name, folder in (("work", "claude-work"), ("course", "claude-personal")):
         profiles[name] = replace(profiles[name], claude_account=str(tmp_path / folder))
-    return replace(config, agent_profiles=profiles, modules=(*config.modules, "workdev"),
-                   module_folders={"workdev": tmp_path / "work"})
+    return replace(config, agent_profiles=profiles, module_folders={"work": tmp_path / "work"})
 
 
 def _request(config, actor, provider):
@@ -80,11 +79,9 @@ def test_accounts_and_other_accounts_workspaces_are_never_readable(config, tmp_p
     research = guard.denied_reads(config, "research")
     assert {tmp_path / "claude-work", tmp_path / "claude-personal"} <= set(research)
     assert tmp_path / "work" in research and config.research_root not in research   # 会社の作業場は読めない
-    workdev = guard.denied_reads(config, "workdev")
-    assert config.research_root in workdev and config.course_root in workdev          # 個人の作業場は読めない
-    assert tmp_path / "work" not in workdev                                          # 自分の作業場は読める
-    # 同じアカウントの担当どうし（仕事と仕事の開発）は、互いを塞がない
-    assert tmp_path / "work" not in guard.denied_reads(config, "work")
+    work = guard.denied_reads(config, "work")
+    assert config.research_root in work and config.course_root in work                # 個人の作業場は読めない
+    assert tmp_path / "work" not in work                                             # 自分のプロジェクトは読める
 
 
 async def test_claude_also_stops_before_running_when_the_lines_cannot_be_kept(config, monkeypatch):
@@ -130,7 +127,7 @@ def test_claude_and_codex_reach_out_only_with_own_data(config, tmp_path, actor):
     config = _accounts(config, tmp_path)
     contract = _contract(config, actor, "claude")
     outward = contract.policy.network
-    assert outward == (actor not in ("work", "workdev")) and contract.policy.web == outward
+    assert outward == (actor != "work") and contract.policy.web == outward
     claude = guard.build_settings(config, contract.workspace, contract.policy)["sandbox"]["network"]
     assert claude["strictAllowlist"] is not outward and claude["allowedDomains"] == []
     codex = preflight(config, _contract(config, actor, "codex"), "codex_cli")

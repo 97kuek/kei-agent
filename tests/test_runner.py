@@ -80,7 +80,7 @@ def test_settings_network_follows_the_data(config):
     ws = themes.resolve(config, "vlm")
     network = guard.build_settings(config, ws, policy_of("research"))["sandbox"]["network"]
     assert network == {"allowedDomains": [], "strictAllowlist": False}
-    company = guard.build_settings(config, ws, policy_of("workdev"))["sandbox"]["network"]
+    company = guard.build_settings(config, ws, policy_of("work"))["sandbox"]["network"]
     assert company == {"allowedDomains": [], "strictAllowlist": True}
 
 

@@ -33,6 +33,8 @@ def config(tmp_path: Path) -> Config:
         agent_root=tmp_path / "kei-agent",
         course_root=tmp_path / "course",
         state_dir=tmp_path / "state",
+        # 仕事のプロジェクトの置き場所（既定の ~/work に触れない）
+        module_folders={"work": tmp_path / "work"},
         repo_root=REPO_ROOT,
         allowed_user_id="UME",
         allow_write=(tmp_path / "cache",),

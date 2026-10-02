@@ -638,7 +638,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             await self._dispatch(req, themes.actor_of(ws), "")
             return None
         if ws.kind is ChannelKind.PROJECT:
-            # プロジェクトのチャンネル。受け持つモジュール（仕事の開発など）が、作業場で答える
+            # プロジェクトのチャンネル。受け持つモジュール（仕事など）が、作業場で答える
             if not await self._dispatch(req, themes.actor_of(ws), ""):
                 await self.post(req, NO_THEME_OWNER)
                 await self.mark_answered(req, failed=True)

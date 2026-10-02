@@ -2,6 +2,8 @@
 
 - 仕事のチャンネル（#3-work）… 言われたことを担当の名刺の仕事から選び、予定の一覧なら Outlook の予定を
   今日・明日・このあとに分けて出す。そのほかの質問は、担当が Microsoft 365 を読んで答える（会話の続き方は研究と同じ）
+- プロジェクトのチャンネル（module.toml の [channels] project に "work-*"。#work-billing など）… 依頼はプロジェクトの
+  作業場で担当と会話して答える（core.work。添付・できたファイル・引き継ぎは研究テーマと同じ流れ）
 - 予定（agenda）… 朝の一覧・声のレイヤ・共通ホームの予定カレンダー（出典 Outlook）・振り返りの材料に、会議を出す
 
 `list-events` から作る一覧は、件名・時間・場所・リンクまで（1行ずつ並べるため）。自由な質問の返事は、担当が
@@ -13,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from kei_agent.api import Core, Request, day_label, escape, failure_text, parse_time
+from kei_agent.api import Core, Request, day_label, escape, failure_text, parse_time, theme_name
 
 from .skills import LIST_EVENTS
 
@@ -22,7 +24,8 @@ log = logging.getLogger(__name__)
 CAN_DO = ("このチャンネルでできること。\n"
           "• 「今日の予定は？」… Outlook の予定を、今日・明日・このあとで出す\n"
           "• そのほかの質問… メール・Teams・SharePoint を読んで、要点とリンクで答える\n"
-          "送信や予定の作成はできない（読むだけ）。")
+          "送信や予定の作成はできない（読むだけ）。\n"
+          "コードを書くときは、プロジェクトごとに `#work-<名前>` のチャンネルを作って招いてね。")
 NO_EVENTS = "予定は入っていないよ。"
 # 何日先まで見るか（言われなかったとき）
 DEFAULT_DAYS = 7
@@ -76,6 +79,13 @@ def events_text(events: list[dict], now: datetime, period: str = "week") -> str:
     return "\n".join(lines) or NO_EVENTS
 
 
+def is_project(channel_name: str, patterns: tuple[str, ...]) -> bool:
+    """プロジェクトのチャンネル（[channels] project の "work-*" に頭が一致する名前。番号は外して比べる）か。"""
+    name = theme_name(channel_name)
+    heads = [pattern[:-1] for pattern in patterns if pattern.endswith("-*")]
+    return any(name.startswith(head) and len(name) > len(head) for head in heads)
+
+
 class Module:
     default_question = "今日の予定は？"
 
@@ -86,7 +96,11 @@ class Module:
         return CAN_DO
 
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
-        """仕事の依頼。研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事を使う。"""
+        """仕事の依頼。プロジェクトのチャンネルなら作業場で答える。研究全体のチャンネルから回ってきたときは、
+        振り分け係が選んだ仕事を使う。"""
+        if is_project(req.channel_name, self.core.channels("project")):
+            await self.core.work(req)
+            return
         params = dict(params or {})
         if not skill:
             skill, params = await self.core.pick_skill(req)

@@ -41,8 +41,8 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 |---|---|
 | `module` | モジュールの名前。本体の行は `router`（振り分けの AI）と `overview`（研究全体のチャンネル） |
 | `enabled` | `true` / `false` |
-| `channels` | 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら `module.toml` の既定 |
-| `folder` | その担当の作業場。research の行はテーマのフォルダを置く場所（既定 `~/research`）、course の行は大学の作業場（既定 `~/course`）。AI を使う担当の行だけ。`/tmp` の下には置かない（sandbox が一時フォルダへの書き込みを許すため） |
+| `channels` | 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら `module.toml` の既定。work の行は、`work-*` の形をプロジェクトのチャンネルに、ほかを `#3-work` の名前にする（例 `work work-*`。書かなかったほうは既定のまま） |
+| `folder` | その担当の作業場。research の行はテーマのフォルダを置く場所（既定 `~/research`）、course の行は大学の作業場（既定 `~/course`）、work の行はプロジェクトの作業場を置く場所（既定 `~/work`）。AI を使う担当の行だけ。`/tmp` の下には置かない（sandbox が一時フォルダへの書き込みを許すため） |
 | `engine` | `claude` / `codex`。空欄の担当は動かない |
 | `notion` | その担当が届く Notion のホームのページ ID（URL の末尾32文字）。overview の行は共通ホーム、research は研究ホーム、course は授業ホーム。空欄ならその担当は Notion を使わない |
 | `claude_account` / `codex_account` | その担当が使うアカウントのフォルダ（`CLAUDE_CONFIG_DIR`・`CODEX_HOME`。例 `~/.claude-work`）。空欄ならプロセスの既定のアカウント。Claude のフォルダを書いた担当では、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外して動かす |

@@ -87,6 +87,26 @@ async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, stor
     reply = updater.envelope()
     assert reply["ok"] and reply["data"]["session_id"] == "s-1"
     assert set(reply["data"]) <= set(FIELDS)
+    if kind == "work":
+        # 仕事の担当は、研究テーマのチャンネルを渡されても、そこに作業場を作らない
+        assert not (config.research_root / "vlm").exists()
+
+
+@pytest.mark.parametrize(("channel_name", "folder"), [("work-billing", "billing"), ("3-work-billing", "billing"),
+                                                       ("work", None)])
+async def test_work_runs_in_the_project_only_for_its_project_channels(channel_name, folder, config, store, ran):
+    """仕事の担当は、プロジェクトのチャンネル（work-*）ならその作業場、#3-work なら自分の作業場で動く。"""
+    ask = {"prompt": "テストを直して", "session_id": None, "channel": "C1", "thread_ts": "1.2",
+           "use_case": "work_execute", "provider": "claude", "channel_name": channel_name}
+    updater = _Updater()
+
+    await _executor("work", config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
+
+    (request, _prompt), = ran
+    assert updater.state == "completed"
+    own = config.state_dir / "agents" / "work"
+    assert request.workspace.cwd == (config.module_workspace("work") / folder if folder else own)
+    assert request.workspace.cwd != config.module_workspace("work")      # プロジェクトを並べる場所そのものでは動かない
 
 
 async def test_ask_without_a_use_case_is_classified_by_the_agents_classifier(config, store, ran, monkeypatch):

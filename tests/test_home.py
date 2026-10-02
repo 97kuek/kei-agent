@@ -46,7 +46,7 @@ def test_home_lists_each_agents_ai_and_account_without_controls(config, store):
 
     profiles = {name: AgentProfile() for name in model_actors()}
     profiles["research"] = AgentProfile(provider="claude")
-    profiles["workdev"] = AgentProfile(provider="codex", claude_account="~/.claude-work", codex_account="~/.codex-work")
+    profiles["work"] = AgentProfile(provider="codex", claude_account="~/.claude-work", codex_account="~/.codex-work")
     profiles["router"] = AgentProfile(provider="claude", engines=("claude", "codex"))
     config = replace(config, agent_profiles=profiles)
     view = home.build_home(config, store, is_owner=True)
@@ -55,7 +55,7 @@ def test_home_lists_each_agents_ai_and_account_without_controls(config, store):
     assert "研究  Claude（既定）" in lines
     assert "大学  未選択" in lines                                     # 選ぶまで、その担当は動かない
     assert "振り分け  Claude（既定）・Codex（既定）" in lines
-    assert "仕事の開発  Codex（~/.codex-work）" in lines                # 使う AI のアカウントだけを出す
+    assert "仕事  Codex（~/.codex-work）" in lines                # 使う AI のアカウントだけを出す
     # App Home では AI を変えない（変えるのは agents.csv だけ）
     controls = [element for block in view["blocks"] for element in [block.get("accessory", {}), *block.get("elements", [])]]
     assert not any(str(element.get("action_id", "")).startswith("kei_agent_home_provider") for element in controls)

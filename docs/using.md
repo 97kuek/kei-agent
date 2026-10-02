@@ -14,7 +14,7 @@
 | `#1-<テーマ>` | そのテーマの研究 | [研究](agents/research-agent.md) |
 | `#2-course` | 授業と課題 | [大学](agents/course-agent.md) |
 | `#3-work` | 会社の予定・メール・資料 | [仕事](agents/work-agent.md) |
-| `#work-<名前>` | 仕事のプロジェクトのコードを書く・テストを動かす（作業場は `~/work/<名前>`） | [仕事の開発](agents/workdev-agent.md) |
+| `#work-<名前>` | 仕事のプロジェクトのコードを書く・テストを動かす（作業場は `~/work/<名前>`） | [仕事](agents/work-agent.md#プロジェクトのチャンネル) |
 | `#4-knowledge` | 朝の読みもの、記事と論文の質問 | [知識](agents/knowledge-agent.md) |
 
 - 先頭の番号（`1-` のような1〜2桁と `-`）は並び順のため。照合するときは外す

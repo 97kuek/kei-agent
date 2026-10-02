@@ -10,8 +10,7 @@
 |---|---|---|---|
 | 研究 | 8788 | `#1-<テーマ>`（ほかのどれでもないチャンネル） | [research-agent.md](agents/research-agent.md) |
 | 大学 | 8787 | `#2-course` | [course-agent.md](agents/course-agent.md) |
-| 仕事 | 8789 | `#3-work` | [work-agent.md](agents/work-agent.md) |
-| 仕事の開発 | 8793 | `#work-<名前>` | [workdev-agent.md](agents/workdev-agent.md) |
+| 仕事 | 8789 | `#3-work`・`#work-<名前>` | [work-agent.md](agents/work-agent.md) |
 | 知識 | 8792 | `#4-knowledge` | [knowledge-agent.md](agents/knowledge-agent.md) |
 
 ## 触れる範囲（制限の表）
@@ -23,7 +22,6 @@
 | 研究 | 自分 | ○ | 研究ホームを読み書き | なし |
 | 大学 | 自分 | ○ | 授業ホームを読み書き | Box（読むだけ） |
 | 仕事 | 会社 | ×（外へ出ない） | なし | Microsoft 365（読むだけ） |
-| 仕事の開発 | 会社 | ×（外へ出ない） | なし | なし（会社のアカウントで動く） |
 | 知識 | 自分 | ○ | なし | なし |
 
 - 表は各モジュールの `module.toml` の `[actor]`（`data`・`notion`・`connectors`）から作り、実行のときにコアが守らせる

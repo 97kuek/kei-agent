@@ -82,9 +82,11 @@ class Hands:
         for name in self._projects():
             found[name] = self._describe(name)
         for spec in modules.enabled(self.config.modules):
-            if spec.actor is None or spec.catch_all or spec.prefixes or not spec.channels:
+            if spec.actor is None or spec.catch_all:
                 continue
-            names = self.config.module_channels.get(next(iter(spec.channels)), ())
+            # 担当のチャンネル（頭が一致するプロジェクトのチャンネルは、上の作業場として並べる）
+            names = [name for kind in spec.channels for name in self.config.module_channels.get(kind, ())
+                     if not modules.channel_prefix(name)]
             if names:
                 found[names[0]] = self._describe(names[0])
         return [item for item in found.values() if item]

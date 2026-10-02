@@ -257,6 +257,8 @@ class Config:
     def module_workspace(self, name: str) -> Path:
         """モジュールの実行役の作業場。担当の表の folder 列、無ければ module.toml の [actor] workspace（それも無ければ
         状態の置き場の agents/<名前>）。大学は course_root（表の course の行の folder。書かなければ ~/course）。
+        プロジェクトのチャンネルを持つモジュール（仕事）では、プロジェクトの作業場を並べる場所（担当の作業場は
+        themes.agent_workspace）。
         """
         if name == "course":
             return self.course_root

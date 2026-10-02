@@ -56,7 +56,7 @@ def _run(tmp_path, script, *, installer=None, found=("claude",)):
 def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
     script = Script(
         answers=[("話し方", "一人称は「僕」。短く"), ("呼び方", "山田さん"), ("所属", "○○大学"),
-                 ("外すモジュール", "voice work workdev"), ("研究テーマ", "~/study"), ("共通ホーム", f"https://www.notion.so/Home-{PAGE}?pvs=4"),
+                 ("外すモジュール", "voice work"), ("研究テーマ", "~/study"), ("共通ホーム", f"https://www.notion.so/Home-{PAGE}?pvs=4"),
                  ("登録して起動しますか", "y")],
         secrets={"SLACK_BOT_TOKEN": BOT, "SLACK_APP_TOKEN": APP, "KEI_AGENT_ALLOWED_USER_ID": "U123",
                  "NOTION_TOKEN": "ntn_1", "MOODLE_ICS_URL": "https://moodle.example/ics"})

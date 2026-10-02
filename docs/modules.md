@@ -116,6 +116,7 @@ default = "07:00"               # 空文字なら、既定では動かさない
 | `[settings]` | 利用者が書けるのは、ここにある名前だけ。形が既定と違えば断る。オフにしても設定は残せる |
 | `[secrets]` | `required`: 無いと動かない。`own_file`: `kei-agent-<名前>.zsh` に置く。`generate`: setup が値を作る。`group`: そろって初めて使う |
 | `[channels]` ほか | `[channels]`・`core_channels`・`core_schedules`・`[schedules]` を書いたら `module.py` が要る |
+| `[channels]` の種類 | `agents.csv` の行の `channels` で名前を変えられるのは、種類が1つのときと、ふつうの種類と頭が一致する種類（`"work-*"`）が1つずつのとき（仕事。書き方で分ける）。頭が一致する種類を持つ担当の作業場は状態の置き場の `agents/<名前>` で、`folder` はプロジェクトを並べる場所 |
 | `[process]` | `agent.py`（`kind = "service"` なら `service.py`）が要る。起動し直すときは service が先 |
 | 定期処理の順 | 同じ時刻なら、夜間の Task → モジュール（設定の `modules` の順）→ Daily → 振り返り → 保守 |
 

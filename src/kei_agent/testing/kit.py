@@ -43,8 +43,9 @@ OWNER = "UME"
 BOT = "UBOT"
 # 置き場所（テストの一時フォルダの下に作る）
 PLACES = ("agent_root", "state_dir")
-# 研究と大学の置き場所（担当の表の folder 列に書く）。担当 → 一時フォルダの下の名前
-FOLDERS = {"research": "research_root", "course": "course_root"}
+# 研究・大学・仕事のプロジェクトの置き場所（担当の表の folder 列に書く。既定の ~/research などに触れない）。
+# 担当 → 一時フォルダの下の名前
+FOLDERS = {"research": "research_root", "course": "course_root", "work": "work_root"}
 
 
 async def settle(assistant: Assistant) -> None:

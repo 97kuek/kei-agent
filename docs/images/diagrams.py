@@ -228,8 +228,8 @@ def dots_plan() -> Drawing:
 
     d.arrow([(742, 452), (782, 452)], "A2A", label_at=(762, 434))
     d.frame(782, 360, 210, 300, "MacBook Air", icons=("mac",))
-    d.card(796, 404, 182, 236, "仕事・仕事の開発", ("会社のアカウントの", "Claude Code", "会社のデータは", "ここだけで読む",
-                                               "Mac を開いている", "間だけ使える"),
+    d.card(796, 404, 182, 236, "仕事", ("会社のアカウントの", "Claude Code", "会社のデータは", "ここだけで読む",
+                                     "Mac を開いている", "間だけ使える"),
            icons=("work",), links=("outlook", "teams", "sharepoint"), size=24)
     d.arrow([(620, 660), (620, 684), (1115, 684), (1115, 660)], "SSH", label_at=(868, 684))
     d.frame(1010, 360, 210, 300, "研究室のサーバー", icons=("server",))

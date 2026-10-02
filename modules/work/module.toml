@@ -1,22 +1,26 @@
-# 仕事のモジュール（docs/extensibility.md）。会社のアカウントの Microsoft 365 を読んで、予定と会社のことに答える
+# 仕事のモジュール（docs/agents/work-agent.md）。会社のアカウントで、Microsoft 365 を読んで予定と会社のことに答え、
+# 仕事のプロジェクトのチャンネルでは作業場のコードを書いて動かす
 api = 1
 name = "work"
 label = "仕事"
-description = "会社のアカウントの Outlook・Teams・SharePoint を読む（読むだけ）。予定の一覧と、会社のことの質問に答える"
+description = "会社のアカウントで、Outlook・Teams・SharePoint を読んで予定と会社のことに答え（読むだけ）、プロジェクトのチャンネル（#work-<名前>）では作業場（~/work/<名前>）のコードを書いてテストを動かす"
 
 # AI の実行役（provider は agents.csv の engine）。会社のアカウントは agents.csv の work の行の claude_account / codex_account。
-# 手元のファイル・コマンド・Web・Notion は使わない。送信・投稿・作成・削除は、道具を渡さないうえに二の柵（plugin）が断る
+# Notion は使わない。Microsoft 365 は読むだけで、送信・投稿・作成・削除は、道具を渡さないうえに二の柵（plugin）が断る
 [actor]
 # 会社のデータを読む。外へ出られない（Web もコマンドの通信も無し）
 data = "company"
 prompt = "work.md"
 plugin = true
 notion = "none"
+# 1回の上限（#3-work の読む回）。プロジェクトの作業場は config.toml の run_timeout_minutes
 timeout_minutes = 5
-default_use_case = "work_single_source"
+# プロジェクトの作業場を置く場所（agents.csv の work の行の folder で変えられる）。#work-billing の作業場は ~/work/billing
+workspace = "~/work"
+default_use_case = "work_execute"
 # 頭（Dots など）が伝える重さ → 用途
-weights = { light = "work_single_source", normal = "work_cross_source", deep = "work_decide" }
-classify = "1件のメール・資料の要点は work_single_source、複数メール・予定・資料の状況要約は work_cross_source、優先順位・会議準備・論点整理は work_decide。"
+weights = { light = "work_single_source", normal = "work_execute", deep = "work_design" }
+classify = "1件のメール・資料の要点は work_single_source、複数メール・予定・資料の状況要約は work_cross_source、優先順位・会議準備・論点整理は work_decide。コードの実装・修正・テスト・調査は work_execute、コードの設計・方針の比較・大きな作り替えの計画は work_design。"
 
 # Outlook: 予定・メール・人・空き時間を探して読む。Codex ではメールと予定が別の App で、道具の名前も違う
 [[actor.connectors]]
@@ -58,10 +62,21 @@ codex = { model = "gpt-6-sol", effort = "medium" }
 claude = { model = "claude-opus-5", effort = "high" }
 codex = { model = "gpt-6-sol", effort = "high" }
 
+[use_cases.work_execute]
+claude = { model = "claude-sonnet-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "high" }
+
+[use_cases.work_design]
+claude = { model = "claude-opus-5", effort = "high" }
+codex = { model = "gpt-6-sol", effort = "xhigh" }
+
 # 担当プロセス（A2A のサーバー）
 [process]
 port = 8789
 
-# チャンネル（番号を外した名前。agents.csv の work の行の channels で変えられる）
+# チャンネル（番号を外した名前）。種類が2つあるので、agents.csv の work の行の channels は空欄にする
+# - work … 会社の予定・メール・資料に答えるチャンネル（#3-work）
+# - project … 頭が work- のチャンネル（プロジェクト）。#work-billing の作業場は ~/work/billing
 [channels]
 work = ["work"]
+project = ["work-*"]

@@ -4,7 +4,9 @@
 claude_account, codex_account, claude_email（folder・notion・engines と、アカウントの3つは無くてもよい）。
 
 - enabled … true / false（大文字でもよい）。表に無いモジュールはオフ
-- channels … 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら module.toml の既定
+- channels … 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら module.toml の既定。チャンネルの種類が
+  2つ（ふつうのものと、"work-*" のような頭が一致するもの）のモジュール（仕事）は、書き方で種類を分ける。書かなかった
+  種類は既定のまま
 - folder … その担当の作業場（研究はテーマのフォルダを置く場所）。AI を持つ担当だけ。空欄なら既定
 - notion … その担当が届く Notion のホームのページ（URL の末尾32文字）。overview の行は共通ホーム。空欄なら Notion を使わない
 - engine … claude / codex。空欄は「まだ選んでいない」
@@ -54,6 +56,28 @@ def channel_kind(spec: modules.ModuleSpec) -> str | None:
     """その行の channels が受け持つチャンネルの種類。本体のチャンネル（improve）か、module.toml の [channels] の1つ。"""
     kinds = [*spec.core_channels, *spec.channels]
     return kinds[0] if len(kinds) == 1 else None
+
+
+def split_channels(spec: modules.ModuleSpec, names: list[str]) -> dict[str, list[str]] | None:
+    """その行の channels を、受け持つチャンネルの種類ごとに分ける。分けられなければ None。
+
+    種類が1つなら、全部をその種類に。module.toml の [channels] に、頭が一致する書き方（"work-*"）だけの種類と
+    そうでない種類が1つずつあるとき（仕事）は、"work-*" の形の名前を前者に、ほかを後者に分ける。
+    """
+    kind = channel_kind(spec)
+    if kind is not None:
+        return {kind: list(names)}
+    if spec.core_channels:
+        return None
+    patterns = [k for k, defaults in spec.channels.items()
+                if defaults and all(modules.channel_prefix(n) for n in defaults)]
+    plain = [k for k in spec.channels if k not in patterns]
+    if len(patterns) != 1 or len(plain) != 1:
+        return None
+    found: dict[str, list[str]] = {}
+    for channel in names:
+        found.setdefault(patterns[0] if modules.channel_prefix(channel) else plain[0], []).append(channel)
+    return found
 
 
 def parse(text: str, name: str = AGENTS_FILE) -> dict:
@@ -115,11 +139,11 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
             if on:
                 enabled.append(module)
             if names:
-                kind = channel_kind(spec)
-                if kind is None:
+                split = split_channels(spec, names)
+                if split is None:
                     why = "チャンネルの種類が複数あるので、ここには書けません" if spec.channels else "チャンネルを持ちません"
                     raise TableError(f"{where}: このモジュールは{why}")
-                channels[kind] = names
+                channels.update(split)
             if spec.actor is None:
                 if engine or model or effort:
                     raise TableError(f"{where}: このモジュールは AI を使わないので、engine・model・effort は空欄にしてください")
@@ -185,5 +209,6 @@ def build(enabled: list[str] | None = None, *, channels: dict[str, list[str]] | 
             writer.writerow({"module": name, "enabled": "true"})
             continue
         kind = channel_kind(spec)
-        row(name, name in on, channels.get(kind, ()) if kind else (), spec.actor is not None)
+        kinds = (kind,) if kind else tuple(spec.channels) if split_channels(spec, []) is not None else ()
+        row(name, name in on, [n for k in kinds for n in channels.get(k, ())], spec.actor is not None)
     return out.getvalue()

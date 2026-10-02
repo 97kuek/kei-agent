@@ -38,6 +38,15 @@ def test_workspaces_list_themes_and_agents_with_what_the_head_may_choose(hands):
     assert found["vlm"]["weights"] == ["light", "normal", "deep"]
 
 
+def test_workspaces_list_the_work_agent_and_its_projects(hands, config):
+    """仕事は #3-work の担当と、作業場のフォルダがあるプロジェクトの両方を並べる。"""
+    h, _ = hands
+    (h.config.module_workspace("work") / "billing").mkdir(parents=True)
+    found = {item["name"]: item for item in h.workspaces()}
+    assert found["work"]["kind"] == "担当" and found["work-billing"]["kind"] == "プロジェクト"
+    assert {"work_execute", "work_design", "work_single_source"} <= {u["name"] for u in found["work"]["use_cases"]}
+
+
 async def test_a_short_run_answers_in_place_and_a_conversation_continues(hands):
     h, claude = hands
     claude.answer(final_answer("図を作りました"), session_id="sess-9",

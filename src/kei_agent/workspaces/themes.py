@@ -141,8 +141,9 @@ def resolve(config: Config, channel_name: str) -> Workspace:
     if module:
         if not _SAFE_NAME.match(project) or ".." in project:
             raise ValueError(f"プロジェクト名に使えないチャンネル名です: {channel_name!r}")
+        # コードを書く作業場なので、上限は config.toml の run_timeout_minutes（担当の短い上限は、担当の作業場の回のもの）
         return Workspace(channel_name, ChannelKind.PROJECT, place or config.module_workspace(module) / project,
-                         module=module, external=place is not None)
+                         module=module, external=place is not None, timeout_minutes=config.run_timeout_minutes)
     return Workspace(channel_name, ChannelKind.THEME, place or config.research_root / channel_name,
                      module=catch_all_module(config), external=place is not None)
 
@@ -190,11 +191,13 @@ def agent_workspace(config: Config, agent: str) -> Workspace:
     """モジュールのエージェントが AI を動かす場所。会話の続きは作業場ごとに残るので、毎回同じ場所にする。
 
     module.toml の [actor] workspace（大学は ~/course。前提のメモの AGENTS.md を置く）か、状態の置き場の下
-    （`agents/<名前>`）。どれも手元のファイルは作業場を読むだけ（制限の表）。
+    （`agents/<名前>`）。プロジェクトのチャンネルを持つモジュール（仕事）は、表の folder・[actor] workspace が
+    プロジェクトを並べる場所なので、担当の作業場は状態の置き場の下にする（プロジェクトの作業場と混ぜない）。
     """
     spec = modules.known().get(agent)
     if spec is not None and spec.actor is not None:
-        ws = Workspace(agent, ChannelKind.MODULE, config.module_workspace(agent), module=agent)
+        place = config.state_dir / "agents" / agent if spec.prefixes else config.module_workspace(agent)
+        ws = Workspace(agent, ChannelKind.MODULE, place, module=agent)
     else:
         raise ValueError(f"作業場を持たないエージェントです: {agent}")
     ensure_workspace(ws)
