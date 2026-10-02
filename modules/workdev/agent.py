@@ -29,10 +29,7 @@ class Executor(SkillExecutor):
     agent = "workdev"
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        if metadata.get("skill", ASK) != ASK:
-            await self.fail(updater, f"できるのは {ASK} だけです")
-            return
-        await self.answer(updater, text)
+        await self.pick(updater, metadata, text, (ASK,), ASK)
 
     def workspace(self, ask: dict) -> Workspace:
         """プロジェクトの作業場で動かす。許可済みの接続先は、本体が依頼に添えてくる。"""

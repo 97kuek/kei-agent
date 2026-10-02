@@ -7,6 +7,7 @@ A2A では、相手からのメッセージは `RequestContext` に入って届�
 
 from __future__ import annotations
 
+import json
 import logging
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -47,6 +48,26 @@ def asked_days(metadata: dict | None, default: int, maximum: int = MAX_DAYS) -> 
     return days if 1 <= days <= maximum else default
 
 
+# 材料が本文の JSON でないときの断り
+NO_JSON = "材料は本文の JSON で渡してください"
+
+
+def body_json(text: str) -> dict:
+    """本文の JSON（本体の core.ask_agent が材料を渡す形）。辞書でなければ ValueError（NO_JSON）。"""
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        raise ValueError(NO_JSON) from None
+    if not isinstance(data, dict):
+        raise ValueError(NO_JSON)
+    return data
+
+
+def provider_of(metadata: dict) -> str:
+    """本体が metadata で指定した provider（claude / codex。無ければ空文字で、担当の既定）。"""
+    return str(metadata.get("provider") or "")
+
+
 class SkillExecutor(AgentExecutor):
     """仕事を受け付けて `handle` に渡す。返事は全エージェント共通の封筒（`envelope.py`）。
 
@@ -78,6 +99,21 @@ class SkillExecutor(AgentExecutor):
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         raise NotImplementedError
+
+    async def pick(self, updater: TaskUpdater, metadata: dict, text: str, names: tuple[str, ...] | list[str],
+                   default: str) -> str | None:
+        """頼まれた仕事の名前（metadata の skill。無ければ default）。
+
+        できない仕事なら断り、自由な依頼（ask）なら answer に渡して、どちらも None を返す（呼んだ側は何もしない）。
+        """
+        skill = str(metadata.get("skill") or default)
+        if skill not in names:
+            await self.fail(updater, f"できるのは {' / '.join(names)} だけです")
+            return None
+        if skill == ASK:
+            await self.answer(updater, text)
+            return None
+        return skill
 
     def workspace(self, ask: dict) -> Workspace:
         """自由な依頼で AI を動かす作業場。研究はテーマごとに変える（上書きする）。"""

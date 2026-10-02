@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from kei_agent_a2a.api import (
     SkillExecutor,
     TaskUpdater,
     Workspace,
+    body_json,
     channel_workspace,
     theme_folders,
 )
@@ -64,19 +64,6 @@ SKILLS = [
                tags=["research", "jobs"], examples=[]),
 ]
 NAMES = tuple(skill.id for skill in SKILLS)
-NO_JSON = "依頼は JSON で渡してください"
-
-
-def _json(text: str) -> dict:
-    try:
-        data = json.loads(text or "{}")
-    except ValueError:
-        raise ValueError(NO_JSON) from None
-    if not isinstance(data, dict):
-        raise ValueError(NO_JSON)
-    return data
-
-
 class Executor(SkillExecutor):
     # 制限の表とモデルの一覧を引く名前（共通の起動コマンドも同じ名前を入れる）
     agent = "research"
@@ -88,15 +75,11 @@ class Executor(SkillExecutor):
         self._group_ready = False
 
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        skill = metadata.get("skill", ASK)
-        if skill not in NAMES:
-            await self.fail(updater, f"できるのは {' / '.join(NAMES)} です")
-            return
-        if skill == ASK:
-            await self.answer(updater, text)
+        skill = await self.pick(updater, metadata, text, NAMES, ASK)
+        if skill is None:
             return
         try:
-            ask = _json(text)
+            ask = body_json(text)
         except ValueError as e:
             await self.fail(updater, str(e))
             return

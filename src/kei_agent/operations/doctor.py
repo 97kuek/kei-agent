@@ -83,7 +83,7 @@ def own_secrets_file(directory: Path, module: str) -> Path:
 
 
 def check_secrets(config: Config) -> list[Finding]:
-    directory = config.secrets_dir or (config.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
+    directory = config.secrets_home
     path = directory / SECRETS_FILE
     if not path.is_file():
         return [Finding(ERROR, "秘密情報", f"共通の秘密情報のファイルが無い: {path}",
@@ -263,7 +263,7 @@ def check_tunnel(config: Config, agents_dir: Path = LAUNCH_AGENTS,
                  state: Callable[[str], str] = launchctl_state, ready: Callable[[], bool] = tunnel_ready,
                  which: Callable[[str], str | None] = shutil.which) -> list[Finding]:
     """[hands] tunnel を書いたとき、トンネルが動いて OpenAI につながっているか。鍵が共通のファイルに漏れていないか。"""
-    directory = config.secrets_dir or (config.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
+    directory = config.secrets_home
     common = directory / SECRETS_FILE
     findings = []
     if common.is_file() and assigned(common).get(TUNNEL_KEY, False):

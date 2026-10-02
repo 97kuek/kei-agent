@@ -64,17 +64,17 @@ from kei_agent.storage.records import Records
 from kei_agent.storage.store import Store
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import Workspace
-from kei_agent_a2a.executor import ASK, SkillExecutor, asked_days
+from kei_agent_a2a.executor import ASK, NO_JSON, SkillExecutor, asked_days, body_json, provider_of
 from kei_agent_a2a.run import progress
 
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV", "LIST_JOBS", "MAIN_CLIENT",
-           "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
+           "NO_JSON", "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
            "NotionError", "OrchestratorError", "Pueue", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl",
            "TogglError", "Workspace", "action_id", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
-           "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
+           "body_json", "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
-           "put_request", "records", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings",
+           "provider_of", "put_request", "records", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings",
            "theme_folders", "weekday", "workspace"]
 # このプロセスが起動したときの版（commit）。常駐のプロセス（[process] kind = "service"）は /health で返す
 RUNNING_VERSION = version.RUNNING
@@ -127,10 +127,10 @@ def requested_days(text: str, default: int, maximum: int = MAX_DAYS) -> int:
     本体（module.py）の core.ask_agent は、材料を本文の JSON で渡す（metadata には provider だけ）。
     """
     try:
-        days = int((json.loads(text) or {}).get("days", default))
-    except (TypeError, ValueError, AttributeError):
+        data = json.loads(text)
+    except (TypeError, ValueError):
         return default
-    return days if 1 <= days <= maximum else default
+    return asked_days(data if isinstance(data, dict) else None, default, maximum)
 
 
 def settings(config: Config, module: str) -> dict:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater, requested_days
+from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater, provider_of, requested_days
 
 from . import connector
 from .skills import LIST_EVENTS
@@ -43,16 +43,11 @@ MAX_DAYS = 90
 
 class Executor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        skill = metadata.get("skill", LIST_EVENTS)
-        if skill not in NAMES:
-            await self.fail(updater, f"できるのは {' / '.join(NAMES)} だけです")
-            return
-        if skill == ASK:
-            await self.answer(updater, text)
+        if await self.pick(updater, metadata, text, NAMES, LIST_EVENTS) is None:
             return
         days = requested_days(text, connector.DEFAULT_DAYS, MAX_DAYS)
         try:
-            events = await connector.events(self.config, self.store, days, provider=str(metadata.get("provider") or ""))
+            events = await connector.events(self.config, self.store, days, provider=provider_of(metadata))
         except connector.WorkCalendarError as e:
             await self.fail(updater, str(e), e.limit_reset_at)
             return

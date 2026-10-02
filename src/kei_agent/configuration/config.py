@@ -296,6 +296,11 @@ class Config:
         return self.state_dir / "kei-agent.db"
 
     @property
+    def secrets_home(self) -> Path:
+        """秘密情報の置き場所（[paths] secrets。書かなければ利用者のフォルダの secrets/）。"""
+        return self.secrets_dir or (self.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
+
+    @property
     def hub_state_path(self) -> Path:
         """共通ホームの ID 控え。研究ホームの notion.json とは独立させる。"""
         return self.state_dir / "hub.json"

@@ -8,10 +8,9 @@ Notion に出す。自由な質問は、どの担当とも同じ `ask`。返す�
 
 from __future__ import annotations
 
-import json
 import logging
 
-from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater, progress
+from kei_agent_a2a.api import ASK, AgentSkill, SkillExecutor, TaskUpdater, body_json, progress, provider_of
 
 from . import digest
 from .skills import PAPER_DIGEST, READING_DIGEST
@@ -50,19 +49,13 @@ NAMES = tuple(skill.id for skill in SKILLS)
 
 class Executor(SkillExecutor):
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        skill = metadata.get("skill", ASK)
-        if skill not in NAMES:
-            await self.fail(updater, f"できるのは {' / '.join(NAMES)} だけです")
-            return
-        if skill == ASK:
-            await self.answer(updater, text)
+        skill = await self.pick(updater, metadata, text, NAMES, ASK)
+        if skill is None:
             return
         try:
-            payload = json.loads(text)
-        except ValueError:
-            payload = None
-        if not isinstance(payload, dict):
-            await self.fail(updater, "材料は本文の JSON で渡してください")
+            payload = body_json(text)
+        except ValueError as e:
+            await self.fail(updater, str(e))
             return
 
         async def say(status: str) -> None:
@@ -70,7 +63,7 @@ class Executor(SkillExecutor):
 
         work = digest.reading if skill == READING_DIGEST else digest.papers
         try:
-            data = await work(self.config, self.store, payload, provider=str(metadata.get("provider") or ""),
+            data = await work(self.config, self.store, payload, provider=provider_of(metadata),
                               progress=say)
         except digest.DigestError as e:
             await self.fail(updater, str(e), e.limit_reset_at)

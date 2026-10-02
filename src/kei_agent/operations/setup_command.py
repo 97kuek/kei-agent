@@ -365,7 +365,7 @@ def secrets_text(entries: list[tuple[modules.SecretSpec, str]]) -> str:
 def step_secrets(asker: Asker, config: Config) -> bool:
     """秘密情報のファイルを作る。要る鍵がそろったか（常駐を登録してよいか）を返す。"""
     print("\n5. 秘密情報（画面には出さない。本人だけが読めるファイルに書く）")
-    directory = config.secrets_dir or (config.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
+    directory = config.secrets_home
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     files: dict[Path, list[modules.SecretSpec]] = {}
     for owner, secret in modules.secrets(config.modules):
