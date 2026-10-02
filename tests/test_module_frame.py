@@ -14,8 +14,16 @@ from kei_agent.conversation import router
 from kei_agent.execution import a2a, model_classifier, model_policy, runner
 from kei_agent.execution.agent_policy import policy_of
 from kei_agent.framework import modules
+from kei_agent.scheduling import briefing
 from kei_agent.scheduling.schedule import Scheduler
 from kei_agent.testing.kit import settle
+
+
+async def _morning(scheduler, now):
+    """朝のまとめ（briefing.build）の本文・記録・知らせの目印。"""
+    found = await briefing.build(scheduler.assistant, now)
+    return found.text, found.detail, list(found.notices)
+
 
 CALENDAR_TOML = '''api = 1
 name = "calendar"
@@ -253,7 +261,7 @@ async def test_a_choice_from_the_overview_router_reaches_the_module(env, monkeyp
 async def test_module_agenda_reaches_the_morning_summary_and_the_calendar(env):
     scheduler, assistant, slack, claude, agent = env
 
-    text, detail, _ = await scheduler.morning_text(datetime(2026, 9, 28, 8, 0))
+    text, detail, _ = await _morning(scheduler, datetime(2026, 9, 28, 8, 0))
 
     assert "`10:00–11:00` 💼 打ち合わせ（会議室A）" in text
     assert detail["agenda"]["synced"]["Google"] == {"created": 1, "updated": 0, "stale": 0}
@@ -272,7 +280,7 @@ async def test_an_unreadable_agenda_is_told_and_never_marks_the_calendar(env):
         told.append(text)
     assistant.notify_trouble = notify
 
-    text, detail, _ = await scheduler.morning_text(datetime(2026, 9, 28, 8, 0))
+    text, detail, _ = await _morning(scheduler, datetime(2026, 9, 28, 8, 0))
 
     assert detail["agenda"] == {"synced": {}, "unread": ["予定"]}
     assert assistant.hub.calendar[0]["同期状態"] == "確認済み"          # 読めなかった日に「要確認」にしない
@@ -368,7 +376,7 @@ async def test_classes_and_dues_from_a_module_reach_the_morning_summary(env, mon
     monkeypatch.setattr(module, "agenda", agenda)
     monkeypatch.setattr(module, "prepare", prepare, raising=False)
 
-    text, detail, notices = await scheduler.morning_text(now)
+    text, detail, notices = await _morning(scheduler, now)
 
     assert "`10:40–12:20` 🎓 データベース" in text and "⏰ 締切: データベース 第3回レポート" in text
     assert "うまくいかなかった" not in text and "─" not in text       # 一覧には予定だけ

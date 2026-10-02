@@ -6,13 +6,20 @@ import pytest
 from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, make_theme
 
 from kei_agent.execution import runner
-from kei_agent.scheduling import morning
+from kei_agent.scheduling import briefing, morning
 from kei_agent.scheduling import schedule as schedule_module
 from kei_agent.scheduling.calendar_sync import SyncReport
 from kei_agent.scheduling.schedule import Scheduler, due_day
 from kei_agent.storage.notion_store import Note
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
+
+
+async def _morning(scheduler, now):
+    """朝のまとめ（briefing.build）の本文・記録・知らせの目印。"""
+    found = await briefing.build(scheduler.assistant, now)
+    return found.text, found.detail, list(found.notices)
+
 
 
 @pytest.fixture
@@ -521,7 +528,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     assistant.agents["work"] = FakeWorkAgent(
         [{"subject": "朝会", "start": f"{today}T10:00", "end": f"{today}T10:15", "location": "Zoom"}])
 
-    text, detail, _ = await scheduler.morning_text(now)
+    text, detail, _ = await _morning(scheduler, now)
 
     lines = text.splitlines()
     # 朝の知らせは時刻の一覧だけ（帯や空き時間は出さない）
@@ -540,7 +547,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
 async def test_morning_text_works_without_the_agents(env):
     """エージェントがいないときは、黙って「予定なし」にする（朝の通知は止めない）。"""
     scheduler, *_ = env
-    text, detail, _ = await scheduler.morning_text(datetime.now())
+    text, detail, _ = await _morning(scheduler, datetime.now())
     assert morning.NOTHING in text and detail == {"classes": 0, "dues": 0, "events": 0}
 
 
@@ -554,7 +561,7 @@ async def test_the_morning_list_does_not_repeat_as_a_reminder(env):
          "url": "https://notion.so/x", "course": "データベース", "moodle": "https://moodle/x",
          "moodle_id": "1@moodle"}])
 
-    _, _, notices = await scheduler.morning_text(datetime.now())
+    _, _, notices = await _morning(scheduler, datetime.now())
     assert notices and all(key.startswith("module.course.due:") for key in notices)
     for key in notices:
         scheduler.store.record_notice(key)
@@ -747,12 +754,12 @@ async def test_the_morning_says_what_went_wrong_since_the_last_daily(env):
     store.record_schedule("review", yesterday, {"status": "error"})
     store.record_schedule("maintenance", yesterday, {"status": "done"})
 
-    note = scheduler.failure_note(now, ["課題の取り込み"])
+    note = briefing.failure_note(scheduler.assistant, now, ["課題の取り込み"])
 
     assert note == "前回の Daily から今朝までに、うまくいかなかったこと（Daily（Notion に残せず）、Retro & Planning、課題の取り込み）"
     store.record_schedule("review", yesterday, {"status": "posted", "notion_url": "https://notion.so/r"})
     store.record_schedule("daily", yesterday, {"status": "posted", "notion_url": "https://notion.so/d"})
-    assert scheduler.failure_note(now) == ""
+    assert briefing.failure_note(scheduler.assistant, now) == ""
 
 
 async def test_a_new_version_left_unrestarted_is_reported_once_after_an_hour(env, monkeypatch):
