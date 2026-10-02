@@ -73,6 +73,7 @@ from kei_agent.conversation.slack_text import FAILED_PREFIX, escape, split_text
 from kei_agent.conversation.slack_text import is_status_inquiry as _is_status_inquiry
 from kei_agent.execution import agents, guard, one_shot
 from kei_agent.execution.agents import Reply
+from kei_agent.execution.model_json import json_list, json_object
 from kei_agent.execution.one_shot import AIError
 from kei_agent.execution.updates import Update
 from kei_agent.framework import modules
@@ -96,7 +97,8 @@ __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Co
            "Records", "Reply", "Request",
            "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_sections", "checked_text",
            "contains_secret",
-           "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "load_toggl", "parse_time",
+           "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "json_list", "json_object",
+           "load_toggl", "parse_time",
            "selected_values", "theme_name", "weekday"]
 # モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
 MODULE_PREFIX = modules.ACTION_PREFIX

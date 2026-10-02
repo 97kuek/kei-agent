@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hmac
 import logging
-import urllib.parse
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -20,6 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from kei_agent.conversation.hands import Hands, HandsError
+from kei_agent.conversation.loopback import serve_loopback
 from kei_agent.scheduling import materials
 
 log = logging.getLogger(__name__)
@@ -138,20 +138,7 @@ def build_app(hands: Hands, token: str, host: str):
 
 async def serve(assistant, url: str, token: str) -> None:
     """本体のプロセスの中で、手の口を開く（止められるまで待つ）。開けなくても本体は止めない。"""
-    import uvicorn
-
-    parsed = urllib.parse.urlparse(url)
-    if parsed.hostname not in {"127.0.0.1", "localhost"} or not parsed.port:
-        await assistant.notify_trouble(f"手の口は 127.0.0.1 のポートで指定してください: {url}")
-        return
     if not token:
         await assistant.notify_trouble("手の口の合言葉（KEI_AGENT_HANDS_TOKEN）が無いので、口を開けませんでした")
         return
-    app = build_app(Hands(assistant), token, parsed.hostname)
-    server = uvicorn.Server(uvicorn.Config(app, host=parsed.hostname, port=parsed.port, log_level="warning"))
-    log.info("手の口を開きます（%s%s）", url.rstrip("/"), MCP_PATH)
-    try:
-        await server.serve()
-    except SystemExit:
-        log.error("手の口を開けませんでした（%s）", url)
-        await assistant.notify_trouble(f"手の口（{url}）を開けませんでした")
+    await serve_loopback(assistant, url, "手の口", lambda host: build_app(Hands(assistant), token, host))

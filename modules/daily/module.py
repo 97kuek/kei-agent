@@ -14,7 +14,6 @@ Slack には出さず、日別記録にも残さない。
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from datetime import date, datetime, timedelta
@@ -33,6 +32,7 @@ from kei_agent.api import (
     escape,
     failure_text,
     final_answer,
+    json_list,
     parse_time,
 )
 
@@ -81,18 +81,11 @@ def learnings_of(text: str) -> tuple[str, list[dict]]:
     head, marker, rest = body.partition(texts.LEARNING_MARKER)
     if not marker:
         return body, []
-    rest = rest.strip()
     try:
-        items = json.loads(rest) if rest else []
+        items = json_list(rest)
     except ValueError:
-        # JSON のあとに説明が続いたときは、最初の行だけを読む
-        try:
-            items = json.loads(rest.splitlines()[0])
-        except ValueError:
-            items = []
-    items = [item for item in items if isinstance(item, dict) and str(item.get("title") or "").strip()] \
-        if isinstance(items, list) else []
-    return head.strip(), items[:3]
+        items = []
+    return head.strip(), [item for item in items if str(item.get("title") or "").strip()][:3]
 
 
 class Module:

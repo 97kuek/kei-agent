@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.parse
 
 from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentCard, AgentSkill
 
+from kei_agent.conversation.loopback import serve_loopback
 from kei_agent_a2a.card import RPC_PATH, agent_card
 from kei_agent_a2a.executor import ASK, SkillExecutor
 from kei_agent_a2a.server import build_app
@@ -64,18 +64,5 @@ class QuestionExecutor(SkillExecutor):
 
 async def serve(assistant, url: str) -> None:
     """本体のプロセスの中で、A2A の口を開く（止められるまで待つ）。開けなくても本体は止めない。"""
-    import uvicorn
-
-    parsed = urllib.parse.urlparse(url)
-    if parsed.hostname not in {"127.0.0.1", "localhost"} or not parsed.port:
-        await assistant.notify_trouble(f"本体の A2A の口は 127.0.0.1 のポートで指定してください: {url}")
-        return
-    app = build_app(build_card(url), QuestionExecutor(assistant), RPC_PATH, assistant.config.a2a_token)
-    server = uvicorn.Server(uvicorn.Config(app, host=parsed.hostname, port=parsed.port, log_level="warning"))
-    log.info("本体の A2A の口を開きます（%s）", url)
-    try:
-        await server.serve()
-    except SystemExit:
-        # ポートが使われているなど。uvicorn は SystemExit で知らせる（本体の Slack の口は動かし続ける）
-        log.error("本体の A2A の口を開けませんでした（%s）", url)
-        await assistant.notify_trouble(f"声のレイヤからの問い合わせ口（{url}）を開けませんでした")
+    await serve_loopback(assistant, url, "本体の A2A の口（声のレイヤからの問い合わせ口）", lambda host: build_app(
+        build_card(url), QuestionExecutor(assistant), RPC_PATH, assistant.config.a2a_token))
