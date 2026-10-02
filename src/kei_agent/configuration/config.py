@@ -365,8 +365,6 @@ CHANNELS_KEYS = {"overview", "improve"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
 SCHEDULE_TIME_KEYS = ("daily", "review", "night")
 SANDBOX_KEYS = {"allow_write", "deny_read"}
-# 通信の範囲は担当の線（module.toml の [actor] data）で決まる。[sandbox] にこのキーが残っていても読まない
-IGNORED_SANDBOX_KEYS = {"allowed_domains"}
 
 
 def _check_keys(data: dict, known: set[str], where: str) -> None:
@@ -664,7 +662,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
                 "[channels]")
-    _check_keys(sandbox, SANDBOX_KEYS | IGNORED_SANDBOX_KEYS, "[sandbox]")
+    _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
     paths = data.get("paths", {})
     _check_keys(paths, PATHS_KEYS, "[paths]")
     module_schedules = [s for spec in enabled for s in spec.schedules]

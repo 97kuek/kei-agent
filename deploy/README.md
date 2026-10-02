@@ -50,7 +50,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 
 - `config.toml` に `modules`・`[channels]`・`[agents]`（前の書き方）があると、起動しない（書く場所を1つにする）
 - 変えたら `deploy/restart-all.sh` で起動し直す。書き間違いは起動と `kei-agent doctor` が行を示して知らせる
-- App Home で AI を切り替えると、本体を起動し直すまでの一時的なものになる（App Home に表の値を出す）
+- AI とアカウントを変えるのは、この表だけ（App Home は今の値を見せるだけ）。変えたら `deploy/restart-all.sh` で起動し直す
 
 ### 定期処理の表（`schedules.csv`）
 

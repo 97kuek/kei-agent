@@ -59,11 +59,14 @@ def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
     assert "research-strategy" not in config.overview_channels
 
 
-def test_an_old_allowed_domains_key_is_read_past(tmp_path):
-    """[sandbox] allowed_domains が残った config.toml でも起動できる（通信の範囲は担当の線で決まる）。"""
-    from kei_agent.configuration.config import load_config
+def test_the_sandbox_takes_only_its_known_keys(tmp_path):
+    """[sandbox] に書けるのは allow_write と deny_read だけ（通信の範囲は担当の線で決まる）。"""
+    import pytest
+
+    from kei_agent.configuration.config import ConfigError, load_config
 
     path = tmp_path / "config.toml"
     write_config(path, '[sandbox]\nallowed_domains = ["export.arxiv.org"]\nallow_write = ["~/.cache/uv"]\n')
     write_agents(tmp_path, ["research"])
-    assert load_config(path, env={}).allow_write
+    with pytest.raises(ConfigError, match="allowed_domains"):
+        load_config(path, env={})
