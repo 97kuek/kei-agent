@@ -70,6 +70,7 @@ export SLACK_BOT_TOKEN="xoxb-..."
 export SLACK_APP_TOKEN="xapp-..."
 export KEI_AGENT_ALLOWED_USER_ID="U..."
 export KEI_AGENT_A2A_TOKEN="..."              # openssl rand -hex 32 で一度だけ作って貼る
+export KEI_AGENT_HANDS_TOKEN="..."            # 手の口（MCP）の合言葉。openssl rand -hex 32 で一度だけ作って貼る
 export NOTION_TOKEN="ntn_..."                 # コネクト「Kei Agent」。読むのはゲートウェイだけ
 export KEI_AGENT_NOTION_GATEWAY_TOKEN="..."   # ゲートウェイの親の合言葉。openssl rand -hex 32 で一度だけ作って貼る
 # 任意
@@ -151,6 +152,21 @@ sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00    # 00:00 の夜間 Task の�
 ffmpeg -f avfoundation -i ":default" -t 1 -f null - # マイクの許可を先に手で通す
 gh auth status                                      # 要望を GitHub issue にするのに使う
 ```
+
+### 手の口（MCP）
+
+頭（Claude Code・Codex、いずれ OpenAI Dots）から作業場で AI を動かす口。使うときだけ開く。
+
+1. `config.toml` に `[hands]` の `url = "http://127.0.0.1:8785"` を書き、`KEI_AGENT_HANDS_TOKEN` を置いて `deploy/restart-all.sh`
+2. 頭に登録する（合言葉はシェルの環境変数から渡す。ファイルに書き写さない）
+
+```zsh
+claude mcp add -s user --transport http kei-agent-hands http://127.0.0.1:8785/mcp \
+  --header 'Authorization: Bearer ${KEI_AGENT_HANDS_TOKEN}'   # 一重の引用符。呼ぶときに展開される
+codex mcp add kei-agent-hands --url http://127.0.0.1:8785/mcp --bearer-token-env-var KEI_AGENT_HANDS_TOKEN
+```
+
+- 道具と返す項目は [architecture.md](../docs/architecture.md#手の口mcp)。開いているかは `curl -s http://127.0.0.1:8785/health`
 
 ## 7. 日々の運用
 

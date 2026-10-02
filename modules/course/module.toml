@@ -17,6 +17,8 @@ timeout_minutes = 5
 # 作業場（前提のメモの AGENTS.md を置く）。agents.csv の course の行の folder で変えられる
 workspace = "~/course"
 default_use_case = "course_explain"
+# 頭（Dots など）が伝える重さ → 用途
+weights = { light = "course_explain", normal = "course_requirements", deep = "course_degree_plan" }
 classify = "1資料の説明は course_explain、課題要件・評価基準の整理は course_requirements、複数資料や試験範囲の比較は course_compare、履修・卒業計画の選択肢提案は course_degree_plan。"
 
 # Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）。道具の名前は Claude と Codex で同じ

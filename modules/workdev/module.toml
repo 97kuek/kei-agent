@@ -16,6 +16,8 @@ notion = "none"
 # プロジェクトの作業場を置く場所（agents.csv の workdev の行の folder で変えられる）
 workspace = "~/work"
 default_use_case = "workdev_execute"
+# 頭（Dots など）が伝える重さ → 用途
+weights = { light = "workdev_execute", normal = "workdev_execute", deep = "workdev_design" }
 classify = "実装・修正・テスト・調査は workdev_execute、設計・方針の比較・大きな作り替えの計画は workdev_design。"
 
 [use_cases.workdev_execute]

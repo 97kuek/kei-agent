@@ -67,6 +67,21 @@
 - 名刺の `version` は起動したときの commit。本体は、古い版のまま動く担当を起動し直す
 - 返事の形は [agents.md](agents.md#どの担当にも共通)
 
+## 手の口（MCP）
+
+- 頭（OpenAI Dots。今は Claude Code・Codex）から、作業場で AI を動かしてもらう入口。Slack の受け口と並ぶもう1つの入口（計画は [#17](https://github.com/97kuek/kei-agent/issues/17)）
+- 本体のプロセスの中で `config.toml` の `[hands] url`（127.0.0.1 だけ）に開く。合言葉は秘密情報の `KEI_AGENT_HANDS_TOKEN`（`Authorization: Bearer`）。どちらかが無ければ開かない
+
+| 道具 | 中身 |
+|---|---|
+| `workspaces` | 頼める作業場（研究テーマ・プロジェクト・担当）と、選べる AI（`agents.csv` の `engines`）・重さ |
+| `run` | 作業場・頼みごと・重さ（`light`・`normal`・`deep` → `module.toml` の `[actor] weights` の用途）・AI・会話の番号で AI を動かす。20秒のうちに終われば答え、終わらなければ受付番号 |
+| `status` | 受付番号の様子と結果（7日残す） |
+
+- 返す項目: `status`（`done`・`needs_input`・`failed`・`accepted`・`running`）・`text`・`conversation`・`files`（作業場の `outputs/` にできたもの）・`ticket`
+- 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
+- 会話は `mcp` という名前のチャンネルとして記録する（Slack のスレッドとは混ざらない）
+
 ## AI の動かし方
 
 - AI を起動するのは `runner.run_model` だけ（Claude も Codex も）

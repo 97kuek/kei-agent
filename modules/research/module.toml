@@ -16,6 +16,8 @@ shell = true
 web = true
 notion = "write"
 default_use_case = "research_execute"
+# 頭（Dots など）が伝える重さ → 用途（Slack からの依頼は、これまでどおり classify で選ぶ）
+weights = { light = "research_extract", normal = "research_execute", deep = "research_design" }
 classify = "書誌・固定項目・ログの抽出は research_extract、明確な基準の候補仕分けは research_screen、比較・結果分析は research_compare、実験コード・データ処理・通常調査は research_execute、仮説・実験計画・手法選択・厳密レビューは research_design。"
 
 [use_cases.research_extract]

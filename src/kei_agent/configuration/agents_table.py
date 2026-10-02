@@ -8,6 +8,7 @@ claude_account, codex_account（folder・notion・claude_account・codex_account
 - folder … その担当の作業場（研究はテーマのフォルダを置く場所）。AI を持つ担当だけ。空欄なら既定
 - notion … その担当が届く Notion のホームのページ（URL の末尾32文字）。overview の行は共通ホーム。空欄なら Notion を使わない
 - engine … claude / codex。空欄は「まだ選んでいない」
+- engines … 頭（Dots など）が選んでよい AI（空白で区切る。例 claude codex）。空欄なら engine の1つだけ
 - model / effort … 空欄なら module.toml の用途ごとの選び分け。書けば、その担当の用途をすべてそのモデルにする
   （依頼者が明示したときだけの用途は除く）。使えるモデルは framework.models の一覧の中だけ
 - claude_account / codex_account … その担当が使うアカウントのフォルダ（CLAUDE_CONFIG_DIR・CODEX_HOME。大学は個人、
@@ -28,10 +29,10 @@ from pathlib import Path
 from kei_agent.framework import modules
 
 AGENTS_FILE = "agents.csv"
-COLUMNS = ("module", "enabled", "channels", "folder", "notion", "engine", "model", "effort",
+COLUMNS = ("module", "enabled", "channels", "folder", "notion", "engine", "engines", "model", "effort",
            "claude_account", "codex_account")
 # 無くてもよい列（あとから足した列。前の表もそのまま読める）
-OPTIONAL_COLUMNS = ("folder", "notion", "claude_account", "codex_account")
+OPTIONAL_COLUMNS = ("folder", "notion", "engines", "claude_account", "codex_account")
 # 本体の行。router は振り分けの AI、overview は研究全体のチャンネル
 ROUTER = "router"
 OVERVIEW = "overview"
@@ -107,12 +108,12 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
         names = _channels(row["channels"])
         on = _bool(row["enabled"], where)
         engine, model, effort, folder = row["engine"], row["model"], row["effort"], row.get("folder", "")
-        accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account") if row.get(key, "")}
+        accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account", "engines") if row.get(key, "")}
         has_ai = module == ROUTER or (module in known and known[module].actor is not None)
         if folder and (module in CORE_ROWS or not has_ai):
             raise TableError(f"{where}: folder を書けるのは、AI を使う担当の行だけです")
         if accounts and not has_ai:
-            raise TableError(f"{where}: claude_account・codex_account を書けるのは、AI を使う担当の行だけです")
+            raise TableError(f"{where}: claude_account・codex_account・engines を書けるのは、AI を使う担当の行だけです")
         if folder:
             folders[module] = folder
         if home := row.get("notion", ""):

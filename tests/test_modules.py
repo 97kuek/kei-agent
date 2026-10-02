@@ -73,9 +73,9 @@ def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
 def test_secrets_come_from_the_core_and_the_modules_that_are_on():
     """要る秘密情報は、本体のものと、オンのモジュールの [secrets]（kei-agent setup が聞き、doctor が確かめる）。"""
     names = [(owner.name if owner else "", secret.name) for owner, secret in modules.secrets(["voice", "time"])]
-    assert names[:4] == [("", "SLACK_BOT_TOKEN"), ("", "SLACK_APP_TOKEN"), ("", "KEI_AGENT_ALLOWED_USER_ID"),
-                         ("", "KEI_AGENT_A2A_TOKEN")]
-    assert names[4:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
+    assert names[:5] == [("", "SLACK_BOT_TOKEN"), ("", "SLACK_APP_TOKEN"), ("", "KEI_AGENT_ALLOWED_USER_ID"),
+                         ("", "KEI_AGENT_A2A_TOKEN"), ("", "KEI_AGENT_HANDS_TOKEN")]
+    assert names[5:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
                          ("time", "TOGGL_WORKSPACE_ID")]
     openai = modules.builtin()["voice"].secrets[0]
     # 声の鍵はマイクでの会話にだけ使う（喋って知らせるだけなら要らない）ので任意

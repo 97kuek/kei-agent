@@ -61,6 +61,7 @@ CORE_SECRETS = (
     SecretSpec("KEI_AGENT_ALLOWED_USER_ID", "あなたの Slack のメンバー ID（U で始まる。プロフィールの ︙ → メンバー ID を"
                "コピー）。この人の依頼だけを受ける", required=True),
     SecretSpec("KEI_AGENT_A2A_TOKEN", "プロセスどうしの合言葉", required=True, generate=True),
+    SecretSpec("KEI_AGENT_HANDS_TOKEN", "手の口（MCP）の合言葉。頭（Claude Code・Dots など）が呼ぶときに渡す", generate=True),
 )
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
 API_VERSION = 1
@@ -88,7 +89,9 @@ _SECRET = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_KEYS = {"description", "required", "generate", "own_file", "group"}
 _DEPENDS_KEYS = {"requires", "optional"}
 _ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
-               "classify", "connectors", "workspace"}
+               "classify", "connectors", "workspace", "weights"}
+# 頭（Dots など）が伝える重さ。module.toml の [actor] weights で、重さ → 用途を決める
+WEIGHTS = ("light", "normal", "deep")
 # 実行役の作業場に最初に置く前提のメモ（AGENTS.md）のひな形（モジュールのフォルダにあれば使う）
 WORKSPACE_TEMPLATE = "AGENTS.template.md"
 _CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
@@ -157,6 +160,11 @@ class ActorSpec:
     connectors: tuple[ConnectorSpec, ...] = ()
     # 作業場（~ から書ける）。無ければ状態の置き場の agents/<名前>
     workspace: str = ""
+    # 頭（Dots など）が伝える重さ（light・normal・deep）→ 用途。書いていない重さは default_use_case
+    weights: dict[str, str] = field(default_factory=dict)
+
+    def use_case_for(self, weight: str) -> str:
+        return self.weights.get(weight, self.default_use_case)
 
 
 @dataclass(frozen=True)
@@ -304,12 +312,18 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
     classify = str(data.get("classify") or "")
     if classify and len([u for u in use_cases if not u.offline and not u.manual]) < 2:
         raise ModuleError(f"{at} の classify は、Web を使う用途（offline でないもの）が2つ以上あるときに書いてください")
+    weights = data.get("weights", {})
+    if not isinstance(weights, dict) or set(weights) - set(WEIGHTS):
+        raise ModuleError(f"{at} の weights は {{ {' / '.join(WEIGHTS)} = \"用途\" }} の形にしてください")
+    usable = {u.name for u in use_cases if not u.manual}
+    if unknown := sorted(str(v) for v in weights.values() if v not in usable):
+        raise ModuleError(f"{at} の weights の用途 {', '.join(unknown)} が、[use_cases] の手動指定でない用途にありません")
     return ActorSpec(prompt=prompt, plugin=plugin, files=data.get("files", "none"),
                      shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
                      notion=data.get("notion", "none"), timeout_minutes=timeout, default_use_case=default,
                      use_cases=use_cases, classify=classify,
                      connectors=_connectors(data.get("connectors", []), at),
-                     workspace=str(data.get("workspace") or ""))
+                     workspace=str(data.get("workspace") or ""), weights={k: str(v) for k, v in weights.items()})
 
 
 def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:

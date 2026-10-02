@@ -56,6 +56,12 @@ class AgentProfile:
     # 担当の表で決めたアカウントのフォルダ（CLAUDE_CONFIG_DIR・CODEX_HOME）。空ならプロセスの既定
     claude_account: str = ""
     codex_account: str = ""
+    # 頭（Dots など）が選んでよい AI（担当の表の engines。空なら provider の1つだけ）
+    engines: tuple[str, ...] = ()
+
+    @property
+    def allowed_engines(self) -> tuple[str, ...]:
+        return self.engines or ((self.provider,) if self.provider else ())
 
 
 def _default_agent_profiles() -> dict[str, AgentProfile]:
@@ -223,6 +229,10 @@ class Config:
     notion: NotionConfig = field(default_factory=lambda: NotionConfig())
     # エージェント同士の合言葉（環境変数 KEI_AGENT_A2A_TOKEN）
     a2a_token: str = ""
+    # 手の口（MCP。conversation/hands.py）の住所（config.toml の [hands] url。空なら開かない）と合言葉
+    # （環境変数 KEI_AGENT_HANDS_TOKEN）
+    hands_url: str = ""
+    hands_token: str = ""
     # 利用者のフォルダ（~/.config/kei-agent/）。None なら、プロフィールも指示書の差し替えも使わない（テスト）
     user_dir: Path | None = None
     # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
@@ -340,11 +350,11 @@ class ConfigError(ValueError):
 TOP_LEVEL_KEYS = {
     "agent_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
     "job_poll_seconds", "job_parallel", "handoff_after_turns", "sandbox",
-    "schedule", "maintenance", "a2a", "notion", "paths", "allow_protected_folders",
+    "schedule", "maintenance", "a2a", "notion", "paths", "allow_protected_folders", "hands",
 }
 PATHS_KEYS = {"secrets"}
 # 担当の表（agents.csv）の1行のうち、AI の列
-AGENT_PROFILE_KEYS = {"provider", "model", "effort", "claude_account", "codex_account"}
+AGENT_PROFILE_KEYS = {"provider", "model", "effort", "claude_account", "codex_account", "engines"}
 # 設定に書かなかったときの置き場所。テストは conftest で一時フォルダに差し替え、本物の状態や研究データを触らない
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
@@ -508,7 +518,12 @@ def _agent_profiles(data: dict, where: str) -> dict[str, AgentProfile]:
         if error := pin_error(name, provider, model, effort):
             raise ConfigError(f"{where} の {name} の行: {error}")
         accounts = {key: str(_expand(str(raw[key]))) for key in ("claude_account", "codex_account") if raw.get(key)}
-        profiles[name] = AgentProfile(provider=provider, model=model, effort=effort, **accounts)
+        engines = tuple(dict.fromkeys(str(raw.get("engines", "")).split()))
+        if bad := [e for e in engines if e not in ("claude", "codex")]:
+            raise ConfigError(f"{where} の engines は claude・codex を空白で区切って書いてください: {' '.join(bad)}")
+        if provider and engines and provider not in engines:
+            raise ConfigError(f"{where}: engines に engine（{provider}）も入れてください")
+        profiles[name] = AgentProfile(provider=provider, model=model, effort=effort, engines=engines, **accounts)
     return profiles
 
 
@@ -531,6 +546,15 @@ def config_home(env: dict[str, str] | None = None) -> Path:
     if env.get("KEI_AGENT_HOME") or not env.get("KEI_AGENT_CONFIG"):
         return user_home(env)
     return config_path(env).parent
+
+
+def _hands_url(data: dict) -> str:
+    """[hands] url（手の口の住所）。書けるのは 127.0.0.1 か localhost のポートだけ。"""
+    _check_keys(data, {"url"}, "[hands]")
+    url = str(data.get("url", ""))
+    if url and not re.match(r"^http://(127\.0\.0\.1|localhost):\d+/?$", url):
+        raise ConfigError(f"config.toml の [hands] url は http://127.0.0.1:<ポート> にしてください: {url}")
+    return url
 
 
 def _with_table(data: dict, table: Path | None) -> dict:
@@ -672,6 +696,8 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         a2a=_a2a(data.get("a2a", {}), enabled),
         notion=_notion(data.get("notion", {})),
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
+        hands_url=_hands_url(data.get("hands", {})),
+        hands_token=env.get("KEI_AGENT_HANDS_TOKEN", ""),
         user_dir=home,
         secrets_dir=secrets_dir,
         module_settings=module_settings,
