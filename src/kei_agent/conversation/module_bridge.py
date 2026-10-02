@@ -203,8 +203,12 @@ class ModuleBridge:
             except Exception:
                 log.exception("モジュール「%s」の頭への材料を作れませんでした", name)
                 continue
+            if not isinstance(given, dict):
+                log.warning("モジュール「%s」の頭への材料が辞書ではありません", name)
+                continue
             for kind, items in given.items():
-                found.setdefault(str(kind), []).extend(item for item in items if isinstance(item, dict))
+                if isinstance(items, list):
+                    found.setdefault(str(kind), []).extend(item for item in items if isinstance(item, dict))
         return found
 
     async def on_reaction_added(self, event: dict) -> None:

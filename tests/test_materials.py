@@ -92,3 +92,19 @@ async def test_the_read_tools_are_on_the_door(assistant):
     assert all(tools[name].read_only_hint for name in ("agenda", "reading", "recent", "jobs"))
     result = await mcp.call_tool("jobs", {})
     assert result.structured_content == json.loads(result.content[0].text) == {"active": [], "finished": []}
+
+
+def test_recent_survives_odd_threads_and_marks_stale_tickets_failed(assistant, store):
+    store.upsert_thread("C1", "1.2.3", "vlm", None)
+    Records(store, "hands").put("ticket", "t-old", {"ticket": "t-old", "workspace": "vlm", "status": "running",
+                                                    "conversation": "c-1", "started_at": time.time()})
+    found = materials.recent(assistant, 1)
+    assert found["threads"][0]["started"] == "" and found["hands"][0]["status"] == "failed"
+
+
+async def test_a_module_returning_the_wrong_shape_does_not_break_reading(assistant, monkeypatch):
+    async def wrong(days):
+        return ["not", "a", "dict"]
+
+    monkeypatch.setattr(assistant.modules["knowledge"], "head_materials", wrong, raising=False)
+    assert await materials.reading(assistant, 1) == {"items": []}

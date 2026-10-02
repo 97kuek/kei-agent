@@ -118,6 +118,7 @@ async def test_the_door_checks_the_password(hands):
         assert wrong.status_code == 401
 
 
+
 async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
     """道具が別のスレッドで動くと、記録の SQLite が使えない（作ったスレッドでしか使えない）。"""
     h, claude = hands
@@ -201,3 +202,14 @@ async def test_a_limit_is_recorded_and_later_runs_are_refused(hands):
     assert out["status"] == "failed" and "08:59" not in out["text"] and "利用上限" in out["text"]
     with pytest.raises(HandsError, match="利用上限"):
         await h.run("vlm", "まとめて")
+
+
+async def test_the_password_scheme_ignores_case_and_spaces():
+    from starlette.responses import PlainTextResponse
+
+    from kei_agent.operations.hands_server import TokenAuth
+
+    door = TokenAuth(PlainTextResponse("通った"), " secret-token ")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=door), base_url="http://127.0.0.1") as client:
+        for given, code in (("bearer secret-token", 200), ("Bearer  secret-token ", 200), ("Basic secret-token", 401)):
+            assert (await client.post("/mcp", headers={"authorization": given})).status_code == code

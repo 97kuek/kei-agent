@@ -174,6 +174,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         # 一瞬だけ「いない」と見えるので、そこで捨てると、待っていた依頼が別のロックを取り、
         # 同じスレッド（同じセッション）の claude が2本同時に走る
         self.thread_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
+        # 手の口（hands.py）で動いている作業（受付番号 → 作業）。本体が起動し直すと空に戻る
+        self.hands_tasks: dict[str, asyncio.Task] = {}
         self.channel_names: dict[str, str] = {}
         # この起動で Notion に登録済みのテーマ（招待の取りこぼしを、使うときに埋める）
         self.registered_themes: set[str] = set()

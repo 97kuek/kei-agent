@@ -92,7 +92,7 @@ def test_the_header_bom_and_comments(tmp_path):
         parse("module,on\nresearch,true\n")
     # Excel が付ける BOM と、# で始まる行・空の行は読み飛ばす
     home = _home(tmp_path, None)
-    (home / "agents.csv").write_bytes(("﻿" + HEADER + "# メモ,,,,,\n\nknowledge,true,,codex,,\n").encode())
+    (home / "agents.csv").write_bytes(("﻿" + HEADER + "# メモ, 列より多い, , , , , , ,\n\nknowledge,true,,codex,,\n").encode())
     assert _load(home).modules == ("knowledge",)
     (home / "agents.csv").write_bytes(HEADER.encode() + "knowledge,true,知識,,,\n".encode("shift_jis"))
     with pytest.raises(ConfigError, match="UTF-8"):

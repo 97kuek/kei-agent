@@ -18,7 +18,8 @@ from datetime import datetime
 from pathlib import Path
 
 from kei_agent.configuration.config import Config, path_without_venv
-from kei_agent.storage.store import Job, Store, dumps
+from kei_agent.storage.notion import write_json_atomic
+from kei_agent.storage.store import Job, Store
 from kei_agent.workspaces import themes
 
 log = logging.getLogger(__name__)
@@ -181,6 +182,10 @@ def interpret_pueue_status(task: dict) -> tuple[str, dict]:
     return "queued", {}
 
 
+# pueue のコマンドを待つ上限（秒）
+PUEUE_TIMEOUT_SECONDS = 30
+
+
 class Pueue:
     def __init__(self, config: Config):
         self.bin = config.pueue_bin
@@ -192,7 +197,13 @@ class Pueue:
             self.bin, *args, env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        out, err = await proc.communicate()
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), PUEUE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # pueued が固まっても、ジョブの見張り（と上限のやり直し）を止めない
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError(f"pueue {' '.join(args)}: {PUEUE_TIMEOUT_SECONDS} 秒たっても答えません") from None
         if proc.returncode:
             raise RuntimeError(f"pueue {' '.join(args)}: {err.decode().strip()}")
         return out.decode()
@@ -231,7 +242,7 @@ class JobManager:
     def _write_state(self, job: Job) -> None:
         jobs_dir = Path(job.cwd) / JOBS_DIR
         jobs_dir.mkdir(parents=True, exist_ok=True)
-        (jobs_dir / f"{job.id}.json").write_text(dumps(job.to_state()), encoding="utf-8")
+        write_json_atomic(jobs_dir / f"{job.id}.json", job.to_state())
 
     async def process_requests(self, cwd: Path) -> list[Outcome]:
         """テーマのディレクトリに置かれた依頼を処理する。知らせることがある分だけ返す。"""

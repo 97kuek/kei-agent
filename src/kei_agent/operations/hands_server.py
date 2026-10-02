@@ -112,7 +112,7 @@ class TokenAuth:
 
     def __init__(self, app, token: str):
         self.app = app
-        self.token = token
+        self.token = token.strip()
 
     async def __call__(self, scope, receive, send) -> None:
         path = scope.get("path", "")
@@ -120,11 +120,11 @@ class TokenAuth:
             # 合言葉があっても無くても、本文の無い 404（本文があると、トンネルが OAuth の案内として読もうとして警告を出す）
             await Response(status_code=404)(scope, receive, send)
             return
-        if scope["type"] != "http" or path.rstrip("/") == HEALTH_PATH:
+        if scope["type"] == "lifespan" or (scope["type"] == "http" and path.rstrip("/") == HEALTH_PATH):
             await self.app(scope, receive, send)
             return
-        given = Headers(scope=scope).get("authorization", "").removeprefix("Bearer ").strip()
-        if not given or not hmac.compare_digest(given, self.token):
+        scheme, _, given = Headers(scope=scope).get("authorization", "").strip().partition(" ")
+        if scheme.lower() != "bearer" or not given.strip() or not hmac.compare_digest(given.strip(), self.token):
             await JSONResponse({"error": "Kei Agent: 合言葉が違います"}, status_code=401)(scope, receive, send)
             return
         await self.app(scope, receive, send)

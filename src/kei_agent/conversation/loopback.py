@@ -36,3 +36,6 @@ async def serve_loopback(assistant, url: str, label: str, app_for: Callable[[str
         # ポートが使われているなど。uvicorn は SystemExit で知らせる
         log.error("%sを開けませんでした（%s）", label, url)
         await assistant.notify_trouble(f"{label}（{url}）を開けませんでした")
+    except Exception:
+        log.exception("%sが止まりました（%s）", label, url)
+        await assistant.notify_trouble(f"{label}（{url}）が止まりました。Kei Agent のログを見てください")

@@ -56,7 +56,7 @@ class Hands:
     def __init__(self, assistant):
         self.assistant = assistant
         self.records = Records(assistant.store, "hands")
-        self._tasks: dict[str, asyncio.Task] = {}
+        self._tasks = assistant.hands_tasks
 
     @property
     def config(self):
@@ -116,7 +116,7 @@ class Hands:
         ws, provider, use_case = self._plan(workspace, request, weight, engine)
         conversation = conversation or f"c-{secrets.token_hex(6)}"
         ticket = f"t-{secrets.token_hex(6)}"
-        self.records.put("ticket", ticket, {"status": "running", "workspace": ws.channel_name,
+        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "workspace": ws.channel_name,
                                             "conversation": conversation, "started_at": time.time()},
                          keep_days=KEEP_DAYS)
         task = asyncio.create_task(self._work(ticket, ws, provider, use_case, request, conversation))
@@ -173,6 +173,8 @@ class Hands:
         actor = ws.module
         version = prompt_version(self.config, actor)
         run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "mcp")
+        # 会話を作業場に結び付けておく（AI が頼んだ研究のジョブを、この作業場のものとして受け付けるため）
+        store.upsert_thread(CHANNEL, conversation, ws.channel_name, None)
         result = None
         before: dict = {}
         try:
@@ -218,7 +220,7 @@ class Hands:
         if found.get("status") == "running" and ticket not in self._tasks:
             # 本体が起動し直して、作業が途中で止まった
             found = {**found, "status": "failed", "text": "Kei Agent が起動し直したので、作業が途中で止まりました。もう一度頼んでください"}
-        return {"ticket": ticket, **{k: v for k, v in found.items() if k != "started_at"}}
+        return {**{k: v for k, v in found.items() if k != "started_at"}, "ticket": ticket}
 
 
 def _clock(at: float) -> str:

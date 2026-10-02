@@ -23,6 +23,8 @@ from kei_agent.execution.jobs import missing_outputs
 from kei_agent.workspaces import themes
 
 log = logging.getLogger(__name__)
+# 手の口の会話を記録するチャンネルの名前（hands.CHANNEL）
+HANDS_CHANNEL = "mcp"
 
 
 class BackgroundLoops:
@@ -90,6 +92,11 @@ class BackgroundLoops:
 
     async def handle_job_requests(self, cwd: Path) -> None:
         for o in await self.jobs.process_requests(cwd):
+            if o.channel == HANDS_CHANNEL:
+                # 手の口から頼まれたジョブは Slack に出さない（頭が jobs の道具で様子と結果を見る）
+                if o.error:
+                    log.warning("手の口のジョブの依頼を投入できませんでした: %s", o.error)
+                continue
             # 依頼のチャンネルとスレッドは Claude が書いたものなので、知っているスレッドのときだけ投稿する
             known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
             req = Request(o.channel, "", o.thread_ts, None, "")
@@ -114,17 +121,23 @@ class BackgroundLoops:
         for job in await self.jobs.refresh():
             self.jobs.mark_reported(job)
             row = self.store.get_thread(job.channel, job.thread_ts)
-            if row is None:
+            if row is None or job.channel == HANDS_CHANNEL:
                 continue
             req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
             missing = missing_outputs(job)
             note = f"。ただ {'、'.join(missing)} ができていない" if missing else ""
-            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ"
-                                 f"（{job_status_label(job.status)}{note}）。結果を見てみるね")
-            await self.submit(replace(
-                req, text=job_resume_prompt(job), trigger="job",
-                outputs_since=job.submitted_at, awaiting_after=job.status != "succeeded" or bool(missing),
-            ))
+            try:
+                await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ"
+                                     f"（{job_status_label(job.status)}{note}）。結果を見てみるね")
+                await self.submit(replace(
+                    req, text=job_resume_prompt(job), trigger="job",
+                    outputs_since=job.submitted_at, awaiting_after=job.status != "succeeded" or bool(missing),
+                ))
+            except Exception:
+                # 知らせられなかったジョブを黙って落とさない（ほかのジョブの報告は続ける）
+                log.exception("ジョブの終わりを知らせられませんでした")
+                await self.notify_trouble(f"ジョブ {job.id}「{job.name}」（#{row['channel_name']}）は終わりましたが、"
+                                          f"スレッドに知らせられませんでした（{job_status_label(job.status)}）")
 
     async def job_loop(self) -> None:
         failing = False

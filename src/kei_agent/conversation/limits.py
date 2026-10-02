@@ -188,17 +188,26 @@ class LimitDeferral:
         """上限で止まった依頼を、明けたらやり直す。"""
         now = time.time() if now is None else now
         for deferred_id, payload in self.store.due_deferred("request", now):
+            # 1件ずつ。やり直せなかったものは黙って消さず、知らせる（ほかの依頼のやり直しは続ける）
             self.store.finish_deferred(deferred_id)
-            req = replace(Request.from_payload(payload), retried=True)
-            for ts in payload.get("held") or []:
-                await self._react(self.slack.reactions_remove, req.channel, ts, HOLD_REACTION)
-            original_provider = payload.get("provider")
-            if original_provider:
-                actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
-                if settings.selected_provider(self.config, self.store, actor) != original_provider:
-                    await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
-                    continue
-            await self.submit(req)
+            try:
+                await self._retry_one(payload)
+            except Exception:
+                log.exception("上限で止まった依頼をやり直せませんでした")
+                await self.notify_trouble(f"上限で止まっていた依頼（#{payload.get('channel_name', '?')}）を、"
+                                          "明けたあとにやり直せませんでした。もう一度頼んでください")
+
+    async def _retry_one(self, payload: dict) -> None:
+        req = replace(Request.from_payload(payload), retried=True)
+        for ts in payload.get("held") or []:
+            await self._react(self.slack.reactions_remove, req.channel, ts, HOLD_REACTION)
+        original_provider = payload.get("provider")
+        if original_provider:
+            actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
+            if settings.selected_provider(self.config, self.store, actor) != original_provider:
+                await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
+                return
+        await self.submit(req)
 
     # ジョブ
 

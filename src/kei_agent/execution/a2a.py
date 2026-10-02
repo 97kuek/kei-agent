@@ -20,6 +20,8 @@ import aiohttp
 from aiohttp.http_exceptions import LineTooLong
 
 log = logging.getLogger(__name__)
+# 名刺を待つ上限（秒）。開いているのに答えない担当で、起動の確かめを止めない
+CARD_TIMEOUT_SECONDS = 10
 
 CARD_PATH = "/.well-known/agent-card.json"
 # JSON-RPC のメソッド名。A2A v1 は proto の RPC 名（SendMessage）、v0.x は message/send だった
@@ -144,7 +146,8 @@ class Agent:
         """相手の名刺（何ができるか、どこに話しかけるか）。"""
         try:
             async with (_session(session) as http,
-                        http.get(self.base_url + CARD_PATH, headers=self._headers()) as resp):
+                        http.get(self.base_url + CARD_PATH, headers=self._headers(),
+                                 timeout=aiohttp.ClientTimeout(total=CARD_TIMEOUT_SECONDS)) as resp):
                 if resp.status != 200:
                     raise A2AError(f"名刺を読めません（HTTP {resp.status}）: {self.base_url}")
                 text = await resp.text()

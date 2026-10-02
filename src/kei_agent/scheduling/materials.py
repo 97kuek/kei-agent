@@ -46,6 +46,19 @@ def _clamp(value: int, top: int) -> int:
     return max(1, min(int(value), top))
 
 
+def _float(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_status(ticket: dict, running: set[str]) -> str:
+    """受付番号の様子。running のまま本体が起動し直したものは failed（Hands.status と同じ）。"""
+    status = str(ticket.get("status") or "")
+    return "failed" if status == "running" and ticket.get("ticket") not in running else status
+
+
 def _stamp(value: float | None) -> str:
     return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M") if value else ""
 
@@ -116,7 +129,7 @@ def recent(assistant: Assistant, hours: int, now: float | None = None) -> dict:
         except ValueError:
             continue
         item = {"workspace": row["channel_name"], "updated": _stamp(row["updated_at"]),
-                "started": _stamp(float(row["thread_ts"])) if row["thread_ts"].replace(".", "").isdigit() else ""}
+                "started": _stamp(_float(row["thread_ts"])), "from": "手の口" if row["channel"] == "mcp" else "Slack"}
         if ws.kind in EXCERPT_KINDS and ws.cwd is not None:
             item |= _excerpt(thread_log_path(ws.cwd, row["thread_ts"]))
         threads.append(item)
@@ -126,9 +139,10 @@ def recent(assistant: Assistant, hours: int, now: float | None = None) -> dict:
         counted["runs"] += 1
         counted["failed"] += int(bool(row["is_error"]))
         counted["running"] += int(row["ended_at"] is None)
-    asked = [{key: ticket.get(key) for key in ("workspace", "status", "conversation")}
-             | {"started": _stamp(ticket.get("started_at"))}
-             for ticket in Records(store, "hands").items("ticket") if (ticket.get("started_at") or 0) >= since]
+    running = set(assistant.hands_tasks)
+    asked = [{key: ticket.get(key) for key in ("workspace", "conversation")}
+             | {"status": _ticket_status(ticket, running), "started": _stamp(ticket.get("started_at"))}
+             for ticket in Records(store, "hands").items("ticket") if (_float(ticket.get("started_at")) or 0) >= since]
     finished = [_job(job) for job in store.jobs_finished_since(since)]
     return {"since": _stamp(since), "threads": threads,
             "runs": [{"agent": name, **counted} for name, counted in sorted(runs.items())],

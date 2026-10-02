@@ -21,7 +21,7 @@ from kei_agent.execution.agent_policy import NOTION_MCP, AgentPolicy
 from kei_agent.execution.execution_contract import ExecutionContract, resolve_contract
 from kei_agent.execution.model_policy import ResolvedModel, validate_resolved
 from kei_agent.execution.provider_permissions import PROFILE_NAME, CapabilityUnavailable, PermissionProfile, preflight
-from kei_agent.storage.notion import gateway_client_token
+from kei_agent.storage.notion import gateway_client_token, write_json_atomic
 from kei_agent.workspaces.themes import Workspace
 
 # 契約の上限に達したときに claude -p が返す文。書き方は版によって違う。
@@ -265,7 +265,7 @@ def clear_managed_skill_directory(cwd: Path) -> None:
             raise RuntimeError(f"managed skill changed by another owner: {name}")
         target.unlink()
     if manifest.exists():
-        manifest.write_text("{}", encoding="utf-8")
+        write_json_atomic(manifest, {})
 
 
 def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) -> None:
@@ -293,7 +293,7 @@ def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) ->
             raise RuntimeError(f"agent skill collides with existing skill: {source.name}")
         target.symlink_to(os.path.relpath(source, target_root), target_is_directory=True)
         new_managed[source.name] = str(source.resolve())
-    manifest.write_text(json.dumps(new_managed, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(manifest, new_managed)
 
 
 def account_env(config: Config, actor: str, env: dict[str, str]) -> dict[str, str]:

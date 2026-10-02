@@ -43,9 +43,9 @@ def rows(text: str, name: str, columns: tuple[str, ...], optional: tuple[str, ..
     reader.fieldnames = header
     first = columns[0]
     for line, raw in enumerate(reader, start=2):
+        head = (raw.get(first) or "").strip()
+        if not head or head.startswith("#"):
+            continue    # メモの行は、列の数を数えない
         if None in raw:
             raise TableError(f"{name} の {line} 行目は列が多すぎます{too_many}")
-        row = {key: (value or "").strip() for key, value in raw.items()}
-        if not row[first] or row[first].startswith("#"):
-            continue
-        yield line, row
+        yield line, {key: (value or "").strip() for key, value in raw.items() if key is not None}
