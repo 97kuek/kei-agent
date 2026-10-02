@@ -121,7 +121,10 @@ class BackgroundLoops:
         for job in await self.jobs.refresh():
             self.jobs.mark_reported(job)
             row = self.store.get_thread(job.channel, job.thread_ts)
-            if row is None or job.channel == HANDS_CHANNEL:
+            if row is None:
+                continue
+            if job.channel == HANDS_CHANNEL:
+                await self.tell_head_job_done(job, row["channel_name"])
                 continue
             req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
             missing = missing_outputs(job)
@@ -138,6 +141,20 @@ class BackgroundLoops:
                 log.exception("ジョブの終わりを知らせられませんでした")
                 await self.notify_trouble(f"ジョブ {job.id}「{job.name}」（#{row['channel_name']}）は終わりましたが、"
                                           f"スレッドに知らせられませんでした（{job_status_label(job.status)}）")
+
+    async def tell_head_job_done(self, job, workspace: str) -> None:
+        """手の口から投げたジョブが終わった。Slack につないでいないときは、頭への知らせにする（頭が同じ会話で続きを頼む）。
+        Slack につないでいるときは、頭が jobs の道具で見る。"""
+        from kei_agent.conversation.outbox import Outbox
+
+        if not isinstance(self.slack, Outbox):
+            return
+        missing = missing_outputs(job)
+        note = f"。ただ {'、'.join(missing)} ができていない" if missing else ""
+        await self.slack.chat_postMessage(
+            channel=workspace,
+            text=f"🧪 ジョブ {job.id}「{job.name}」が終わったよ（{job_status_label(job.status)}{note}）。"
+                 f"続きは run（workspace={workspace}, conversation={job.thread_ts}）に「ジョブの結果を読んでまとめて」と頼んでね")
 
     async def job_loop(self) -> None:
         failing = False

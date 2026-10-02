@@ -147,10 +147,6 @@ class Speaker:
         elapsed = int((time.monotonic() - self._started) * 1000)
         return min(self._written_ms, max(elapsed, 0))
 
-    @property
-    def speaking(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None and self.played_ms < self._written_ms
-
     async def wait_until_done(self) -> None:
         """書き込んだPCMを鳴らし終えるまで待つ。"""
         remaining_ms = max(self._written_ms - self.played_ms, 0)

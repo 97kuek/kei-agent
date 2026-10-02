@@ -24,7 +24,7 @@ FAILED_REACTION = "warning"
 HOLD_REACTION = "hourglass_flowing_sand"
 NIGHT_REACTION = "crescent_moon"
 
-# Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（prompts/system.md）
+# Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（各担当の指示書と prompts/head.md）
 AWAITING_MARKER = "❓ 確認:"
 # 作業がひと段落して、新しいスレッドで続けたほうがよいときに、返答の最後の行をこれで始める（handoff.py）
 HANDOFF_MARKER = "🧵 区切り:"

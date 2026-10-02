@@ -221,7 +221,8 @@ class Hands:
         assistant, store = self.assistant, self.assistant.store
         ws, provider = plan.ws, plan.provider
         actor = ws.module
-        version = prompt_version(self.config, actor, for_head=True)
+        # 作業場ごとの指示書（テーマの AGENTS.md など）も版に入れる（変えたら古い会話を続けない）
+        version = prompt_version(self.config, actor, ws if ws.kind in WORKSPACE_KINDS else None, for_head=True)
         run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "mcp")
         # 会話を作業場に結び付けておく（AI が頼んだ研究のジョブを、この作業場のものとして受け付けるため）
         store.upsert_thread(CHANNEL, conversation, ws.channel_name, None)
@@ -419,7 +420,10 @@ def _clock(at: float) -> str:
 def _status(result) -> str:
     if result.is_error:
         return "failed"
-    return "needs_input" if AWAITING_MARKER in (result.text or "") else "done"
+    # 確認の合図は最後の行だけを見る（本文の途中に引用された合図では止めない）
+    last = next((line.strip() for line in reversed((result.text or "").splitlines())
+                 if line.strip() and not line.strip().startswith("<<kei-agent-final")), "")
+    return "needs_input" if last.startswith(AWAITING_MARKER) else "done"
 
 
 def _text(result) -> str:

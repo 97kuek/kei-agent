@@ -153,6 +153,8 @@ def recent(assistant: Assistant, hours: int, now: float | None = None) -> dict:
 
 def _job(job) -> dict:
     return {"id": job.id, "name": job.name, "workspace": Path(job.cwd).name, "status": job.status,
+            # 手の口から投げたジョブなら、その会話の番号（同じ会話で続きを頼める）
+            "conversation": job.thread_ts if job.channel == "mcp" else "",
             "detail": job.detail or "", "submitted": _stamp(job.submitted_at), "started": _stamp(job.started_at),
             "finished": _stamp(job.finished_at)}
 

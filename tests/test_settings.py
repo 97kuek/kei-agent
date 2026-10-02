@@ -6,23 +6,6 @@ from kei_agent.configuration.config import MaintenanceConfig, ScheduleConfig
 from kei_agent.storage import settings
 
 
-def test_old_domain_tables_are_dropped(tmp_path):
-    """使わなくなった表（接続先と、App Home で切り替えた AI）は、既存のデータベースからも消える。"""
-    import sqlite3
-
-    from kei_agent.storage.store import Store
-
-    db = tmp_path / "state.db"
-    with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE theme_domains (theme TEXT, domain TEXT)")
-        conn.execute("CREATE TABLE domain_requests (id INTEGER PRIMARY KEY)")
-        conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute("INSERT INTO settings VALUES ('agent.research.provider', 'codex')")
-    store = Store(db)
-    names = {r["name"] for r in store.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert not names & {"theme_domains", "domain_requests", "settings"}
-
-
 def test_schedule_time_comes_from_the_config(config):
     """時刻は設定（schedules.csv から読んだもの）だけ。空文字と、止めた保守は「行わない」。"""
     config = replace(config, schedule=ScheduleConfig(daily="08:00", review=""), maintenance=MaintenanceConfig(time="22:00"))

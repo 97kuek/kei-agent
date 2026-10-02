@@ -200,8 +200,6 @@ ADDED_COLUMNS = {
                 # 区切って引き継いだ先のスレッド
                 "handed_off_to": "TEXT"},
 }
-# 使わなくなった表。既存のデータベースからも消す
-DROPPED_TABLES = ("theme_domains", "domain_requests", "settings")
 
 
 class Store:
@@ -223,8 +221,6 @@ class Store:
                 for name, kind in columns.items():
                     if name not in have:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
-            for table in DROPPED_TABLES:
-                self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。

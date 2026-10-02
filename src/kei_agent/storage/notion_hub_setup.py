@@ -176,14 +176,10 @@ class HubSetup:
                 if full.get("name") != name:
                     continue
                 parent_id = full.get("parent", {}).get("database_id")
-                if parent_id:
-                    parent = self.notion.request("GET", f"/databases/{parent_id}")
-                    belongs_here = notion_id(parent.get("parent", {}).get("page_id")) == notion_id(self.home_id)
-                else:
-                    # テスト用 fake と旧応答のみ。実 API の view は parent.database_id を返す。
-                    created_in = full.get("create_database", {}).get("parent", {}).get("page_id")
-                    belongs_here = notion_id(created_in) == notion_id(self.home_id)
-                if belongs_here:
+                if not parent_id:
+                    continue
+                parent = self.notion.request("GET", f"/databases/{parent_id}")
+                if notion_id(parent.get("parent", {}).get("page_id")) == notion_id(self.home_id):
                     matches.append(full)
             if len(matches) > 1:
                 raise NotionError(f"{name} のリンクドビューが重複しています")

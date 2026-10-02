@@ -317,7 +317,7 @@ def test_codex_missing_rollout_is_a_missing_session():
 
 def test_system_prompt_warns_that_replies_do_not_auto_continue(config):
     """「続ける」と言い切って実際には止まる、という矛盾を防ぐための一文。"""
-    for path in (config.repo_root / "prompts" / "system.md", config.repo_root / "modules" / "research" / "research.md"):
+    for path in (config.repo_root / "modules" / "research" / "research.md",):
         text = path.read_text(encoding="utf-8")
         assert "自動で" in text and "続き" in text and "止まる" in text, path
 

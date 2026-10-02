@@ -361,3 +361,38 @@ async def test_post_turns_slack_errors_into_reasons(config, store):
     slack.chat_postMessage = broken
     with pytest.raises(HandsError, match="投稿できませんでした"):
         await Hands(assistant).post("長い Daily")
+
+
+async def test_jobs_started_from_the_head_tell_the_head_when_they_finish(config, store, monkeypatch):
+    """Slack につないでいないとき、手の口から投げたジョブの終わりは知らせになる（同じ会話で続きを頼めるように）。"""
+    from fakes import FakePueue, write_request
+
+    from kei_agent.conversation.outbox import Outbox
+    claude = FakeAI()
+    monkeypatch.setattr(runner, "run_model", claude)
+    pueue = FakePueue()
+    assistant, _ = make_assistant(config, store, {"C1": "vlm"}, pueue=pueue)
+    assistant.slack = Outbox(config, store)
+    (config.research_root / "vlm").mkdir(parents=True)
+
+    def submit_job(cwd):
+        (cwd / "scripts").mkdir(exist_ok=True)
+        (cwd / "scripts" / "sweep.py").write_text("print(1)")
+        write_request(cwd, action="submit", request_id="req-1", channel="mcp", thread_ts="1790932570.682239",
+                      name="sweep", script="scripts/sweep.py", args=[])
+
+    claude.behaviors = [{"side_effect": submit_job, "text": final_answer("ジョブにしたよ")}]
+    await Hands(assistant).run("vlm", "回して", conversation="1790932570.682239")
+    await assistant.poll_jobs()
+    pueue.task_status[0] = {"status": {"Done": {
+        "start": "2026-09-17T10:00:00+09:00", "end": "2026-09-17T10:10:00+09:00", "result": "Success"}}}
+    await assistant.poll_jobs()
+    (notice,) = [n for n in assistant.slack.pending() if "sweep" in n["text"]]
+    assert notice["channel"] == "vlm" and "1790932570.682239" in notice["text"] and "終わった" in notice["text"]
+    assert len(claude.calls) == 1   # 本体は自分では続けない（頭が同じ会話で頼む）
+
+
+async def test_a_quoted_question_mark_in_the_middle_does_not_stop_the_run(hands):
+    h, claude = hands
+    claude.answer(final_answer("前の回の「❓ 確認: A と B」は A に決まった。\nA で直した"))
+    assert (await h.run("vlm", "直して"))["status"] == "done"

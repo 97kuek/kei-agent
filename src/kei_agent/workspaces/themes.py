@@ -106,7 +106,7 @@ class Workspace:
     # claude -p を動かすディレクトリ。IMPROVE では None
     cwd: Path | None
     # ここから下は、エージェントが自分の claude を動かすときの上乗せ（docs/architecture.md の「振り分けと A2A」）
-    # そのエージェントの指示書（prompts/<agent>.md）。既定は prompts/system.md
+    # そのエージェントの指示書（prompts/<agent>.md）。既定は受け持つモジュールの指示書
     system_prompt: Path | None = None
     # claude 1回の上限時間（分）。既定は config.run_timeout_minutes
     timeout_minutes: int | None = None

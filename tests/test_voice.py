@@ -142,11 +142,10 @@ def test_stopping_reports_how_much_was_actually_heard(monkeypatch):
 
     # 書いた長さより、経った時間の方が短いので、鳴ったのは経った時間ぶんだけ
     assert speaker.played_ms < 1000
-    assert speaker.speaking is True
 
     # 書いた長さを越えて時間が経ったら、鳴り終わっている
     speaker._started -= 2
-    assert speaker.played_ms == 1000 and speaker.speaking is False
+    assert speaker.played_ms == 1000
     assert speaker.stop() == 1000
 
     # 返事ごとに、その返事の始まりから測る（2つめで割り込まれたとき、1つめの長さまで足して伝えていた）
