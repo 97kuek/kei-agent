@@ -15,7 +15,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from starlette.datastructures import Headers
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from kei_agent.conversation.hands import Hands, HandsError
 
@@ -84,8 +84,8 @@ class TokenAuth:
     async def __call__(self, scope, receive, send) -> None:
         path = scope.get("path", "")
         if scope["type"] == "http" and path.startswith(WELL_KNOWN):
-            # 合言葉があっても無くても、同じ JSON の 404（本文が JSON でないと、トンネルが読めずに警告を出す）
-            await JSONResponse({"error": "not found"}, status_code=404)(scope, receive, send)
+            # 合言葉があっても無くても、本文の無い 404（本文があると、トンネルが OAuth の案内として読もうとして警告を出す）
+            await Response(status_code=404)(scope, receive, send)
             return
         if scope["type"] != "http" or path.rstrip("/") == HEALTH_PATH:
             await self.app(scope, receive, send)

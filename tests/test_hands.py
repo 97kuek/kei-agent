@@ -114,7 +114,7 @@ async def test_the_door_checks_the_password(hands):
         # OAuth は使わない（トンネルの点検は、合言葉なしで 404 を見る）
         for given in ({}, {"authorization": "Bearer secret-token"}):
             found = await client.get("/.well-known/oauth-protected-resource/mcp", headers=given)
-            assert found.status_code == 404 and found.json() == {"error": "not found"}
+            assert found.status_code == 404 and found.content == b""
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
         headers = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
         assert (await client.post("/mcp", json=body, headers=headers)).status_code == 401
