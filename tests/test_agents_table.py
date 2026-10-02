@@ -1,5 +1,6 @@
 """担当の表（agents.csv）: モジュールのオンオフ・チャンネル・AI の実行器とモデルを1か所で変える。"""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,6 @@ from kei_agent.configuration.agents_table import TableError, parse, with_enabled
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.model_policy import resolve
 from kei_agent.operations import module_command
-from kei_agent.storage import settings
 from kei_agent.storage.store import Store
 
 HEADER = "module,enabled,channels,engine,model,effort\n"
@@ -59,7 +59,7 @@ def test_a_pinned_model_applies_to_every_use_case_except_manual_ones(tmp_path):
         assert (recipe.model, recipe.reasoning_effort) == ("claude-opus-5", "max")
     # 依頼者が明示したときだけの用途は、表のモデルにしない
     assert resolve("research", "claude", "manual_fable", manual=True).model == "claude-fable-5"
-    # App Home で表と違う provider に一時的に切り替えたときは、用途ごとの選び分け
+    # 表と違う provider（頭が engines のほかの AI を選んだとき）は、用途ごとの選び分け
     assert resolve("research", "codex", "research_extract").model == "gpt-6-luna"
     # 空欄の担当は用途ごとの選び分けのまま
     assert resolve("course", "claude", "course_degree_plan").model == "claude-opus-5"
@@ -117,19 +117,6 @@ def test_without_a_table_every_builtin_module_is_on_and_no_ai_is_chosen(tmp_path
     assert not any(p.provider for p in config.agent_profiles.values())
 
 
-def test_app_home_switches_are_temporary(tmp_path):
-    home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
-    config = _load(home)
-    store = Store(config.db_path)
-    settings.set_agent_provider(store, "knowledge", "claude")
-    assert settings.selected_provider(config, store, "knowledge") == "claude"
-    assert settings.table_provider(config, "knowledge") == "codex"
-    # 本体を起動し直すと、表の値に戻る
-    assert settings.reset_agent_providers(store) == ["knowledge"]
-    assert settings.selected_provider(config, store, "knowledge") == "codex"
-    assert settings.reset_agent_providers(store) == []
-
-
 def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
     text = HEADER + "knowledge,true,,codex,,\nwork,false,work,claude,,\n"
     assert with_enabled(text, "work", True) == HEADER + "knowledge,true,,codex,,\nwork,true,work,claude,,\n"
@@ -144,16 +131,17 @@ def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
     assert "enabled = false" in capsys.readouterr().out
 
 
-def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
+def test_app_home_shows_the_engine_and_the_account_from_the_table(tmp_path):
     from kei_agent.conversation.home import build_home
 
     home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
     config = _load(home)
-    store = Store(config.db_path)
-    text = str(build_home(config, store, True))
-    assert "agents.csv では" not in text
-    settings.set_agent_provider(store, "knowledge", "claude")
-    assert "agents.csv では Codex（起動し直すと戻る）" in str(build_home(config, store, True))
+    config = replace(config, agent_profiles={**config.agent_profiles, "knowledge": replace(
+        config.agent_profiles["knowledge"], codex_account="~/.codex-work")})
+    text = str(build_home(config, Store(config.db_path), True))
+    assert "知識  Codex（~/.codex-work）" in text
+    # 選べる欄は無い（変えるのは agents.csv だけ）
+    assert "static_select" not in text and "kei_agent_home_provider" not in text
 
 
 def test_the_folder_column_decides_where_agents_work(tmp_path):

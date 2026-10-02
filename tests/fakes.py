@@ -203,3 +203,10 @@ def write_schedules(home: Path, rows: str | Iterable[str | dict]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_table(schedules_table.COLUMNS, rows, "name"), encoding="utf-8")
     return path
+
+
+def use_engine(config, actor: str, provider: str) -> None:
+    """担当の AI を変える（agents.csv の engine を書き換えて、起動し直したのと同じ）。"""
+    from dataclasses import replace
+
+    config.agent_profiles[actor] = replace(config.agent_profiles[actor], provider=provider)

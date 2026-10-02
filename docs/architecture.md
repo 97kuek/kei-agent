@@ -111,7 +111,7 @@
 
 ### actor とモデル
 
-- AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine`。App Home の切り替えは起動し直すまでの一時的なもの。既定は無く、選ぶまで動かない
+- AI の実行役（actor）ごとに provider を選ぶ。担当の表 `agents.csv` の `engine` だけで決まる（App Home は見せるだけ）。既定は無く、選ぶまで動かない
 - モデルは用途ごとの表（下と [agents/](agents.md)）で決まる。`agents.csv` の `model`・`effort` を書いた担当だけ、明示の用途を除いてそのモデルにする（[deploy/README.md](../deploy/README.md#担当の表agentscsv)）
 - actor: `research` / `course` / `work` / `knowledge` / `router`（振り分け）/ `daily` / `improve`
 - 使ってよいモデルは `framework/models.py` にだけ置く。モジュールはその中からしか選べない（用途ごとに選ぶのは `execution/model_policy.py`）
@@ -264,7 +264,7 @@
 | 領域 | 中身 |
 |---|---|
 | `configuration/` | `config.toml`・担当の表 `agents.csv`（`agents_table.py`）・既存のフォルダの対応 `themes.toml` とチャンネル名の決まり（`places.py`）・起動スクリプトが知りたい場所 |
-| `storage/` | SQLite（`store.py`・`records.py`・App Home で変えた値 `settings.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`（作るのは `notion_hub_setup.py`）） |
+| `storage/` | SQLite（`store.py`・`records.py`）、定期処理の見出しと時刻・担当ごとの AI を設定から引く `settings.py`と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`（作るのは `notion_hub_setup.py`）） |
 | `framework/` | モジュールの定義の読み込み（`modules.py`）、使ってよいモデルの一覧とその確かめ（`models.py`）、動いている版 |
 | `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
 | `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |

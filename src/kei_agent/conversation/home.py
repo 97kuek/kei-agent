@@ -1,8 +1,8 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
-見出しと操作だけの1画面にする（説明文は置かない）。置くのは、動いているもの、担当ごとの AI、
-モジュールの項目（class Module の home。声の「知らせる」「聞く」など）だけ。
-`config.toml` の柵は出さない。
+見出しと操作だけの1画面にする（説明文は置かない）。置くのは、動いているもの、担当ごとの AI とアカウント
+（agents.csv の値を見せるだけ。変えるのは agents.csv）、モジュールの項目（class Module の home。声の「知らせる」
+「聞く」など）だけ。`config.toml` の柵は出さない。
 """
 
 from __future__ import annotations
@@ -10,14 +10,13 @@ from __future__ import annotations
 import time
 from datetime import datetime
 
-from kei_agent.configuration.config import Config
+from kei_agent.configuration.config import AgentProfile, Config
 from kei_agent.conversation.slack_text import format_duration
 from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.store import Store
 
 REFRESH_ACTION = "kei_agent_home_refresh"
-PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
 MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
 CORE_AGENT_LABELS: dict[str, str] = {}
@@ -28,7 +27,7 @@ TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "voice": "�
 
 
 def agent_labels(config: Config) -> dict[str, str]:
-    """AI を選ぶ実行役と表示名（本体の担当、使うモジュール、横断の係の順）。"""
+    """AI を使う実行役と表示名（本体の担当、使うモジュール、横断の係の順）。"""
     labels = dict(CORE_AGENT_LABELS)
     labels.update({spec.name: spec.label for spec in modules.enabled(config.modules) if spec.actor})
     labels.update(CROSS_AGENT_LABELS)
@@ -90,6 +89,15 @@ def _now_working(config: Config, store: Store, now: float | None = None) -> list
     return lines
 
 
+def _engines(config: Config, agent: str) -> str:
+    """その担当の AI と、使うアカウントのフォルダ（agents.csv の engine・engines と claude_account・codex_account）。"""
+    profile = config.agent_profiles.get(agent, AgentProfile())
+    if not profile.allowed_engines:
+        return "未選択"
+    accounts = {"claude": profile.claude_account, "codex": profile.codex_account}
+    return "・".join(f"{engine.title()}（{accounts.get(engine) or '既定'}）" for engine in profile.allowed_engines)
+
+
 def build_home(config: Config, store: Store, is_owner: bool,
                module_sections: list[tuple[str, list[dict]]] = ()) -> dict:
     """module_sections は、モジュールの表示名と項目（class Module の home が返した blocks）。定期実行の下に並べる。"""
@@ -104,19 +112,8 @@ def build_home(config: Config, store: Store, is_owner: bool,
         _mrkdwn("\n".join(working)) if working else _context("なし"),
         {"type": "divider"},
         _mrkdwn("*AI*"),
+        _mrkdwn("\n".join(f"{label}  {_engines(config, agent)}" for agent, label in agent_labels(config).items())),
     ]
-    for agent, label in agent_labels(config).items():
-        provider = settings.agent_profile(config, store, agent).provider
-        select = {"type": "static_select", "action_id": f"{PROVIDER_ACTION}:{agent}",
-                  "placeholder": {"type": "plain_text", "text": "未選択"},
-                  "options": [_option("Claude", "claude"), _option("Codex", "codex")]}
-        if provider:
-            select["initial_option"] = _option(provider.title(), provider)
-        base = settings.table_provider(config, agent)
-        if base != provider:
-            # 表（agents.csv）と違う AI で動いている。本体を起動し直すと表に戻る
-            label += f"\n_agents.csv では {base.title() if base else '未選択'}（起動し直すと戻る）_"
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": label}, "accessory": select})
 
     for label, items in module_sections:
         blocks += [{"type": "divider"}, _mrkdwn(f"*{label}*"), *items]

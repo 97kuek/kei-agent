@@ -1,15 +1,13 @@
-"""Slack（App Home）から変える設定: 一時的に切り替えた担当の AI。定期処理の見出し。
+"""定期処理の見出しと時刻、担当ごとの AI（どれも設定ファイルから読む）。
 
-柵そのもの（書き込み先、読ませない場所）は `config.toml` に残し、ここでは扱わない。
-保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。
+柵そのもの（書き込み先、読ませない場所）は `config.toml`、担当ごとの AI は `agents.csv` が決める。
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 
-from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_actors
+from kei_agent.configuration.config import HHMM, Config, model_actors
 from kei_agent.framework import modules
 from kei_agent.storage.store import Store, schedule_detail
 
@@ -68,14 +66,6 @@ def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
 
 # 決まった時刻の処理
 
-def _get(store: Store, key: str) -> str | None:
-    return store.setting(key)
-
-
-def _set(store: Store, key: str, value: str) -> None:
-    store.set_setting(key, value)
-
-
 def _config_time(config: Config, name: str) -> str:
     if name == "maintenance":
         return config.maintenance.time
@@ -93,44 +83,10 @@ def schedule_time(config: Config, name: str) -> str:
     return hhmm if HHMM.match(hhmm or "") else ""
 
 
-# actor ごとの provider。正は担当の表（agents.csv）の engine。App Home の値は表を書き換えず、
-# 本体を起動し直すまでの一時的な上書き
-_PROFILE_PROVIDERS = frozenset({"claude", "codex"})
+# actor ごとの provider。担当の表（agents.csv）の engine だけが決める
 
-
-def set_agent_provider(store: Store, agent: str, provider: str) -> None:
-    """実行器を切り替える。model / effort は保存しない。"""
-    if agent not in model_actors():
-        raise ValueError(f"未知のagentです: {agent}")
-    if provider not in _PROFILE_PROVIDERS:
-        raise ValueError("provider は claude または codex にしてください")
-    _set(store, f"agent.{agent}.provider", provider)
-
-
-def selected_provider(config: Config, store: Store, actor: str) -> str:
-    """actor が明示選択した provider。空なら実行しない。"""
+def selected_provider(config: Config, actor: str) -> str:
+    """actor の provider（agents.csv の engine）。空なら実行しない。"""
     if actor not in model_actors():
         raise ValueError(f"未知のagentです: {actor}")
-    return _get(store, f"agent.{actor}.provider") or config.agent_profiles[actor].provider
-
-
-def table_provider(config: Config, actor: str) -> str:
-    """担当の表（agents.csv）に書いた provider（App Home の一時的な切り替えの前のもの）。"""
     return config.agent_profiles[actor].provider
-
-
-def reset_agent_providers(store: Store) -> list[str]:
-    """App Home で一時的に切り替えた provider を消して、担当の表に戻す（本体の起動のとき）。戻した actor を返す。"""
-    reset = []
-    for actor in sorted(model_actors()):
-        key = f"agent.{actor}.provider"
-        if _get(store, key) is not None:
-            store.delete_setting(key)
-            reset.append(actor)
-    return reset
-
-
-def agent_profile(config: Config, store: Store, agent: str) -> AgentProfile:
-    if agent not in model_actors():
-        raise ValueError(f"未知のagentです: {agent}")
-    return replace(config.agent_profiles[agent], provider=selected_provider(config, store, agent))

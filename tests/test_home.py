@@ -5,7 +5,6 @@ from fakes import FakeAI, make_assistant
 
 from kei_agent.conversation import home
 from kei_agent.execution import runner
-from kei_agent.storage import settings
 from kei_agent.workspaces import themes
 
 
@@ -42,26 +41,25 @@ def test_home_shows_neither_schedules_nor_connections(config, store):
     assert "定期実行" not in text and not any(b.get("accessory", {}).get("type") == "timepicker" for b in view["blocks"])
 
 
-def test_home_shows_agent_provider_controls(config, store):
+def test_home_lists_each_agents_ai_and_account_without_controls(config, store):
     from kei_agent.configuration.config import AgentProfile, model_actors
 
-    config = replace(config, agent_profiles={name: AgentProfile() for name in model_actors()})
+    profiles = {name: AgentProfile() for name in model_actors()}
+    profiles["research"] = AgentProfile(provider="claude")
+    profiles["workdev"] = AgentProfile(provider="codex", claude_account="~/.claude-work", codex_account="~/.codex-work")
+    profiles["router"] = AgentProfile(provider="claude", engines=("claude", "codex"))
+    config = replace(config, agent_profiles=profiles)
     view = home.build_home(config, store, is_owner=True)
-    course, = [b["accessory"] for b in view["blocks"]
-               if b.get("accessory", {}).get("action_id") == "kei_agent_home_provider:course"]
-    # 選んでいなければ、欄に「未選択」と出るだけ（説明文は置かない）
-    assert "initial_option" not in course and course["placeholder"]["text"] == "未選択"
-    controls = [block.get("accessory", {}) for block in view["blocks"]]
-    assert {element.get("action_id") for element in controls} >= {
-        "kei_agent_home_provider:research", "kei_agent_home_provider:course", "kei_agent_home_provider:work",
-        "kei_agent_home_provider:router", "kei_agent_home_provider:improve",
-        "kei_agent_home_provider:knowledge",
-    }
-    # 選べるのは AI だけ。モデルや深さは用途の表で決まり、ホームから上書きさせない
-    action_ids = {element.get("action_id") for block in view["blocks"]
-                  for element in [block.get("accessory", {}), *block.get("elements", [])]}
-    assert not any(action_id.startswith("kei_agent_home_model:") for action_id in action_ids if action_id)
-    assert not any(action_id.startswith("kei_agent_home_effort:") for action_id in action_ids if action_id)
+    title = next(n for n, block in enumerate(view["blocks"]) if (block.get("text") or {}).get("text") == "*AI*")
+    lines = view["blocks"][title + 1]["text"]["text"].splitlines()
+    assert "研究  Claude（既定）" in lines
+    assert "大学  未選択" in lines                                     # 選ぶまで、その担当は動かない
+    assert "振り分け  Claude（既定）・Codex（既定）" in lines
+    assert "仕事の開発  Codex（~/.codex-work）" in lines                # 使う AI のアカウントだけを出す
+    # App Home では AI を変えない（変えるのは agents.csv だけ）
+    controls = [element for block in view["blocks"] for element in [block.get("accessory", {}), *block.get("elements", [])]]
+    assert not any(str(element.get("action_id", "")).startswith("kei_agent_home_provider") for element in controls)
+    assert not any(element.get("type") == "static_select" for element in controls)
 
 
 def test_home_for_someone_else_changes_nothing(config, store):
@@ -113,24 +111,6 @@ async def test_voice_checkboxes_open_and_close_the_microphone(env, store, monkey
     title = next(n for n, block in enumerate(blocks) if (block.get("text") or {}).get("text") == "*声*")
     boxes, = blocks[title + 1]["elements"]
     assert boxes["action_id"] == switches and "initial_options" not in boxes
-
-
-async def test_home_provider_action_changes_the_next_agent_run(env, config, store, monkeypatch):
-    """App Home で選んだ AI で次の回が動き、モデルと深さは用途の表から選ぶ。"""
-    assistant, _ = env
-    await assistant.on_home_action(_action("kei_agent_home_provider:course", selected_option={"value": "codex"}))
-    assert settings.agent_profile(assistant.config, store, "course").provider == "codex"
-    await assistant.on_home_action(_action("kei_agent_home_provider:research", selected_option={"value": "codex"}))
-    seen = {}
-
-    async def fake_run(_config, request, _prompt, *_args, **_kwargs):
-        seen.update(model=request.recipe.model, effort=request.recipe.reasoning_effort)
-        return runner.RunResult(text="ok")
-
-    monkeypatch.setattr(runner, "run_model", fake_run)
-    await assistant.run_agent(themes.resolve(config, "vlm"), "実験計画を設計して")
-
-    assert seen == {"model": "gpt-6-sol", "effort": "xhigh"}
 
 
 # いま動いているもの

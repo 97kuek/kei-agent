@@ -21,7 +21,6 @@ from kei_agent.execution import jobs
 from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler
-from kei_agent.storage import settings
 from kei_agent.storage.notion_hub import load_hub
 from kei_agent.storage.notion_store import load_notion
 from kei_agent.storage.store import Store
@@ -53,8 +52,6 @@ async def serve() -> None:
     config = load_config()
     config.research_root.mkdir(parents=True, exist_ok=True)
     store = Store(config.db_path)
-    for actor in settings.reset_agent_providers(store):
-        log.info("App Home で切り替えていた %s の AI を、agents.csv の値に戻しました", actor)
     for name, day in store.mark_interrupted_schedules():
         log.warning("前回の %s（%s）は途中で終わっていました。時間内ならやり直します", name, day)
     pueue = jobs.queue(config)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fakes import use_engine
 
 from kei_agent.execution.model_policy import ModelPolicyError, UseCase, explicit_use_case, is_manual, resolve
 
@@ -33,9 +34,8 @@ def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_cas
 def test_selected_provider_and_the_manual_label_resolve_their_recipes(config, store):
     """選んだ provider の固定のレシピになる。持ち主が [[manual-astra]] と書いたときだけ例外の最上位を使う。"""
     from kei_agent.execution.model_policy import resolve_selected
-    from kei_agent.storage import settings
 
-    settings.set_agent_provider(store, "research", "codex")
+    use_engine(config, "research", "codex")
     recipe = resolve_selected(config, store, "research", "research_execute")
     assert (recipe.provider, recipe.model, recipe.reasoning_effort) == ("codex", "gpt-6-sol", "high")
 
@@ -92,9 +92,8 @@ def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answe
 
 async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeypatch):
     from kei_agent.execution import model_classifier, runner
-    from kei_agent.storage import settings
 
-    settings.set_agent_provider(store, "research", "claude")
+    use_engine(config, "research", "claude")
 
     async def limited(*_args, **_kwargs):
         return runner.RunResult(is_error=True, limit_reset_at=123.0, errors=["usage limit reached"])
@@ -111,7 +110,6 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
     """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
     from kei_agent.conversation import router
     from kei_agent.execution import model_classifier, runner
-    from kei_agent.storage import settings
 
     seen = []
 
@@ -121,7 +119,7 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
 
     monkeypatch.setattr(runner, "run_model", record)
     for actor in ("research", "course"):
-        settings.set_agent_provider(store, actor, "codex")
+        use_engine(config, actor, "codex")
     # conftest が差し替えた classify_module ではなく、本物の _classify を通す
     await model_classifier._classify(config, store, "research", "ログを見て", frozenset({"research_extract"}),
                                      "research_execute", "", "")

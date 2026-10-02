@@ -141,11 +141,11 @@ def resolve(actor: str, provider: str, use_case: UseCase | str, *, manual: bool 
 
 
 def resolve_selected(config, store, actor: str, use_case: UseCase | str, *, manual: bool = False) -> ResolvedModel:
-    """選ばれている provider（agents.csv の engine か、App Home の一時的な切り替え）から recipe を解決する。"""
+    """選ばれている provider（agents.csv の engine）から recipe を解決する。"""
     # settings は Config を import するため、循環 import を避けて遅延 import にする。
     from kei_agent.storage.settings import selected_provider
 
-    return resolve(actor, selected_provider(config, store, actor), use_case, manual=manual)
+    return resolve(actor, selected_provider(config, actor), use_case, manual=manual)
 
 
 def classifies(actor: str) -> bool:
@@ -166,7 +166,7 @@ def resolve_classifier(config, store, actor: str, *, provider: str | None = None
         raise ModelPolicyError(f"{actor} は軽量分類を使えません")
     from kei_agent.storage.settings import selected_provider
 
-    provider = provider or selected_provider(config, store, actor)
+    provider = provider or selected_provider(config, actor)
     if provider not in PROVIDERS:
         raise ModelPolicyError(f"provider を選んでください: {actor}")
     try:

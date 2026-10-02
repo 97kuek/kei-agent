@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack, final_answer, make_assistant, pending_asks, write_request
+from fakes import FakeAI, FakePueue, FakeSlack, final_answer, make_assistant, pending_asks, use_engine, write_request
 
 import kei_agent.conversation.assistant as assistant_module
 from kei_agent.conversation import ask, router
@@ -203,7 +203,7 @@ async def test_switching_provider_uses_slack_history_not_the_old_session(env, st
     """AI を切り替えたら（行きも戻りも）、前の AI の会話は再開せず、Slack の履歴から文脈を戻す。"""
     assistant, slack, claude, _ = env
     await mention(assistant, "始めて")
-    settings.set_agent_provider(store, "research", "codex")
+    use_engine(assistant.config, "research", "codex")
     slack.replies = [
         {"ts": "10.1", "user": "UME", "text": "始めて"},
         {"ts": "10.2", "user": "UBOT", "bot_id": "B1", "text": "前回の答え"},
@@ -215,7 +215,7 @@ async def test_switching_provider_uses_slack_history_not_the_old_session(env, st
     assert "前回の答え" in claude.calls[1]["prompt"]
     assert store.last_provider("C1", "10.1", "research") == "codex"
 
-    settings.set_agent_provider(store, "research", "claude")
+    use_engine(assistant.config, "research", "claude")
     slack.replies.append({"ts": "10.4", "user": "UBOT", "bot_id": "B1", "text": "二回目"})
     await reply(assistant, "さらに", "10.5")
     assert claude.calls[2]["session_id"] is None
@@ -674,7 +674,7 @@ async def test_quota_retry_does_not_auto_switch_provider(env, store):
     reset = time.time() + 3600
     claude.behaviors = [_limit(reset)]
     await mention(assistant, "調べて")
-    settings.set_agent_provider(store, "research", "codex")
+    use_engine(assistant.config, "research", "codex")
 
     await assistant.retry_deferred(now=reset + 120)
     await settle(assistant)
@@ -953,7 +953,7 @@ async def test_writing_after_switching_the_provider_runs_now(env, store):
     """別の provider に切り替えていれば、上限を待たずに、止まった依頼の続きとしてすぐ動かす。"""
     assistant, slack, claude, _ = env
     await limited_thread(assistant, slack, claude, store)
-    settings.set_agent_provider(store, "research", "codex")
+    use_engine(assistant.config, "research", "codex")
 
     await reply(assistant, "続けて", "10.2")
 
@@ -1071,7 +1071,7 @@ async def test_course_channel_sends_free_questions_to_ask(course, store):
     assert "調べている…" in slack.thinking()  # 経過は固定の1行だけに出す
     assert slack.streamed() == ["過去問は Box の Personal/過去問 にあるよ"]
     # 会話の続きは本体が覚える（次の質問は同じ provider の会話につながる。研究と同じ表）
-    provider = settings.selected_provider(assistant.config, store, "course")
+    provider = settings.selected_provider(assistant.config, "course")
     assert store.session_for("C7", "11.2", "course", provider,
                              prompt_version(assistant.config, "course")) == "course-1"
 
@@ -1121,7 +1121,7 @@ async def test_course_and_work_threads_continue_the_agents_session_like_research
     assert (second["channel"], second["thread_ts"], second["read_only"]) == (channel, "11.2", False)
     assert slack.streamed() == ["答えだよ", "答えだよ"]
 
-    settings.set_agent_provider(store, actor, "codex")
+    use_engine(assistant.config, actor, "codex")
     slack.replies = [
         {"ts": "11.2", "user": "UME", "text": "どうなってる？"},
         {"ts": "11.3", "user": "UBOT", "bot_id": "B1", "text": "前の答え"},
@@ -1172,7 +1172,7 @@ async def test_improve_without_a_provider_says_to_choose_one(env, store):
     assistant, slack, claude, _ = env
     assistant.config = replace(assistant.config, agent_profiles={
         **assistant.config.agent_profiles, "improve": AgentProfile(provider="")})
-    assert settings.selected_provider(assistant.config, store, "improve") == ""
+    assert settings.selected_provider(assistant.config, "improve") == ""
 
     result = await assistant.run_agent(themes.resolve(assistant.config, "0-kei-agent"), "直して")
 
@@ -1612,7 +1612,7 @@ async def test_a_deferred_question_in_a_paper_thread_follows_the_knowledge_provi
     store.upsert_thread("C1", "20.1", "vlm", None)
     store.set_agent_session("C1", "20.1", "knowledge", "")
     await reply(assistant, "2番を詳しく", "20.2", thread_ts="20.1")
-    settings.set_agent_provider(store, "research", "codex")
+    use_engine(assistant.config, "research", "codex")
 
     await assistant.retry_deferred(now=reset + 120)
     await settle(assistant)

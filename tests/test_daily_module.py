@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeNotion, final_answer, make_assistant, make_theme
+from fakes import FakeAI, FakeHub, FakeNotion, final_answer, make_assistant, make_theme, use_engine
 from test_schedule import FakeCourseAgent, due_item
 
 from kei_agent.execution import runner
@@ -274,10 +274,8 @@ async def test_review_syncs_assignments_first_and_lists_near_deadlines(env):
 
 
 def test_claude_limit_does_not_block_codex_daily(env, store):
-    from kei_agent.storage import settings
-
     scheduler, _, *_ = env
-    settings.set_agent_provider(store, "daily", "codex")
+    use_engine(scheduler.config, "daily", "codex")
     store.set_limit_until("claude", time.time() + 3600)
     assert scheduler.can_run("daily", time.time())
 

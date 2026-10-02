@@ -101,13 +101,13 @@ def test_actors_without_an_ai_and_missing_commands(config):
     assert found["codex のコマンドが見つからない"] == ERROR and found["claude がある"] == OK
 
 
-def test_the_ai_chosen_in_app_home_wins_and_doctor_never_writes_the_state(config, store, tmp_path):
-    """点検は読むだけ（状態のデータベースが無ければ作らず、あっても読み取りだけで開く）。"""
-    store.set_setting("agent.work.provider", "codex")
-    chosen = replace(config, agent_profiles={**config.agent_profiles, "work": AgentProfile(provider="")})
+def test_the_ai_comes_only_from_the_table_and_doctor_never_writes_the_state(config, tmp_path):
+    """AI は agents.csv の engine だけで決まる。点検は状態のデータベースを作らない。"""
+    chosen = replace(config, agent_profiles={**config.agent_profiles, "work": AgentProfile(provider="codex")})
     assert doctor.chosen_providers(chosen)["work"] == "codex"
     fresh = replace(config, state_dir=tmp_path / "no-state")
-    assert set(doctor.chosen_providers(fresh).values()) == {"claude"}      # config.toml の [agents] から
+    assert set(doctor.chosen_providers(fresh).values()) == {"claude"}
+    doctor.check_ai(fresh, which=lambda name: "/bin/" + name)
     assert not fresh.db_path.exists()
 
 
@@ -167,9 +167,9 @@ def test_recent_errors_in_the_log_are_counted(tmp_path):
 # まとめと、コマンド
 
 def test_the_report_hides_what_works_unless_asked():
-    findings = [doctor.Finding(OK, "設定", "読めた"), doctor.Finding(ERROR, "AI", "選ばれていない", "App Home で選ぶ")]
+    findings = [doctor.Finding(OK, "設定", "読めた"), doctor.Finding(ERROR, "AI", "選ばれていない", "agents.csv に書く")]
     short = doctor.report(findings)
-    assert "読めた" not in short and "❌ 選ばれていない" in short and "→ App Home で選ぶ" in short
+    assert "読めた" not in short and "❌ 選ばれていない" in short and "→ agents.csv に書く" in short
     assert "問題 1 件、注意 0 件、うまくいっている 1 件" in short
     assert "✅ 読めた" in doctor.report(findings, verbose=True)
 

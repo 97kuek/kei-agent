@@ -11,7 +11,6 @@ import asyncio
 import os
 import re
 import shutil
-import sqlite3
 import stat
 import subprocess
 import time
@@ -124,28 +123,12 @@ def check_secrets(config: Config) -> list[Finding]:
 
 # AI
 
-def stored_providers(db: Path) -> dict[str, str]:
-    """App Home で一時的に切り替えた provider（actor → provider）。状態は読むだけで開く。"""
-    picked: dict[str, str] = {}
-    if db.exists():
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        try:
-            for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'agent.%.provider'"):
-                picked[key.split(".")[1]] = value
-        except sqlite3.Error:
-            pass
-        finally:
-            conn.close()
-    return picked
-
-
 def chosen_providers(config: Config) -> dict[str, str]:
-    """実行役ごとの provider（App Home で一時的に切り替えたもの。無ければ agents.csv）。"""
-    picked = stored_providers(config.db_path)
+    """実行役ごとの provider（agents.csv の engine）。"""
     found = {}
     for actor in home.agent_labels(config):
         profile = config.agent_profiles.get(actor)
-        found[actor] = picked.get(actor) or (profile.provider if profile is not None else "")
+        found[actor] = profile.provider if profile is not None else ""
     return found
 
 
@@ -157,10 +140,6 @@ def check_ai(config: Config, which: Callable[[str], str | None] = shutil.which) 
     if unset:
         findings.append(Finding(ERROR, "AI", f"AI が選ばれていない担当: {'、'.join(unset)}",
                                 "agents.csv の engine 列に claude か codex を書く（表が無ければ uv run kei-agent setup）"))
-    moved = [f"{labels[a]}（{p}）" for a, p in providers.items() if p and p != config.agent_profiles[a].provider]
-    if moved:
-        findings.append(Finding(WARN, "AI", f"App Home で agents.csv と違う AI に切り替えている: {'、'.join(moved)}",
-                                "本体を起動し直すと表の値に戻る。ずっと使うなら表の engine を書き換える"))
     pins = [f"{labels[a]}（{p.model}{' ' + p.effort if p.effort else ''}）"
             for a, p in config.agent_profiles.items() if p.model and a in labels]
     if pins:

@@ -506,7 +506,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         """
         actor = themes.actor_of(ws)
         agent = self.agents.get(actor)
-        provider = provider or settings.selected_provider(self.config, self.store, actor)
+        provider = provider or settings.selected_provider(self.config, actor)
         if provider not in PROVIDERS:
             # 分類器も動かせないので、ここで止めて agents.csv で選ぶよう伝える
             return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
@@ -551,7 +551,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if agent is None:
             await self.notify_trouble(f"{actor} のエージェントの住所が config.toml の [a2a.agents] にありません")
             return runner.RunResult(is_error=True, errors=[f"{actor} のエージェントの住所がありません"])
-        provider = provider or settings.selected_provider(self.config, self.store, actor)
+        provider = provider or settings.selected_provider(self.config, actor)
         if provider not in PROVIDERS:
             return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
         payload = {"prompt": prompt, "session_id": session_id, "channel": channel, "thread_ts": thread_ts,
@@ -854,7 +854,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
         actor = actor or (themes.actor_of(ws) if ws is not None else "")
-        provider = settings.selected_provider(self.config, self.store, actor)
+        provider = settings.selected_provider(self.config, actor)
         version = prompt_version(self.config, actor)
         session_id = self.store.session_for(req.channel, req.thread_ts, actor, provider, version)
         prior_provider = self.store.last_provider(req.channel, req.thread_ts, actor)

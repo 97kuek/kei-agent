@@ -217,7 +217,7 @@ class Core:
         """選ばれている（agents.csv の engine）、このモジュールの実行役の provider（claude / codex）。選ばれていないか、実行役が無ければ空文字。"""
         if self.spec.actor is None:
             return ""
-        return settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
+        return settings.selected_provider(self._assistant.config, self.name)
 
     @property
     def settings(self) -> dict:
@@ -402,7 +402,7 @@ class Core:
             await self.notify_trouble(f"{self.spec.label}の担当の住所がありません（module.toml の [process]）")
             return Reply.broken(f"{self.spec.label}の担当の住所がないよ")
         # AI の実行役（[actor]）を持たないモジュールの担当は、AI を選ばない（provider を渡さない）
-        provider = (settings.selected_provider(self._assistant.config, self._assistant.store, self.name)
+        provider = (settings.selected_provider(self._assistant.config, self.name)
                     if self.spec.actor is not None else "")
 
         async def keep_alive(_status: str) -> None:

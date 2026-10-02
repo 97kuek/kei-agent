@@ -73,7 +73,7 @@ def pin_models(profiles: dict) -> None:
 
 def pinned(actor: str, provider: str) -> tuple[str, str] | None:
     """その actor を provider で動かすときに固定したモデル (model, effort)。表の engine と違う provider なら None
-    （App Home で一時的に切り替えたときは、module.toml の用途ごとの選び分けに戻る）。"""
+    （頭が engines のほかの AI を選んだときは、module.toml の用途ごとの選び分けに戻る）。"""
     pin = _PINS.get(actor)
     return pin[1:] if pin is not None and pin[0] == provider else None
 

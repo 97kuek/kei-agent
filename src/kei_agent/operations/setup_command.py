@@ -294,7 +294,7 @@ def step_ai(which: Callable[[str], str | None]) -> None:
         print(f"  ✅ 見つかった: {'、'.join(found)}（ログインしておく）")
     else:
         print("  ⚠️ claude も codex も見つからない。どちらかを入れて、ログインしておく")
-    print("  担当ごとの AI は agents.csv の engine 列（空の担当は動かない）。App Home では一時的に切り替えられる")
+    print("  担当ごとの AI は agents.csv の engine 列（空の担当は動かない）。変えるのも agents.csv だけ")
 
 
 def channel_lines(config: Config) -> list[str]:

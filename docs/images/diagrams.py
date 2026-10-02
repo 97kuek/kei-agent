@@ -180,7 +180,7 @@ def architecture() -> Drawing:
     for i in range(4):
         x = 262 + i * 188 + 88
         d.arrow([(x, 428), (x, 470)])
-    d.frame(262, 470, 740, 132, "AI の CLI（担当ごとに App Home で Claude Code か Codex を選ぶ）", colors=AI,
+    d.frame(262, 470, 740, 132, "AI の CLI（担当ごとに agents.csv で Claude Code か Codex を選ぶ）", colors=AI,
             icons=("claude", "chatgpt"))
     d.text(282, 526, "使える道具と届く範囲は、モジュールの宣言から作る制限の表で決まる", size=12, color=SUB)
     d.text(282, 546, "sandbox の中で動かし、作業場の外には書かない", size=12, color=SUB)

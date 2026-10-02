@@ -1,4 +1,4 @@
-"""App Home の操作で、空の選択が来ても落ちない。"""
+"""App Home では AI を変えない。前に出した画面の AI の選択が押されても、何も変わらない。"""
 
 import pytest
 from fakes import FakeAI, home_action, make_assistant
@@ -13,8 +13,10 @@ def env(config, store, monkeypatch):
     return make_assistant(config, store, {"C1": "vlm"})
 
 
-async def test_cleared_choices_keep_the_previous_value(env, config, store):
+@pytest.mark.parametrize("option", [None, {"value": "codex"}])
+async def test_an_old_ai_choice_changes_nothing(env, config, option):
     assistant, slack = env
-    before = settings.selected_provider(config, store, "course")
-    await assistant.on_home_action(home_action("kei_agent_home_provider:course", selected_option=None))
-    assert settings.selected_provider(config, store, "course") == before
+    before = settings.selected_provider(config, "course")
+    await assistant.on_home_action(home_action("kei_agent_home_provider:course", selected_option=option))
+    assert settings.selected_provider(config, "course") == before
+    assert not [name for name, _ in slack.calls if name == "views_publish"]

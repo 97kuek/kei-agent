@@ -65,11 +65,6 @@ CREATE TABLE IF NOT EXISTS deferred_runs (
     created_at REAL NOT NULL,
     done INTEGER NOT NULL DEFAULT 0
 );
--- Slack から変える設定（settings.py）
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
 -- どのスレッドを、どの担当が受け持っているか（session_id は使わない。会話の続きは provider_sessions）。
 -- 会話の単位はスレッドなので、本体が覚える（docs/architecture.md の「振り分けと A2A」）
 CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -206,7 +201,7 @@ ADDED_COLUMNS = {
                 "handed_off_to": "TEXT"},
 }
 # 使わなくなった表。既存のデータベースからも消す
-DROPPED_TABLES = ("theme_domains", "domain_requests")
+DROPPED_TABLES = ("theme_domains", "domain_requests", "settings")
 
 
 class Store:
@@ -504,21 +499,6 @@ class Store:
             "SELECT agent FROM agent_sessions WHERE channel = ? AND thread_ts = ? "
             "ORDER BY updated_at DESC LIMIT 1", (channel, thread_ts)).fetchone()
         return row["agent"] if row else None
-
-    # Slack から変える設定（settings.py）
-
-    def setting(self, key: str) -> str | None:
-        row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else None
-
-    def set_setting(self, key: str, value: str) -> None:
-        with self.conn:
-            self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                              "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
-
-    def delete_setting(self, key: str) -> None:
-        with self.conn:
-            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
     # 一度だけ知らせるもの
 

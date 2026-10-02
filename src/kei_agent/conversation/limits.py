@@ -46,7 +46,7 @@ class LimitDeferral:
         except ValueError:
             return False
         actor = self.actor_for(req, ws)
-        provider = settings.selected_provider(self.config, self.store, actor)
+        provider = settings.selected_provider(self.config, actor)
         until = self.store.limit_until(provider) if provider else 0.0
         if until <= time.time():
             return False
@@ -204,7 +204,7 @@ class LimitDeferral:
         original_provider = payload.get("provider")
         if original_provider:
             actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
-            if settings.selected_provider(self.config, self.store, actor) != original_provider:
+            if settings.selected_provider(self.config, actor) != original_provider:
                 await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
                 return
         await self.submit(req)

@@ -7,7 +7,7 @@ from kei_agent.storage import settings
 
 
 def test_old_domain_tables_are_dropped(tmp_path):
-    """使わなくなった接続先の表は、既存のデータベースからも消える。"""
+    """使わなくなった表（接続先と、App Home で切り替えた AI）は、既存のデータベースからも消える。"""
     import sqlite3
 
     from kei_agent.storage.store import Store
@@ -16,9 +16,11 @@ def test_old_domain_tables_are_dropped(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.execute("CREATE TABLE theme_domains (theme TEXT, domain TEXT)")
         conn.execute("CREATE TABLE domain_requests (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO settings VALUES ('agent.research.provider', 'codex')")
     store = Store(db)
     names = {r["name"] for r in store.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert not names & {"theme_domains", "domain_requests"}
+    assert not names & {"theme_domains", "domain_requests", "settings"}
 
 
 def test_schedule_time_comes_from_the_config(config):
@@ -30,13 +32,17 @@ def test_schedule_time_comes_from_the_config(config):
     assert settings.schedule_time(config, "maintenance") == ""
 
 
-def test_home_provider_changes_only_the_named_agents_provider(config, store):
-    """使える道具と連携は制限の表が決める。profile が持つのは provider と、担当の表で固定したモデルだけ。"""
-    settings.set_agent_provider(store, "course", "codex")
-    profile = settings.agent_profile(config, store, "course")
-    assert profile.provider == "codex"
-    assert set(profile.__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account", "engines"}
-    assert settings.agent_profile(config, store, "work").provider == "claude"
+def test_the_provider_comes_only_from_the_table(config):
+    """使える道具と連携は制限の表が決める。profile が持つのは provider・固定したモデル・アカウント・頭が選べる AI だけ。"""
+    from dataclasses import replace as change
+
+    from kei_agent.configuration.config import AgentProfile
+
+    config = change(config, agent_profiles={**config.agent_profiles, "course": AgentProfile(provider="codex")})
+    assert settings.selected_provider(config, "course") == "codex"
+    assert settings.selected_provider(config, "work") == "claude"
+    assert set(AgentProfile.__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account",
+                                                      "engines"}
 
 
 def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):

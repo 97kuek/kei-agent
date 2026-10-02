@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 
 from kei_agent.conversation import home
-from kei_agent.storage import settings
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ class SettingsActions:
             await self.publish_home(event["user"])
 
     async def on_home_action(self, body: dict) -> None:
-        """App Home のボタンと時刻の選択。変えられるのは依頼者だけ。"""
+        """App Home の更新とモジュールの項目。変えられるのは依頼者だけ。"""
         user = body.get("user", {}).get("id")
         if not self.is_allowed(user):
             return
@@ -49,10 +48,6 @@ class SettingsActions:
             module, _, item = name.partition(":")
             if not await self.module_home_action(module, item, action):
                 return
-        elif kind == home.PROVIDER_ACTION and name in home.agent_labels(self.config):
-            provider = ((action.get("selected_option") or {}).get("value") or "")
-            if provider:
-                settings.set_agent_provider(self.store, name, provider)
         else:
             return
         await self.publish_home(user)

@@ -170,7 +170,7 @@ class Hands:
             # 打ち間違いで新しいテーマやプロジェクトのフォルダを作らない（作るのは Slack でチャンネルを作ったとき）
             raise HandsError(f"{workspace} という作業場はありません（workspaces で頼める作業場を見てください）")
         profile = self.config.agent_profiles[ws.module]
-        provider = engine or settings.selected_provider(self.config, self.assistant.store, ws.module)
+        provider = engine or settings.selected_provider(self.config, ws.module)
         if provider not in profile.allowed_engines:
             raise HandsError(f"{workspace} で使える AI は {' / '.join(profile.allowed_engines) or 'まだ選ばれていません'}です"
                              "（agents.csv の engine・engines）")
