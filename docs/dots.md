@@ -3,8 +3,9 @@
 決まった時刻の処理は、Kei Agent ではなく OpenAI の Dot の予定（スケジュール）で動かす。この文書は、Dot の予定に貼る指示と、Dot が Notion に書くときの決まり。計画は [#17](https://github.com/97kuek/kei-agent/issues/17)。
 
 - Dot が使うのは、Kei Agent の手の口（MCP。[architecture.md](architecture.md) の「手の口」）と、Dot 自身の連携（Notion・Slack・Outlook・Web）
+- 会社の Outlook の予定は、Dot の Outlook 連携が読む（予定だけ。メール・Teams・SharePoint は仕事の担当だけが読む）
 - 手の口は MacBook Air で動く。閉じている間は手の口の道具（`post` も）が使えないので、どの予定も Notion と Dot 自身の連携だけで終わるように書いてある
-- Kei Agent に残す決まった時刻の処理は、保守とバックアップ（`maintenance`）と、MacBook Air が開いているときの朝の取り込み（`intake`）だけ。ほかの処理は `schedules.csv` で止める（下の「Kei Agent 側で止めるもの」）
+- Kei Agent に残す決まった時刻の処理は、保守とバックアップ（`maintenance`）だけ。ほかの処理は `schedules.csv` で止める（下の「Kei Agent 側で止めるもの」）
 
 ## どの予定にも付ける決まり
 
@@ -27,7 +28,7 @@
 | 07:00 | 先行研究の新着 | 研究ホームの「テーマ」、arXiv | 研究ホームの「先行研究」、Slack |
 | 07:00 | 読みもの | 共通ホームの「収集」、Web | Slack |
 | 07:30 | Moodle の課題 | Moodle のカレンダーの書き出し（ICS） | 授業ホームの「課題」、共通ホームの「予定カレンダー」 |
-| 07:40 | Outlook の予定（Outlook をつないだときだけ） | Outlook の予定表（7日ぶん） | 共通ホームの「予定カレンダー」 |
+| 07:40 | Outlook の予定 | Outlook の予定表（7日ぶん） | 共通ホームの「予定カレンダー」 |
 | 08:00 | 朝の一覧と Daily | 「授業」「課題」「予定カレンダー」「Task」 | Slack、共通ホームの「日別記録」 |
 | 08:00・18:00 | 締切の知らせ | 授業ホームの「課題」 | Slack |
 | 21:00 | 振り返り（Retro & Planning） | 「Task」「課題」、今日の Slack | Slack、「日別記録」 |
@@ -74,7 +75,7 @@ Moodle のカレンダーの書き出し（ICS）を読む（URL は予定の設
 新しい課題か締切の変更があったときだけ、Slack に「📚 課題の新着・変更」として1通出す。
 ```
 
-### Outlook の予定（07:40。Outlook をつないだときだけ）
+### Outlook の予定（07:40）
 
 ```text
 Outlook の予定表から、今日から7日の会議を読む。共通ホームの「予定カレンダー」に写す。
@@ -162,7 +163,8 @@ Slack には、失敗したときだけ出す。
 | `review` | 振り返り |
 | `toggl_import` | Toggl の取り込み |
 | `night` | 夜間の Task |
+| `intake` | Moodle の課題、Outlook の予定 |
 
 - 大学の担当の見回りは、MacBook Air が開いている間は動く。課題を予定カレンダーへ写すことは、Dot と同じキーで書くので二重にならない。締切の知らせは、大学の担当が大学のチャンネル（`#course`）に、Dot が研究全体のチャンネルに出すので、開いている間は両方に出る
-- `intake`（朝の取り込み）は、Daily を止めると動き出す。MacBook Air が開いているときに、Outlook の会議を予定カレンダーへ写し、声に1週間の予定を渡す。Dot の「Outlook の予定」を使うなら `false` にする（Moodle の課題は Dot と同じキーで書くので、両方動いても二重にはならない）
+- `intake`（朝の取り込み）は Daily を止めると動き出すので、いっしょに止める
 - `maintenance`（保守とバックアップ）は残す
