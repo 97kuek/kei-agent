@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -17,7 +16,7 @@ from kei_agent.conversation.slack_text import format_duration
 from kei_agent.framework import modules
 from kei_agent.scheduling import deadline, timelog
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.store import Store
+from kei_agent.storage.store import Store, schedule_detail
 from kei_agent.workspaces import themes
 
 if TYPE_CHECKING:
@@ -166,7 +165,7 @@ class DigestBuilder:
     def _night(self, since: float) -> list[str]:
         lines = ["", "## 夜間の Task", ""]
         last = self.store.last_schedule("night")
-        night = json.loads(last["detail"] or "{}") if last and last["ran_at"] >= since else {}
+        night = schedule_detail(last) if last and last["ran_at"] >= since else {}
         for t in night.get("tasks") or []:
             lines.append(f"- {t.get('title')}（{t.get('theme') or '-'}）: {t.get('status')} "
                          f"{t.get('summary') or t.get('reason') or ''} {t.get('url') or ''}".rstrip())

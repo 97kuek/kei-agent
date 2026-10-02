@@ -191,12 +191,19 @@ class Job:
         }
 
 
-def _schedule_status(detail: str | None) -> str:
-    """schedule_runs の detail に入っている status。読めなければ空文字。"""
+def schedule_detail(row: sqlite3.Row | None) -> dict:
+    """schedule_runs の行の detail（run_schedule が返した辞書）。行が無い・読めない・辞書でなければ空。"""
+    if row is None:
+        return {}
     try:
-        return str((json.loads(detail or "{}") or {}).get("status", ""))
+        found = json.loads(row["detail"] or "{}")
     except json.JSONDecodeError:
-        return ""
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _schedule_status(row: sqlite3.Row) -> str:
+    return str(schedule_detail(row).get("status", ""))
 
 
 # あとから足した列。既存のデータベースにも同じ形を用意する
@@ -404,7 +411,7 @@ class Store:
         ).fetchone()
         if row is None:
             return False
-        return _schedule_status(row["detail"]) != "interrupted"
+        return _schedule_status(row) != "interrupted"
 
     def mark_interrupted_schedules(self) -> list[tuple[str, str]]:
         """前回の起動で「実行中」のまま終わった定期処理を「中断」にする。起動時に1回呼ぶ。
@@ -412,7 +419,7 @@ class Store:
         これをしないと、記録が残っているせいで、その日の分が二度と実行されない。
         """
         rows = self.conn.execute("SELECT name, day, detail FROM schedule_runs").fetchall()
-        stuck = [(r["name"], r["day"]) for r in rows if _schedule_status(r["detail"]) == "running"]
+        stuck = [(r["name"], r["day"]) for r in rows if _schedule_status(r) == "running"]
         with self.conn:
             for name, day in stuck:
                 self.conn.execute(

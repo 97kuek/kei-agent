@@ -81,7 +81,8 @@ PROVIDERS = ("claude", "codex")
 ACCESS = ("none", "read", "write")
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
-_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+# 時刻の書き方（HH:MM）。定期処理の既定・schedules.csv・config.toml で共通
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
              "core_channels", "core_schedules", "schedules", "settings", "slash_commands", "secrets"}
@@ -333,7 +334,7 @@ def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:
             raise ModuleError(f"{at}: 定期処理の名前は英小文字と _ で、中身はテーブルにしてください")
         _check_keys(spec, _SCHEDULE_KEYS, at)
         default = str(spec.get("default", ""))
-        if default and not _HHMM.match(default):
+        if default and not HHMM.match(default):
             raise ModuleError(f"{at} の default は HH:MM か、空文字（既定では動かさない）にしてください")
         label = str(spec.get("label") or name)
         found.append(ScheduleSpec(name, label, default))

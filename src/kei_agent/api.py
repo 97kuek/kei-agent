@@ -83,6 +83,7 @@ from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError,
 from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.records import Records
+from kei_agent.storage.store import schedule_detail
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import append_thread_log
 
@@ -678,7 +679,7 @@ class Core:
         row = self._assistant.store.last_schedule(name)
         if row is None or row["day"] != day:
             return {}
-        return json.loads(row["detail"] or "{}") or {}
+        return schedule_detail(row)
 
     def themes(self) -> list[Theme]:
         """研究テーマ（作業用のフォルダと、前提のメモ AGENTS.md の検索キーワード・前提）。"""

@@ -26,6 +26,7 @@ import csv
 import io
 from pathlib import Path
 
+from kei_agent.configuration.csv_table import TableError, parse_bool, read_text, rows
 from kei_agent.framework import modules
 
 AGENTS_FILE = "agents.csv"
@@ -43,20 +44,6 @@ REPLACED_KEYS = ("modules", "channels", "agents", "notion")
 NOTION_KEYS = {OVERVIEW: "hub_home", "research": "research_home", "course": "course_home"}
 # 研究と大学の置き場所の config.toml での名前（書いてあれば止める。この表の folder に書く）
 FOLDER_KEYS = {"research_root": "research", "course_root": "course"}
-_TRUE = {"true": True, "false": False}
-
-
-class TableError(ValueError):
-    pass
-
-
-def _bool(value: str, where: str) -> bool:
-    found = _TRUE.get(value.strip().lower())
-    if found is None:
-        raise TableError(f"{where} の enabled は true か false にしてください: {value!r}")
-    return found
-
-
 def _channels(value: str) -> list[str]:
     return [name.lstrip("#") for name in value.split() if name.lstrip("#")]
 
@@ -67,24 +54,11 @@ def channel_kind(spec: modules.ModuleSpec) -> str | None:
     return kinds[0] if len(kinds) == 1 else None
 
 
-def read_text(path: Path) -> str:
-    try:
-        # Excel が付ける BOM は外す
-        return path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        raise TableError(f"{path.name} を UTF-8 として読めません。UTF-8（CSV UTF-8）で保存し直してください") from None
-
-
 def parse(text: str, name: str = AGENTS_FILE) -> dict:
     """表を、config.toml と同じ形の {"modules": [...], "channels": {...}, "agents": {...}} にする。
 
     モデルが使えるものかは、ここでは見ない（config の [agents] を読むところで確かめる）。
     """
-    reader = csv.DictReader(io.StringIO(text))
-    header = [column.strip() for column in reader.fieldnames or ()]
-    if not set(COLUMNS) - set(OPTIONAL_COLUMNS) <= set(header) <= set(COLUMNS) or len(set(header)) != len(header):
-        raise TableError(f"{name} の1行目（列の名前）は {','.join(COLUMNS)} にしてください（今は {','.join(header) or '空'}）")
-    reader.fieldnames = header
     known = modules.known()
     enabled: list[str] = []
     channels: dict[str, list[str]] = {}
@@ -92,13 +66,9 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
     folders: dict[str, str] = {}
     notion: dict = {"homes": {}}
     seen: set[str] = set()
-    for line, raw in enumerate(reader, start=2):
-        if None in raw:
-            raise TableError(f"{name} の {line} 行目は列が多すぎます（チャンネルを複数書くときは , ではなく空白で区切る）")
-        row = {key: (value or "").strip() for key, value in raw.items()}
+    for line, row in rows(text, name, COLUMNS, OPTIONAL_COLUMNS,
+                          too_many="（チャンネルを複数書くときは , ではなく空白で区切る）"):
         module = row["module"]
-        if not module or module.startswith("#"):
-            continue
         where = f"{name} の {line} 行目（{module}）"
         if module in seen:
             raise TableError(f"{where}: {module} の行が2つあります")
@@ -106,7 +76,7 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
         if module not in known and module not in CORE_ROWS:
             raise TableError(f"{where}: 知らないモジュールです（知っているもの: {', '.join(sorted([*known, *CORE_ROWS]))}）")
         names = _channels(row["channels"])
-        on = _bool(row["enabled"], where)
+        on = parse_bool(row["enabled"], where)
         engine, model, effort, folder = row["engine"], row["model"], row["effort"], row.get("folder", "")
         accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account", "engines") if row.get(key, "")}
         has_ai = module == ROUTER or (module in known and known[module].actor is not None)

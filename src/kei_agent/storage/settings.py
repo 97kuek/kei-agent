@@ -7,14 +7,13 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime
 
 from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_actors
 from kei_agent.framework import modules
-from kei_agent.storage.store import Store
+from kei_agent.storage.store import Store, schedule_detail
 
 # 本体の定期処理（名前 → 見出し）。モジュールのものは module.toml の [schedules] から足す
 CORE_SCHEDULES = {
@@ -61,7 +60,7 @@ def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
         label = schedule_label(config, row["name"]) if row["name"] in schedule_names(config) else None
         if label is None or (row["name"] == "daily" and row["day"] == today):
             continue    # 定期処理でないもの、いま作っている Daily
-        detail = json.loads(row["detail"] or "{}") or {}
+        detail = schedule_detail(row)
         if detail.get("status") == "error":
             failed.append(label)
         elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):

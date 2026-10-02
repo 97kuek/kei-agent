@@ -26,7 +26,7 @@ PROFILE_FILE = "profile.md"
 EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 
 # 決まった時刻の処理の時刻。空文字は「その処理を行わない」（settings.schedule_time と同じ形）
-HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+HHMM = modules.HHMM
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
 # 本体の担当で skill を持つもの（今は無い。担当の skill はモジュールの plugin/ に置く）
