@@ -169,7 +169,7 @@ Slack の #0-overview に「🌙 Retro & Planning（日付）」を出し、そ�
 ### Kei Agent からの知らせ（毎時）
 
 ```text
-Kei Agent の手の口の notices を呼ぶ（手の口が使えないときは、何もせずに終える）。
+Kei Agent の手の口の notices を done=[] で呼ぶ（手の口が使えないときは、何もせずに終える）。
 返った知らせを、1件ずつ Slack に出す。出す先は channel（研究テーマ・course・kei-agent・overview など。番号つきの
 Slack のチャンネル名で、名前の数字の後ろが一致するもの。例 vlm → #1-vlm、kei-agent → #0-kei-agent）。
 - thread（スレッドの親の本文）があれば、そのチャンネルで、その本文の投稿のスレッドに返す。見つからなければ、

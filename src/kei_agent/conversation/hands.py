@@ -392,13 +392,16 @@ class Hands:
 
     def notices(self, done: list[str] | None = None) -> dict:
         """まだ出していない知らせ（古い順）。done に渡した id は「出した」にして、書き換えられない限り次からは返さない
-        （頭が Slack に出せたものだけを done で返す。途中で切れても知らせは消えない）。
+        （頭が Slack に出せたものだけを done で返す。途中で切れても知らせは消えない）。done を渡さなければ、返したものを
+        そのまま「出した」にする（done を知らない頭のため）。
         Slack につないでいる間は、Kei Agent が自分で Slack に出しているので空。"""
         outbox = self._outbox()
         if outbox is None:
             return {"notices": [], "slack": True}
         outbox.mark_delivered([str(i) for i in done or []])
         found = outbox.pending()
+        if done is None:
+            outbox.mark_delivered([item["id"] for item in found])
         return {"notices": [{k: item[k] for k in ("id", "channel", "thread_ts", "thread", "text")}
                             | {"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(item["at"]))}
                             for item in found], "slack": False}

@@ -257,11 +257,15 @@ async def test_notices_come_back_until_the_head_says_it_posted_them(config, stor
     assistant.slack = Outbox(config, store)
     await assistant.slack.chat_postMessage(channel="vlm", text="🧪 評価が終わったよ")
     h = Hands(assistant)
-    first = h.notices()
+    first = h.notices(done=[])
     assert [(n["channel"], n["text"]) for n in first["notices"]] == [("vlm", "🧪 評価が終わったよ")]
     # 頭が出せなかった（途中で切れた）なら、次の回にもう一度返る
-    assert h.notices()["notices"] == first["notices"]
+    assert h.notices(done=[])["notices"] == first["notices"]
     assert h.notices(done=[n["id"] for n in first["notices"]])["notices"] == []
+    # done を知らない頭は、読んだら出したことになる（毎時くり返さない）
+    await assistant.slack.chat_postMessage(channel="vlm", text="次の知らせ")
+    assert [n["text"] for n in h.notices()["notices"]] == ["次の知らせ"]
+    assert h.notices()["notices"] == []
 
 
 async def test_notices_are_empty_while_kei_agent_is_on_slack(hands):
