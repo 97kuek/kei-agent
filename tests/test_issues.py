@@ -4,13 +4,11 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakePueue, FakeSlack
+from fakes import make_assistant
 
 from kei_agent.api import AIError, contains_secret
 from kei_agent.configuration.config import AgentProfile
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent_modules.improve import issues
 
 # conftest がすべてのテストで偽物に差し替える前の、本物
@@ -108,7 +106,7 @@ async def test_the_summary_runs_read_only_with_the_improve_provider(config, stor
 
     monkeypatch.setattr(runner, "run_model", run_model)
     config = replace(config, agent_profiles={**config.agent_profiles, "improve": AgentProfile(provider="codex")})
-    assistant = Assistant(config, store, FakeSlack({}), JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, _ = make_assistant(config, store, {})
     await SUMMARIZE(assistant.cores["improve"].run_ai, REQUEST, contains_secret)
 
     request, = calls

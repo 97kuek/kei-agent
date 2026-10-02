@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack, pending_asks, write_request
+from fakes import FakeAI, FakePueue, FakeSlack, make_assistant, pending_asks, write_request
 
 import kei_agent.conversation.assistant as assistant_module
 from kei_agent.conversation import ask, router
@@ -17,7 +17,6 @@ from kei_agent.conversation.slack_text import split_text
 from kei_agent.conversation.thread_ui import ThreadUI
 from kei_agent.execution import a2a, runner
 from kei_agent.execution.execution_contract import prompt_version
-from kei_agent.execution.jobs import JobManager
 from kei_agent.storage import settings
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -25,11 +24,11 @@ from kei_agent.workspaces import themes
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "0-kei-agent", "C5": "research-overview"})
     claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     pueue = FakePueue()
-    assistant = Assistant(config, store, slack, JobManager(config, store, pueue), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm", "C9": "0-kei-agent", "C5": "research-overview"},
+                                      pueue=pueue)
     return assistant, slack, claude, pueue
 
 

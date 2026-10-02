@@ -7,12 +7,10 @@
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, make_assistant, write_config
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import model_classifier, model_policy, runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.execution.model_policy import ModelPolicyError
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
@@ -175,10 +173,9 @@ def lab(config, store, tmp_path, monkeypatch):
     config = replace(config, modules=(*[name for name in config.modules if name != "research"], "lab"),
                      module_channels={**config.module_channels, "lab": ("*",)},
                      agent_profiles={**config.agent_profiles, "lab": config.agent_profiles["work"]})
-    slack = FakeSlack({"C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
     return assistant, slack, claude
 
 
@@ -225,11 +222,10 @@ def test_research_is_the_builtin_module_that_takes_theme_channels():
 
 async def test_without_a_module_for_themes_the_channel_is_told_so(config, store, monkeypatch):
     """研究をオフにすると、研究テーマのチャンネルでは答えない（受け持つモジュールが無いと伝える）。"""
-    slack = FakeSlack({"C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     config = replace(config, modules=tuple(name for name in config.modules if name != "research"))
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
     await settle(assistant)
     assert claude.calls == [] and "受け持つモジュールがない" in slack.texts()[-1]

@@ -10,13 +10,11 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack
+from fakes import FakeAI, make_assistant
 
 from kei_agent.conversation import hands as hands_module
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.hands import Hands, HandsError
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.operations.hands_server import build_app, build_mcp
 
 FINAL = "<<kei-agent-final>>\n{}\n<<kei-agent-final-end>>"
@@ -29,8 +27,7 @@ def hands(config, store, monkeypatch):
     config = replace(config, agent_profiles={**config.agent_profiles,
                                              "research": replace(config.agent_profiles["research"],
                                                                  engines=("claude", "codex"))})
-    assistant = Assistant(config, store, FakeSlack({"C1": "vlm"}), JobManager(config, store, FakePueue()),
-                          "xoxb", "UBOT")
+    assistant, _ = make_assistant(config, store, {"C1": "vlm"})
     (config.research_root / "vlm").mkdir(parents=True)
     return Hands(assistant), claude
 

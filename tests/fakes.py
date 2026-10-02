@@ -20,6 +20,20 @@ from kei_agent.testing.fakes import (  # noqa: F401  テストはここからま
 from kei_agent.workspaces import themes
 
 
+def make_assistant(config, store, channels: dict[str, str] | None = None, *, pueue=None, **kwargs):
+    """偽の Slack とジョブの列（pueue の偽物）で Assistant を作り、(assistant, slack) を返す。
+
+    `channels` は FakeSlack に渡すチャンネル ID と名前。ジョブの偽物をテストで見るときは `pueue` に渡す。
+    残りの引数（notion・hub・team_url など）は Assistant にそのまま渡す。
+    """
+    from kei_agent.conversation.assistant import Assistant
+    from kei_agent.execution.jobs import JobManager
+
+    slack = FakeSlack(channels or {})
+    jobs = JobManager(config, store, pueue if pueue is not None else FakePueue())
+    return Assistant(config, store, slack, jobs, "xoxb-test", "UBOT", **kwargs), slack
+
+
 def write_request(cwd: Path, **payload) -> Path:
     d = cwd / REQUESTS_DIR
     d.mkdir(parents=True, exist_ok=True)

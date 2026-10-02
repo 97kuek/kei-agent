@@ -8,19 +8,16 @@ import pytest
 
 pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
 
-from fakes import FakeAI, FakePueue, FakeSlack
+from fakes import FakeAI, make_assistant
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 
 
 @pytest.fixture
 def assistant(config, store, monkeypatch):
     claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
-    made = Assistant(config, store, FakeSlack({"C1": "vlm"}), JobManager(config, store, FakePueue()),
-                     "xoxb-test", "UBOT")
+    made, _ = make_assistant(config, store, {"C1": "vlm"})
     made.claude = claude
     return made
 

@@ -8,13 +8,11 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant
 
 from kei_agent.conversation import router
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import a2a, model_classifier, model_policy, runner
 from kei_agent.execution.agent_policy import policy_of
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler
 from kei_agent.testing.kit import settle
@@ -138,11 +136,11 @@ def env(config, store, tmp_path, monkeypatch):
     config = replace(config, modules=(*config.modules, "calendar"),
                      module_channels={**config.module_channels, "calendar": ("calendar",)},
                      agent_profiles={**config.agent_profiles, "calendar": config.agent_profiles["work"]})
-    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C60": "6-calendar"})
     claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+    channels = {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C60": "6-calendar"}
+    assistant, slack = make_assistant(config, store, channels,
+                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     agent = FakeCalendarAgent()
     assistant.agents["calendar"] = agent
     return Scheduler(config, store, assistant), assistant, slack, claude, agent

@@ -11,13 +11,11 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from fakes import FakeAI, FakeHub, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeSlack, make_assistant
 from slack_sdk.errors import SlackApiError
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
 from kei_agent.execution.agents import Reply
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent.storage.notion import NotionError
@@ -33,11 +31,9 @@ STOP = "kei_agent_module:time:stop"
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C3": "3-work", "C4": "2-linear-algebra",
-                       "C9": "0-kei-agent"})
     monkeypatch.setattr(runner, "run_model", FakeAI())
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          team_url="https://example.slack.com/", hub=FakeHub())
+    channels = {"C1": "1-vlm", "C2": "2-course", "C3": "3-work", "C4": "2-linear-algebra", "C9": "0-kei-agent"}
+    assistant, slack = make_assistant(config, store, channels, team_url="https://example.slack.com/", hub=FakeHub())
     module = assistant.modules["time"]
     # Toggl の設定は、使うテストだけが入れる
     monkeypatch.setattr(sys.modules[type(module).__module__], "load_toggl", lambda: None)
@@ -396,10 +392,9 @@ async def test_old_cards_get_the_new_buttons_once(env):
 # 設定
 
 def test_the_channel_prefixes_can_be_changed_and_are_checked(config, store):
-    slack = FakeSlack({"C7": "5_lab"})
     custom = replace(config, module_settings={**config.module_settings,
                                               "time": {"prefixes": {"5_": "research"}, "pick_course": []}})
-    module = Assistant(custom, store, slack, JobManager(custom, store, FakePueue()), "x", "UBOT").modules["time"]
+    module = make_assistant(custom, store, {"C7": "5_lab"})[0].modules["time"]
     assert module.domain("5_lab") == "research" and module.domain("1-vlm") == ""
 
     with pytest.raises(ValueError, match="research / course / work"):

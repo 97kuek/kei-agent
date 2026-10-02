@@ -5,11 +5,9 @@ import time
 from datetime import date, datetime
 
 import pytest
-from fakes import FakePueue, FakeSlack, make_theme
+from fakes import make_assistant, make_theme
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.hands import Hands
-from kei_agent.execution.jobs import JobManager
 from kei_agent.operations.hands_server import build_mcp
 from kei_agent.scheduling import materials
 from kei_agent.storage.records import Records
@@ -20,7 +18,7 @@ NOW = datetime(2026, 10, 2, 9, 0)
 
 @pytest.fixture
 def assistant(config, store):
-    return Assistant(config, store, FakeSlack({"C1": "vlm"}), JobManager(config, store, FakePueue()), "xoxb", "UBOT")
+    return make_assistant(config, store, {"C1": "vlm"})[0]
 
 
 async def test_the_agenda_mixes_classes_meetings_and_deadlines_in_time_order(assistant, monkeypatch):

@@ -8,13 +8,11 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, write_config
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
 from kei_agent.workspaces.themes import ChannelKind
@@ -92,11 +90,10 @@ def env(config, store, tmp_path, monkeypatch):
     # 組み込みの Daily・振り返りは外す（本体の定期処理を受け持てるのは1つだけ）
     config = replace(config, modules=(*[name for name in config.modules if name != "daily"], "brief"),
                      agent_profiles={**config.agent_profiles, "brief": config.agent_profiles["work"]})
-    slack = FakeSlack({"C5": "0-overview", "C9": "0-kei-agent"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), hub=FakeHub())
+    assistant, slack = make_assistant(config, store, {"C5": "0-overview", "C9": "0-kei-agent"},
+                                      notion=FakeNotion(), hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack, claude
 
 

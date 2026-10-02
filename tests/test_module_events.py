@@ -8,11 +8,9 @@ import json
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack
+from fakes import FakeAI, make_assistant
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
 
@@ -54,9 +52,8 @@ def env(config, store, tmp_path, monkeypatch):
     _lamp(tmp_path / "user-modules")
     modules.register_user_modules(tmp_path / "user-modules")
     config = replace(config, modules=(*config.modules, "lamp"))
-    slack = FakeSlack({"C1": "vlm"})
     monkeypatch.setattr(runner, "run_model", FakeAI())
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
     return assistant, slack
 
 

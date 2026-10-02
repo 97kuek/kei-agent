@@ -10,14 +10,12 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, make_assistant, write_config
 
 from kei_agent import api
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.execution import guard, runner, updates
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -102,10 +100,9 @@ def env(config, store, tmp_path, monkeypatch):
     # 組み込みの自己改善は外す（Kei Agent のチャンネルを受け持てるのは1つだけ）
     config = replace(config, modules=(*[name for name in config.modules if name != "improve"], "fixer"),
                      agent_profiles={**config.agent_profiles, "fixer": config.agent_profiles["work"]})
-    slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C9": "0-kei-agent", "C1": "vlm"})
     return assistant, slack, claude
 
 
