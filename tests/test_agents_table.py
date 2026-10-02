@@ -7,7 +7,7 @@ import pytest
 from kei_agent.configuration.agents_table import TableError, parse, with_enabled
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.model_policy import resolve
-from kei_agent.operations import agents_command, cli, module_command
+from kei_agent.operations import module_command
 from kei_agent.storage import settings
 from kei_agent.storage.store import Store
 
@@ -101,11 +101,11 @@ def test_the_header_bom_and_comments(tmp_path):
 
 def test_the_same_things_cannot_also_be_in_config_toml(tmp_path):
     home = _home(tmp_path, HEADER + "knowledge,true,,,,\n", 'modules = ["knowledge"]\n\n[agents.router]\nprovider = "claude"\n')
-    with pytest.raises(ConfigError, match="modules・agents は、担当の表（agents.csv）に移してください"):
+    with pytest.raises(ConfigError, match="modules・agents は、担当の表（agents.csv）に書いてください"):
         _load(home)
-    # 表が無くても同じ（前の書き方のまま起動しない）
+    # 表が無くても同じ（config.toml には書けない）
     (home / "agents.csv").unlink()
-    with pytest.raises(ConfigError, match="agents init"):
+    with pytest.raises(ConfigError, match="agents.example.csv"):
         _load(home)
 
 
@@ -174,51 +174,11 @@ def test_the_folder_column_decides_where_agents_work(tmp_path):
         (home / "agents.csv").write_text(header + rows)
         with pytest.raises(ConfigError, match=said):
             _load(home)
-    # config.toml に残っていれば、表に移すよう知らせる
+    # config.toml に書いてあれば、表に書くよう知らせる
     (home / "agents.csv").write_text(header)
     (home / "config.toml").write_text('research_root = "~/r"\n')
-    with pytest.raises(ConfigError, match="research の行の folder 列に移して"):
+    with pytest.raises(ConfigError, match="research の行の folder 列に書いて"):
         _load(home)
-
-
-def test_init_moves_the_config_into_the_table(tmp_path, capsys):
-    state = tmp_path / "state"
-    config_text = (f'# わたしの設定\nmodules = ["research", "course", "knowledge"]\nhandoff_after_turns = 5\n'
-                   f'state_dir = "{state}"\nresearch_root = "{tmp_path}/lab"\n\n'
-                   '[agents.research]\nprovider = "codex"\n\n[agents.router]\nprovider = "claude"\n\n'
-                   '[schedule]\ndaily = "07:30"\n\n[channels]\ncourse = ["uni"]\nimprove = ["kei-agent"]\n')
-    home = _home(tmp_path, None, config_text)
-    env = {"KEI_AGENT_HOME": str(home)}
-    # App Home で選んだ AI は、表の engine に書き写す（移したあとの起動で App Home の値は消える）
-    settings.set_agent_provider(Store(state / "kei-agent.db"), "course", "claude")
-    assert agents_command.init(env=env, dry_run=True) == 0
-    assert not (home / "agents.csv").exists()
-    assert agents_command.init(env=env) == 0
-    after = _load(home)
-    assert after.agents_table is not None
-    assert after.modules == ("research", "course", "knowledge")
-    assert after.module_channels["course"] == ("uni",) and after.improve_channels == ("kei-agent",)
-    assert after.agent_profiles["research"].provider == "codex"
-    assert after.agent_profiles["course"].provider == "claude"
-    assert after.research_root == (tmp_path / "lab").resolve()       # 研究の置き場所は folder 列へ
-    toml = (home / "config.toml").read_text()
-    assert "research_root" not in toml
-    assert "modules" not in toml and "[agents" not in toml and "[channels]" not in toml
-    assert 'daily = "07:30"' not in toml and "handoff_after_turns = 5" in toml
-    # 定期処理の時刻は schedules.csv に移る
-    assert after.schedule.daily == "07:30" and "daily,true,07:30" in (home / "schedules.csv").read_text()
-    assert (home / "config.toml.bak").read_text() == config_text
-    # もう表があれば、何もしない
-    assert agents_command.init(env=env) == 0
-    assert "もうあります" in capsys.readouterr().out
-
-
-def test_the_command_dispatches(monkeypatch):
-    seen = []
-    monkeypatch.setattr(agents_command, "init", lambda **kw: seen.append(kw) or 0)
-    with pytest.raises(SystemExit) as e:
-        cli.main(["agents", "init", "--dry-run"])
-    assert e.value.code == 0 and seen == [{"dry_run": True}]
 
 
 def test_the_example_table_lists_every_builtin_module(tmp_path):

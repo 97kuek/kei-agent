@@ -182,8 +182,8 @@ def with_enabled(text: str, name: str, on: bool) -> str:
 
 
 def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
-    """config.toml の modules・[channels]・[agents]・[notion]・research_root・course_root から、同じ中身の表を作る
-    （移すとき）。providers は今使っている provider（App Home で選んだもの）。あれば [agents] より先に使う。"""
+    """modules・channels・agents・notion・research_root・course_root の辞書から表を作る（setup・モジュールの追加・
+    テストの道具が使う）。providers は担当ごとの provider。あれば agents より先に使う。"""
     providers = providers or {}
     known = modules.known()
     on = data.get("modules", list(modules.builtin()))

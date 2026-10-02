@@ -5,7 +5,6 @@
 - `kei-agent doctor` … 今の設定と動きを点検する（読むだけ）
 - `kei-agent manifest` … オンにしたモジュールに合わせた Slack App の manifest を出す
 - `kei-agent module list / add / remove / new / test` … モジュールを一覧にする・足す・外す・作る・テストする
-- `kei-agent agents init` … config.toml のモジュール・チャンネル・AI を、担当の表（agents.csv）に移す
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ USAGE = """使い方: kei-agent [コマンド]
   manifest          オンにしたモジュールに合わせた Slack App の manifest を出す（Slack の App Manifest に貼る）
   module            モジュールを一覧にする（list）・足す（add <名前>）・外す（remove <名前>）・
                     ひな形を作る（new <名前> [--ai] [--process]）・テストする（test <名前>）
-  agents init       config.toml のモジュール・チャンネル・AI を、担当の表（agents.csv）に移す（--dry-run で見るだけ）
 """
 
 
@@ -48,10 +46,6 @@ def main(argv: list[str] | None = None) -> None:
         from kei_agent.operations import module_command
 
         raise SystemExit(module_command.main(rest))
-    if command == "agents":
-        from kei_agent.operations import agents_command
-
-        raise SystemExit(agents_command.main(rest))
     if command in ("-h", "--help", "help"):
         print(USAGE)
         return

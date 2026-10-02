@@ -66,9 +66,9 @@ def test_notion_homes_are_written_in_the_notion_column(tmp_path):
     (home / "agents.csv").write_text("module,enabled,channels,notion,engine,model,effort\nrouter,true,,X,,,\n")
     with pytest.raises(ConfigError, match="notion を書けません"):
         load_config(env={"KEI_AGENT_HOME": str(home)})
-    # config.toml の [notion] は、表に移すよう知らせる
+    # config.toml の [notion] は、表に書くよう知らせる
     (home / "config.toml").write_text('[notion]\ncourse_home = "a"\n')
-    with pytest.raises(ConfigError, match="notion 列に書く"):
+    with pytest.raises(ConfigError, match="Notion のホームは notion 列"):
         load_config(env={"KEI_AGENT_HOME": str(home)})
 
 

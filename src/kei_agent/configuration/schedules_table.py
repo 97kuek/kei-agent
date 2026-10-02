@@ -8,7 +8,7 @@
 - 表に無い処理は、既定の時刻で動く（本体の既定と module.toml の default）
 
 config.toml には時刻（[schedule] の daily などと、[maintenance] の time・enabled）を書かない（書いてあれば、
-移すよう知らせて止める）。App Home では変えない。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
+表に書くよう知らせて止める）。App Home では変えない。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
 行わない）にして load_config に渡す。
 """
 
@@ -84,19 +84,3 @@ def read_text(path: Path) -> str:
 
 def load(path: Path) -> dict[str, str]:
     return parse(read_text(path), path.name)
-
-
-def from_config(schedule: dict, maintenance: dict) -> str:
-    """config.toml の [schedule] の時刻と [maintenance] の time・enabled から、同じ中身の表を作る（移すとき）。"""
-    out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(COLUMNS)
-    for name, default in known_names().items():
-        if name == "maintenance":
-            time = str(maintenance.get("time", default))
-            on = bool(maintenance.get("enabled", True)) and bool(time)
-        else:
-            time = str(schedule.get(name, default))
-            on = bool(time)
-        writer.writerow([name, "true" if on else "false", time or default])
-    return out.getvalue()

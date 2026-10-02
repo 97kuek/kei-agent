@@ -3,6 +3,7 @@
 """
 
 import json
+import re
 from pathlib import Path
 
 from kei_agent.conversation import ask
@@ -83,25 +84,68 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
     return ws
 
 
+_TABLE = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]")
+_TOP_KEY = re.compile(r"^\s*(modules|research_root|course_root)\s*=")
+
+
+def _without_tables(text: str) -> str:
+    """TOML の文から、表に書くもの（modules・research_root・course_root の行と、[channels]・[agents]・[notion] の表）を
+    消す。テストは設定を config.toml の形で書き、write_config がそれを表に分ける。"""
+    out: list[str] = []
+    skipping = False
+    lines = text.splitlines(keepends=True)
+    i = 0
+    while i < len(lines):
+        row = lines[i]
+        if table := _TABLE.match(row):
+            name = table.group(1).strip()
+            skipping = name in ("channels", "agents", "notion") or name.startswith(("agents.", "notion."))
+        if skipping:
+            i += 1
+            continue
+        if _TOP_KEY.match(row) and not any(_TABLE.match(r) for r in lines[:i]):
+            # 複数の行にまたがる配列（modules = [ …）は、閉じ括弧の行まで消す
+            if "[" in lines[i].split("#", 1)[0]:
+                while "]" not in lines[i].split("#", 1)[0] and i + 1 < len(lines):
+                    i += 1
+            i += 1
+            continue
+        out.append(row)
+        i += 1
+    return "".join(out)
+
+
+def _without_keys(text: str, drop: dict[str, set[str]]) -> str:
+    """TOML の文から、表ごとの決まったキーの行を消す（1行で書いた値だけ。"" は一番外側）。"""
+    out, table = [], ""
+    for line in text.splitlines(keepends=True):
+        if header := _TABLE.match(line):
+            table = header.group(1).strip()
+        key = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=", line)
+        if key and key.group(1) in drop.get(table, ()):
+            continue
+        out.append(line)
+    return "".join(out)
+
+
 def write_config(path: Path, text: str) -> Path:
-    """config.toml を書く。モジュール・チャンネル・AI（modules・[channels]・[agents]）は、同じフォルダの agents.csv に分ける。"""
+    """config.toml を書く。テストでは config.toml の形でまとめて書いてよく、モジュール・チャンネル・AI・作業場・
+    Notion のホーム（modules・[channels]・[agents]・[notion]・research_root・course_root）は同じフォルダの
+    agents.csv に、定期処理の時刻は schedules.csv に分けて書く。"""
     import tomllib
 
-    from kei_agent.configuration import agents_table
+    from kei_agent.configuration import agents_table, schedules_table
     from kei_agent.framework import modules
-    from kei_agent.operations import agents_command
 
     # 利用者のモジュール（同じフォルダの modules/）も、表の行にできるように読んでおく
     modules.register_user_modules(path.parent / "modules")
-    from kei_agent.configuration import schedules_table
-
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
         data = {}
     if any(key in data for key in agents_table.REPLACED_KEYS):
-        text, table = agents_command.split(text)
-        (path.parent / agents_table.AGENTS_FILE).write_text(table, encoding="utf-8")
+        (path.parent / agents_table.AGENTS_FILE).write_text(agents_table.from_config(data), encoding="utf-8")
+        text = _without_tables(text)
     # 定期処理の時刻とオンオフは schedules.csv に（[schedule] の時刻と [maintenance] の time・enabled）
     known = schedules_table.known_names()
     schedule, maintenance = data.get("schedule", {}), data.get("maintenance", {})
@@ -114,7 +158,7 @@ def write_config(path: Path, text: str) -> Path:
             rows.append(f"maintenance,{'true' if on else 'false'},{time}")
         (path.parent / schedules_table.SCHEDULES_FILE).write_text("name,enabled,time\n" + "\n".join(rows) + "\n",
                                                                   encoding="utf-8")
-        text = agents_command.without_keys(text, {"schedule": set(times), "maintenance": {"time", "enabled"}})
+        text = _without_keys(text, {"schedule": set(times), "maintenance": {"time", "enabled"}})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path

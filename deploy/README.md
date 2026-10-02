@@ -34,7 +34,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 
 ### 担当の表（`agents.csv`）
 
-- `setup` は、選んだモジュールと AI でこの表を作る。今の `config.toml` から移すときは `uv run kei-agent agents init`（`--dry-run` で見るだけ。前のものは `config.toml.bak`）
+- `setup` は、選んだモジュールと AI でこの表を作る（例は `agents.example.csv`）
 - 1行に1つ。表に無いモジュールはオフ。Excel や Numbers で開いてよい（UTF-8 で保存する）
 
 | 列 | 書くこと |

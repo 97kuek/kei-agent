@@ -563,19 +563,18 @@ def _hands(data: dict) -> tuple[str, str]:
 def _with_table(data: dict, table: Path | None) -> dict:
     """担当の表（agents.csv）の中身を、modules・channels・agents として重ねる。表が無ければ、組み込み全部で AI は未選択。
 
-    モジュールのオンオフ・チャンネル・AI は表だけに書く。config.toml に残っていれば、移し方を示して止める。
+    モジュールのオンオフ・チャンネル・AI は表だけに書く。config.toml に書いてあれば、表に書くよう示して止める。
     """
     from kei_agent.configuration import agents_table
 
     old = [key for key in agents_table.REPLACED_KEYS if key in data]
     if old:
-        how = "（uv run kei-agent agents init が移す）" if table is None else "（Notion のホームは notion 列に書く）"
-        raise ConfigError(f"config.toml の {'・'.join(old)} は、担当の表（{agents_table.AGENTS_FILE}）に移してください{how}")
+        raise ConfigError(f"config.toml の {'・'.join(old)} は、担当の表（{agents_table.AGENTS_FILE}）に書いてください"
+                          "（Notion のホームは notion 列。例は agents.example.csv）")
     if places := [key for key in agents_table.FOLDER_KEYS if key in data]:
         rows = "・".join(agents_table.FOLDER_KEYS[key] for key in places)
-        how = "" if table is not None else "（表が無ければ uv run kei-agent agents init が移す）"
         raise ConfigError(f"config.toml の {'・'.join(places)} は、{agents_table.AGENTS_FILE} の {rows} の行の "
-                          f"folder 列に移してください{how}")
+                          "folder 列に書いてください")
     if table is None:
         return data
     try:
@@ -587,7 +586,7 @@ def _with_table(data: dict, table: Path | None) -> dict:
 def _with_schedules(data: dict, table: Path) -> dict:
     """定期処理の表（schedules.csv）の時刻とオンオフを、[schedule] の時刻と [maintenance] の time・enabled として重ねる。
 
-    時刻は表だけに書く。config.toml に残っていれば、移すよう知らせて止める。
+    時刻は表だけに書く。config.toml に書いてあれば、表に書くよう知らせて止める。
     """
     from kei_agent.configuration import schedules_table
 
@@ -596,7 +595,7 @@ def _with_schedules(data: dict, table: Path) -> dict:
     old = [f"[schedule] {key}" for key in schedule if key in known]
     old += [f"[maintenance] {key}" for key in ("time", "enabled") if key in maintenance]
     if old:
-        raise ConfigError(f"config.toml の {'・'.join(old)} は、定期処理の表（{SCHEDULES_FILE}）に移してください"
+        raise ConfigError(f"config.toml の {'・'.join(old)} は、定期処理の表（{SCHEDULES_FILE}）に書いてください"
                           f"（1行に1つ: name,enabled,time。例は schedules.example.csv）")
     if not table.is_file():
         return data

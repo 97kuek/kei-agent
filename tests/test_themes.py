@@ -71,10 +71,10 @@ def test_an_old_claude_md_moves_to_agents_md_but_not_in_someone_elses_folder(con
     ('[schedule]\ndaily = "8:00"\n', r"\[schedule\] daily"),
     ('[maintenance]\ntime = "22時"\n', r"\[maintenance\] time"),
     ('[model_recipes.routine]\nprovider = "codex"\nmodel = "gpt-routine"\n', "model_recipes"),
-    # 連携は制限の表が決め、モジュール・チャンネル・AI は担当の表だけに書く。移し方を示す
-    ('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n', "kei-agent agents init"),
-    ('modules = ["research"]\n', "kei-agent agents init"),
-    ('[channels]\ntheme_prefix = "theme-"\n', "kei-agent agents init"),
+    # 連携は制限の表が決め、モジュール・チャンネル・AI は担当の表だけに書く。書く場所を示す
+    ('[agents.research]\nprovider = "codex"\nconnectors = ["wandb"]\n', "agents.csv"),
+    ('modules = ["research"]\n', "agents.csv"),
+    ('[channels]\ntheme_prefix = "theme-"\n', "agents.csv"),
 ])
 def test_wrong_config_is_refused_at_startup(tmp_path, text, match):
     from kei_agent.configuration.config import ConfigError, load_config
