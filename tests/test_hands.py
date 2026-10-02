@@ -129,7 +129,10 @@ async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
     mcp = build_mcp(h)
 
     async def call(name, args):
-        return json.loads((await mcp.call_tool(name, args)).content[0].text)
+        result = await mcp.call_tool(name, args)
+        # 決まった項目のまま渡り、同じ中身の文字も付く
+        assert result.structured_content == json.loads(result.content[0].text)
+        return result.structured_content
 
     ticket = (await call("run", {"workspace": "vlm", "request": "まとめて"}))["ticket"]
     assert (await call("status", {"ticket": ticket}))["status"] == "done"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 import logging
 import urllib.parse
+from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -38,13 +39,14 @@ INSTRUCTIONS = (
 
 
 def build_mcp(hands: Hands) -> MCPServer:
-    """道具はどれも async にする（async でない道具は別のスレッドで動き、記録の SQLite が使えない）。"""
+    """道具はどれも async にする（async でない道具は別のスレッドで動き、記録の SQLite が使えない）。
+    戻り値は dict[str, Any] と書く（決まった項目のまま頭に渡る。ただの dict だと、文字にした JSON だけになる）。"""
     mcp = MCPServer("kei-agent-hands", instructions=INSTRUCTIONS)
 
     @mcp.tool(annotations=READ_ONLY,
               description="頼める作業場の一覧。name（run に渡す）・kind（研究テーマ・プロジェクト・担当）・"
                           "agent（受け持つ担当）・engines（選べる AI）・weights（選べる重さ）")
-    async def workspaces() -> dict:
+    async def workspaces() -> dict[str, Any]:
         return {"workspaces": hands.workspaces()}
 
     @mcp.tool(description="作業場で AI を動かす。workspace は workspaces の name、request は頼みごと、"
@@ -53,7 +55,7 @@ def build_mcp(hands: Hands) -> MCPServer:
                           "返すのは status（done・needs_input・failed・accepted）・text・conversation・"
                           "files（作業場の outputs にできたファイル）・ticket")
     async def run(workspace: str, request: str, weight: str = "normal", engine: str = "",
-                  conversation: str = "") -> dict:
+                  conversation: str = "") -> dict[str, Any]:
         try:
             return await hands.run(workspace, request, weight, engine, conversation)
         except HandsError as e:
@@ -61,7 +63,7 @@ def build_mcp(hands: Hands) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY,
               description="受付番号（run が返した ticket）の作業の様子と結果。status が running なら、まだ動いている")
-    async def status(ticket: str) -> dict:
+    async def status(ticket: str) -> dict[str, Any]:
         try:
             return hands.status(ticket)
         except HandsError as e:
