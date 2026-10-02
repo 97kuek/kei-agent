@@ -34,16 +34,53 @@ DEFAULT_DENY_READ = (
     "~/.config/git/credentials",
 )
 
-def denied_reads(config: Config) -> tuple[Path, ...]:
-    """sandbox の中から読ませない場所。config.toml の [sandbox] deny_read（書かなければ上の既定と、使うたびに更新する
-    トークン（Box など）の置き場 <state_dir>/secrets）に、秘密情報の置き場所を必ず足す（書き換えていても外せない）。"""
+def denied_reads(config: Config, actor: str = "") -> tuple[Path, ...]:
+    """sandbox の中から読ませない場所（越えてはいけない線。Claude にも Codex にも同じものを掛ける）。
+
+    - config.toml の [sandbox] deny_read（書かなければ上の既定と、使うたびに更新するトークン（Box など）の置き場
+      <state_dir>/secrets）
+    - 秘密情報の置き場所（deny_read を書き換えていても外せない）
+    - 担当の表（agents.csv）に書いたアカウントのフォルダ（claude_account・codex_account。ログインの情報がある）
+    - actor を渡すと、アカウントの違う担当の作業場（会社と個人のアカウントを混ぜない）
+    """
     if config.deny_read is not None:
         found = list(config.deny_read)
     else:
         found = [Path(p).expanduser().resolve() for p in DEFAULT_DENY_READ] + [config.state_dir / "secrets"]
-    if config.secrets_dir is not None and config.secrets_dir not in found:
+    if config.secrets_dir is not None:
         found.append(config.secrets_dir)
+    found += [Path(folder) for p in config.agent_profiles.values()
+              for folder in (p.claude_account, p.codex_account) if folder]
+    if actor:
+        found += _other_account_folders(config, actor)
     return tuple(dict.fromkeys(found))
+
+
+def _account_of(config: Config, actor: str) -> tuple[str, str]:
+    profile = config.agent_profiles.get(actor)
+    return (profile.claude_account, profile.codex_account) if profile is not None else ("", "")
+
+
+def _other_account_folders(config: Config, actor: str) -> list[Path]:
+    """actor とアカウントの違う担当の作業場（研究テーマの置き場所・大学の作業場・表の folder・既存のフォルダ）。"""
+    from kei_agent.configuration.places import places
+    from kei_agent.workspaces import themes
+
+    folders: dict[str, list[Path]] = {"research": [config.research_root], "course": [config.course_root]}
+    for name, folder in config.module_folders.items():
+        folders.setdefault(name, []).append(folder)
+    for name, folder in places(config).items():
+        # themes.toml の既存のフォルダは、そのチャンネルを受け持つ担当のもの（研究テーマ・プロジェクト）
+        try:
+            owner = themes.resolve(config, name).module
+        except ValueError:
+            continue
+        if owner:
+            folders.setdefault(owner, []).append(folder)
+    mine = _account_of(config, actor)
+    own = {p for p in folders.get(actor, [])}
+    return [p for name, paths in folders.items() if name != actor and _account_of(config, name) != mine
+            for p in paths if p not in own]
 
 
 # claude -p の子プロセスに渡さない環境変数。Bash から Slack や Notion のトークンが見えないようにする。
@@ -151,7 +188,7 @@ def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> di
         allow += connector.claude_names()
     deny = [# 秘密情報の置き場所。sandbox は Bash にしか効かないので、読む道具（Read・Grep・Glob）でも塞ぐ。
             # フォルダ（~/.ssh）とファイル（~/.netrc）の両方の書き方で書く
-            *(rule for path in denied_reads(config) for rule in (f"Read(/{path})", _abs_rule("Read", path))),
+            *(rule for path in denied_reads(config, policy.name) for rule in (f"Read(/{path})", _abs_rule("Read", path))),
             *(SEARCH_TOOLS if policy.files == "none" else ()),
             *(EDIT_TOOLS if policy.files != "write" else ()),
             *(() if policy.shell else ("Bash",)),
@@ -179,7 +216,7 @@ def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
             "filesystem": {
                 "allowWrite": [str(p) for p in config.allow_write],
                 # sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞ぐ
-                "denyRead": [str(p) for p in denied_reads(config)],
+                "denyRead": [str(p) for p in denied_reads(config, policy.name)],
             },
         },
         "permissions": claude_permissions(config, ws, policy),

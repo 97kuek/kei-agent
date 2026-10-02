@@ -129,7 +129,7 @@
 |---|---|
 | 使える道具 | 制限の表から作る |
 | 書き込み | 作業場の中と `[sandbox] allow_write` だけ |
-| 読ませない場所 | `[sandbox] deny_read`（既定は秘密情報・`~/.ssh`・`~/.claude`・担当のプロファイル） |
+| 読ませない場所 | `[sandbox] deny_read`（既定は秘密情報・`~/.ssh`・`~/.claude`・担当のプロファイル）に、`agents.csv` のアカウントのフォルダと、アカウントの違う担当の作業場を足したもの（`guard.denied_reads`）。Claude にも Codex にも同じものを掛ける |
 | 接続先 | `[sandbox] allowed_domains` と、テーマごとに Slack で許したもの（本体の SQLite） |
 | 環境変数 | 子プロセスに鍵を渡さない（`guard.strip_env`） |
 | 柵そのもの | `guard.py`・`config.example.toml`・`deploy/` は自己改善で直させない |

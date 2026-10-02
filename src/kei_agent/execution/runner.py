@@ -595,6 +595,12 @@ async def _run_model(
         except (CapabilityUnavailable, codex_apps.AppsUnavailable) as exc:
             return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
         install_agent_skills(contract, ws.cwd)
+    else:
+        try:
+            # 始める前の確かめは、Claude にも同じものを掛ける（線を守れないなら動かさない）
+            preflight(config, contract, "claude_cli")
+        except CapabilityUnavailable as exc:
+            return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
     env = build_env(config, dict(os.environ), request.channel, request.thread_ts, policy)
     proc = await asyncio.create_subprocess_exec(
         *build_command(config, request, contract, apps),

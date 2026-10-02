@@ -34,7 +34,10 @@ def check_module_recipes(spec: ModuleSpec) -> None:
     for use_case in spec.actor.use_cases if spec.actor else ():
         if use_case.name in CORE_USE_CASES:
             raise ModelCatalogError(f"モジュール「{spec.name}」の用途 {use_case.name} は、コアの用途と同じ名前です")
-        for provider, (model, _effort) in use_case.recipes.items():
+        for provider, (model, effort) in use_case.recipes.items():
+            if effort not in ALLOWED_EFFORTS[provider]:
+                raise ModelCatalogError(f"モジュール「{spec.name}」の用途 {use_case.name} の {provider} の effort {effort} は使えません"
+                                        f"（使えるのは {', '.join(sorted(ALLOWED_EFFORTS[provider] - {''}))} か空）")
             if not is_allowed_model(provider, model):
                 raise ModelCatalogError(f"モジュール「{spec.name}」の用途 {use_case.name} の {provider} のモデル {model} は使えません"
                                   f"（使えるのは {', '.join(sorted(ALLOWED_MODELS[provider]))}）")

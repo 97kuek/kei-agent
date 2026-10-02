@@ -55,6 +55,9 @@ def _filesystem(config: Config, contract: ExecutionContract) -> dict[str, str]:
                       str(Path.home()): "deny", str(workspace.cwd): "read"}
         for skills in contract.skill_dirs:
             filesystem[str(skills)] = "read"
+        # 越えてはいけない線（秘密情報・アカウントのフォルダ・ほかのアカウントの作業場）は、どの担当にも掛ける
+        for denied in guard.denied_reads(config, policy.name):
+            filesystem[str(denied)] = "deny"
         return filesystem
     filesystem = {":root": "read", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny"}
     for root in guard.read_roots(config, workspace):
@@ -63,7 +66,7 @@ def _filesystem(config: Config, contract: ExecutionContract) -> dict[str, str]:
         filesystem[str(workspace.cwd)] = "write"
         for root in config.allow_write:
             filesystem[str(root)] = "write"
-    for denied in guard.denied_reads(config):
+    for denied in guard.denied_reads(config, policy.name):
         filesystem[str(denied)] = "deny"
     return filesystem
 
@@ -87,8 +90,8 @@ def preflight(config: Config, contract: ExecutionContract, runtime: Runtime,
     network_domains = {domain: "allow" for domain in domains}
     filesystem = _filesystem(config, contract)
 
-    if runtime == "claude_cli":
-        return PermissionProfile(filesystem, network_domains, ())
     if "mcp.allowlist" in contract.capabilities and not config.notion_gateway_url:
         raise CapabilityUnavailable("Notion gateway is not configured")
+    if runtime == "claude_cli":
+        return PermissionProfile(filesystem, network_domains, ())
     return PermissionProfile(filesystem, network_domains, _overrides(filesystem, network_domains))
