@@ -157,14 +157,14 @@ def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
 
 
 def test_the_folder_column_decides_where_agents_work(tmp_path):
-    """研究のテーマを置く場所・大学の作業場・ほかの担当の作業場は、表の folder 列（前は config.toml の research_root など）。"""
+    """研究のテーマを置く場所・大学の作業場・ほかの担当の作業場は、表の folder 列で決まる。"""
     header = "module,enabled,channels,folder,engine,model,effort\n"
     home = _home(tmp_path, header + f"research,true,,{tmp_path}/r,claude,,\ncourse,true,,{tmp_path}/c,,,\n"
                                     f"knowledge,true,,{tmp_path}/k,,,\n")
     config = _load(home)
     assert (config.research_root, config.course_root) == ((tmp_path / "r").resolve(), (tmp_path / "c").resolve())
     assert config.module_workspace("knowledge") == (tmp_path / "k").resolve()
-    # 列が無い前の表は、既定の場所
+    # folder 列が無い表は、既定の場所
     (tmp_path / "old").mkdir()
     from kei_agent.configuration.config import DEFAULT_PATHS
 

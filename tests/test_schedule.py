@@ -524,7 +524,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     text, detail, _ = await scheduler.morning_text(now)
 
     lines = text.splitlines()
-    # 帯と空き時間はやめた（2026-09-22）。時刻の一覧だけにする
+    # 朝の知らせは時刻の一覧だけ（帯や空き時間は出さない）
     assert lines[0].startswith("☀️")
     assert "10:00–10:15` 💼 朝会（Zoom）" in lines[1]
     assert "10:40–12:20` 🎓 データベース" in lines[2]

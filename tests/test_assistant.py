@@ -1360,7 +1360,7 @@ def _pick(monkeypatch, **choice):
 
 
 async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(course, monkeypatch):
-    """2週間に締切が無くても「ない」だけで終わらせず、その先のいちばん近いものを添える（2026-09-26 21:40）。"""
+    """2週間に締切が無くても「ない」だけで終わらせず、その先のいちばん近いものを添える。"""
     assistant, slack, _, _ = course
     agent = assistant.agents["course"] = _due_agent({14: [], 400: DUES})
     _pick(monkeypatch, skill="list-due")
@@ -1378,7 +1378,7 @@ async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(course
     ({"days": 365}, "一番締め切りが近い課題は？全期間で"),  # 拾えなくても、言い方で1件と分かる
 ])
 async def test_course_channel_answers_the_nearest_deadline_alone(course, monkeypatch, choice, text):
-    """「一番近い」に全部を並べない（2026-09-26 21:41、1年ぶん30件を並べていた）。"""
+    """「一番近い」と聞かれたら、いちばん近い1件だけを答える（1年ぶんを並べない）。"""
     assistant, slack, _, _ = course
     assistant.agents["course"] = _due_agent({365: DUES})
     _pick(monkeypatch, skill="list-due", params=dict(choice))
@@ -1397,7 +1397,7 @@ def test_first_items_keep_deadlines_at_the_same_time():
 
 
 async def test_an_expired_login_says_so_and_tells_the_improve_channel_once(course):
-    """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ（2026-09-27）。"""
+    """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ。"""
     assistant, slack, _, _ = course
     how = runner.login_help("claude", {"CLAUDE_CONFIG_DIR": "/Users/me/.claude-personal"})
     failed = {"is_error": True, "failure_kind": "login", "provider": "claude",

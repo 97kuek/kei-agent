@@ -276,7 +276,7 @@ def test_update_reinstalls_only_changed_plists_restarts_all_and_checks_the_versi
     repo = _update_repo(tmp_path)
     agents = tmp_path / "Library" / "LaunchAgents"
     (agents / "com.kei-agent.assistant.plist").write_text(_printed(repo, tmp_path), encoding="utf-8")
-    # 前の雛形のまま（起動スクリプトが違う）の担当は、登録し直す
+    # 雛形と違う（起動スクリプトが違う）担当は、登録し直す
     (agents / "com.kei-agent.course.plist").write_text(
         _printed(repo, tmp_path, "course").replace("run-agent.sh", "run-course.sh"), encoding="utf-8")
 

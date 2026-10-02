@@ -481,7 +481,7 @@ def test_failure_reason_says_what_happened_even_without_an_error_text():
 
 
 def test_an_expired_login_is_told_apart_from_other_failures():
-    """ログインが切れた回は、答えの代わりに返った理由の文を残し、入り直し方を先頭に置く（2026-09-27）。"""
+    """ログインが切れた回は、答えの代わりに返った理由の文を残し、入り直し方を先頭に置く。"""
     said = "Failed to authenticate: OAuth session expired and could not be refreshed"
     result = runner.finalize_run_result(runner.RunResult(text=said, is_error=True), returncode=1)
     assert (result.failure_kind, result.text, result.errors) == ("login", "", [said])

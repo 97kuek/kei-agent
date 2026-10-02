@@ -83,7 +83,7 @@ async def test_backup_commits_and_pushes(config, store, tmp_path):
     log = git(remote, "log", "--format=%s", "main")
     assert log.splitlines()[0] == "9/18 の研究データを保存する"
     files = git(remote, "ls-tree", "-r", "--name-only", "main")
-    # 状態の書き出しは Kei Agent 側に移したので、研究のリポジトリには入らない
+    # 状態の書き出しは Kei Agent 側に置くので、研究のリポジトリには入らない
     assert "vlm/result.csv" in files and "kei-agent.sql" not in files
     # Kei Agent 側が Git になっていないことは、黙って見逃さずに結果へ出す
     assert detail["agent_root"] == {"status": "not_a_repo", "path": str(config.agent_root)}

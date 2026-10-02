@@ -96,7 +96,7 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     assert "daily/" not in call["prompt"] and "outputs/" not in call["prompt"]
     text = material(call["prompt"])
     assert "10.1.md" in text
-    # 先行研究はテーマのチャンネルに流すので、Daily の材料には入れない（2026-09-22）
+    # 先行研究はテーマのチャンネルに流すので、Daily の材料には入れない
     assert "先行研究" not in text
     # 「今日のタスク」の元になる（済みも入れて、取り消し線にする）
     assert "## Notion: 今日が期日の Task（済みを含む）" in text
