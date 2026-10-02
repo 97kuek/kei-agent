@@ -586,3 +586,12 @@ def test_env_passes_only_what_the_cli_needs():
                            "GH_TOKEN": "x", "GITHUB_TOKEN": "x", "ANTHROPIC_API_KEY": "x", "AWS_SECRET_ACCESS_KEY": "x",
                            "SSH_AUTH_SOCK": "/tmp/agent", "S2_API_KEY": "x", "KEI_AGENT_HANDS_TOKEN": "x"})
     assert env == {"HOME": "/h", "PATH": "/bin", "LANG": "ja_JP.UTF-8", "LC_ALL": "C", "KEI_AGENT_HOME": "/k"}
+
+
+def test_dangling_skill_links_left_by_an_older_layout_are_replaced(config, tmp_path):
+    """元が無くなった古い skill のリンク（中身が無い）は片づけて、今の skill を入れる。中身のあるものは残す。"""
+    target = tmp_path / ".agents" / "skills"
+    target.mkdir(parents=True)
+    (target / "managing-wandb").symlink_to(tmp_path / "gone" / "managing-wandb", target_is_directory=True)
+    runner.install_agent_skills(resolve_contract(config, request(config, provider="codex")), tmp_path)
+    assert (target / "managing-wandb").resolve() == config.agent_plugin_dir("research") / "skills" / "managing-wandb"

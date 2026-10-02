@@ -295,6 +295,10 @@ def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) ->
             target.unlink()
         elif target.exists() or target.is_symlink():
             raise RuntimeError(f"managed skill changed by another owner: {name}")
+    # 行き先の無いリンク（古い Kei Agent が置いて、元が無くなったもの）は、中身が無いので片づけてよい
+    for target in target_root.iterdir():
+        if target.is_symlink() and not target.exists():
+            target.unlink()
     new_managed: dict[str, str] = {}
     for source in sorted(s for root in source_roots for s in root.iterdir()):
         if not source.is_dir() or not (source / "SKILL.md").is_file():
