@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
--- エージェントが持っている会話の続き（どのスレッドの、どのエージェントの claude か）。
+-- どのスレッドを、どの担当が受け持っているか（session_id は使わない。会話の続きは provider_sessions）。
 -- 会話の単位はスレッドなので、本体が覚える（docs/architecture.md の「振り分けと A2A」）
 CREATE TABLE IF NOT EXISTS agent_sessions (
     channel TEXT NOT NULL,
@@ -504,12 +504,6 @@ class Store:
                    ON CONFLICT (provider) DO UPDATE SET until = excluded.until""",
                 (provider, until),
             )
-
-    def agent_session(self, channel: str, thread_ts: str, agent: str) -> str | None:
-        row = self.conn.execute(
-            "SELECT session_id FROM agent_sessions WHERE channel = ? AND thread_ts = ? AND agent = ?",
-            (channel, thread_ts, agent)).fetchone()
-        return row["session_id"] if row else None
 
     def set_agent_session(self, channel: str, thread_ts: str, agent: str, session_id: str) -> None:
         with self.conn:

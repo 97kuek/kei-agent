@@ -752,8 +752,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
         # 研究全体から回した続きも、毎回どこに聞くかを選び直してしまう
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
-        self.store.set_agent_session(req.channel, req.thread_ts, agent,
-                                     self.store.agent_session(req.channel, req.thread_ts, agent) or "")
+        self.store.set_agent_session(req.channel, req.thread_ts, agent, "")
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
             await on_message(req, skill=skill, params=dict(params or {}))
         return True
