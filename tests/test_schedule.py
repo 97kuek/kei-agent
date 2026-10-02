@@ -779,7 +779,8 @@ async def test_a_new_version_left_unrestarted_is_reported_once_after_an_hour(env
 
 # 朝の取り込み（Daily を頭の予定に移したとき、投稿せずに取り込みだけを続ける）
 
-async def test_intake_syncs_meetings_without_posting_when_daily_is_off(env, config):
+async def test_intake_reads_the_agenda_without_posting_or_writing_meetings(env, config):
+    """Daily を Dot に移したときの朝の取り込み。会議を予定カレンダーへ写すのは Dot なので、ここでは写さない。"""
     from dataclasses import replace
     scheduler, assistant, slack, _ = env
     today = datetime.now().date().isoformat()
@@ -788,7 +789,7 @@ async def test_intake_syncs_meetings_without_posting_when_daily_is_off(env, conf
     scheduler.config = assistant.config = replace(config, schedule=replace(config.schedule, daily=""))
     detail = await scheduler.run_task("intake", today)
     assert detail["status"] == "done" and detail["events"] == 1
-    assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
+    assert assistant.hub.calendar == [] and "synced" not in detail.get("agenda", {})
     assert slack.posted() == []
 
 

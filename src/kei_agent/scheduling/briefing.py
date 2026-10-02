@@ -65,8 +65,10 @@ def failure_note(assistant: Assistant, now: datetime, failed_now: list[str] | No
     return f"前回の Daily から今朝までに、うまくいかなかったこと（{'、'.join(dict.fromkeys(failed))}）" if failed else ""
 
 
-async def build(assistant: Assistant, now: datetime) -> Morning:
-    """朝の一覧（今日の時系列）。集められなかったものは飛ばし、うまくいかなかったことは #0-kei-agent に知らせる。"""
+async def build(assistant: Assistant, now: datetime, *, write_meetings: bool = True) -> Morning:
+    """朝の一覧（今日の時系列）。集められなかったものは飛ばし、うまくいかなかったことは #0-kei-agent に知らせる。
+
+    write_meetings にしないと、会議を予定カレンダーに写さない（Dot の予定が Outlook から写すとき）。"""
     detail: dict = {}
     classes: list[dict] = []
     dues: list[dict] = []
@@ -88,7 +90,7 @@ async def build(assistant: Assistant, now: datetime) -> Morning:
         dues += module_dues
         # モジュールの締切の目印は、そのモジュールの core.notice_once と同じ名前で記録する
         notices += [f"module.{name}.{item['notice']}" for item in morning.soon(module_dues, now) if item.get("notice")]
-        for source in dict.fromkeys(str(item.get("source") or name) for item in meetings):
+        for source in dict.fromkeys(str(item.get("source") or name) for item in meetings) if write_meetings else ():
             synced[source] = await sync_meetings(
                 assistant, [item for item in meetings if str(item.get("source") or name) == source], now, source)
     if synced or unread:

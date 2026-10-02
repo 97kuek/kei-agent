@@ -205,9 +205,10 @@ class Scheduler:
     # 朝の取り込み
 
     async def run_intake(self, day: str) -> dict:
-        """朝の一覧と同じ取り込み（モジュールの取り込み直し・会議を予定カレンダーへ・声に1週間の予定）を、投稿せずに行う。
-        Daily を頭（Dots）の予定に移して止めたときのため（Daily が動く間は task_names に入らない）。"""
-        found = await briefing.build(self.assistant, datetime.now())
+        """朝の一覧と同じ取り込み（モジュールの取り込み直し・声に1週間の予定）を、投稿せずに行う。
+        Daily を頭（Dots）の予定に移して止めたときのため（Daily が動く間は task_names に入らない）。
+        会議を予定カレンダーへ写すのは Dot の予定なので、ここでは写さない（docs/dots.md）。"""
+        found = await briefing.build(self.assistant, datetime.now(), write_meetings=False)
         return {"status": "done", **found.detail}
 
     # 夜間の Task
