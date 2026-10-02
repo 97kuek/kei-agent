@@ -10,6 +10,7 @@
 #         deploy/install.sh knowledge     知識エージェント（担当プロセスを持つモジュール）を登録
 #         deploy/install.sh voice         声（A2A サーバー＋マイク）を登録
 #         deploy/install.sh notion        Notion のゲートウェイ（Notion に届く唯一の口）を登録
+#         deploy/install.sh tunnel        手の口のトンネル（ChatGPT から手の口に届ける。deploy/run-tunnel.sh）を登録
 #         deploy/install.sh <名前> print  登録する plist を表示するだけ（登録はしない）
 set -eu
 
@@ -21,6 +22,9 @@ source "$REPO/deploy/_common.sh"
 agents=($(agent_names))
 if [[ -n "${1:-}" && ${agents[(Ie)$1]} -gt 0 ]]; then
   NAME="$1" SCRIPT="run-agent.sh" ARGUMENT="$1" LOG="$1-launchd.log"
+  shift
+elif [[ "${1:-}" == tunnel ]]; then
+  NAME="tunnel" SCRIPT="run-tunnel.sh" ARGUMENT="" LOG="tunnel-launchd.log"
   shift
 else
   NAME="assistant" SCRIPT="run.sh" ARGUMENT="" LOG="launchd.log"

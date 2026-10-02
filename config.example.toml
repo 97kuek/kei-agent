@@ -56,6 +56,9 @@ orchestrator = "http://127.0.0.1:8786"
 # 手の口（MCP）。頭（Claude Code・Codex、のちに OpenAI Dots）から作業場で AI を動かしてもらう（docs/architecture.md）。
 # 127.0.0.1 のポートだけ。合言葉は環境変数 KEI_AGENT_HANDS_TOKEN（kei-agent setup が作る）。書かなければ開かない
 # url = "http://127.0.0.1:8785"
+# ChatGPT（Dots）から届けるときの OpenAI の Secure MCP Tunnel の番号（deploy/run-tunnel.sh が使う。deploy/README.md）。
+# 鍵は kei-agent-tunnel.zsh の CONTROL_PLANE_API_KEY
+# tunnel = "tunnel_..."
 
 [a2a.agents]
 # ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。名前は launchd・ログ・秘密情報ファイル・ポートと同じ呼び名。

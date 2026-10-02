@@ -233,6 +233,9 @@ class Config:
     # （環境変数 KEI_AGENT_HANDS_TOKEN）
     hands_url: str = ""
     hands_token: str = ""
+    # 手の口を ChatGPT に届ける OpenAI の Secure MCP Tunnel の番号（[hands] tunnel。空ならトンネルを使わない）。
+    # 動かすのは deploy/run-tunnel.sh。鍵（CONTROL_PLANE_API_KEY）はトンネルだけのファイル kei-agent-tunnel.zsh
+    hands_tunnel: str = ""
     # 利用者のフォルダ（~/.config/kei-agent/）。None なら、プロフィールも指示書の差し替えも使わない（テスト）
     user_dir: Path | None = None
     # 秘密情報の置き場所（[paths] secrets。既定は利用者のフォルダの secrets/）。いつも AI に読ませない
@@ -548,13 +551,18 @@ def config_home(env: dict[str, str] | None = None) -> Path:
     return config_path(env).parent
 
 
-def _hands_url(data: dict) -> str:
-    """[hands] url（手の口の住所）。書けるのは 127.0.0.1 か localhost のポートだけ。"""
-    _check_keys(data, {"url"}, "[hands]")
+def _hands(data: dict) -> tuple[str, str]:
+    """[hands] の url（手の口の住所。127.0.0.1 か localhost のポートだけ）と tunnel（トンネルの番号）。"""
+    _check_keys(data, {"url", "tunnel"}, "[hands]")
     url = str(data.get("url", ""))
     if url and not re.match(r"^http://(127\.0\.0\.1|localhost):\d+/?$", url):
         raise ConfigError(f"config.toml の [hands] url は http://127.0.0.1:<ポート> にしてください: {url}")
-    return url
+    tunnel = str(data.get("tunnel", ""))
+    if tunnel and not re.match(r"^tunnel_[0-9a-f]+$", tunnel):
+        raise ConfigError(f"config.toml の [hands] tunnel は OpenAI Platform のトンネルの番号（tunnel_...）にしてください: {tunnel}")
+    if tunnel and not url:
+        raise ConfigError("config.toml の [hands] tunnel を使うなら、url（手の口の住所）も書いてください")
+    return url, tunnel
 
 
 def _with_table(data: dict, table: Path | None) -> dict:
@@ -664,6 +672,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     state_dir = _expand(data.get("state_dir", DEFAULT_PATHS["state_dir"]))
     secrets_dir = _expand(paths.get("secrets", str(home / "secrets")))
     allow_protected = data.get("allow_protected_folders", False)
+    hands_url, hands_tunnel = _hands(data.get("hands", {}))
     if not isinstance(allow_protected, bool):
         raise ConfigError("config.toml の allow_protected_folders は true か false にしてください")
     config = Config(
@@ -696,7 +705,8 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         a2a=_a2a(data.get("a2a", {}), enabled),
         notion=_notion(data.get("notion", {})),
         a2a_token=env.get("KEI_AGENT_A2A_TOKEN", ""),
-        hands_url=_hands_url(data.get("hands", {})),
+        hands_url=hands_url,
+        hands_tunnel=hands_tunnel,
         hands_token=env.get("KEI_AGENT_HANDS_TOKEN", ""),
         user_dir=home,
         secrets_dir=secrets_dir,

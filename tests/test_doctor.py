@@ -187,3 +187,25 @@ def test_the_command_runs_the_app_without_arguments(monkeypatch):
     with pytest.raises(SystemExit) as unknown:
         cli.main(["nothing"])
     assert unknown.value.code == 2
+
+
+# 手の口のトンネル
+
+def test_the_tunnel_is_checked_only_when_configured_and_its_key_stays_in_its_own_file(config, tmp_path):
+    agents = tmp_path / "LaunchAgents"
+    agents.mkdir()
+    config = _secrets(config, tmp_path, FULL)
+    run = lambda config, **kw: levels(doctor.check_tunnel(config, agents, **{  # noqa: E731
+        "state": lambda label: "running", "ready": lambda: True, "which": lambda name: "/bin/x", **kw}))
+    assert run(config) == []                                    # [hands] tunnel を書かなければ見ない
+    config = replace(config, hands_url="http://127.0.0.1:8785", hands_tunnel="tunnel_abc")
+    assert [text for _, text in run(config)] == [f"CONTROL_PLANE_API_KEY が {doctor.TUNNEL_SECRETS} に無い",
+                                                 "トンネル（com.kei-agent.tunnel）が登録されていない"]
+    (config.secrets_dir / doctor.TUNNEL_SECRETS).write_text('export CONTROL_PLANE_API_KEY="sk-1"\n')
+    (agents / "com.kei-agent.tunnel.plist").write_text("x")
+    assert run(config) == [(OK, "トンネルが動いて、ChatGPT から届く")]
+    assert run(config, ready=lambda: False)[0][0] == ERROR
+    assert run(config, state=lambda label: "waiting")[0] == (ERROR, "トンネルが動いていない（waiting）")
+    # 鍵が共通のファイルにあると、どのプロセスにも見える
+    (config.secrets_dir / doctor.SECRETS_FILE).write_text(FULL + 'export CONTROL_PLANE_API_KEY="sk-1"\n')
+    assert run(replace(config, hands_tunnel=""))[0][0] == ERROR

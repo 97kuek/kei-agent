@@ -34,6 +34,11 @@ _ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$")
 RECENT_LOG_SECONDS = 3600
 LOG_FILE = Path.home() / "Library" / "Logs" / "kei-agent" / "kei-agent.log"
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
+# 手の口のトンネル（deploy/run-tunnel.sh）。launchd の名前、鍵を置くトンネルだけのファイル、様子を見る口
+TUNNEL_LABEL = "com.kei-agent.tunnel"
+TUNNEL_SECRETS = "kei-agent-tunnel.zsh"
+TUNNEL_KEY = "CONTROL_PLANE_API_KEY"
+TUNNEL_READY = "http://127.0.0.1:8784/readyz"
 
 
 @dataclass(frozen=True)
@@ -242,6 +247,51 @@ async def check_versions(config: Config, fetch=None, disk: str | None = None) ->
     return findings
 
 
+# 手の口のトンネル
+
+def tunnel_ready(url: str = TUNNEL_READY) -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=5) as found:
+            return found.status == 200
+    except OSError:
+        return False
+
+
+def check_tunnel(config: Config, agents_dir: Path = LAUNCH_AGENTS,
+                 state: Callable[[str], str] = launchctl_state, ready: Callable[[], bool] = tunnel_ready,
+                 which: Callable[[str], str | None] = shutil.which) -> list[Finding]:
+    """[hands] tunnel を書いたとき、トンネルが動いて OpenAI につながっているか。鍵が共通のファイルに漏れていないか。"""
+    directory = config.secrets_dir or (config.user_dir or Path.home() / ".config" / "kei-agent") / "secrets"
+    common = directory / SECRETS_FILE
+    findings = []
+    if common.is_file() and assigned(common).get(TUNNEL_KEY, False):
+        findings.append(Finding(ERROR, "トンネル", f"{TUNNEL_KEY} が共通の {SECRETS_FILE} にある（どのプロセスにも見える）",
+                                f"{TUNNEL_SECRETS} に移す"))
+    if not config.hands_tunnel:
+        return findings
+    if not which("tunnel-client"):
+        findings.append(Finding(ERROR, "トンネル", "tunnel-client が見つからない", "brew install openai/tools/tunnel-client"))
+    own = directory / TUNNEL_SECRETS
+    if not (own.is_file() and assigned(own).get(TUNNEL_KEY, False)):
+        findings.append(Finding(ERROR, "トンネル", f"{TUNNEL_KEY} が {TUNNEL_SECRETS} に無い",
+                                "OpenAI Platform で Tunnels の Read と Use の鍵を作って書く。値はここに出さない"))
+    if not (agents_dir / f"{TUNNEL_LABEL}.plist").exists():
+        findings.append(Finding(ERROR, "トンネル", f"トンネル（{TUNNEL_LABEL}）が登録されていない", "deploy/install.sh tunnel"))
+        return findings
+    running = state(TUNNEL_LABEL)
+    if running != "running":
+        findings.append(Finding(ERROR, "トンネル", f"トンネルが動いていない（{running or '読めない'}）",
+                                "~/Library/Logs/kei-agent/tunnel-launchd.log を見る"))
+    elif not ready():
+        findings.append(Finding(ERROR, "トンネル", "トンネルが OpenAI か手の口につながっていない",
+                                "~/Library/Logs/kei-agent/tunnel-launchd.log を見る（鍵・番号・手の口の合言葉）"))
+    else:
+        findings.append(Finding(OK, "トンネル", "トンネルが動いて、ChatGPT から届く"))
+    return findings
+
+
 # Notion・道具・ログ
 
 def check_notion(config: Config) -> list[Finding]:
@@ -297,6 +347,7 @@ async def run(env: dict[str, str] | None = None) -> list[Finding]:
     findings += check_secrets(config)
     findings += check_ai(config)
     findings += check_launchd(config)
+    findings += check_tunnel(config)
     findings += await check_versions(config)
     findings += check_notion(config)
     findings += check_tools(config)

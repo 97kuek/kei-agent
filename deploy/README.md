@@ -168,6 +168,15 @@ codex mcp add kei-agent-hands --url http://127.0.0.1:8785/mcp --bearer-token-env
 
 - 道具と返す項目は [architecture.md](../docs/architecture.md#手の口mcp)。開いているかは `curl -s http://127.0.0.1:8785/health`
 
+ChatGPT（Dots）から使うときは、OpenAI の Secure MCP Tunnel を通す（この Mac から OpenAI へ出ていくだけで、口は外に開かない）。
+
+1. `brew install openai/tools/tunnel-client`
+2. <https://platform.openai.com/settings/organization/tunnels> でトンネルを作り、番号を `config.toml` の `[hands]` に `tunnel = "tunnel_..."` と書く。ChatGPT workspaces には自分のものを選ぶ
+3. 同じ Platform で鍵（Restricted。Tunnels の Read と Use だけ）を作り、トンネルだけのファイル `kei-agent-tunnel.zsh` に `export CONTROL_PLANE_API_KEY="sk-..."` と書く（共通の `kei-agent.zsh` には書かない。doctor が見る）
+4. `deploy/install.sh tunnel`（`deploy/run-tunnel.sh` を launchd に載せる。ログは `tunnel-launchd.log`、つながっているかは `curl -s http://127.0.0.1:8784/readyz`）
+5. <https://chatgpt.com/plugins> の「＋」→「MCP アプリを作成」。接続は Tunnel でこのトンネルを選び、認証はなし（合言葉はトンネルが付ける）
+6. チャットでは `@Kei Agent` と指名して頼む（指名しないと、ChatGPT は道具を呼ばずにほかの手段で答えることがある）
+
 ## 7. 日々の運用
 
 | したいこと | コマンド |

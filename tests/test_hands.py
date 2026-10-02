@@ -144,3 +144,20 @@ async def test_only_the_tools_that_just_read_say_so(hands):
     tools = {t.name: t.annotations for t in await build_mcp(h).list_tools()}
     assert tools["workspaces"].read_only_hint and tools["status"].read_only_hint
     assert tools["run"] is None or not tools["run"].read_only_hint
+
+
+def test_the_tunnel_needs_the_door_and_a_tunnel_number(tmp_path):
+    from fakes import write_config
+
+    from kei_agent.configuration.config import ConfigError, load_config
+
+    path = tmp_path / "config.toml"
+    write_config(path, '[hands]\nurl = "http://127.0.0.1:8785"\ntunnel = "tunnel_6abf27"\n')
+    config = load_config(path, env={})
+    assert (config.hands_url, config.hands_tunnel) == ("http://127.0.0.1:8785", "tunnel_6abf27")
+    for text, said in (('[hands]\ntunnel = "tunnel_1"\n', "url"), ('[hands]\nurl = "http://127.0.0.1:1"\ntunnel = "x"\n',
+                                                                    "tunnel_"),
+                       ('[hands]\nurl = "http://0.0.0.0:1"\n', "127.0.0.1")):
+        write_config(path, text)
+        with pytest.raises(ConfigError, match=said):
+            load_config(path, env={})

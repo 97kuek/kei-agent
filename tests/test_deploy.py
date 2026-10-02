@@ -17,7 +17,8 @@ DEPLOY = REPO_ROOT / "deploy"
 # 共通の kei-agent-module <名前> で動く（研究もモジュール）
 AGENTS = ("course", "knowledge", "notion", "research", "voice", "work")
 # install.sh で登録できるもの（名前なしは本体）
-INSTALLABLE = ("", *AGENTS)
+# 本体（""）・担当・手の口のトンネル
+INSTALLABLE = ("", *AGENTS, "tunnel")
 ZSH = shutil.which("zsh")
 needs_zsh = pytest.mark.skipif(ZSH is None, reason="起動スクリプトは macOS の zsh で動く")
 
