@@ -36,13 +36,15 @@ log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
 def task_names(config: Config) -> tuple[str, ...]:
-    """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ Daily → 振り返り → 保守。
+    """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ 朝の取り込み → Daily → 振り返り → 保守。
 
     夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。Daily と振り返りは、受け持つモジュール
-    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。
+    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。朝の取り込みは、Daily が動かないときだけ
+    （Daily が動くなら、Daily が取り込む）。
     """
     taken = tuple(name for name in modules.CORE_SCHEDULES if modules.core_schedule_owner(config.modules, name))
-    return ("night", *(s.name for s in settings.module_schedules(config)), *taken, "maintenance")
+    intake = () if "daily" in taken and settings.schedule_time(config, "daily") else ("intake",)
+    return ("night", *(s.name for s in settings.module_schedules(config)), *intake, *taken, "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
@@ -159,8 +161,8 @@ class Scheduler:
         return detail
 
     def task_provider(self, name: str) -> str | None:
-        """定期処理が使う明示 provider。保守はモデルを使わない。"""
-        if name == "maintenance":
+        """定期処理が使う明示 provider。保守と朝の取り込みはモデルを使わない（取り込みの AI は担当のプロセスが動かす）。"""
+        if name in ("maintenance", "intake"):
             return None
         owner = (modules.core_schedule_owner(self.config.modules, name)
                  or modules.schedule_owner(self.config.modules, name))
@@ -199,6 +201,14 @@ class Scheduler:
             self.store.finish_deferred(deferred_id)
             if not self.store.schedule_ran(payload["name"], payload["day"]):
                 await self.run_or_defer(payload["name"], payload["day"], now)
+
+    # 朝の取り込み
+
+    async def run_intake(self, day: str) -> dict:
+        """朝の一覧と同じ取り込み（モジュールの取り込み直し・会議を予定カレンダーへ・声に1週間の予定）を、投稿せずに行う。
+        Daily を頭（Dots）の予定に移して止めたときのため（Daily が動く間は task_names に入らない）。"""
+        found = await briefing.build(self.assistant, datetime.now())
+        return {"status": "done", **found.detail}
 
     # 夜間の Task
 

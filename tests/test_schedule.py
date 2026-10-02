@@ -775,3 +775,32 @@ async def test_a_new_version_left_unrestarted_is_reported_once_after_an_hour(env
 
     trouble, = troubles
     assert "new" in trouble and "deploy/restart-all.sh" in trouble
+
+
+# 朝の取り込み（Daily を頭の予定に移したとき、投稿せずに取り込みだけを続ける）
+
+async def test_intake_syncs_meetings_without_posting_when_daily_is_off(env, config):
+    from dataclasses import replace
+    scheduler, assistant, slack, _ = env
+    today = datetime.now().date().isoformat()
+    assistant.agents["work"] = FakeWorkAgent(
+        [{"subject": "朝会", "start": f"{today}T10:00", "end": f"{today}T10:15", "location": "Zoom"}])
+    scheduler.config = assistant.config = replace(config, schedule=replace(config.schedule, daily=""))
+    detail = await scheduler.run_task("intake", today)
+    assert detail["status"] == "done" and detail["events"] == 1
+    assert [(row["出典"], row["名前"]) for row in assistant.hub.calendar] == [("Outlook", "朝会")]
+    assert slack.posted() == []
+
+
+def test_intake_is_left_to_daily_while_daily_is_on(config):
+    from dataclasses import replace
+    assert "intake" not in schedule_module.task_names(config)
+    off = replace(config, schedule=replace(config.schedule, daily=""))
+    names = schedule_module.task_names(off)
+    assert names.index("intake") < names.index("review")
+
+
+def test_intake_runs_at_the_daily_time():
+    from kei_agent.configuration import schedules_table
+    from kei_agent.storage import settings
+    assert schedules_table.CORE_TIMES["intake"] == "08:00" and settings.CORE_SCHEDULES["intake"] == "朝の取り込み"

@@ -38,6 +38,7 @@ INSTRUCTIONS = (
     "仕事（会社のデータ。仕事の担当と、そのプロジェクト work-*）は外へ出られないので、外の情報が要るなら頭が調べて request に入れる。"
     "続きを頼むときは、前の結果の conversation を渡す。"
     "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
+    "Slack の研究全体のチャンネルに出すときは post を使う（Kei Agent の名前で出る）。"
     "status が accepted なら、あとで status に ticket を渡して結果を見る。needs_input なら、本文の確認に答えて、"
     "同じ conversation で run する。担当・アカウント・届く範囲は作業場から決まり、変えられない"
 )
@@ -75,6 +76,15 @@ def build_mcp(hands: Hands) -> MCPServer:
     async def status(ticket: str) -> dict[str, Any]:
         try:
             return hands.status(ticket)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
+    @mcp.tool(description="研究全体のチャンネル（Slack の overview）に、Kei Agent の名前で投稿する。text はチャンネルに"
+                          "出す本文、details はそのスレッドに出す続き（任意）。どちらも Markdown。ほかのチャンネルには出せない。"
+                          "返すのは channel・ts・link（投稿へのリンク）")
+    async def post(text: str, details: str = "") -> dict[str, Any]:
+        try:
+            return await hands.post(text, details)
         except HandsError as e:
             raise ToolError(str(e)) from None
 

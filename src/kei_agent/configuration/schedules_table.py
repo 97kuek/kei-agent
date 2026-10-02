@@ -2,7 +2,7 @@
 
 1行に1つの処理。列は name, enabled, time。
 
-- name … 本体の処理（daily・review・night・maintenance）か、モジュールの module.toml の [schedules] の名前
+- name … 本体の処理（intake・daily・review・night・maintenance）か、モジュールの module.toml の [schedules] の名前
 - enabled … true / false（大文字でもよい）。false なら、その処理を行わない
 - time … HH:MM（ローカル時刻）。enabled が true なら要る
 - 表に無い処理は、既定の時刻で動く（本体の既定と module.toml の default）
@@ -22,7 +22,7 @@ from kei_agent.framework import modules
 SCHEDULES_FILE = "schedules.csv"
 COLUMNS = ("name", "enabled", "time")
 # 本体の処理と既定の時刻（保守は config.toml の [maintenance] の残りの項目と組む）
-CORE_TIMES = {"night": "00:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
+CORE_TIMES = {"night": "00:00", "intake": "08:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
 def known_names() -> dict[str, str]:
     """書ける処理の名前と既定の時刻（本体のものと、知っているすべてのモジュールのもの。オフのモジュールのものも書ける）。"""
     found = dict(CORE_TIMES)

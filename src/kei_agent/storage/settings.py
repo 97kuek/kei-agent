@@ -13,6 +13,7 @@ from kei_agent.storage.store import Store, schedule_detail
 
 # 本体の定期処理（名前 → 見出し）。モジュールのものは module.toml の [schedules] から足す
 CORE_SCHEDULES = {
+    "intake": "朝の取り込み",
     "daily": "Daily",
     "review": "Retro & Planning",
     "night": "🌙 をつけた Task",

@@ -218,7 +218,7 @@ def dots_plan() -> Drawing:
     d.arrow([(432, 300), (432, 360)], "Secure MCP Tunnel（機械から外へ出るだけ）", label_at=(432, 330))
 
     d.frame(262, 360, 480, 300, "家の小さな機械（いつも動く。Raspberry Pi など）", icons=("server",))
-    d.card(282, 404, 440, 96, "手の口（MCP）", ("workspaces・run・status（作業場で AI を動かす）",
+    d.card(282, 404, 440, 96, "手の口（MCP）", ("workspaces・run・status（作業場で AI を動かす）・post",
                                                "agenda・reading・recent・jobs（材料を読む）"),
            colors=HOST, icons=("server",), size=26)
     d.card(282, 512, 214, 128, "取り込みと保守", ("Moodle・予定・Toggl", "毎晩の保守と", "バックアップ"),

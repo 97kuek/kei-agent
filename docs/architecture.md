@@ -70,7 +70,7 @@
 ## 手の口（MCP）
 
 - 頭（OpenAI Dots。今は Claude Code・Codex）から、作業場で AI を動かしてもらう入口。Slack の受け口と並ぶもう1つの入口（計画は [#17](https://github.com/97kuek/kei-agent/issues/17)）
-- AI を動かす道具（`workspaces`・`run`・`status`）は `conversation/hands.py`、読む道具（`agenda`・`reading`・`recent`・`jobs`）の材料は `scheduling/materials.py`、口そのもの（MCP・合言葉）は `operations/hands_server.py`。読む道具は AI を動かさない（`agenda` だけは、担当が予定を読むのに AI を使うことがある）
+- AI を動かす道具（`workspaces`・`run`・`status`）と投稿の道具（`post`）は `conversation/hands.py`、読む道具（`agenda`・`reading`・`recent`・`jobs`）の材料は `scheduling/materials.py`、口そのもの（MCP・合言葉）は `operations/hands_server.py`。読む道具は AI を動かさない（`agenda` だけは、担当が予定を読むのに AI を使うことがある）
 - 本体のプロセスの中で `config.toml` の `[hands] url`（127.0.0.1 だけ）に開く。合言葉は秘密情報の `KEI_AGENT_HANDS_TOKEN`（`Authorization: Bearer`）。どちらかが無ければ開かない
 
 | 道具 | 中身 |
@@ -82,6 +82,7 @@
 | `reading` | 知識の担当がこの 1〜7 日に出した読みもの（👍 したか、保存したか）。モジュールの `head_materials` |
 | `recent` | この 1〜168 時間の動き（スレッド・担当ごとの実行と失敗・手の口の頼みごと・終わったジョブ）。本文の抜き出しは研究テーマと研究全体のスレッドだけ |
 | `jobs` | 研究のジョブ（動いているものと、2日のうちに終わったもの） |
+| `post` | 研究全体のチャンネル（`overview`）に Kei Agent の名前で投稿する。`text` はチャンネルに、`details` はそのスレッドに。ほかのチャンネルには出せない。返信は研究全体のスレッドとして受ける |
 
 - 返す項目: `status`（`done`・`needs_input`・`failed`・`accepted`・`running`）・`text`・`conversation`・`files`（作業場の `outputs/` にできたもの）・`ticket`
 - 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
@@ -164,13 +165,15 @@
 | 名前 | 既定 | 受け持ち |
 |---|---|---|
 | `literature` / `reading` | 07:00 | 知識 |
+| `intake` | 08:00 | 本体（朝の取り込み。Daily が止まっているときだけ動く。投稿せずに、モジュールの取り込み直しと会議を予定カレンダーへ写すことと、声への1週間の予定） |
 | `daily` | 08:00 | Daily・振り返り |
 | `review` | 21:00 | Daily・振り返り |
 | `toggl_import` | 22:00 | 時間記録 |
 | `maintenance` | 22:00 | 本体（古いファイルの整理とバックアップ） |
 | `night` | 00:00 | 本体（🌙 の Task） |
 
-- 同じ時刻なら、夜間の Task → モジュールの定期処理 → Daily → 振り返り → 保守の順
+- 同じ時刻なら、夜間の Task → モジュールの定期処理 → 朝の取り込み → Daily → 振り返り → 保守の順
+- Dot の予定に移した処理と、そのとき止めるものは [dots.md](dots.md)
 - スリープで逃した処理は3時間以内なら動かす（`night` は12時間以内）。上限中は明けてから
 - 毎分、24時間放っておかれた返事待ち（❓ の確認・失敗したジョブのあと）に一度だけ声をかける
 - 1回だけ動かす: `uv run kei-agent-schedule <名前>`（`--record` を付けなければ記録に残らない）

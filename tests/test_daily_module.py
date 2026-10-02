@@ -320,3 +320,4 @@ def test_the_review_answer_shows_only_the_file_name_of_local_paths(path):
     shown = review_answer(final_answer(f"**今日の成果**\n{path}\n\n**未完了タスク**\nなし"))
     assert shown and path not in shown and path.rsplit("/", 1)[-1] in shown
 
+

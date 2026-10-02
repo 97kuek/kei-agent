@@ -121,8 +121,8 @@ async def test_a_user_module_runs_its_schedule_and_owns_its_reactions(env, store
     scheduler, assistant, slack = env
     await post_memo(assistant)
 
-    assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily", "review",
-                                           "maintenance")
+    assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily",
+                                           "review", "maintenance")
     assert await scheduler.run_task("tidy", "2026-09-27") == {"status": "done", "count": 1}
 
     memo_ts = next(row["key"] for row in store.module_records("memo", "memo"))

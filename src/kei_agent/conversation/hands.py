@@ -1,11 +1,12 @@
 """手の口（MCP）。頭（OpenAI Dots、今は Claude Code・Codex）から、Kei Agent の作業場で AI を動かしてもらう入口。
 
-Slack の受け口と並ぶ、もう1つの入口（GitHub issue #17）。出す道具は3つ。
+Slack の受け口と並ぶ、もう1つの入口（GitHub issue #17）。AI を動かす道具は3つと、投稿の道具が1つ。
 
 - workspaces … 頼める作業場の一覧（研究テーマ・プロジェクト・担当）。それぞれの担当・使ってよい AI・重さ
 - run … 作業場・頼みごと・重さ（light / normal / deep）・AI（任意）・会話の番号（任意）で AI を動かす。
   SHORT_SECONDS のうちに終われば答えを、終わらなければ受付番号を返して裏で続ける
 - status … 受付番号の作業の様子と結果
+- post … 研究全体のチャンネルに、Kei Agent の名前で投稿する（頭の予定で動かす Daily など）。ほかのチャンネルには出せない
 
 返すのは決まった項目（本文・状態・会話の番号・できたファイル）。状態は done（終わった）・needs_input（返事待ち。
 本文に確認が書いてある）・failed（失敗）・accepted（受け付けた。status で見る）・running（まだ動いている）。
@@ -26,7 +27,7 @@ from dataclasses import dataclass, replace
 
 from kei_agent.conversation.auto_messages import today_line
 from kei_agent.conversation.response_output import OutputError, finalize_conversation
-from kei_agent.conversation.slack_text import AWAITING_MARKER
+from kei_agent.conversation.slack_text import AWAITING_MARKER, split_text
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.runner import FAILURE_LABELS
 from kei_agent.framework import modules
@@ -244,6 +245,29 @@ class Hands:
         return await self.assistant.ask_agent(plan.ws.module, prompt, session_id, CHANNEL, conversation, **options)
 
     # 様子
+
+    # 研究全体のチャンネルへの投稿（頭の予定で動かす Daily などを、Kei Agent の名前で出す）
+
+    async def post(self, text: str, details: str = "") -> dict:
+        """研究全体のチャンネルに text を出し、details があればそのスレッドに出す（どちらも Markdown）。
+        出せるのは研究全体のチャンネルだけ（頭はチャンネルを選べない）。"""
+        if not text.strip():
+            raise HandsError("投稿する本文が空です")
+        name = self.config.overview_channels[0]
+        channel = (await self.assistant.channel_ids()).get(name)
+        if not channel:
+            raise HandsError(f"研究全体のチャンネル（{name}）に Kei Agent が入っていません")
+        slack = self.assistant.slack
+        posted = await slack.chat_postMessage(channel=channel, markdown_text=text, unfurl_links=False,
+                                              unfurl_media=False)
+        ts = str(posted["ts"])
+        # 返信を拾えるように、スレッドを覚えておく
+        self.assistant.store.upsert_thread(channel, ts, name, None)
+        for chunk in split_text(details) if details.strip() else ():
+            await slack.chat_postMessage(channel=channel, thread_ts=ts, markdown_text=chunk, unfurl_links=False,
+                                         unfurl_media=False)
+        log.info("手の口から研究全体のチャンネルに投稿しました（%s）", ts)
+        return {"channel": name, "ts": ts, "link": await self.assistant.permalink(channel, ts)}
 
     def status(self, ticket: str) -> dict:
         found = self.records.get("ticket", ticket)

@@ -222,3 +222,30 @@ async def test_the_password_scheme_ignores_case_and_spaces():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=door), base_url="http://127.0.0.1") as client:
         for given, code in (("bearer secret-token", 200), ("Bearer  secret-token ", 200), ("Basic secret-token", 401)):
             assert (await client.post("/mcp", headers={"authorization": given})).status_code == code
+
+
+async def test_post_goes_to_the_overview_channel_as_kei_agent_with_details_in_the_thread(config, store):
+    assistant, slack = make_assistant(config, store, {"C9": "0-overview", "C1": "vlm"})
+    found = await Hands(assistant).post("**今日の予定**\n10:40 情報セキュリティB", "締切は2件")
+    first, second = slack.posted()
+    assert first["channel"] == "C9" and first["markdown_text"].startswith("**今日の予定**")
+    assert second["channel"] == "C9" and second["thread_ts"] == found["ts"] and second["markdown_text"] == "締切は2件"
+    assert found["channel"] == "overview" and found["link"].startswith("https://")
+    # 返信を拾えるように、スレッドを覚えておく
+    assert store.get_thread("C9", found["ts"]) is not None
+
+
+async def test_post_refuses_empty_text_and_a_missing_overview_channel(config, store):
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
+    with pytest.raises(HandsError, match="空"):
+        await Hands(assistant).post("  ")
+    with pytest.raises(HandsError, match="overview"):
+        await Hands(assistant).post("今日の予定")
+    assert slack.posted() == []
+
+
+async def test_post_is_on_the_door_and_takes_no_channel(config, store):
+    assistant, _ = make_assistant(config, store, {"C9": "0-overview"})
+    tools = {t.name: t for t in await build_mcp(Hands(assistant)).list_tools()}
+    assert "channel" not in tools["post"].input_schema["properties"]
+    assert not (tools["post"].annotations and tools["post"].annotations.read_only_hint)

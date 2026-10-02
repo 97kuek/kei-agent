@@ -104,6 +104,8 @@ class ScheduleConfig:
     enabled: bool = True
     # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
     daily: str = "08:00"
+    # 朝の取り込み（Daily を止めたときだけ動く。Daily が動くなら、Daily が取り込む）
+    intake: str = "08:00"
     review: str = "21:00"
     night: str = "00:00"
     # Mac のスリープなどで逃した処理を、何時間後まで実行するか
@@ -367,7 +369,7 @@ DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "co
 # 本体が持つチャンネルの種類（モジュールの種類は module.toml の [channels] から足す）
 CHANNELS_KEYS = {"overview", "improve"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
-SCHEDULE_TIME_KEYS = ("daily", "review", "night")
+SCHEDULE_TIME_KEYS = ("intake", "daily", "review", "night")
 SANDBOX_KEYS = {"allow_write", "deny_read"}
 
 
