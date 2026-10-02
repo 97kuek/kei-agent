@@ -42,7 +42,7 @@ def test_the_provider_comes_only_from_the_table(config):
     assert settings.selected_provider(config, "course") == "codex"
     assert settings.selected_provider(config, "work") == "claude"
     assert set(AgentProfile.__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account",
-                                                      "engines"}
+                                                      "claude_email", "engines"}
 
 
 def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):

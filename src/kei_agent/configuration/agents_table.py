@@ -1,7 +1,7 @@
 """担当の表（利用者のフォルダの agents.csv）。モジュールのオンオフ・チャンネル・AI の実行器とモデルを1か所で変える。
 
 1行に1つ（モジュールか、本体の router・overview）。列は module, enabled, channels, folder, notion, engine, model, effort,
-claude_account, codex_account（folder・notion・claude_account・codex_account は無くてもよい）。
+claude_account, codex_account, claude_email（folder・notion・engines と、アカウントの3つは無くてもよい）。
 
 - enabled … true / false（大文字でもよい）。表に無いモジュールはオフ
 - channels … 番号を外したチャンネルの名前。複数は空白で区切る。空欄なら module.toml の既定
@@ -13,6 +13,8 @@ claude_account, codex_account（folder・notion・claude_account・codex_account
   （依頼者が明示したときだけの用途は除く）。使えるモデルは framework.models の一覧の中だけ
 - claude_account / codex_account … その担当が使うアカウントのフォルダ（CLAUDE_CONFIG_DIR・CODEX_HOME。大学は個人、
   仕事は会社、など）。空欄ならプロセスの既定のアカウント
+- claude_email … そのフォルダにログインしているはずの人（メールアドレス）。書けば、Claude を動かす前に確かめ、
+  違うアカウントなら止めて知らせる（ログインの入れ替えで、会社と個人のアカウントが混ざらないように）
 
 config.toml には modules・[channels]・[agents]・[notion] を書かない（書いてあれば、移すよう知らせて止める）。
 研究と大学の置き場所も、この表の folder に書く（config.toml の research_root・course_root は使わない）。
@@ -31,9 +33,9 @@ from kei_agent.framework import modules
 
 AGENTS_FILE = "agents.csv"
 COLUMNS = ("module", "enabled", "channels", "folder", "notion", "engine", "engines", "model", "effort",
-           "claude_account", "codex_account")
+           "claude_account", "codex_account", "claude_email")
 # 無くてもよい列（あとから足した列。前の表もそのまま読める）
-OPTIONAL_COLUMNS = ("folder", "notion", "engines", "claude_account", "codex_account")
+OPTIONAL_COLUMNS = ("folder", "notion", "engines", "claude_account", "codex_account", "claude_email")
 # 本体の行。router は振り分けの AI、overview は研究全体のチャンネル
 ROUTER = "router"
 OVERVIEW = "overview"
@@ -78,12 +80,14 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
         names = _channels(row["channels"])
         on = parse_bool(row["enabled"], where)
         engine, model, effort, folder = row["engine"], row["model"], row["effort"], row.get("folder", "")
-        accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account", "engines") if row.get(key, "")}
+        accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account", "claude_email", "engines")
+                    if row.get(key, "")}
         has_ai = module == ROUTER or (module in known and known[module].actor is not None)
         if folder and (module in CORE_ROWS or not has_ai):
             raise TableError(f"{where}: folder を書けるのは、AI を使う担当の行だけです")
         if accounts and not has_ai:
-            raise TableError(f"{where}: claude_account・codex_account・engines を書けるのは、AI を使う担当の行だけです")
+            raise TableError(f"{where}: claude_account・codex_account・claude_email・engines を書けるのは、"
+                             "AI を使う担当の行だけです")
         if folder:
             folders[module] = folder
         if home := row.get("notion", ""):

@@ -122,3 +122,43 @@ def test_profiles_without_accounts_add_nothing(config):
     """アカウントを書いていなければ、今までどおり（既定の読ませない場所と秘密情報の置き場所だけ）。"""
     plain = replace(config, agent_profiles={name: AgentProfile(provider="claude") for name in config.agent_profiles})
     assert guard.denied_reads(plain, "research") == guard.denied_reads(plain)
+
+
+@pytest.mark.parametrize("actor", ACTORS)
+def test_claude_and_codex_reach_out_only_with_own_data(config, tmp_path, actor):
+    """会社のデータを読む担当は、どちらの AI でも外へ出られない。自分のデータの担当は、どちらでも出られる。"""
+    config = _accounts(config, tmp_path)
+    contract = _contract(config, actor, "claude")
+    outward = contract.policy.network
+    assert outward == (actor not in ("work", "workdev")) and contract.policy.web == outward
+    claude = guard.build_settings(config, contract.workspace, contract.policy)["sandbox"]["network"]
+    assert claude["strictAllowlist"] is not outward and claude["allowedDomains"] == []
+    codex = preflight(config, _contract(config, actor, "codex"), "codex_cli")
+    assert codex.network_open is outward
+    assert f"permissions.kei_agent_scoped.network.enabled={'true' if outward else 'false'}" in codex.config_overrides
+    # コマンドは、どの担当も（作業場の中で）使える
+    assert contract.policy.shell and _contract(config, actor, "codex").policy.shell
+
+
+async def test_a_wrong_login_stops_claude_before_it_runs(config, monkeypatch, tmp_path):
+    """ログインの入れ替えで、会社のフォルダに個人のアカウントが入っていたら、動かす前に止めて知らせる。"""
+    profiles = dict(config.agent_profiles)
+    profiles["work"] = replace(profiles["work"], provider="claude", claude_account=str(tmp_path / "claude-work"),
+                               claude_email="me@company.example")
+    config = replace(config, agent_profiles=profiles)
+    seen = {}
+
+    async def email(config, env):
+        seen["folder"] = env.get("CLAUDE_CONFIG_DIR")
+        return "me@personal.example"
+
+    monkeypatch.setattr(runner, "claude_login_email", email)
+    started = []
+    monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", lambda *a, **k: started.append(a))
+    result = await runner.run_model(config, _request(config, "work", "claude"), "x")
+    assert result.is_error and result.failure_kind == "login" and started == []
+    assert "me@personal.example" in result.errors[0] and "me@company.example" in result.errors[0]
+    assert seen["folder"] == str(tmp_path / "claude-work")
+    # 合っていれば動かす（ここでは起動の手前まで）
+    monkeypatch.setattr(runner, "claude_login_email", lambda config, env: asyncio.sleep(0, "me@company.example"))
+    assert await runner.wrong_claude_login(config, "work") == ""

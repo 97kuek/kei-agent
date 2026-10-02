@@ -46,6 +46,7 @@ cp profile.example.md ~/.config/kei-agent/profile.md
 | `engine` | `claude` / `codex`。空欄の担当は動かない |
 | `notion` | その担当が届く Notion のホームのページ ID（URL の末尾32文字）。overview の行は共通ホーム、research は研究ホーム、course は授業ホーム。空欄ならその担当は Notion を使わない |
 | `claude_account` / `codex_account` | その担当が使うアカウントのフォルダ（`CLAUDE_CONFIG_DIR`・`CODEX_HOME`。例 `~/.claude-work`）。空欄ならプロセスの既定のアカウント。Claude のフォルダを書いた担当では、共通の `CLAUDE_CODE_OAUTH_TOKEN` を外して動かす |
+| `claude_email` | そのフォルダにログインしているはずの人（例 会社のメールアドレス）。書けば、Claude を動かす前に確かめ、違う人なら止めて `#0-kei-agent` に知らせる（ログインの入れ替えで会社と個人が混ざらないように）。Codex では確かめない |
 | `model` / `effort` | ふだんは空欄（用途ごとに軽いモデルと重いモデルを選び分ける）。書くと、その担当の用途をすべてそのモデルにする（`[[manual-fable]]` などの明示の用途は除く）。使えるモデルは [architecture.md](../docs/architecture.md#actor-とモデル) |
 
 - `config.toml` に `modules`・`[channels]`・`[agents]`（前の書き方）があると、起動しない（書く場所を1つにする）

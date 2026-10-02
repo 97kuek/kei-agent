@@ -124,7 +124,8 @@ def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path)
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"
     assert config.agent_profiles["research"].provider == "codex"
-    assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account", "engines"}
+    assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account", "claude_email",
+                                                                         "engines"}
     assert config.agent_profiles["course"].provider == ""
 
 

@@ -311,6 +311,42 @@ def install_skill_directory(source_roots: Path | tuple[Path, ...], cwd: Path) ->
     write_json_atomic(manifest, new_managed)
 
 
+# claude auth status を読み直す間隔（秒）。動かすたびに聞かないように、フォルダごとに覚えておく
+LOGIN_CHECK_SECONDS = 300
+_logins: dict[str, tuple[float, str]] = {}
+
+
+async def claude_login_email(config: Config, env: dict[str, str]) -> str:
+    """そのアカウントのフォルダ（env の CLAUDE_CONFIG_DIR）にログインしている人。読めなければ空文字。"""
+    folder = env.get("CLAUDE_CONFIG_DIR", "")
+    if (seen := _logins.get(folder)) and time.monotonic() - seen[0] < LOGIN_CHECK_SECONDS:
+        return seen[1]
+    try:
+        proc = await asyncio.create_subprocess_exec(config.claude_bin, "auth", "status", env=env,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), 30)
+        email = str(json.loads(out.decode() or "{}").get("email") or "")
+    except (OSError, TimeoutError, ValueError):
+        return ""
+    _logins[folder] = (time.monotonic(), email)
+    return email
+
+
+async def wrong_claude_login(config: Config, actor: str) -> str:
+    """担当の表の claude_email と違う人がログインしていれば、その知らせの文。合っているか、書いていなければ空文字。"""
+    profile = config.agent_profiles.get(actor)
+    if profile is None or not profile.claude_email:
+        return ""
+    env = account_env(config, actor, guard.strip_env(dict(os.environ)))
+    found = await claude_login_email(config, env)
+    if found.lower() == profile.claude_email.lower():
+        return ""
+    folder = env.get("CLAUDE_CONFIG_DIR", "既定のフォルダ")
+    who = f"{found} でログインしています" if found else "ログインしている人を確かめられません"
+    return (f"{folder} は {who}（agents.csv では {profile.claude_email}）。"
+            f"CLAUDE_CONFIG_DIR={folder} claude で /login して、{profile.claude_email} で入り直してください")
+
+
 def account_env(config: Config, actor: str, env: dict[str, str]) -> dict[str, str]:
     """その担当のアカウント（agents.csv の claude_account・codex_account）を、子の環境に入れる（env を書き換えて返す）。"""
     profile = config.agent_profiles.get(actor)
@@ -608,6 +644,9 @@ async def _run_model(
             preflight(config, contract, "claude_cli")
         except CapabilityUnavailable as exc:
             return RunResult(provider=recipe.provider, is_error=True, errors=[str(exc)], failure_kind="capability")
+        if wrong := await wrong_claude_login(config, policy.name):
+            # 会社と個人のアカウントを混ぜない。違う人がログインしていれば、動かす前に止める
+            return RunResult(provider=recipe.provider, is_error=True, errors=[wrong], failure_kind="login")
     env = build_env(config, dict(os.environ), request.channel, request.thread_ts, policy)
     proc = await asyncio.create_subprocess_exec(
         *build_command(config, request, contract, apps),

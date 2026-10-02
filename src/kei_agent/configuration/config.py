@@ -56,6 +56,8 @@ class AgentProfile:
     # 担当の表で決めたアカウントのフォルダ（CLAUDE_CONFIG_DIR・CODEX_HOME）。空ならプロセスの既定
     claude_account: str = ""
     codex_account: str = ""
+    # claude_account にログインしているはずの人（担当の表の claude_email）。空なら確かめない
+    claude_email: str = ""
     # 頭（Dots など）が選んでよい AI（担当の表の engines。空なら provider の1つだけ）
     engines: tuple[str, ...] = ()
 
@@ -356,7 +358,7 @@ TOP_LEVEL_KEYS = {
 }
 PATHS_KEYS = {"secrets"}
 # 担当の表（agents.csv）の1行のうち、AI の列
-AGENT_PROFILE_KEYS = {"provider", "model", "effort", "claude_account", "codex_account", "engines"}
+AGENT_PROFILE_KEYS = {"provider", "model", "effort", "claude_account", "codex_account", "claude_email", "engines"}
 # 設定に書かなかったときの置き場所。テストは conftest で一時フォルダに差し替え、本物の状態や研究データを触らない
 DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "course_root": "~/course",
                  "state_dir": "~/.local/state/kei-agent"}
@@ -525,7 +527,11 @@ def _agent_profiles(data: dict, where: str) -> dict[str, AgentProfile]:
             raise ConfigError(f"{where} の engines は claude・codex を空白で区切って書いてください: {' '.join(bad)}")
         if provider and engines and provider not in engines:
             raise ConfigError(f"{where}: engines に engine（{provider}）も入れてください")
-        profiles[name] = AgentProfile(provider=provider, model=model, effort=effort, engines=engines, **accounts)
+        email = str(raw.get("claude_email", "")).strip()
+        if email and "@" not in email:
+            raise ConfigError(f"{where} の {name} の行: claude_email はメールアドレスで書いてください")
+        profiles[name] = AgentProfile(provider=provider, model=model, effort=effort, engines=engines,
+                                      claude_email=email, **accounts)
     return profiles
 
 
