@@ -70,6 +70,7 @@
 ## 手の口（MCP）
 
 - 頭（OpenAI Dots。今は Claude Code・Codex）から、作業場で AI を動かしてもらう入口。Slack の受け口と並ぶもう1つの入口（計画は [#17](https://github.com/97kuek/kei-agent/issues/17)）
+- AI を動かす道具（`workspaces`・`run`・`status`）は `conversation/hands.py`、読む道具（`agenda`・`reading`・`recent`・`jobs`）の材料は `scheduling/materials.py`、口そのもの（MCP・合言葉）は `operations/hands_server.py`。読む道具は AI を動かさない（`agenda` だけは、担当が予定を読むのに AI を使うことがある）
 - 本体のプロセスの中で `config.toml` の `[hands] url`（127.0.0.1 だけ）に開く。合言葉は秘密情報の `KEI_AGENT_HANDS_TOKEN`（`Authorization: Bearer`）。どちらかが無ければ開かない
 
 | 道具 | 中身 |
@@ -77,6 +78,10 @@
 | `workspaces` | 頼める作業場（研究テーマ・プロジェクト・担当）と、選べる AI（`agents.csv` の `engines`）・重さ |
 | `run` | 作業場・頼みごと・重さ（`light`・`normal`・`deep` → `module.toml` の `[actor] weights` の用途）・AI・会話の番号で AI を動かす。20秒のうちに終われば答え、終わらなければ受付番号 |
 | `status` | 受付番号の様子と結果（7日残す） |
+| `agenda` | これから 1〜14 日の授業・会議・締切（各担当の予定。朝の一覧と同じ材料、件名もそのまま）を時刻順に |
+| `reading` | 知識の担当がこの 1〜7 日に出した読みもの（👍 したか、保存したか）。モジュールの `head_materials` |
+| `recent` | この 1〜168 時間の動き（スレッド・担当ごとの実行と失敗・手の口の頼みごと・終わったジョブ）。本文の抜き出しは研究テーマと研究全体のスレッドだけ |
+| `jobs` | 研究のジョブ（動いているものと、2日のうちに終わったもの） |
 
 - 返す項目: `status`（`done`・`needs_input`・`failed`・`accepted`・`running`）・`text`・`conversation`・`files`（作業場の `outputs/` にできたもの）・`ticket`
 - 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
@@ -263,7 +268,7 @@
 | `framework/` | モジュールの定義の読み込み（`modules.py`）、使ってよいモデルの一覧とその確かめ（`models.py`）、動いている版 |
 | `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
 | `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |
-| `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め、締切、毎晩の保守、予定カレンダー、時間 |
-| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
-| `operations/` | 起動（`app.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、モジュールのひな形、取り込みの確かめ |
+| `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め（頭に渡す材料 `materials.py` も）、締切、毎晩の保守、予定カレンダー、時間 |
+| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、手の口で AI を動かす（`hands.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
+| `operations/` | 起動（`app.py`）、手の口の MCP（`hands_server.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、モジュールのひな形、取り込みの確かめ |
 | `testing/` | モジュールのテストの道具（[modules.md](modules.md#テストの書き方kei_agenttesting)） |

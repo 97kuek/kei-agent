@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta
 
 from kei_agent.api import Core, NotionError, Request, day_label, escape
 
@@ -28,6 +29,8 @@ PAPERS_PER_THEME = 5
 # 読みものの投稿の控え（記録の種類）。👍 していないものは、この日数で忘れる
 POST = "post"
 POST_KEEP_DAYS = 30
+# 頭に渡す読みものの項目
+READING_FIELDS = ("title", "url", "source", "summary", "why")
 # 読みものの 👍（肌の色の違いも同じ）。付けた記事は Notion の「読みもの」に入れ、📝 を付けて知らせる
 LIKE_REACTIONS = frozenset({"+1", "thumbsup"})
 SAVED_REACTION = "memo"
@@ -175,6 +178,15 @@ class Module:
                     "channel": channel, "ts": ts, "day": day, "item": item, "liked_at": None, "page": None},
                     keep_days=POST_KEEP_DAYS)
         return {"status": "posted", "count": len(items), "channel": channel, "failed_sources": failed}
+
+    async def head_materials(self, days: int) -> dict[str, list[dict]]:
+        """頭（手の口の reading）に渡す、この days 日に出した読みもの（新しい順）。👍 したか、保存したかも添える。"""
+        since = (datetime.now().date() - timedelta(days=max(days, 1) - 1)).isoformat()
+        posts = sorted((post for post in self.core.records.items(POST) if str(post.get("day") or "") >= since),
+                       key=lambda post: (str(post.get("day") or ""), str(post.get("ts") or "")), reverse=True)
+        return {"reading": [{"day": post.get("day"), **{key: post["item"].get(key) for key in READING_FIELDS},
+                             "liked": bool(post.get("liked_at")), "saved": bool(post.get("page"))}
+                            for post in posts if isinstance(post.get("item"), dict)]}
 
     def liked(self) -> list[dict]:
         """最近 👍 した記事（新しい順）。次の読みものを選ぶときの参考に、題名・出どころ・興味だけを渡す。"""

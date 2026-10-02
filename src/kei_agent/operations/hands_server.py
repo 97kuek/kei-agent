@@ -1,4 +1,5 @@
-"""手の口（MCP）を、本体のプロセスの中で開く。中身は hands.py。
+"""手の口（MCP）を、本体のプロセスの中で開く。AI を動かす道具は conversation/hands.py、読む道具の材料は
+scheduling/materials.py。
 
 住所は config.toml の [hands] url（127.0.0.1 だけ）、合言葉は秘密情報の KEI_AGENT_HANDS_TOKEN。
 合言葉が違う呼び出しは、道具に届く前に断る。どちらかが無ければ、口は開かない。
@@ -19,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from kei_agent.conversation.hands import Hands, HandsError
+from kei_agent.scheduling import materials
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ INSTRUCTIONS = (
     "Kei Agent の手。作業場（研究テーマ・プロジェクト・大学・仕事・知識）で Claude Code か Codex を動かす。"
     "まず workspaces で頼める作業場を見て、run で頼む。重さは light（抜き出し・要約）・normal（ふつうの作業）・"
     "deep（設計・計画・厳密な見直し）。続きを頼むときは、前の結果の conversation を渡す。"
+    "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
     "status が accepted なら、あとで status に ticket を渡して結果を見る。needs_input なら、本文の確認に答えて、"
     "同じ conversation で run する。担当・アカウント・届く範囲は作業場から決まり、変えられない"
 )
@@ -68,6 +71,34 @@ def build_mcp(hands: Hands) -> MCPServer:
             return hands.status(ticket)
         except HandsError as e:
             raise ToolError(str(e)) from None
+
+    assistant = hands.assistant
+
+    @mcp.tool(annotations=READ_ONLY,
+              description="これから days 日（1〜14。1 なら今日だけ）の授業・会議・締切を時刻の早い順に。"
+                          "items の kind は 授業・会議・締切、date・start・end・title・where（場所）・course・url・"
+                          "agent（予定を読んだ担当）。unread は予定を読めなかった担当")
+    async def agenda(days: int = 1) -> dict[str, Any]:
+        return await materials.agenda(assistant, days)
+
+    @mcp.tool(annotations=READ_ONLY,
+              description="この days 日（1〜7）に知識の担当が出した読みもの（新しい順）。title・url・source・summary・"
+                          "why（選んだ理由）・liked（依頼者が 👍 した）・saved（Notion の読みものに入れた）")
+    async def reading(days: int = 1) -> dict[str, Any]:
+        return await materials.reading(assistant, days)
+
+    @mcp.tool(annotations=READ_ONLY,
+              description="この hours 時間（1〜168）の動き。threads（やり取りのあった Slack のスレッド。研究テーマは"
+                          "最初の頼みごとと最後の答えの抜き出しつき）・runs（担当ごとの実行と失敗の数）・"
+                          "hands（手の口で受けた頼みごと）・jobs（終わったジョブ）")
+    async def recent(hours: int = 24) -> dict[str, Any]:
+        return materials.recent(assistant, hours)
+
+    @mcp.tool(annotations=READ_ONLY,
+              description="研究のジョブ。active（待っている・動いている）と finished（2日のうちに終わった）。"
+                          "id・name・workspace・status・detail・submitted・started・finished")
+    async def jobs() -> dict[str, Any]:
+        return materials.jobs(assistant)
 
     @mcp.custom_route(HEALTH_PATH, methods=["GET"])
     async def health(request: Request) -> JSONResponse:

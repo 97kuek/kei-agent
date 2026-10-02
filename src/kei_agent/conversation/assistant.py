@@ -754,6 +754,25 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
                 log.exception("モジュール「%s」の材料を作れませんでした", name)
         return lines
 
+    async def module_head_materials(self, days: int) -> dict[str, list[dict]]:
+        """頭（手の口）に渡す材料（class Module の head_materials）。種類 → 項目。作れなかったモジュールは飛ばす。
+
+        材料は手元の記録から作るもの（担当のプロセスに聞きに行かない）ので、担当の住所が無くても読む。
+        """
+        found: dict[str, list[dict]] = {}
+        for name, module in self.modules.items():
+            materials = getattr(module, "head_materials", None)
+            if not callable(materials):
+                continue
+            try:
+                given = await materials(days) or {}
+            except Exception:
+                log.exception("モジュール「%s」の頭への材料を作れませんでした", name)
+                continue
+            for kind, items in given.items():
+                found.setdefault(str(kind), []).extend(item for item in items if isinstance(item, dict))
+        return found
+
     async def on_reaction_added(self, event: dict) -> None:
         """自分のメッセージに 🌙 をつけると、夜間の Task になる。モジュールの投稿へのリアクションは、そのモジュールが扱う。"""
         if await self.module_reaction(event, added=True) or not self._own_night_reaction(event):

@@ -757,6 +757,12 @@ class Store:
             (since, until),
         ).fetchall()
 
+    def runs_since(self, since: float) -> list[sqlite3.Row]:
+        """since 以降に始まった実行（終わったものも、動いているものも）。古い順。"""
+        return self.conn.execute(
+            "SELECT channel_name, trigger, actor, started_at, ended_at, is_error FROM runs WHERE started_at >= ? "
+            "ORDER BY started_at", (since,)).fetchall()
+
     def end_run(self, run_id: int, is_error: bool, cost_usd: float | None, *, actor: str = "", use_case: str = "",
                 provider: str = "", model: str = "", effort: str = "") -> None:
         """実行の終わりを記録する。担当・用途・provider・モデル・effort は、分かれば（RunResult.recipe_fields()）。"""

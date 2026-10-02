@@ -184,7 +184,7 @@ async def serve() -> None:
             questions_loop = asyncio.create_task(questions.serve(assistant, config.a2a.orchestrator))
         if config.hands_url:
             # 手の口（MCP）。頭（Dots・Claude Code など）から作業場で AI を動かしてもらう（hands.py）
-            from kei_agent.conversation import hands_server
+            from kei_agent.operations import hands_server
             hands_loop = asyncio.create_task(hands_server.serve(assistant, config.hands_url, config.hands_token))
         # 取り込みのあと、動いている作業がなくなると立つ。終了すると launchd が新しい版で起動する
         await assistant.restart_requested.wait()

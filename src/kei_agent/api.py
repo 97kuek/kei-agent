@@ -37,6 +37,7 @@ module.py には `class Module` を置き、`__init__(self, core)` で窓口（C
 - `async on_view(name, body) -> dict | None` … このモジュールの入力の画面（callback_id は core.view_id(名前)）が送られたとき。
   欄の下に出す理由を {block_id: 文} で返すと、画面を閉じない
 - `async material(now) -> list[str]` … Daily と振り返りの材料に足す行（今週の時間など）
+- `async head_materials(days) -> dict[str, list[dict]]` … 頭（手の口）に渡す材料。種類 → 項目（知識なら reading）。手元の記録から作る
 - `async on_start()` … 起動して Slack につながったあと（Kei Agent を入れ替えたあとの起動なら、その結果は
   core.last_update() で受け取れる。途中で止まった作業の後始末など）
 - `welcome() -> str` … モジュールのチャンネル（と core_channels の本体のチャンネル）に招かれたときの案内（できること）
