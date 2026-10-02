@@ -231,7 +231,7 @@
 | `kei-agent` | 本体、setup などの CLI | 共通と、書いてあるすべてのホーム | `/mcp`、`/notion/v1` |
 | `course` | 大学の決まった処理と AI | 授業ホーム | `/mcp`、`/notion/v1` |
 | `research` | 研究の AI | 研究ホーム | `/mcp` だけ（コマンドを使えるので） |
-| そのほかのモジュール | そのモジュール | `[notion.homes]` のホーム | `/mcp`（シェルを使う AI がいなければ `/notion/v1` も） |
+| そのほかのモジュール | そのモジュール | `agents.csv` のその行の `notion` のホーム | `/mcp`（シェルを使う AI がいなければ `/notion/v1` も） |
 
 - 要求ごとに、触れる ID がホームの子孫かを親をたどって確かめる。外なら 403
 - `/mcp` の道具は12個: `read` `search` `query` `create_page` `update_page` `append_blocks` `replace_content` `update_block` `delete_block` `create_database` `update_data_source` `move`

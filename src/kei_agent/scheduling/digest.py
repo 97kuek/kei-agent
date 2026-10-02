@@ -222,15 +222,11 @@ class DigestBuilder:
         today = datetime.fromtimestamp(now).date()
         yesterday = (today - timedelta(days=1)).isoformat()
         try:
-            notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since),
-                                            ["計画", "考察", "振り返り"])
+            notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since), ["計画", "考察"])
             if self.assistant.hub is not None:
                 hub_reviews = await asyncio.to_thread(
                     self.assistant.hub.reviews_edited_since, datetime.fromtimestamp(since))
-                # 移行中の旧レトプラは残すが、新 DB に同じ日の記録がある場合は二重に載せない。
-                migrated_days = {review.day for review in hub_reviews}
-                notes = [n for n in notes if n.kind != "振り返り" or n.day not in migrated_days]
-                # 前日の分は「前日の振り返り」に丸ごと入れてある
+                # 振り返りは共通ホームの DB から。前日の分は「前日の振り返り」に丸ごと入れてある
                 notes += [review for review in hub_reviews if review.day != yesterday]
             today_tasks = await asyncio.to_thread(notion.tasks_due_on, today)
             awaiting = await asyncio.to_thread(notion.awaiting_tasks)

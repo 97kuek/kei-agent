@@ -356,7 +356,7 @@ class JobManager:
 def missing_outputs(job: Job) -> list[str]:
     """宣言された「できるはずのファイル」のうち、無いか空のもの。
 
-    pueue の終了コードは 0 でも、中身が空のまま終わっていることがある（9/19 のジョブ2）。
+    pueue の終了コードは 0 でも、中身が空のまま終わっていることがある。
     """
     missing = []
     for rel in job.expected_files:

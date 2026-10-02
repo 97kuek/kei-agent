@@ -232,11 +232,6 @@ def _is_theme(config: Config, name: str) -> bool:
         return False
 
 
-def theme_dirs(config: Config) -> list[Path]:
-    """研究テーマの作業用ディレクトリ（all_themes のフォルダ）。"""
-    return list(all_themes(config).values())
-
-
 def notes_file(folder: Path) -> Path:
     """作業場の前提のメモ。AGENTS.md（無くて CLAUDE.md だけがある既存のフォルダなら、その CLAUDE.md）。"""
     agents = folder / NOTES_FILE

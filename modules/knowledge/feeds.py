@@ -23,7 +23,7 @@ from html.parser import HTMLParser
 
 USER_AGENT = "Mozilla/5.0 (Kei Agent reader)"
 # arXiv は curl で読む。arXiv の前にある配信の仕組みは、Python から頼むとキャッシュに無い問い合わせを 406 で断り、
-# 待っても通らない。Mac に入っている curl なら通る（2026-09-27・28 の朝、論文の新着が止まった。9/28 に確かめた）
+# 待っても通らない。Mac に入っている curl なら通る
 CURL = shutil.which("curl") or "/usr/bin/curl"
 # arXiv には、ブラウザのふりをしない、何のプログラムかが分かる名前で頼む（arXiv の求め）
 ARXIV_USER_AGENT = "kei-agent/1.0 (+https://github.com/97kuek/kei-agent)"

@@ -268,14 +268,14 @@ class CourseSetup(Setup):
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="kei-agent-module course setup")
     parser.add_argument("home_page_id", nargs="?", default="",
-                        help="授業ホームのページID（省くと config.toml の [notion] course_home）")
+                        help="授業ホームのページID（省くと agents.csv の course の行の notion）")
     parser.add_argument("--seed", type=Path, metavar="ファイル",
                         help="履修科目のファイル（書き方は modules/course/courses.example.toml）の科目を「授業」に入れる")
     args = parser.parse_args(argv)
     config = load_config()
     home = args.home_page_id or config.notion.course_home
     if not home:
-        sys.exit("授業ホームのページ ID がありません（config.toml の [notion] course_home）")
+        sys.exit("授業ホームのページ ID がありません（agents.csv の course の行の notion）")
     try:
         school = from_config(config)
         year, courses = read_seed(args.seed.expanduser()) if args.seed else (None, None)

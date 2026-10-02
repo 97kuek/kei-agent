@@ -60,10 +60,7 @@ async def sync_meetings(assistant: Assistant, events: list[dict], now: datetime,
 
 
 def failure_note(assistant: Assistant, now: datetime, failed_now: list[str] | None = None) -> str:
-    """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で。無ければ空文字。
-
-    Daily とレトプラが何日も Notion に残っていなかったのに、気づけなかった（2026-09-26）。
-    """
+    """前回の Daily から今朝までに、うまくいかなかった定期処理を1行で。無ければ空文字。"""
     failed = settings.failed_schedules(assistant.config, assistant.store, now) + (failed_now or [])
     return f"前回の Daily から今朝までに、うまくいかなかったこと（{'、'.join(dict.fromkeys(failed))}）" if failed else ""
 
@@ -99,7 +96,7 @@ async def build(assistant: Assistant, now: datetime) -> Morning:
     detail |= {"classes": len(classes), "dues": len(dues), "events": len(events)}
     # 声のレイヤは、聞かれてから取りに行かず、朝に決まったものを手元へ渡しておく（出来事 schedule）。
     # 渡すのはデータで、声の言い方は声のレイヤが作る（帯も URL も声では読めない）。
-    # **日付も渡す。** 今日ぶんだけ渡していたせいで、明日を聞かれても今日を答えていた
+    # 明日・今週を聞かれても答えられるよう、日付つきで1週間ぶんを渡す
     assistant.emit("schedule", items=[
         {"date": f"{e.day:%Y-%m-%d}", "at": e.clock,
          "end": f"{e.end:%H:%M}" if e.end else "", "icon": e.icon, "text": e.text}

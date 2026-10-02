@@ -29,7 +29,7 @@ EXAMPLE_CONFIG = REPO_ROOT / "config.example.toml"
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 # skill を持つエージェント（`plugin/<agent>/`）。声やルーターには skill を渡さない
-# 本体の担当で skill を持つもの（研究はモジュールになったので、今は無い）
+# 本体の担当で skill を持つもの（今は無い。担当の skill はモジュールの plugin/ に置く）
 AGENT_PLUGINS: frozenset[str] = frozenset()
 # 本体が持つ実行役。router は Daily/Retro の横断的な計画も担う。モジュールの実行役は module.toml の [actor] から足す
 CORE_ACTORS = AGENT_PLUGINS | frozenset({"router"})
@@ -166,9 +166,6 @@ def _notion(data: dict) -> NotionConfig:
     if unknown:
         raise ConfigError(f"agents.csv の notion 列に知らないモジュールがあります: {', '.join(unknown)}"
                           f"（書けるもの: {', '.join(sorted(allowed))}）")
-    for name, key in (("research", "research_home"), ("course", "course_home")):
-        if data.get(key) and homes.get(name):
-            raise ConfigError(f"agents.csv の notion 列で、{name} のホームが2か所にあります")
     values = {key: notion_id(str(value)) for key, value in data.items() if key != "homes"}
     return NotionConfig(**values, homes={name: notion_id(home) for name, home in homes.items()})
 
@@ -178,7 +175,7 @@ class A2AConfig:
     """ほかのエージェントの住所（docs/architecture.md の「振り分けと A2A」）。
 
     `[a2a.agents]` に「名前 = 住所」を並べる。名前は launchd・ログ・秘密情報ファイル・ポートの
-    呼び名と同じにする。書かなければ、そのエージェントは使わない（研究を書かなければ本体の中で動かす）。
+    呼び名と同じにする。書かなければ、module.toml の [process] の port（127.0.0.1）を使う。
     """
     agents: dict[str, str] = field(default_factory=dict)
     # 相手を待つ時間（秒）。AI を動かす仕事には、AI の上限時間を足して待つ
@@ -204,8 +201,6 @@ class Config:
     overview_channels: tuple[str, ...] = ("overview", "research-overview")
     # `#0-kei-agent`。先頭の番号は外して照合する（themes.theme_name）
     improve_channels: tuple[str, ...] = ("kei-agent",)
-    # 大学エージェントに取り次ぐチャンネル（claude -p は動かさない）
-    # 仕事エージェントに取り次ぐチャンネル
     # 使うモジュール（設定の modules）と、そのチャンネル（種類 → 番号を外した名前）
     modules: tuple[str, ...] = field(default_factory=_default_modules)
     module_channels: dict[str, tuple[str, ...]] = field(default_factory=_default_module_channels)

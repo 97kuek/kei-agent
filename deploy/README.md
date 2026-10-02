@@ -5,7 +5,7 @@
 
 ## 1. Slack App
 
-1. 自分用のワークスペースに、チャンネルを作る（`#0-kei-agent`・`#0-overview`・`#10_<テーマ>`・`#2-course`・`#3-work`・`#4-knowledge`）
+1. 自分用のワークスペースに、チャンネルを作る（`#0-kei-agent`・`#0-overview`・`#1-<テーマ>`・`#2-course`・`#3-work`・`#4-knowledge`）
 2. <https://api.slack.com/apps> → **Create New App** → **From a manifest** に、`uv run kei-agent manifest` の出力を貼る
 3. **Install App** で入れ、Bot User OAuth Token（`xoxb-`）を控える
 4. **Basic Information** → **App-Level Tokens** で、scope `connections:write` のトークン（`xapp-`）を作る
@@ -146,7 +146,7 @@ uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml   #
 ## 6. そのほかの最初の1回
 
 ```zsh
-uv run kei-agent-module time cards                  # 10_/20_/30_ に時間記録カードを置く（そのあと Slack で固定する）
+uv run kei-agent-module time cards                  # 1-/2-/3- のチャンネルに時間記録カードを置く（そのあと Slack で固定する）
 deploy/backup-init.sh                               # ~/research を非公開リポジトリ research-data にする
 sudo pmset repeat wakeorpoweron MTWRFSU 23:55:00    # 00:00 の夜間 Task のために毎晩 Mac を起こす
 ffmpeg -f avfoundation -i ":default" -t 1 -f null - # マイクの許可を先に手で通す

@@ -103,7 +103,7 @@ _RECIPE_KEYS = {"model", "effort"}
 _PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
 PROCESS_KINDS = ("a2a", "service")
-_SCHEDULE_KEYS = {"label", "short", "default"}
+_SCHEDULE_KEYS = {"label", "default"}
 # Slack のスラッシュコマンドの名前（/ は付けない）
 _SLASH = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 # 設定（[settings]）の既定の値に使える形。利用者の設定（config.toml の [<名前>]）は、既定と同じ形にする
@@ -171,7 +171,6 @@ class ActorSpec:
 class ScheduleSpec:
     name: str
     label: str
-    short: str
     default: str
 
 
@@ -337,7 +336,7 @@ def _schedules(data: dict, where: str) -> tuple[ScheduleSpec, ...]:
         if default and not _HHMM.match(default):
             raise ModuleError(f"{at} の default は HH:MM か、空文字（既定では動かさない）にしてください")
         label = str(spec.get("label") or name)
-        found.append(ScheduleSpec(name, label, str(spec.get("short") or label), default))
+        found.append(ScheduleSpec(name, label, default))
     return tuple(found)
 
 

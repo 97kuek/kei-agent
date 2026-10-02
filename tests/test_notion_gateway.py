@@ -94,7 +94,7 @@ def test_gateway_needs_the_master_the_notion_token_and_homes(gw_config, config):
         load_gateway_config(gw_config, {"NOTION_TOKEN": "notion"})
     with pytest.raises(RuntimeError, match="NOTION_TOKEN"):
         load_gateway_config(gw_config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "gateway"})
-    with pytest.raises(RuntimeError, match=r"\[notion\]"):
+    with pytest.raises(RuntimeError, match="agents.csv の notion の列"):
         load_gateway_config(replace(config, notion=NotionConfig()),
                             {"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER, "NOTION_TOKEN": "notion"})
 

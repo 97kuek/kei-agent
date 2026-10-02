@@ -11,7 +11,7 @@
 |---|---|---|
 | `#0-kei-agent` | Kei Agent への要望・不具合。困りごとの知らせも届く（30分のうちに続いたものは1通に書き足す。前回の Daily から失敗した定期処理も朝にここへ） | 自己改善 |
 | `#0-overview` | 全体の相談。Daily と振り返りが届く | 本体が担当に振り分ける |
-| `#10_<テーマ>` | そのテーマの研究 | [研究](agents/research-agent.md) |
+| `#1-<テーマ>` | そのテーマの研究 | [研究](agents/research-agent.md) |
 | `#2-course` | 授業と課題 | [大学](agents/course-agent.md) |
 | `#3-work` | 会社の予定・メール・資料 | [仕事](agents/work-agent.md) |
 | `#work-<名前>` | 仕事のプロジェクトのコードを書く・テストを動かす（作業場は `~/work/<名前>`） | [仕事の開発](agents/workdev-agent.md) |

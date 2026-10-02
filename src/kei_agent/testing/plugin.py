@@ -22,8 +22,7 @@ def no_real_secrets(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_real_restarts(monkeypatch):
-    """本物の launchd の担当を起動し直さない（2026-09-26、テストを回すたびに本番の担当が起動し直されていた）。
-    起動し直そうとした名前の一覧を返す。"""
+    """本物の launchd の担当を起動し直さない。起動し直そうとした名前の一覧を返す。"""
     return isolation.stub_restarts(monkeypatch)
 
 
@@ -36,7 +35,7 @@ def no_user_modules(monkeypatch):
 @pytest.fixture(autouse=True)
 def no_real_state(tmp_path_factory, monkeypatch):
     """置き場所を書かない設定も一時フォルダを指し、本物の状態（~/.local/state/kei-agent）を開こうとしたら落とす
-    （2026-09-27、既定の置き場所のまま Store を開いたテストが、本番の SQLite の表を作り替えてしまった）。"""
+    （本番の SQLite を開いて表を作り替えないように）。"""
     isolation.guard_state(monkeypatch, tmp_path_factory.mktemp("default-paths"))
 
 

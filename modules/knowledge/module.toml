@@ -46,10 +46,8 @@ knowledge = ["knowledge"]
 # 同じ時刻のときは、夜間の Task のあと、Daily の前に動く（朝の一覧に件数を載せるため）
 [schedules.literature]
 label = "先行研究の新着"
-short = "先行研究"
 default = "07:00"
 
 [schedules.reading]
 label = "読みもの"
-short = "読みもの"
 default = "07:00"

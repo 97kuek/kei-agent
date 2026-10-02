@@ -15,7 +15,6 @@ toggl = { description = "時間記録を始める・止める", usage_hint = "[s
 # 定期処理（時刻とオンオフは schedules.csv で変えられる。default は書いていないときの時刻）
 [schedules.toggl_import]
 label = "Toggl の取り込み"
-short = "Toggl"
 default = "22:00"
 
 # 設定（config.toml の [time] で変えられる）

@@ -355,8 +355,8 @@ def describe_tool(name: str, tool_input: dict) -> str:
 # 失敗の種類の言い方（RunResult.failure_reason）
 FAILURE_LABELS = {"quota": "利用上限", "timeout": "時間切れ", "session_missing": "会話が見つからない",
                   "capability": "選んだ provider では使えない", "login": "ログインが切れている", "runtime": "実行の失敗"}
-# provider の CLI が、ログインが切れた・認証できないときに返す文。入り直すまで、何度やり直しても動かない
-# （2026-09-27、大学の担当の個人アカウントが切れていたのに「接続に失敗した」とだけ出て、1週間気づけなかった）
+# provider の CLI が、ログインが切れた・認証できないときに返す文。入り直すまで、何度やり直しても動かないので、
+# 「接続に失敗した」とまとめずに、ログインが切れていると知らせる
 LOGIN_EXPIRED = re.compile(r"Failed to authenticate|OAuth session|Please run /login|not logged in|log ?in again|"
                            r"Invalid API key|401 Unauthorized|could not be refreshed|codex login", re.IGNORECASE)
 

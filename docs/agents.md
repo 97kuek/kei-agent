@@ -8,7 +8,7 @@
 
 | 担当 | 番地 | チャンネル | 詳しく |
 |---|---|---|---|
-| 研究 | 8788 | `#10_<テーマ>`（ほかのどれでもないチャンネル） | [research-agent.md](agents/research-agent.md) |
+| 研究 | 8788 | `#1-<テーマ>`（ほかのどれでもないチャンネル） | [research-agent.md](agents/research-agent.md) |
 | 大学 | 8787 | `#2-course` | [course-agent.md](agents/course-agent.md) |
 | 仕事 | 8789 | `#3-work` | [work-agent.md](agents/work-agent.md) |
 | 仕事の開発 | 8793 | `#work-<名前>` | [workdev-agent.md](agents/workdev-agent.md) |

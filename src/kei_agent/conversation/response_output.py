@@ -11,10 +11,6 @@ FINAL_CLOSE = "<<kei-agent-final-end>>"
 
 _LOCAL_PATH = re.compile(r"(?:file://\S+|~/(?:\S+)|(?:^|[\s([{\"])\/(?:\S+))")
 _WEB_URL = re.compile(r"https?://\S+")
-_RELATIVE_LOCAL_PATH = re.compile(
-    r"(?:\b(?:reviews|overview|outputs|inputs|logs|\.kei-agent|\.config|\.local)/\S+"
-    r"|\b(?:[\w.-]+/)+[\w.-]+\.(?:md|txt|json|csv|py|html|pdf|xlsx?|docx?))"
-)
 _INTERNAL_PROGRESS = re.compile(
     r"\b(?:Bash|Read|Glob|Grep|WebSearch|WebFetch|Skill|Codex App|Claude Code|apply_patch|pytest|ruff)\b"
     r"|(?:材料|参照スレッド|スレッド).{0,24}(?:確認|読[みむ])"

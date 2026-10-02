@@ -17,7 +17,7 @@ class GatewayConfig:
     # 親の合言葉。client ごとの合言葉を作るのにだけ使い、これ自体では通さない
     master: str
     notion_token: str
-    # client → 届くホームのページ ID（config.toml の [notion]）
+    # client → 届くホームのページ ID（agents.csv の notion の列）
     roots: dict[str, frozenset[str]]
     # Notion の API をそのまま中継する口（/notion/v1）を使える client
     proxy: frozenset[str] = frozenset()
@@ -32,5 +32,5 @@ def load_gateway_config(config: Config, env: Mapping[str, str], port: int = 8791
         raise RuntimeError("NOTION_TOKEN がありません")
     roots = client_roots(config.notion)
     if not any(roots.values()):
-        raise RuntimeError("config.toml の [notion] にホームのページ ID がありません")
+        raise RuntimeError("agents.csv の notion の列にホームのページ ID がありません")
     return GatewayConfig("127.0.0.1", port, master, notion_token, roots, proxy_clients(config.notion))

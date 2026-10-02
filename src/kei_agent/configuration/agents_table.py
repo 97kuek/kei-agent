@@ -15,7 +15,7 @@ claude_account, codex_account（folder・notion・claude_account・codex_account
   仕事は会社、など）。空欄ならプロセスの既定のアカウント
 
 config.toml には modules・[channels]・[agents]・[notion] を書かない（書いてあれば、移すよう知らせて止める）。
-研究と大学の置き場所（前の research_root・course_root）も、この表の folder に書く。
+研究と大学の置き場所も、この表の folder に書く（config.toml の research_root・course_root は使わない）。
 表が無ければ、組み込みのモジュールを全部使い、AI は未選択。
 読んだ中身は、config.toml と同じ形（modules・channels・agents・notion と、folders）にして load_config に渡す。
 """
@@ -41,7 +41,7 @@ CORE_ROWS = (ROUTER, OVERVIEW)
 REPLACED_KEYS = ("modules", "channels", "agents", "notion")
 # notion の列の行と、config.toml の [notion] の名前（それ以外のモジュールは [notion.homes]）
 NOTION_KEYS = {OVERVIEW: "hub_home", "research": "research_home", "course": "course_home"}
-# 前は config.toml にあった、研究と大学の置き場所（この表の folder に書く）
+# 研究と大学の置き場所の config.toml での名前（書いてあれば止める。この表の folder に書く）
 FOLDER_KEYS = {"research_root": "research", "course_root": "course"}
 _TRUE = {"true": True, "false": False}
 

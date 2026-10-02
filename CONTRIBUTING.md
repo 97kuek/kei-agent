@@ -32,7 +32,7 @@ uv run python -m pytest
 2. `module.toml`・`module.py`（と指示書・`agent.py`）を書く
 3. テストを `tests/` に書き、`uv run --group agents kei-agent module test <名前>` で通す
 4. 要る秘密情報は `[secrets]` に名前と説明だけを書く
-5. `config.example.toml` の `modules` に足す。設定を持つなら `[<名前>]` の例も書く
+5. `agents.example.csv` に行を足す。設定を持つなら `config.example.toml` に `[<名前>]` の例も書く
 6. スラッシュコマンドを足したら、`uv run kei-agent manifest > slack/manifest.yaml` で書き直す
 7. README の「何ができるか」の表に1行足す（テストが `modules/` と照らし合わせる）
 

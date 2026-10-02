@@ -61,7 +61,7 @@ def test_read_only_research_contract_does_not_request_write_and_reads_notion_onl
 
 
 def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
-    """config.toml の [notion] にホームが無い担当には、届かない Notion の道具（ゲートウェイの MCP）を渡さない。"""
+    """agents.csv の notion の列にホームが無い担当には、届かない Notion の道具（ゲートウェイの MCP）を渡さない。"""
     from kei_agent.configuration.config import NotionConfig
 
     request = runner.ExecutionRequest(themes.agent_workspace(config, "course"),

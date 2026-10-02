@@ -1,4 +1,4 @@
-"""Slack（ボタンと App Home）から変える設定: テーマごとの接続先と、決まった時刻の処理の時刻。
+"""Slack（ボタンと App Home）から変える設定: テーマごとの接続先と、一時的に切り替えた担当の AI。定期処理の見出し。
 
 柵そのもの（書き込み先、読ませない場所、基本の接続先）は `config.toml` に残し、ここでは扱わない。
 保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
@@ -16,12 +16,12 @@ from kei_agent.configuration.config import HHMM, AgentProfile, Config, model_act
 from kei_agent.framework import modules
 from kei_agent.storage.store import Store
 
-# 本体の定期処理（名前 → 見出し、App Home の短い名前）。モジュールのものは module.toml の [schedules] から足す
+# 本体の定期処理（名前 → 見出し）。モジュールのものは module.toml の [schedules] から足す
 CORE_SCHEDULES = {
-    "daily": ("Daily", "Daily"),
-    "review": ("Retro & Planning", "レトプラ"),
-    "night": ("🌙 をつけた Task", "夜間"),
-    "maintenance": ("保守とバックアップ", "保守"),
+    "daily": "Daily",
+    "review": "Retro & Planning",
+    "night": "🌙 をつけた Task",
+    "maintenance": "保守とバックアップ",
 }
 
 
@@ -31,7 +31,7 @@ def module_schedules(config: Config) -> list[modules.ScheduleSpec]:
 
 
 def schedule_names(config: Config) -> tuple[str, ...]:
-    """App Home で扱う定期処理（モジュールのものを先に。朝の読みものなどは Daily より前に並べる）。
+    """動かす定期処理（モジュールのものを先に。朝の読みものなどは Daily より前に並べる）。
 
     Daily と振り返りは、受け持つモジュール（core_schedules）があるときだけ。
     """
@@ -40,18 +40,18 @@ def schedule_names(config: Config) -> tuple[str, ...]:
     return (*(s.name for s in module_schedules(config)), *core)
 
 
-def schedule_label(config: Config, name: str, short: bool = False) -> str:
-    """定期処理の見出し（short なら App Home のチェックに出す短い名前）。"""
+def schedule_label(config: Config, name: str) -> str:
+    """定期処理の見出し。"""
     if name in CORE_SCHEDULES:
-        return CORE_SCHEDULES[name][1 if short else 0]
+        return CORE_SCHEDULES[name]
     spec = next((s for s in module_schedules(config) if s.name == name), None)
-    return (spec.short if short else spec.label) if spec else name
+    return spec.label if spec else name
 
 
 def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
     """前回の Daily から今までに、うまくいかなかった定期処理の見出し（朝の一覧の「うまくいかなかったこと」）。
 
-    Notion に残せなかった Daily・振り返りも入れる（何日も残っていなかったのに気づけなかった。2026-09-26）。
+    Notion に残せなかった Daily・振り返りも入れる。
     """
     today = now.date().isoformat()
     last = store.last_schedule("daily", before_day=today)

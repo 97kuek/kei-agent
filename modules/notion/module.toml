@@ -2,10 +2,10 @@
 api = 1
 name = "notion"
 label = "Notion"
-description = "Notion に届く唯一の口（ゲートウェイ）。使う側ごとに、config.toml の [notion] に書いたホームの下だけを通す"
+description = "Notion に届く唯一の口（ゲートウェイ）。使う側ごとに、agents.csv の notion の列に書いたホームの下だけを通す"
 
 # 常駐のプロセス（A2A ではない。MCP と /notion/v1 の口）。Notion の鍵（NOTION_TOKEN）を持てるのは、このプロセスだけ。
-# ホームのページ ID は config.toml の [notion]（本体の設定。研究・大学・共通ホームがまだ本体にあるため）
+# ホームのページ ID は agents.csv の notion の列（本体が読んで、ゲートウェイに渡す）
 [process]
 port = 8791
 kind = "service"

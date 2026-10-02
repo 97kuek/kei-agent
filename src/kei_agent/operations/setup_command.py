@@ -324,7 +324,7 @@ def step_slack(config: Config) -> None:
             "Basic Information → App-Level Tokens で、scope が connections:write のトークン（xapp-）を作って控える",
             "Agents の Agent experience をオンにして入れ直す（入力欄の下の経過表示に使う）",
             "Slack のプロフィールの ︙ から、自分のメンバー ID（U…）を控える",
-            "チャンネルを作る（頭に 00_ などの番号を付けてよい。番号は外して照合する）:"]
+            "チャンネルを作る（頭に 0- などの番号を付けてよい。番号は外して照合する）:"]
     for number, line in enumerate(todo, 1):
         print(f"  {number}) {line}")
     for line in channel_lines(config):

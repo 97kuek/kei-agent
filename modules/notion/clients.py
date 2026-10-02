@@ -6,7 +6,7 @@
 | client | 届くホーム | 使える口 |
 |---|---|---|
 | kei-agent（本体と setup） | 共通ホームと、書いてあるすべてのホーム | MCP と `/notion/v1` |
-| モジュール・研究（名前が client） | config.toml の [notion] に書いた、そのホームだけ | MCP。シェルを持つ AI の実行役がいなければ `/notion/v1` も |
+| モジュール・研究（名前が client） | agents.csv の notion の列に書いた、そのホームだけ | MCP。シェルを持つ AI の実行役がいなければ `/notion/v1` も |
 
 研究（AI が Bash を持つ）のように、シェルを使える AI の実行役がいる client には、何でも送れる口（`/notion/v1`）を渡さない。
 """
@@ -19,7 +19,7 @@ from kei_agent_a2a.api import MAIN_CLIENT, NotionConfig, ai_runs_shell, gateway_
 
 
 def client_roots(notion: NotionConfig) -> dict[str, frozenset[str]]:
-    """client ごとの届くホーム（config.toml の [notion]）。空の設定は数えない。"""
+    """client ごとの届くホーム（agents.csv の notion の列）。空の設定は数えない。"""
     homes = notion.client_homes()
     roots = {MAIN_CLIENT: frozenset(notion_id(home) for home in (notion.hub_home, *homes.values()) if home)}
     roots.update({client: frozenset({notion_id(home)}) for client, home in homes.items()})

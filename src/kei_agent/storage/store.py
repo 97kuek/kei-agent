@@ -100,8 +100,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     updated_at REAL NOT NULL,
     PRIMARY KEY (channel, thread_ts, agent)
 );
--- 新しい会話の鍵は provider と指示版まで揃うときだけ再利用する。
--- 旧 threads / agent_sessions の session_id は migration 後も消さない。
+-- 会話の続き（provider と指示書の版まで揃うときだけ使う）。threads の session_id は「会話がある」目印
 CREATE TABLE IF NOT EXISTS provider_sessions (
     channel TEXT NOT NULL,
     thread_ts TEXT NOT NULL,

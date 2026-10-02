@@ -82,10 +82,6 @@ class Scheduler:
         # ネットにつながらなくなった時刻（つながっている間は None）
         self._offline_since: float | None = None
 
-    @property
-    def overview_channel_name(self) -> str:
-        return self.config.overview_channels[0]
-
     # ループ
 
     async def loop(self) -> None:
@@ -118,7 +114,7 @@ class Scheduler:
                    for _, payload in self.store.pending_deferred("schedule")}
         for name in task_names(self.config):
             catch_up = NIGHT_CATCH_UP_HOURS if name == "night" else sched.catch_up_hours
-            # Slack（App Home）で変えた時刻を毎回読み直す。止めている処理は空文字
+            # 定期処理の時刻（schedules.csv と module.toml の既定）。止めている処理は空文字
             hhmm = settings.schedule_time(self.config, name)
             day = due_day(now, hhmm, catch_up)
             if day is None or self.store.schedule_ran(name, day) or (name, day) in pending:

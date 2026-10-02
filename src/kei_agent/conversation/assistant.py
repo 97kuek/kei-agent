@@ -491,7 +491,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         """つないでいるエージェントの名刺を読んで、生きているか、何ができるか、本体と同じ版かを見る。
 
         古い版のまま動いている担当は起動し直す（手作業のデプロイで担当だけ起動し直し忘れると、古いコードが
-        新しい設定を読めずに止まる。2026-09-26 に大学の担当で起きた）。
+        新しい設定を読めずに止まる）。
         """
         skills: dict[str, list[str]] = {}
         stale: list[str] = []
@@ -1320,8 +1320,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             if result.session_id:
                 self.store.set_session(req.channel, req.thread_ts, actor, provider,
                                        result.session_id, version)
-                # 既存 row の session_id は provider 不明の legacy 値なので上書きしない。
-                # 新規スレッドは従来互換の参照値として保存する。
+                # threads の session_id は「このスレッドに会話がある」目印。続きの鍵は provider_sessions に置く
                 if row is None or row["session_id"] is None:
                     self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, result.session_id)
                 self.store.set_prompt_version(req.channel, req.thread_ts, version)

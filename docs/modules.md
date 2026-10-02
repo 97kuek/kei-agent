@@ -102,7 +102,6 @@ knowledge = ["knowledge"]
 
 [schedules.reading]             # 定期処理
 label = "読みもの"
-short = "読みもの"              # App Home のチェックに出す名前
 default = "07:00"               # 空文字なら、既定では動かさない
 
 # [slash_commands]              # スラッシュコマンド（kei-agent manifest が Slack App に載せる）
