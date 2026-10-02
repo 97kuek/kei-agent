@@ -95,20 +95,27 @@ class Module:
             return None
         action = str(params.get("action") or "")
         user_id = self.core.owner_id
-        stopped = None
+        started = stopped = None
         if action == "start":
             domain, label = str(params.get("domain") or ""), str(params.get("label") or "").strip()
             if domain not in DOMAINS or not label:
                 raise ValueError(f"始めるときは domain（{' / '.join(DOMAINS)}）と label（テーマや科目の名前）を渡してください")
-            # チャンネルの代わりに、領域とラベルの組を置き場所にする（大学の科目もラベルの名前で残す）
-            _, stopped = self.entries.start(user_id, domain, f"{domain}:{label}", label)
+            channel = await self._head_channel(domain, label)
+            # 名前は頭が言ったラベル（大学なら、そのチャンネルで選んでいた科目より、頭が言った科目を使う）
+            started, stopped = self.entries.start(user_id, domain, channel, theme_name(label), label=label)
         elif action == "stop":
             stopped = self.entries.stop(user_id)
         elif action != "status":
             raise ValueError("action は start / stop / status のどれかにしてください")
-        if stopped is not None:
-            await self._sync(stopped)
+        # カードのあるチャンネル（Slack で測っていたもの）は表示を合わせる。カードの無いところには置かない
+        await self._after_change(started=started, stopped=stopped, post_cards=False)
         return {"running": _shown(self.entries.active(user_id)), "stopped": _shown(stopped)}
+
+    async def _head_channel(self, domain: str, label: str) -> str:
+        """頭から測るときの置き場所（Toggl の確認の知らせを出す先）。研究はテーマの、大学・仕事は担当のチャンネル。"""
+        names = self.core.channels(domain)
+        name = theme_name(label) if domain == "research" or not names else names[0]
+        return (await self.core.channel_ids()).get(name, name)
 
     # カードのボタンと画面
 

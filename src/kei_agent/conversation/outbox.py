@@ -60,10 +60,13 @@ class Outbox:
     async def files_upload_v2(self, *, channel: str = "", thread_ts: str = "", file_uploads: list | None = None,
                               **_) -> dict:
         for upload in file_uploads or []:
-            content = str(upload.get("content") or "")
-            name = upload.get("filename") or upload.get("title") or "file"
-            await self.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                        text=f"📎 {name}\n```\n{content[:FILE_CHARS]}\n```")
+            name = upload.get("title") or upload.get("filename") or "file"
+            if upload.get("content") is not None:
+                body = f"```\n{str(upload['content'])[:FILE_CHARS]}\n```"
+            else:
+                # 作業場にできたファイル（outputs/）。頭は read_file で中身を読める
+                body = f"作業場の `{name}` にできたよ（文のファイルなら read_file で読める）"
+            await self.chat_postMessage(channel=channel, thread_ts=thread_ts, text=f"📎 {name}\n{body}")
         return {"ok": True}
 
     # 頭が読む

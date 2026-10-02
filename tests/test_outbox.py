@@ -59,3 +59,10 @@ def test_kei_agent_runs_without_slack_only_when_both_tokens_are_gone():
     assert not without_slack({"SLACK_BOT_TOKEN": "xoxb-1", "SLACK_APP_TOKEN": "xapp-1"})
     # 片方だけなら書き忘れ（Slack につなぐつもり）なので、起動のときに足りないと止める
     assert not without_slack({"SLACK_BOT_TOKEN": "xoxb-1"})
+
+
+async def test_output_files_point_the_head_to_read_file(outbox):
+    await outbox.files_upload_v2(channel="vlm", thread_ts="1.2",
+                                 file_uploads=[{"file": "/x/outputs/結果.md", "filename": "結果.md", "title": "outputs/結果.md"}])
+    (notice,) = outbox.pending()
+    assert "outputs/結果.md" in notice["text"] and "read_file" in notice["text"]

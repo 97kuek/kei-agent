@@ -58,7 +58,9 @@ def without_slack(env: dict[str, str] | None = None) -> bool:
 
 async def serve() -> None:
     headless = without_slack()
-    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)] if not headless else []
+    # Slack につながなくても、依頼者の ID は要る（頭から測った時間などを、Slack のときと同じ人の記録にする）
+    required = ("KEI_AGENT_ALLOWED_USER_ID",) if headless else REQUIRED_ENV
+    missing = [k for k in required if not os.environ.get(k)]
     if missing:
         sys.exit(f"環境変数が設定されていません: {', '.join(missing)}（deploy/README.md を参照）")
 

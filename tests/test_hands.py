@@ -251,7 +251,7 @@ async def test_post_is_on_the_door_and_takes_no_channel(config, store):
     assert not (tools["post"].annotations and tools["post"].annotations.read_only_hint)
 
 
-async def test_notices_hand_over_what_kei_agent_would_have_posted_once(config, store):
+async def test_notices_come_back_until_the_head_says_it_posted_them(config, store):
     from kei_agent.conversation.outbox import Outbox
     assistant, _ = make_assistant(config, store)
     assistant.slack = Outbox(config, store)
@@ -259,7 +259,9 @@ async def test_notices_hand_over_what_kei_agent_would_have_posted_once(config, s
     h = Hands(assistant)
     first = h.notices()
     assert [(n["channel"], n["text"]) for n in first["notices"]] == [("vlm", "🧪 評価が終わったよ")]
-    assert h.notices()["notices"] == []
+    # 頭が出せなかった（途中で切れた）なら、次の回にもう一度返る
+    assert h.notices()["notices"] == first["notices"]
+    assert h.notices(done=[n["id"] for n in first["notices"]])["notices"] == []
 
 
 async def test_notices_are_empty_while_kei_agent_is_on_slack(hands):
@@ -324,3 +326,38 @@ async def test_create_workspace_refuses_agent_channels(hands):
     h, _ = hands
     with pytest.raises(HandsError):
         await h.create_workspace("course")
+
+
+async def test_conversation_numbers_cannot_reach_outside_the_workspace(hands, config):
+    h, _ = hands
+    for bad in ("../../AGENTS", "/tmp/x", "a/b", "", ".hidden"):
+        if not bad:
+            continue
+        with pytest.raises(HandsError):
+            await h.run("vlm", "評価して", conversation=bad)
+    assert not (config.research_root / "AGENTS.md").exists()
+
+
+async def test_odd_but_allowed_conversation_numbers_still_log(hands, config):
+    h, claude = hands
+    claude.answer(final_answer("できた"))
+    assert (await h.run("vlm", "評価して", conversation="1e999"))["status"] == "done"
+
+
+async def test_put_file_keeps_the_earlier_file_and_cleans_names(hands, config):
+    h, _ = hands
+    assert h.put_file("vlm", "data.csv", "1")["path"] == "inputs/data.csv"
+    assert h.put_file("vlm", "data.csv", "2")["path"] == "inputs/data-1.csv"
+    assert h.put_file("vlm", "a\x00b.txt", "x")["path"] == "inputs/a_b.txt"
+    assert (config.research_root / "vlm" / "inputs" / "data.csv").read_text() == "1"
+
+
+async def test_post_turns_slack_errors_into_reasons(config, store):
+    assistant, slack = make_assistant(config, store, {"C9": "0-overview"})
+
+    async def broken(**kw):
+        raise RuntimeError("msg_too_long")
+
+    slack.chat_postMessage = broken
+    with pytest.raises(HandsError, match="投稿できませんでした"):
+        await Hands(assistant).post("長い Daily")

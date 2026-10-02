@@ -484,7 +484,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return
-        slack_url = f"{self.team_url}archives/{channel}" if self.team_url else ""
+        slack_url = f"{self.team_url}archives/{channel}" if self.team_url and channel else ""
         try:
             await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, slack_url, f"{ws.cwd}/")
         except NotionError as e:

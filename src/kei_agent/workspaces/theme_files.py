@@ -57,7 +57,7 @@ def append_thread_log(cwd: Path, channel_name: str, thread_ts: str, who: str, te
     if not path.exists():
         try:
             started = datetime.fromtimestamp(float(thread_ts)).strftime("%Y-%m-%d %H:%M")
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
             # 手の口の会話の番号（Slack のスレッドではない）。始まりは今
             started = datetime.now().strftime("%Y-%m-%d %H:%M")
         path.write_text(f"# #{channel_name} のスレッド（{started} 開始）\n", encoding="utf-8")
@@ -66,7 +66,12 @@ def append_thread_log(cwd: Path, channel_name: str, thread_ts: str, who: str, te
         f.write(f"\n## {who}（{stamp}）\n\n{text.strip()}\n")
 
 
-def _free_name(inputs: Path, name: str) -> Path:
+def safe_filename(name: str) -> str:
+    """添付のファイル名（使えない文字は _ に。先頭の . は外す）。"""
+    return _UNSAFE_FILENAME.sub("_", name).lstrip(".") or "file"
+
+
+def free_name(inputs: Path, name: str) -> Path:
     dest = inputs / name
     stem, suffix, n = dest.stem, dest.suffix, 1
     while dest.exists():
@@ -90,8 +95,7 @@ async def download_files(files: list[dict], cwd: Path, bot_token: str) -> list[s
             if int(f.get("size") or 0) > MAX_DOWNLOAD_BYTES:
                 log.warning("大きすぎる添付は保存しません: %s", f.get("name"))
                 continue
-            name = _UNSAFE_FILENAME.sub("_", f.get("name") or f.get("id") or "file").lstrip(".") or "file"
-            dest = _free_name(inputs, name)
+            dest = free_name(inputs, safe_filename(f.get("name") or f.get("id") or "file"))
             async with http.get(url) as resp:
                 resp.raise_for_status()
                 # 全部をメモリに載せない

@@ -193,6 +193,12 @@ class ModuleBridge:
         for module in self.modules.values():
             act = getattr(module, "head_action", None)
             if callable(act) and (done := await act(name, params)) is not None:
+                if self.config.allowed_user_id:
+                    # App Home に同じスイッチが出ているので、開いている画面を今の値で作り直す（Slack につないでいるとき）
+                    try:
+                        await self.publish_home(self.config.allowed_user_id)
+                    except Exception:
+                        log.warning("App Home を作り直せませんでした", exc_info=True)
                 return done
         raise ValueError(f"「{name}」を受け持つモジュールがありません（オフかもしれません）")
 

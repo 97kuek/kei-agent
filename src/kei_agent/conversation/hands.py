@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 import time
 from contextlib import suppress
@@ -37,7 +38,13 @@ from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.records import Records
 from kei_agent.workspaces import themes
-from kei_agent.workspaces.theme_files import append_thread_log, changed_files, snapshot_outputs
+from kei_agent.workspaces.theme_files import (
+    append_thread_log,
+    changed_files,
+    free_name,
+    safe_filename,
+    snapshot_outputs,
+)
 from kei_agent.workspaces.themes import ChannelKind
 
 log = logging.getLogger(__name__)
@@ -48,6 +55,8 @@ CHANNEL = "mcp"
 SHORT_SECONDS = 20
 # 受付番号の結果を残す日数
 KEEP_DAYS = 7
+# 頭が渡す会話の番号（Slack のスレッドの ts など）。作業場の記録のファイル名にもなるので、文字と長さを絞る
+CONVERSATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 # read_file で返す長さと、put_file で受け取る長さ
 FILE_CHARS = 100_000
 # 作業場を本体に持つ種類（研究テーマ・プロジェクト・研究全体）。ほかは担当のプロセスに頼む
@@ -145,6 +154,8 @@ class Hands:
         手段を外す。minutes は上限時間（workspaces の max_minutes まで。0 なら担当の既定）。
         """
         plan = self._plan(workspace, request, weight, engine, use_case, read_only, minutes)
+        if conversation and (not CONVERSATION.fullmatch(conversation) or ".." in conversation):
+            raise HandsError("conversation は英数字と . _ - だけの64字までにしてください（Slack のスレッドの ts など）")
         conversation = conversation or f"c-{secrets.token_hex(6)}"
         ticket = f"t-{secrets.token_hex(6)}"
         self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "workspace": plan.ws.channel_name,
@@ -314,13 +325,14 @@ class Hands:
     def put_file(self, workspace: str, name: str, content: str) -> dict:
         """頭が渡した文のファイルを、作業場の inputs/ に置く。run の頼みごとで、そのパスを伝える。"""
         folder = self._folder(workspace)
-        inputs = folder / "inputs"
-        dest = (inputs / name).resolve()
-        if dest.parent != inputs or not name.strip() or name.startswith("."):
+        if "/" in name or "\\" in name or not name.strip():
             raise HandsError("ファイルの名前は、フォルダを含まない名前にしてください")
         if len(content) > FILE_CHARS:
             raise HandsError(f"ファイルは {FILE_CHARS} 字までです")
+        inputs = folder / "inputs"
         inputs.mkdir(exist_ok=True)
+        # Slack の添付と同じ決まり（使えない文字は _ に、同じ名前があれば番号を足す。前のものは上書きしない）
+        dest = free_name(inputs, safe_filename(name))
         dest.write_text(content, encoding="utf-8")
         return {"path": str(dest.relative_to(folder))}
 
@@ -347,19 +359,27 @@ class Hands:
             raise HandsError("投稿する本文が空です")
         if self._outbox() is not None:
             raise HandsError("Kei Agent は Slack につないでいません。Slack には自分の Slack 連携で出してください")
+        if not self.config.overview_channels:
+            raise HandsError("研究全体のチャンネルが決まっていません（agents.csv の overview の行）")
         name = self.config.overview_channels[0]
         channel = (await self.assistant.channel_ids()).get(name)
         if not channel:
             raise HandsError(f"研究全体のチャンネル（{name}）に Kei Agent が入っていません")
         slack = self.assistant.slack
-        posted = await slack.chat_postMessage(channel=channel, markdown_text=text, unfurl_links=False,
-                                              unfurl_media=False)
-        ts = str(posted["ts"])
-        # 返信を拾えるように、スレッドを覚えておく
-        self.assistant.store.upsert_thread(channel, ts, name, None)
-        for chunk in split_text(details) if details.strip() else ():
-            await slack.chat_postMessage(channel=channel, thread_ts=ts, markdown_text=chunk, unfurl_links=False,
-                                         unfurl_media=False)
+        # 長すぎる本文は、頭の1つ目だけをチャンネルに、残りをスレッドに出す
+        head, *rest = split_text(text)
+        try:
+            posted = await slack.chat_postMessage(channel=channel, markdown_text=head, unfurl_links=False,
+                                                  unfurl_media=False)
+            ts = str(posted["ts"])
+            # 返信を拾えるように、スレッドを覚えておく
+            self.assistant.store.upsert_thread(channel, ts, name, None)
+            for chunk in [*rest, *(split_text(details) if details.strip() else ())]:
+                await slack.chat_postMessage(channel=channel, thread_ts=ts, markdown_text=chunk, unfurl_links=False,
+                                             unfurl_media=False)
+        except Exception as e:
+            log.warning("手の口から投稿できませんでした", exc_info=True)
+            raise HandsError(f"Slack に投稿できませんでした（{type(e).__name__}）") from None
         log.info("手の口から研究全体のチャンネルに投稿しました（%s）", ts)
         return {"channel": name, "ts": ts, "link": await self.assistant.permalink(channel, ts)}
 
@@ -369,14 +389,15 @@ class Hands:
         from kei_agent.conversation.outbox import Outbox
         return self.assistant.slack if isinstance(self.assistant.slack, Outbox) else None
 
-    def notices(self) -> dict:
-        """まだ渡していない知らせ（古い順）。渡したものは、書き換えられない限り次からは返さない。
+    def notices(self, done: list[str] | None = None) -> dict:
+        """まだ出していない知らせ（古い順）。done に渡した id は「出した」にして、書き換えられない限り次からは返さない
+        （頭が Slack に出せたものだけを done で返す。途中で切れても知らせは消えない）。
         Slack につないでいる間は、Kei Agent が自分で Slack に出しているので空。"""
         outbox = self._outbox()
         if outbox is None:
             return {"notices": [], "slack": True}
+        outbox.mark_delivered([str(i) for i in done or []])
         found = outbox.pending()
-        outbox.mark_delivered([item["id"] for item in found])
         return {"notices": [{k: item[k] for k in ("id", "channel", "thread_ts", "thread", "text")}
                             | {"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(item["at"]))}
                             for item in found], "slack": False}

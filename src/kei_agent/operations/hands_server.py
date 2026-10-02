@@ -132,11 +132,12 @@ def build_mcp(hands: Hands) -> MCPServer:
             raise ToolError(str(e)) from None
 
     @mcp.tool(description="Kei Agent が Slack に出すつもりだった知らせ（ジョブが終わった・困りごと・課題の新着など）のうち、"
-                          "まだ渡していないもの（古い順）。一度渡したものは、書き換えられない限り次からは返さない。"
-                          "notices の1件は id・channel（出すつもりだったチャンネル）・thread_ts・thread（スレッドの親の本文）・"
-                          "text・at。slack が true なら、Kei Agent が自分で Slack に出しているので空")
-    async def notices() -> dict[str, Any]:
-        return hands.notices()
+                          "まだ出していないもの（古い順）。Slack に出せたものの id を done に入れてもう一度呼ぶと、それは次から返さない"
+                          "（done を返さなかったものは、次の回にもう一度返る）。notices の1件は id・channel（出すつもりだった"
+                          "チャンネル）・thread_ts・thread（スレッドの親の本文）・text・at。slack が true なら、Kei Agent が自分で"
+                          " Slack に出しているので空")
+    async def notices(done: list[str] | None = None) -> dict[str, Any]:
+        return hands.notices(done)
 
     assistant = hands.assistant
 

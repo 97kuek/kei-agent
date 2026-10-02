@@ -98,17 +98,17 @@ class Entries:
         return next((entry for entry in running if entry is not None and entry.channel == channel), None)
 
     def start(self, user_id: str, domain: str, channel: str, theme: str,
-              started_at: float | None = None) -> tuple[Entry, Entry | None]:
+              started_at: float | None = None, label: str = "") -> tuple[Entry, Entry | None]:
         """計測を始める。前の計測が動いていれば、その時刻で止める（止めた記録も返す）。
 
-        そのチャンネルで科目を選んでいれば、大学の記録はその科目の名前で残す。
+        そのチャンネルで科目を選んでいれば、大学の記録はその科目の名前で残す。label を渡せば、それを名前にする。
         """
         if not user_id or not channel or not theme or domain not in DOMAINS:
             raise ValueError("利用者・チャンネル・領域を指定してください")
         at = time.time() if started_at is None else started_at
         previous = self.stop(user_id, ended_at=at)
         page_id, course_name = self.course(channel)
-        label = course_name if domain == "course" and course_name else theme
+        label = label.strip() or (course_name if domain == "course" and course_name else theme)
         entry = self._save(Entry(uuid.uuid4().hex, user_id, domain, channel, theme, page_id, course_name,
                                  project_label(domain, label), "", at, None))
         self.records.put("active", user_id, {"entry": entry.id})

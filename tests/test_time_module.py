@@ -578,3 +578,18 @@ async def test_the_head_timer_checks_its_words(env):
         await Hands(assistant).timer("start", "research", "")
     with pytest.raises(HandsError):
         await Hands(assistant).timer("jump")
+
+
+async def test_head_timers_live_in_real_channels_and_fix_slack_cards(env):
+    """頭から測った記録の置き場所は本物のチャンネル（Toggl の確認の知らせが届く）。Slack のカードも合わせる。"""
+    assistant, module, slack = env
+    from kei_agent.conversation.hands import Hands
+    await module.on_action("start", press(START))
+    card_ts = module.entries.card("C1")
+    h = Hands(assistant)
+    await h.timer("start", "course", "線形代数")
+    running = module.entries.active("UME")
+    assert running.channel == "C2" and running.description == "大学 / 線形代数"
+    # Slack で始めた vlm の計測は止まり、そのカードは「計測していない」に戻る
+    updates = [kw for name, kw in slack.calls if name == "chat_update" and kw.get("ts") == card_ts]
+    assert updates and "計測中" not in (updates[-1].get("text") or "")
