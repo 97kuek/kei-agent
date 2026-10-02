@@ -83,7 +83,11 @@ class TokenAuth:
 
     async def __call__(self, scope, receive, send) -> None:
         path = scope.get("path", "")
-        if scope["type"] != "http" or path.rstrip("/") == HEALTH_PATH or path.startswith(WELL_KNOWN):
+        if scope["type"] == "http" and path.startswith(WELL_KNOWN):
+            # 合言葉があっても無くても、同じ JSON の 404（本文が JSON でないと、トンネルが読めずに警告を出す）
+            await JSONResponse({"error": "not found"}, status_code=404)(scope, receive, send)
+            return
+        if scope["type"] != "http" or path.rstrip("/") == HEALTH_PATH:
             await self.app(scope, receive, send)
             return
         given = Headers(scope=scope).get("authorization", "").removeprefix("Bearer ").strip()
