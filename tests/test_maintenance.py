@@ -2,12 +2,12 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import pytest
+from fakes import git
 
 from kei_agent.operations.app import setup_logging
 from kei_agent.scheduling import maintenance
@@ -55,10 +55,6 @@ def test_exclude_large_files_rewrites_its_own_block(tmp_path):
     assert "# 手で書いた行" in text and "big.bin" not in text
 
 
-def git(cwd, *args):
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
-
-
 def pushed_repo(path, remote, files):
     """files を1回コミットして、裸の remote に push 済みの Git リポジトリ。"""
     git(remote.parent, "init", "-q", "--bare", "-b", "main", str(remote))
@@ -87,7 +83,7 @@ async def test_backup_commits_and_pushes(config, store, tmp_path):
     log = git(remote, "log", "--format=%s", "main")
     assert log.splitlines()[0] == "9/18 の研究データを保存する"
     files = git(remote, "ls-tree", "-r", "--name-only", "main")
-    # 状態の書き出しは Kei Agent 側に移したので、研究のリポジトリには入らない
+    # 状態の書き出しは Kei Agent 側に置くので、研究のリポジトリには入らない
     assert "vlm/result.csv" in files and "kei-agent.sql" not in files
     # Kei Agent 側が Git になっていないことは、黙って見逃さずに結果へ出す
     assert detail["agent_root"] == {"status": "not_a_repo", "path": str(config.agent_root)}

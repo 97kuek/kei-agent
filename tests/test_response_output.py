@@ -1,4 +1,5 @@
 import pytest
+from fakes import final_answer
 
 from kei_agent.conversation.response_output import (
     OutputError,
@@ -13,23 +14,19 @@ HEADINGS = ("**今日のタスク**", "**夜間処理の結果**", "**確認待�
             "**今日考えるとよい問い**")
 
 
-def _final(text):
-    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
-
-
 @pytest.mark.parametrize(("raw", "expected"), [
     # 印の外（作業の実況）は捨てる
-    ("まず材料を確認します。\n" + _final("僕が調べた結果、課題はないよ。"), "僕が調べた結果、課題はないよ。"),
+    ("まず材料を確認します。\n" + final_answer("僕が調べた結果、課題はないよ。"), "僕が調べた結果、課題はないよ。"),
     # プロンプトは outputs/ のファイル名を書くよう頼んでいる。これで返答全体を捨てない
-    (_final("図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"),
+    (final_answer("図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"),
      "図は `outputs/dropfrac_test.png`、要約は reviews/2026-09-24.md に置いたよ"),
     # 手元の絶対パスは、答えを捨てずにファイル名だけにする
-    (_final("結果は /Users/kei/research/amr/outputs/fig.png と ~/notes/memo.md、file:///tmp/x.txt にあるよ"),
+    (final_answer("結果は /Users/kei/research/amr/outputs/fig.png と ~/notes/memo.md、file:///tmp/x.txt にあるよ"),
      "結果は fig.png と memo.md、x.txt にあるよ"),
     # 手順や道具の名前、ふつうの Web のリンクは通す
-    (_final("まず締切を確認するといいよ。Claude Code の話なら続けるね"),
+    (final_answer("まず締切を確認するといいよ。Claude Code の話なら続けるね"),
      "まず締切を確認するといいよ。Claude Code の話なら続けるね"),
-    (_final("資料は https://example.com/notes にあるよ。"), "資料は https://example.com/notes にあるよ。"),
+    (final_answer("資料は https://example.com/notes にあるよ。"), "資料は https://example.com/notes にあるよ。"),
 ])
 def test_finalizer_keeps_the_marked_user_facing_answer(raw, expected):
     assert finalize_conversation(raw) == expected

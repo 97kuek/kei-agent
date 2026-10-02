@@ -80,7 +80,7 @@ def no_pinned_models():
 def fake_model_classifier(monkeypatch):
     """通常の unit test は本物の CLI を起動せず、既存の用途判定だけを再現する。"""
     async def module(_config, _store, spec, prompt: str, *, provider=None):
-        # 研究は言葉で当てる（以前の研究の分類器の代わり）。ほかのモジュールは default_use_case
+        # 研究は依頼の言葉で用途を当てる。ほかのモジュールは default_use_case
         return research_use_case(prompt) if spec.name == "research" else spec.actor.default_use_case
 
     real_module = model_classifier.classify_module

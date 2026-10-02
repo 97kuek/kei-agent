@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, pending_asks, write_request
+from fakes import FakeAI, FakePueue, FakeSlack, final_answer, make_assistant, pending_asks, write_request
 
 import kei_agent.conversation.assistant as assistant_module
 from kei_agent.conversation import ask, router
@@ -17,7 +17,6 @@ from kei_agent.conversation.slack_text import split_text
 from kei_agent.conversation.thread_ui import ThreadUI
 from kei_agent.execution import a2a, runner
 from kei_agent.execution.execution_contract import prompt_version
-from kei_agent.execution.jobs import JobManager
 from kei_agent.storage import settings
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -25,11 +24,11 @@ from kei_agent.workspaces import themes
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C9": "0-kei-agent", "C5": "research-overview"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     pueue = FakePueue()
-    assistant = Assistant(config, store, slack, JobManager(config, store, pueue), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm", "C9": "0-kei-agent", "C5": "research-overview"},
+                                      pueue=pueue)
     return assistant, slack, claude, pueue
 
 
@@ -91,11 +90,7 @@ def _ask_result(data):
                                                   "limit_reset_at": data.get("limit_reset_at"), "cost_usd": None}))
 
 
-def _final(text):
-    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
-
-
-ANSWER = _final("答えだよ")
+ANSWER = final_answer("答えだよ")
 
 
 class _Agent:
@@ -164,7 +159,7 @@ async def test_mention_runs_claude_in_theme_and_replies(env, config, store):
 
 
 @pytest.mark.parametrize(("behavior", "shown", "hidden"), [
-    ({"text": "まず材料を確認します。\n" + _final("僕が調べた結果、できたよ。")}, "僕が調べた結果、できたよ。",
+    ({"text": "まず材料を確認します。\n" + final_answer("僕が調べた結果、できたよ。")}, "僕が調べた結果、できたよ。",
      "まず材料を確認します。"),
     ({"text": "材料を確認してから返します", "raw": True}, "返答を利用者向けの形に整えられなかったよ",
      "材料を確認してから返します"),
@@ -1171,7 +1166,7 @@ async def test_course_channel_sends_free_questions_to_ask(course, store):
     """定型に当てはまらない質問は ask に回し、大学エージェント自身の claude が答える。"""
     assistant, slack, claude, _ = course
     agent = assistant.agents["course"] = _Agent(_ask_result({
-        "session_id": "course-1", "text": _final("過去問は Box の Personal/過去問 にあるよ"), "is_error": False,
+        "session_id": "course-1", "text": final_answer("過去問は Box の Personal/過去問 にあるよ"), "is_error": False,
         "provider": "claude"}), activity="box_search: 過去問")
 
     await mention(assistant, "情報セキュリティBの過去問ある？", ts="11.2", channel="C7")
@@ -1199,7 +1194,7 @@ async def test_course_answers_mention_the_owner_like_research(course, monkeypatc
     if long_run:
         monkeypatch.setattr(assistant_module, "NOTIFY_AFTER_SECONDS", -1)
     assistant.agents["course"] = _AskAgent("http://127.0.0.1:8787", [
-        {"session_id": "course-1", "text": _final(answer), "is_error": False, "provider": "claude"}])
+        {"session_id": "course-1", "text": final_answer(answer), "is_error": False, "provider": "claude"}])
     await mention(assistant, "過去問ある？", ts="11.2", channel="C7")
     assert [said in m for m in _mentions(slack)] == ([True] if said else [])
 
@@ -1365,7 +1360,7 @@ def _pick(monkeypatch, **choice):
 
 
 async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(course, monkeypatch):
-    """2週間に締切が無くても「ない」だけで終わらせず、その先のいちばん近いものを添える（2026-09-26 21:40）。"""
+    """2週間に締切が無くても「ない」だけで終わらせず、その先のいちばん近いものを添える。"""
     assistant, slack, _, _ = course
     agent = assistant.agents["course"] = _due_agent({14: [], 400: DUES})
     _pick(monkeypatch, skill="list-due")
@@ -1383,7 +1378,7 @@ async def test_course_channel_adds_the_nearest_deadline_when_none_is_near(course
     ({"days": 365}, "一番締め切りが近い課題は？全期間で"),  # 拾えなくても、言い方で1件と分かる
 ])
 async def test_course_channel_answers_the_nearest_deadline_alone(course, monkeypatch, choice, text):
-    """「一番近い」に全部を並べない（2026-09-26 21:41、1年ぶん30件を並べていた）。"""
+    """「一番近い」と聞かれたら、いちばん近い1件だけを答える（1年ぶんを並べない）。"""
     assistant, slack, _, _ = course
     assistant.agents["course"] = _due_agent({365: DUES})
     _pick(monkeypatch, skill="list-due", params=dict(choice))
@@ -1402,7 +1397,7 @@ def test_first_items_keep_deadlines_at_the_same_time():
 
 
 async def test_an_expired_login_says_so_and_tells_the_improve_channel_once(course):
-    """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ（2026-09-27）。"""
+    """ログインが切れた担当は「接続に失敗」ではなく、そう言う。改善のチャンネルには入り直し方を1回だけ。"""
     assistant, slack, _, _ = course
     how = runner.login_help("claude", {"CLAUDE_CONFIG_DIR": "/Users/me/.claude-personal"})
     failed = {"is_error": True, "failure_kind": "login", "provider": "claude",
@@ -1463,7 +1458,7 @@ async def test_claude_runs_through_the_research_agent_when_configured(env, store
     """[a2a] research_url を書くと、claude は研究エージェント経由で動く（本体の中では動かさない）。"""
     assistant, slack, claude, _ = env
     agent = assistant.agents["research"] = _Agent(_ask_result(
-        {"text": _final("できたよ"), "session_id": "sess-7", "is_error": False}),
+        {"text": final_answer("できたよ"), "session_id": "sess-7", "is_error": False}),
         base_url="http://127.0.0.1:8788", activity="Bash: 図を描く")
 
     await mention(assistant, "図を作って", ts="13.1")

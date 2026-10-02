@@ -4,21 +4,19 @@ import json
 from datetime import datetime
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler
 
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C7": "2-course", "C9": "0-kei-agent"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
+    channels = {"C1": "vlm", "C5": "0-overview", "C7": "2-course", "C9": "0-kei-agent"}
+    assistant, slack = make_assistant(config, store, channels,
+                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack
 
 

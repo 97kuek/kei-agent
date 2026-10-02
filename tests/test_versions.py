@@ -1,14 +1,12 @@
-"""担当が古い版のまま動き続けないようにする（2026-09-26 に大学の担当で起きた）。"""
+"""担当が古い版のまま動き続けないようにする（起動のときに入れ直し、直らなければ知らせる）。"""
 
 from __future__ import annotations
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, make_assistant
 
 from kei_agent.conversation import startup_checks
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner, updates
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import version
 
 
@@ -25,10 +23,10 @@ class _Agent:
 
 @pytest.fixture
 def assistant(config, store, monkeypatch):
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     monkeypatch.setattr(version, "RUNNING", "new")
     monkeypatch.setattr(startup_checks, "STALE_RECHECK_SECONDS", 0)
-    made = Assistant(config, store, FakeSlack({}), JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    made, _ = make_assistant(config, store, {})
     made.troubles = []
 
     async def trouble(text):

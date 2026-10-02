@@ -1,22 +1,16 @@
 """流しながら受け取る口（stream）が、つながらない・壊れた行を呼ぶ側の失敗に揃えること。"""
 
-import socket
 
 import pytest
 from aiohttp import web
+from fakes import free_port
 
 from kei_agent.execution import a2a
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 async def test_stream_to_a_closed_port_is_not_reachable():
     """入れ直しの最中（ポートが閉じている）は、agents.ask がやり直せる NotReachable にする。"""
-    agent = a2a.Agent(f"http://127.0.0.1:{_free_port()}", timeout=5)
+    agent = a2a.Agent(f"http://127.0.0.1:{free_port()}", timeout=5)
     agent._rpc_url = agent.base_url + "/a2a"
 
     with pytest.raises(a2a.NotReachable):
@@ -38,7 +32,7 @@ async def huge_line_server():
     app.router.add_post("/a2a", rpc)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = _free_port()
+    port = free_port()
     site = web.TCPSite(runner, "127.0.0.1", port)
     await site.start()
     yield f"http://127.0.0.1:{port}"

@@ -1,14 +1,18 @@
 """テストで使う偽物。Slack・AI・Notion・ジョブの偽物は kei_agent.testing にある（モジュールを作る人も使う）。
-ここには、このリポジトリのテストだけが使うもの（GitHub・依頼のファイル・研究テーマ）を置く。
+ここには、このリポジトリのテストだけが使うもの（GitHub・依頼のファイル・研究テーマ・本物の HTTP で立てるサーバー）を置く。
 """
 
+import asyncio
+import contextlib
 import json
 import re
+import socket
+import subprocess
 from pathlib import Path
 
 from kei_agent.conversation import ask
 from kei_agent.execution.jobs import REQUESTS_DIR
-from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読めるように
+from kei_agent.testing.fakes import (  # noqa: F401  テストはここからまとめて読む
     FakeAI,
     FakeHub,
     FakeNotion,
@@ -19,8 +23,71 @@ from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読め
 )
 from kei_agent.workspaces import themes
 
-# 前の名前（AI の偽物は Claude でも Codex でも同じ）
-FakeClaude = FakeAI
+
+def make_assistant(config, store, channels: dict[str, str] | None = None, *, pueue=None, **kwargs):
+    """偽の Slack とジョブの列（pueue の偽物）で Assistant を作り、(assistant, slack) を返す。
+
+    `channels` は FakeSlack に渡すチャンネル ID と名前。ジョブの偽物をテストで見るときは `pueue` に渡す。
+    残りの引数（notion・hub・team_url など）は Assistant にそのまま渡す。
+    """
+    from kei_agent.conversation.assistant import Assistant
+    from kei_agent.execution.jobs import JobManager
+
+    slack = FakeSlack(channels or {})
+    jobs = JobManager(config, store, pueue if pueue is not None else FakePueue())
+    return Assistant(config, store, slack, jobs, "xoxb-test", "UBOT", **kwargs), slack
+
+
+def free_port() -> int:
+    """127.0.0.1 の空いているポート。"""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@contextlib.asynccontextmanager
+async def serving(app, port: int = 0):
+    """app を 127.0.0.1 に uvicorn で立て、立ち上がったら住所（`http://127.0.0.1:<port>`）を渡す。
+
+    port が 0 なら空いている番地に立てる。名刺に自分の住所を書くアプリは、先に free_port() で番地を決めて渡す。
+    """
+    import uvicorn
+
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(100):  # 立ち上がるまで待つ
+            if server.started:
+                break
+            await asyncio.sleep(0.05)
+        port = port or server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        await task
+
+
+def make_home(tmp_path: Path, text: str = "") -> Path:
+    """tmp_path の下に設定のフォルダ（home）を作り、text を config.toml として write_config で書く。"""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    write_config(home / "config.toml", text)
+    return home
+
+
+def home_action(action_id: str, user: str = "UME", **extra) -> dict:
+    """App Home のボタンや選択肢を押したときに Slack から届く中身。extra は action にそのまま入る。"""
+    return {"user": {"id": user}, "trigger_id": "trig", "actions": [{"action_id": action_id, **extra}]}
+
+
+def final_answer(text: str) -> str:
+    """AI の返事のうち、利用者に見せる答え（最後の答えの印で囲んだ部分）。"""
+    return f"<<kei-agent-final>>\n{text}\n<<kei-agent-final-end>>"
+
+
+def git(repo: Path, *args: str) -> str:
+    """repo で git を動かし、出力の前後の空白を除いて返す。失敗したら例外。"""
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 def write_request(cwd: Path, **payload) -> Path:

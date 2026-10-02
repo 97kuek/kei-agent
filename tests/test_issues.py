@@ -1,16 +1,13 @@
 """要望を、要約した公開の GitHub issue にする（自己改善のモジュールの issues.py）。"""
 
-import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakePueue, FakeSlack
+from fakes import git, make_assistant
 
 from kei_agent.api import AIError, contains_secret
 from kei_agent.configuration.config import AgentProfile
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent_modules.improve import issues
 
 # conftest がすべてのテストで偽物に差し替える前の、本物
@@ -108,7 +105,7 @@ async def test_the_summary_runs_read_only_with_the_improve_provider(config, stor
 
     monkeypatch.setattr(runner, "run_model", run_model)
     config = replace(config, agent_profiles={**config.agent_profiles, "improve": AgentProfile(provider="codex")})
-    assistant = Assistant(config, store, FakeSlack({}), JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, _ = make_assistant(config, store, {})
     await SUMMARIZE(assistant.cores["improve"].run_ai, REQUEST, contains_secret)
 
     request, = calls
@@ -148,10 +145,6 @@ async def test_summarize_refuses_when_the_ai_cannot_run(error):
 ])
 def test_repository_comes_from_the_origin_url(url, slug):
     assert issues.parse_slug(url) == slug
-
-
-def git(repo, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
 async def test_repo_slug_reads_the_origin_of_the_repository(tmp_path):

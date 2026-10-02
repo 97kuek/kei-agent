@@ -3,11 +3,9 @@ import time
 from datetime import date, datetime, timedelta
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, make_theme
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.scheduling import morning
 from kei_agent.scheduling import schedule as schedule_module
 from kei_agent.scheduling.calendar_sync import SyncReport
@@ -19,11 +17,10 @@ from kei_agent.workspaces import themes
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+    assistant, slack = make_assistant(config, store, {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"},
+                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack, claude
 
 
@@ -527,7 +524,7 @@ async def test_morning_text_puts_everything_on_one_timeline(env):
     text, detail, _ = await scheduler.morning_text(now)
 
     lines = text.splitlines()
-    # 帯と空き時間はやめた（2026-09-22）。時刻の一覧だけにする
+    # 朝の知らせは時刻の一覧だけ（帯や空き時間は出さない）
     assert lines[0].startswith("☀️")
     assert "10:00–10:15` 💼 朝会（Zoom）" in lines[1]
     assert "10:40–12:20` 🎓 データベース" in lines[2]

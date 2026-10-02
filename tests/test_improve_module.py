@@ -11,22 +11,16 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, git, make_assistant
 
 from kei_agent.configuration.config import AgentProfile
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import strip_lines
 from kei_agent.execution import guard, runner, updates
-from kei_agent.execution.jobs import JobManager
 from kei_agent.testing.kit import settle
 from kei_agent_modules.improve import issues
 from kei_agent_modules.improve import repo as improve_repo
 from kei_agent_modules.improve.module import HIDDEN
-
-
-def git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 @pytest.fixture
@@ -52,12 +46,11 @@ def repo(tmp_path):
 @pytest.fixture
 def env(config, store, repo, monkeypatch):
     config = replace(config, repo_root=repo)
-    slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     # 本体が外で回す全体のテスト（本物はこのテスト自身を回してしまう）
     monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(True, "テストは通った"))
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C9": "0-kei-agent", "C1": "vlm"})
     return assistant, slack, claude, config
 
 

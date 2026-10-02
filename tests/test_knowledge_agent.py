@@ -1,14 +1,13 @@
 """知識エージェント（朝の読みもの、論文の新着、その質問）。外の文を読む担当なので、読み方と選び方を細かく見る。"""
 
-import asyncio
 import io
 import json
-import socket
 import subprocess
 import urllib.error
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fakes import free_port, serving
 
 from kei_agent.execution import runner
 from kei_agent.execution.a2a import Agent
@@ -370,32 +369,17 @@ def test_only_the_offline_use_cases_lose_the_web():
 # 担当のサーバー
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 @pytest.fixture
 async def server(config, store):
-    import uvicorn
-
     from kei_agent.framework import modules
     from kei_agent_a2a import launch
     from kei_agent_modules.knowledge.agent import Executor
 
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    app = launch.build_app(modules.builtin()["knowledge"], base, TOKEN, executor=Executor(config, store))
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield base
-    server.should_exit = True
-    await task
+    port = free_port()
+    app = launch.build_app(modules.builtin()["knowledge"], f"http://127.0.0.1:{port}", TOKEN,
+                           executor=Executor(config, store))
+    async with serving(app, port) as base:
+        yield base
 
 
 async def test_card_lists_the_morning_jobs_and_refuses_a_digest_without_json(server):

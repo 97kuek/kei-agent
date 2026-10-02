@@ -1,7 +1,7 @@
 """モジュールの定義（module.toml）と、設定の modules（docs/extensibility.md）。"""
 
 import pytest
-from fakes import write_config
+from fakes import make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation import home
@@ -32,13 +32,6 @@ def _module(root, name, text, code=None):
     if code is not None:
         (root / name / "module.py").write_text(code, encoding="utf-8")
     return root / name
-
-
-def _config(tmp_path, text=""):
-    home_dir = tmp_path / "home"
-    home_dir.mkdir(exist_ok=True)
-    write_config(home_dir / "config.toml", text)
-    return home_dir
 
 
 def test_the_knowledge_module_is_described_by_its_definition():
@@ -85,7 +78,7 @@ def test_secrets_come_from_the_core_and_the_modules_that_are_on():
 
 
 def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
-    home_dir = _config(tmp_path)
+    home_dir = make_home(tmp_path)
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
@@ -98,7 +91,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
 
 
 def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_path):
-    home_dir = _config(tmp_path, 'modules = ["knowledge", "weather"]\n')
+    home_dir = make_home(tmp_path, 'modules = ["knowledge", "weather"]\n')
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == ("knowledge", "weather")
@@ -112,7 +105,7 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
 
 
 def test_turning_a_module_off_removes_what_it_brings(tmp_path):
-    config = load_config(env={"KEI_AGENT_HOME": str(_config(tmp_path, "modules = []\n"))})
+    config = load_config(env={"KEI_AGENT_HOME": str(make_home(tmp_path, "modules = []\n"))})
     assert config.modules == () and config.module_channels == {} and "knowledge" not in config.a2a.agents
     assert task_names(config) == ("night", "maintenance")
     assert "knowledge" not in home.agent_labels(config)
@@ -128,7 +121,7 @@ def test_turning_a_module_off_removes_what_it_brings(tmp_path):
      '[use_cases.cheap_answer]\nclaude = { model = "claude-2" }\n', "claude のモデル claude-2 は使えません"),
 ])
 def test_a_config_whose_modules_do_not_fit_is_refused(tmp_path, text, name, toml, message):
-    home_dir = _config(tmp_path, text)
+    home_dir = make_home(tmp_path, text)
     if name:
         folder = _module(home_dir / "modules", name, f'api = 1\nname = "{name}"\n{toml}',
                          SCHEDULE_ONLY if "[schedules" in toml else None)
@@ -144,7 +137,7 @@ WEATHER_SETTINGS = WEATHER + '[settings]\nplace = "東京"\nhours = 12\nalerts =
 
 def test_a_module_declares_its_settings_and_the_config_can_change_them(tmp_path):
     """書ける項目と既定は module.toml の [settings]。利用者は config.toml の、モジュールの名前の表で変える。"""
-    home_dir = _config(tmp_path, 'modules = ["weather"]\n\n[weather]\nplace = "早稲田"\n')
+    home_dir = make_home(tmp_path, 'modules = ["weather"]\n\n[weather]\nplace = "早稲田"\n')
     _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.settings("weather") == {"place": "早稲田", "hours": 12, "alerts": []}
@@ -162,14 +155,14 @@ def test_a_module_declares_its_settings_and_the_config_can_change_them(tmp_path)
 ])
 def test_module_settings_in_the_config_must_match_the_definition(tmp_path, text, message):
     """オフのモジュールの設定も確かめる（書き間違いを黙って無視しない）。"""
-    home_dir = _config(tmp_path, text)
+    home_dir = make_home(tmp_path, text)
     _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
     with pytest.raises(ConfigError, match=message):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
 
 def test_settings_stay_when_the_module_is_turned_off(tmp_path):
-    home_dir = _config(tmp_path, 'modules = []\n\n[weather]\nplace = "早稲田"\n\n[channels]\nwork = ["office"]\n')
+    home_dir = make_home(tmp_path, 'modules = []\n\n[weather]\nplace = "早稲田"\n\n[channels]\nwork = ["office"]\n')
     _module(home_dir / "modules", "weather", WEATHER_SETTINGS, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == () and config.settings("weather")["place"] == "早稲田"
@@ -276,7 +269,7 @@ def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
     pytest.importorskip("a2a", reason="担当プロセスは a2a-sdk で動く")
     from kei_agent_a2a import launch, server
 
-    home_dir = _config(tmp_path, 'modules = ["knowledge", "weather"]\n')
+    home_dir = make_home(tmp_path, 'modules = ["knowledge", "weather"]\n')
     _agent_module(home_dir / "modules")
     monkeypatch.setenv("KEI_AGENT_HOME", str(home_dir))
     started = []
@@ -309,7 +302,7 @@ def test_a_module_process_can_be_a_service_instead_of_an_agent(tmp_path, monkeyp
     pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
     from kei_agent_a2a import launch
 
-    home_dir = _config(tmp_path, 'modules = ["knowledge", "bridge"]\n')
+    home_dir = make_home(tmp_path, 'modules = ["knowledge", "bridge"]\n')
     text = 'api = 1\nname = "bridge"\n[process]\nport = 8803\nkind = "service"\n'
     folder = _module(home_dir / "modules", "bridge", text)
     with pytest.raises(ConfigError, match="service.py"):
@@ -345,7 +338,7 @@ def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch, capsys):
     pytest.importorskip("a2a", reason="共通のコマンドは kei_agent_a2a にある")
     from kei_agent_a2a import launch
 
-    home_dir = _config(tmp_path)
+    home_dir = make_home(tmp_path)
     folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
     (folder / "commands.py").write_text(
         "import argparse\n\nRAN = []\n\n\ndef setup(argv):\n    RAN.append(argv)\n\n\n"

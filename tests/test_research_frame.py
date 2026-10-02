@@ -7,12 +7,10 @@
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, make_assistant, make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import model_classifier, model_policy, runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.execution.model_policy import ModelPolicyError
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
@@ -68,13 +66,6 @@ def _lab(root, toml=LAB_TOML):
     return folder
 
 
-def _home(tmp_path, text=""):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return home
-
-
 # 用途の手動指定
 
 def test_a_manual_use_case_is_chosen_only_by_name(tmp_path):
@@ -120,7 +111,7 @@ async def test_the_classifier_never_picks_a_manual_use_case(tmp_path, config, st
 ])
 def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, message):
     """いちばん強いモデル（fable・astra）は手動指定の用途でしか書けない。自由な質問の既定にも手動指定は使えない。"""
-    home = _home(tmp_path, 'modules = ["lab"]\n')
+    home = make_home(tmp_path, 'modules = ["lab"]\n')
     _lab(home / "modules", LAB_TOML.replace(*change))
     with pytest.raises((ConfigError, modules.ModuleError), match=message):
         load_config(env={"KEI_AGENT_HOME": str(home)})
@@ -129,7 +120,7 @@ def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, mes
 # ほかのどれにも当たらないチャンネル
 
 def test_one_module_can_take_every_unclaimed_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["course", "lab"]\n')
+    home = make_home(tmp_path, 'modules = ["course", "lab"]\n')
     _lab(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "1-vlm-counting")
@@ -144,7 +135,7 @@ def test_one_module_can_take_every_unclaimed_channel(tmp_path):
 
 def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
     """受け持てるのは、オンのモジュールのうち1つだけ（研究をオフにすれば、自分のモジュールに受け持たせられる）。"""
-    home = _home(tmp_path, 'modules = ["lab", "lab2"]\n')
+    home = make_home(tmp_path, 'modules = ["lab", "lab2"]\n')
     _lab(home / "modules")
     other = home / "modules" / "lab2"
     other.mkdir()
@@ -158,7 +149,7 @@ def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
 
 # チャンネルの作業場での会話（core.work）
 
-class RecordingClaude(FakeClaude):
+class RecordingClaude(FakeAI):
     """どの担当・用途で動かしたかも覚える。"""
 
     async def __call__(self, config, request, prompt, on_activity=None):
@@ -175,10 +166,9 @@ def lab(config, store, tmp_path, monkeypatch):
     config = replace(config, modules=(*[name for name in config.modules if name != "research"], "lab"),
                      module_channels={**config.module_channels, "lab": ("*",)},
                      agent_profiles={**config.agent_profiles, "lab": config.agent_profiles["work"]})
-    slack = FakeSlack({"C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
     return assistant, slack, claude
 
 
@@ -225,11 +215,10 @@ def test_research_is_the_builtin_module_that_takes_theme_channels():
 
 async def test_without_a_module_for_themes_the_channel_is_told_so(config, store, monkeypatch):
     """研究をオフにすると、研究テーマのチャンネルでは答えない（受け持つモジュールが無いと伝える）。"""
-    slack = FakeSlack({"C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
     config = replace(config, modules=tuple(name for name in config.modules if name != "research"))
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
     await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
     await settle(assistant)
     assert claude.calls == [] and "受け持つモジュールがない" in slack.texts()[-1]

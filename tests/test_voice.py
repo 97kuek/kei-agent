@@ -173,7 +173,7 @@ def test_stopping_reports_how_much_was_actually_heard(monkeypatch):
 # 道具（tools.py）。依頼者のことは、こちらから渡すしかない
 
 def _held():
-    """本体が押してきたもの。**日付つき**（今日ぶんだけ渡していたのが前の欠陥）。"""
+    """本体が押してきたもの。**日付つき**（今日ぶんだけでなく、先の日の予定も渡る）。"""
     return {"schedule": {"items": [
         {"date": "2026-09-21", "at": "16:45", "icon": "🎓", "text": "情報通信ネットワークB"},
         {"date": "2026-09-21", "at": "10:40", "icon": "🎓", "text": "データベース"},
@@ -747,7 +747,7 @@ async def test_the_microphone_switch_and_the_conversation_is_not_written_down(co
     assert not (config.overview_dir / "voice").exists()
 
 
-# 直した欠陥
+# 本体との境目・マイク・つなぎ直し・知らせの順番
 
 async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
     """担当を呼べるのは本体だけ。声のレイヤは本体の `ask` に JSON で頼み、答えの文だけを受け取る。"""

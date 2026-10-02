@@ -1,17 +1,10 @@
 """モジュールのオン・オフ（`kei-agent module list / add / remove`。段階4の③）。"""
 
 import pytest
-from fakes import write_config
+from fakes import make_home
 
 from kei_agent.configuration import agents_table
 from kei_agent.operations import cli, module_command
-
-
-def _home(tmp_path, text):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return home
 
 
 def _stamp(home, requires=""):
@@ -41,7 +34,7 @@ def _change(home, name, on, calls=None, **kw):
 
 
 def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
-    home = _home(tmp_path, 'modules = ["research"]\n')
+    home = make_home(tmp_path, 'modules = ["research"]\n')
     before = (home / "agents.csv").read_text(encoding="utf-8")
     _stamp(home)
     calls = []
@@ -55,7 +48,7 @@ def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
 
 
 def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
-    home = _home(tmp_path, "")                          # 表が無い = 組み込みを全部使う
+    home = make_home(tmp_path, "")                          # 表が無い = 組み込みを全部使う
     calls = []
     assert _change(home, "voice", False, calls) == 0
     names = _on(home)
@@ -65,7 +58,7 @@ def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
 
 
 def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
-    home = _home(tmp_path, 'modules = ["course", "work"]\n')
+    home = make_home(tmp_path, 'modules = ["course", "work"]\n')
     assert _change(home, "research", True, launchd=False) == 0
     assert "deploy/install.sh research" in capsys.readouterr().out     # 登録は自分で
     assert set(_on(home)) == {"course", "research", "work"}
@@ -75,7 +68,7 @@ def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
 
 
 def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
-    home = _home(tmp_path, 'modules = ["notion", "stamp"]\n')
+    home = make_home(tmp_path, 'modules = ["notion", "stamp"]\n')
     _stamp(home, requires='"notion"')
     before = (home / "agents.csv").read_text(encoding="utf-8")
     assert _change(home, "notion", False) == 1
@@ -84,7 +77,7 @@ def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
 
 
 def test_a_broken_table_is_left_alone(tmp_path, capsys):
-    home = _home(tmp_path, "")
+    home = make_home(tmp_path, "")
     (home / "agents.csv").write_text("module,on\nresearch,true\n", encoding="utf-8")
     assert _change(home, "work", False) == 1
     assert "1行目" in capsys.readouterr().out
@@ -92,7 +85,7 @@ def test_a_broken_table_is_left_alone(tmp_path, capsys):
 
 
 def test_dry_run_unknown_and_already_on(tmp_path, capsys):
-    home = _home(tmp_path, 'modules = ["research"]\n')
+    home = make_home(tmp_path, 'modules = ["research"]\n')
     assert _change(home, "work", True, dry_run=True) == 0
     assert _on(home) == ["research"]
     assert _change(home, "nothing", True) == 1
@@ -102,7 +95,7 @@ def test_dry_run_unknown_and_already_on(tmp_path, capsys):
 
 
 def test_the_list_shows_what_each_module_brings(tmp_path, capsys):
-    home = _home(tmp_path, 'modules = ["research", "time"]\n')
+    home = make_home(tmp_path, 'modules = ["research", "time"]\n')
     _stamp(home)
     assert module_command.list_modules(env={"KEI_AGENT_HOME": str(home)}) == 0
     out = capsys.readouterr().out

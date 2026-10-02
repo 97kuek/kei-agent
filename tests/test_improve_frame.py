@@ -10,14 +10,12 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, make_assistant, make_home
 
 from kei_agent import api
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.execution import guard, runner, updates
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
@@ -79,14 +77,7 @@ def _fixer(root, toml=FIXER_TOML, code=FIXER_CODE):
     return folder
 
 
-def _home(tmp_path, text=""):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return home
-
-
-class RecordingClaude(FakeClaude):
+class RecordingClaude(FakeAI):
     """どの担当・用途・作業場で、書き込みを許して動かしたかも覚える。"""
 
     async def __call__(self, config, request, prompt, on_activity=None):
@@ -102,10 +93,9 @@ def env(config, store, tmp_path, monkeypatch):
     # 組み込みの自己改善は外す（Kei Agent のチャンネルを受け持てるのは1つだけ）
     config = replace(config, modules=(*[name for name in config.modules if name != "improve"], "fixer"),
                      agent_profiles={**config.agent_profiles, "fixer": config.agent_profiles["work"]})
-    slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
     claude = RecordingClaude()
     monkeypatch.setattr(runner, "run_model", claude)
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
+    assistant, slack = make_assistant(config, store, {"C9": "0-kei-agent", "C1": "vlm"})
     return assistant, slack, claude
 
 
@@ -118,7 +108,7 @@ def req(text="直して", ts="20.1"):
 # 本体のチャンネルの会話を受け持つ
 
 def test_a_module_takes_the_kei_agent_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["fixer"]\n')
+    home = make_home(tmp_path, 'modules = ["fixer"]\n')
     _fixer(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "0-kei-agent")
@@ -138,7 +128,7 @@ def test_only_known_core_channels_can_be_taken(tmp_path):
 
 
 def test_only_one_module_may_take_a_core_channel(tmp_path):
-    home = _home(tmp_path, 'modules = ["fixer", "fixer2"]\n')
+    home = make_home(tmp_path, 'modules = ["fixer", "fixer2"]\n')
     _fixer(home / "modules")
     other = _fixer(home / "modules" / "x", FIXER_TOML.replace('name = "fixer"', 'name = "fixer2"')
                    .replace("fixer_", "fixer2_"))

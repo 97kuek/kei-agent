@@ -4,11 +4,9 @@ import json
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant
 
-from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import a2a, runner
-from kei_agent.execution.jobs import JobManager
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
 from kei_agent.testing.kit import settle
@@ -68,10 +66,10 @@ def env(config, store, tmp_path, monkeypatch):
     modules.register_user_modules(root)
     config = replace(config, modules=(*config.modules, "memo"),
                      module_channels={**config.module_channels, "memo": ("memo",)})
-    slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C50": "5-memo"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
-    assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
-                          notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
+    channels = {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C50": "5-memo"}
+    assistant, slack = make_assistant(config, store, channels,
+                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack
 
 
