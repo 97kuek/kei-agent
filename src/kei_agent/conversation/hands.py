@@ -21,12 +21,14 @@ import asyncio
 import logging
 import secrets
 import time
+from contextlib import suppress
 from dataclasses import replace
 
 from kei_agent.conversation.auto_messages import today_line
 from kei_agent.conversation.response_output import OutputError, finalize_conversation
 from kei_agent.conversation.slack_text import AWAITING_MARKER
 from kei_agent.execution.execution_contract import prompt_version
+from kei_agent.execution.runner import FAILURE_LABELS
 from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.records import Records
@@ -140,21 +142,41 @@ class Hands:
             raise HandsError(f"{workspace} には頼めません（workspaces で頼める作業場を見てください）")
         if ws.module not in self.assistant.modules:
             raise HandsError(f"{workspace} を受け持つ担当がオフです")
+        if ws.kind in (ChannelKind.THEME, ChannelKind.PROJECT) and (ws.cwd is None or not ws.cwd.is_dir()):
+            # 打ち間違いで新しいテーマやプロジェクトのフォルダを作らない（作るのは Slack でチャンネルを作ったとき）
+            raise HandsError(f"{workspace} という作業場はありません（workspaces で頼める作業場を見てください）")
         profile = self.config.agent_profiles[ws.module]
         provider = engine or settings.selected_provider(self.config, self.assistant.store, ws.module)
         if provider not in profile.allowed_engines:
             raise HandsError(f"{workspace} で使える AI は {' / '.join(profile.allowed_engines) or 'まだ選ばれていません'}です"
                              "（agents.csv の engine・engines）")
+        if (until := self.assistant.store.limit_until(provider)) > time.time():
+            raise HandsError(f"{provider} は利用上限で止まっています（{_clock(until)} ごろに明ける）。"
+                             "ほかの AI が選べれば engine で選んでください")
         return ws, provider, spec.actor.use_case_for(weight)
 
     async def _work(self, ticket: str, ws, provider: str, use_case: str, request: str, conversation: str) -> dict:
+        """作業をして、結果を受付番号の記録に残す。どこで失敗しても、記録は failed にする（running のまま残さない）。"""
+        try:
+            # 同じ会話の続きは1つずつ（同時に動かすと、同じ会話が枝分かれして片方が消える）
+            async with self.assistant.thread_locks[(CHANNEL, conversation)]:
+                out = await self._run_once(ws, provider, use_case, request, conversation)
+        except Exception:
+            log.exception("手の口の作業に失敗しました")
+            out = {"status": "failed", "text": "作業に失敗しました（くわしくは Kei Agent のログ）",
+                   "conversation": conversation, "files": []}
+        self.records.update("ticket", ticket, **out)
+        return {**out, "ticket": ticket}
+
+    async def _run_once(self, ws, provider: str, use_case: str, request: str, conversation: str) -> dict:
         assistant, store = self.assistant, self.assistant.store
         actor = ws.module
         version = prompt_version(self.config, actor)
-        session_id = store.session_for(CHANNEL, conversation, actor, provider, version)
         run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "mcp")
+        result = None
         before: dict = {}
         try:
+            session_id = store.session_for(CHANNEL, conversation, actor, provider, version)
             async with assistant.semaphore:
                 if ws.kind in WORKSPACE_KINDS:
                     themes.ensure_workspace(ws)
@@ -163,24 +185,22 @@ class Hands:
                 result = await self._attempt(ws, provider, use_case, today_line() + request, session_id, conversation)
                 if result.session_missing:
                     result = await self._attempt(ws, provider, use_case, today_line() + request, None, conversation)
-        except Exception as e:
-            log.exception("手の口の作業に失敗しました")
-            store.end_run(run_id, is_error=True, cost_usd=None)
-            out = {"status": "failed", "text": f"作業に失敗しました: {type(e).__name__}", "conversation": conversation,
-                   "files": []}
-            self.records.update("ticket", ticket, **out)
-            return {**out, "ticket": ticket}
-        store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
+        finally:
+            store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None,
+                          **(result.recipe_fields() if result else {}))
+        if result.limit_reset_at is not None and result.provider:
+            # 上限に当たった。明けるまで、その provider を頼まない（Slack・定期処理とも同じ記録）
+            store.set_limit_until(result.provider, max(store.limit_until(result.provider),
+                                                       assistant.limit_until(result.limit_reset_at)))
         if not result.is_error and result.session_id:
             store.set_session(CHANNEL, conversation, actor, provider, result.session_id, version)
         files = []
         if ws.kind in WORKSPACE_KINDS and ws.cwd is not None:
-            files = [{"path": str(p.relative_to(ws.cwd)), "bytes": p.stat().st_size}
-                     for p in changed_files(before, snapshot_outputs(ws.cwd))]
-        out = {"status": _status(result), "text": _text(result), "conversation": conversation, "files": files,
-               "engine": result.provider or provider, "model": result.model or ""}
-        self.records.update("ticket", ticket, **out)
-        return {**out, "ticket": ticket}
+            for path in changed_files(before, snapshot_outputs(ws.cwd)):
+                with suppress(OSError, ValueError):
+                    files.append({"path": str(path.relative_to(ws.cwd)), "bytes": path.stat().st_size})
+        return {"status": _status(result), "text": _text(result), "conversation": conversation, "files": files,
+                "engine": result.provider or provider, "model": result.model or ""}
 
     async def _attempt(self, ws, provider: str, use_case: str, prompt: str, session_id: str | None, conversation: str):
         if ws.kind in WORKSPACE_KINDS:
@@ -201,6 +221,10 @@ class Hands:
         return {"ticket": ticket, **{k: v for k, v in found.items() if k != "started_at"}}
 
 
+def _clock(at: float) -> str:
+    return time.strftime("%H:%M", time.localtime(at))
+
+
 def _status(result) -> str:
     if result.is_error:
         return "failed"
@@ -210,10 +234,12 @@ def _status(result) -> str:
 def _text(result) -> str:
     """頭に見せる本文。AI の答えのうち、見せる部分（final の印の間）。失敗なら理由の短い文。"""
     if result.is_error:
-        reason = "; ".join(result.errors)[:300] if result.errors else "AI が答えませんでした"
-        if result.limit_reset_at:
-            reason = f"利用上限に当たりました（{time.strftime('%H:%M', time.localtime(result.limit_reset_at))} ごろに明ける）"
-        return reason
+        # 頭（外のサービス）には、決まった短い理由だけを返す（エラーの中身にはパスなどが入りうる。ログに残る）
+        if result.limit_reset_at is not None:
+            when = f"（{_clock(result.limit_reset_at)} ごろに明ける）" if result.limit_reset_at > time.time() else ""
+            return f"利用上限に当たりました{when}"
+        kind = FAILURE_LABELS.get(result.failure_kind or "", "")
+        return f"作業に失敗しました（{kind}）" if kind else "作業に失敗しました（AI が答えませんでした）"
     try:
         return finalize_conversation(result.text)
     except OutputError:

@@ -60,9 +60,10 @@ async def test_questions_come_back_as_needs_input_and_failures_as_failed(hands):
     h, claude = hands
     claude.answer(final_answer("どちらにする？\n❓ 確認: A と B のどちら？"))
     assert (await h.run("vlm", "直して"))["status"] == "needs_input"
-    claude.answer("", is_error=True, errors=["こわれた"])
+    claude.answer("", is_error=True, errors=["/Users/someone/secret.txt を読めない"])
     failed = await h.run("vlm", "直して")
-    assert failed["status"] == "failed" and "こわれた" in failed["text"]
+    # 頭（外のサービス）には、エラーの中身（パスなど）を渡さず、決まった短い理由だけ
+    assert failed["status"] == "failed" and "/Users" not in failed["text"] and "失敗" in failed["text"]
 
 
 async def test_a_long_run_returns_a_ticket_and_status_shows_the_result(hands, monkeypatch):
@@ -156,3 +157,47 @@ def test_the_tunnel_needs_the_door_and_a_tunnel_number(tmp_path):
         write_config(path, text)
         with pytest.raises(ConfigError, match=said):
             load_config(path, env={})
+
+
+async def test_a_mistyped_workspace_is_refused_without_making_a_folder(hands, config):
+    h, claude = hands
+    with pytest.raises(HandsError, match="作業場はありません"):
+        await h.run("vlm-typo", "まとめて")
+    assert not (config.research_root / "vlm-typo").exists() and claude.calls == []
+
+
+async def test_the_same_conversation_runs_one_at_a_time(hands, monkeypatch):
+    h, claude = hands
+    running, most = 0, 0
+
+    async def attempt(ws, provider, use_case, prompt, session_id, conversation):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return await original(ws, provider, use_case, prompt, session_id, conversation)
+
+    original = h._attempt
+    monkeypatch.setattr(h, "_attempt", attempt)
+    claude.answer(final_answer("1"))
+    claude.answer(final_answer("2"))
+    await asyncio.gather(h.run("vlm", "一", conversation="c-1"), h.run("vlm", "二", conversation="c-1"))
+    assert most == 1
+
+
+async def test_a_failure_anywhere_marks_the_ticket_failed(hands, monkeypatch):
+    h, _ = hands
+    monkeypatch.setattr(h.assistant.store, "session_for", lambda *a: (_ for _ in ()).throw(RuntimeError("db")))
+    out = await h.run("vlm", "まとめて")
+    assert out["status"] == "failed" and h.status(out["ticket"])["status"] == "failed"
+
+
+async def test_a_limit_is_recorded_and_later_runs_are_refused(hands):
+    h, claude = hands
+    # 明ける時刻の分からない上限（時刻を出さない。08:59 のような嘘の時刻にしない）
+    claude.answer("Claude AI usage limit reached", is_error=True)
+    out = await h.run("vlm", "まとめて")
+    assert out["status"] == "failed" and "08:59" not in out["text"] and "利用上限" in out["text"]
+    with pytest.raises(HandsError, match="利用上限"):
+        await h.run("vlm", "まとめて")
