@@ -1,7 +1,7 @@
 """App Home の操作で、空の選択が来ても落ちない。"""
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
@@ -12,7 +12,7 @@ from kei_agent.storage import settings
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     return Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT"), slack
 
 

@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack
 
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import a2a, runner
@@ -69,7 +69,7 @@ def env(config, store, tmp_path, monkeypatch):
     config = replace(config, modules=(*config.modules, "memo"),
                      module_channels={**config.module_channels, "memo": ("memo",)})
     slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C50": "5-memo"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack

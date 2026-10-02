@@ -8,7 +8,7 @@ from pathlib import Path
 
 from kei_agent.conversation import ask
 from kei_agent.execution.jobs import REQUESTS_DIR
-from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読めるように
+from kei_agent.testing.fakes import (  # noqa: F401  テストはここからまとめて読む
     FakeAI,
     FakeHub,
     FakeNotion,
@@ -18,9 +18,6 @@ from kei_agent.testing.fakes import (  # noqa: F401  前からの名前で読め
     check_notion_body,
 )
 from kei_agent.workspaces import themes
-
-# 前の名前（AI の偽物は Claude でも Codex でも同じ）
-FakeClaude = FakeAI
 
 
 def write_request(cwd: Path, **payload) -> Path:

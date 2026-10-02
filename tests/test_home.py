@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation import home
 from kei_agent.conversation.assistant import Assistant
@@ -15,7 +15,7 @@ from kei_agent.workspaces import themes
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C5": "research-overview"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")
     themes.ensure_workspace(themes.resolve(config, "vlm"))
     return assistant, slack

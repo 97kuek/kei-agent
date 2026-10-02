@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.configuration.config import AgentProfile
 from kei_agent.conversation.assistant import Assistant
@@ -53,7 +53,7 @@ def repo(tmp_path):
 def env(config, store, repo, monkeypatch):
     config = replace(config, repo_root=repo)
     slack = FakeSlack({"C9": "0-kei-agent", "C1": "vlm"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     # 本体が外で回す全体のテスト（本物はこのテスト自身を回してしまう）
     monkeypatch.setattr(improve_repo, "run_checks", lambda worktree: improve_repo.CommandResult(True, "テストは通った"))

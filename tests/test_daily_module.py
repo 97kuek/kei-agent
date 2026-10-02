@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
+from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack, make_theme
 from test_schedule import FakeCourseAgent, due_item
 
 from kei_agent.conversation.assistant import Assistant
@@ -53,7 +53,7 @@ def final(text: str) -> str:
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())

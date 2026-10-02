@@ -5,7 +5,7 @@
 
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import runner
@@ -16,7 +16,7 @@ from kei_agent.testing.kit import settle
 
 @pytest.fixture
 def env(config, store, monkeypatch):
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     assistant = Assistant(config, store, FakeSlack({"C1": "vlm"}), JobManager(config, store, FakePueue()),
                           "xoxb-test", "UBOT")
     told = []

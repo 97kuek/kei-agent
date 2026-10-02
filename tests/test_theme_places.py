@@ -10,7 +10,7 @@ import os
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeNotion, FakePueue, FakeSlack
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation.assistant import Assistant
@@ -144,7 +144,7 @@ def test_jobs_may_run_in_an_existing_theme_folder(home, tmp_path):
 @pytest.fixture
 def env(home, store, monkeypatch):
     slack = FakeSlack({"C1": "amr"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(home, store, slack, JobManager(home, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/")

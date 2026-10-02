@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack, write_config
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation.assistant import Assistant
@@ -78,7 +78,7 @@ def _brief(root, toml=BRIEF_TOML, code=BRIEF_CODE):
     return folder
 
 
-class RecordingClaude(FakeClaude):
+class RecordingClaude(FakeAI):
     async def __call__(self, config, request, prompt, on_activity=None):
         result = await super().__call__(config, request, prompt, on_activity)
         self.calls[-1].update(actor=request.recipe.actor, use_case=str(request.recipe.use_case),

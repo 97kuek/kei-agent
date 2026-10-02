@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation import assistant as assistant_module
 from kei_agent.conversation.assistant import Assistant
@@ -25,7 +25,7 @@ class _Agent:
 
 @pytest.fixture
 def assistant(config, store, monkeypatch):
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     monkeypatch.setattr(version, "RUNNING", "new")
     monkeypatch.setattr(assistant_module, "STALE_RECHECK_SECONDS", 0)
     made = Assistant(config, store, FakeSlack({}), JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")

@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.handoff import ACCEPT_ACTION, DECLINE_ACTION, handoff_title, split_memo, strip_handoff
@@ -18,7 +18,7 @@ from kei_agent.testing.kit import settle
 @pytest.fixture
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "vlm", "C9": "0-kei-agent"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(replace(config, handoff_after_turns=3), store, slack,
                           JobManager(config, store, FakePueue()), "xoxb-test", "UBOT")

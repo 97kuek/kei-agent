@@ -7,7 +7,7 @@
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, FakePueue, FakeSlack, write_config
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation.assistant import Assistant
@@ -158,7 +158,7 @@ def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
 
 # チャンネルの作業場での会話（core.work）
 
-class RecordingClaude(FakeClaude):
+class RecordingClaude(FakeAI):
     """どの担当・用途で動かしたかも覚える。"""
 
     async def __call__(self, config, request, prompt, on_activity=None):

@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakeNotion, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakeNotion, FakePueue, FakeSlack
 
 from kei_agent.conversation import router
 from kei_agent.conversation.assistant import Assistant
@@ -139,7 +139,7 @@ def env(config, store, tmp_path, monkeypatch):
                      module_channels={**config.module_channels, "calendar": ("calendar",)},
                      agent_profiles={**config.agent_profiles, "calendar": config.agent_profiles["work"]})
     slack = FakeSlack({"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C60": "6-calendar"})
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())

@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack, write_config
+from fakes import FakeAI, FakePueue, FakeSlack, write_config
 
 from kei_agent import api
 from kei_agent.configuration.config import ConfigError, load_config
@@ -86,7 +86,7 @@ def _home(tmp_path, text=""):
     return home
 
 
-class RecordingClaude(FakeClaude):
+class RecordingClaude(FakeAI):
     """どの担当・用途・作業場で、書き込みを許して動かしたかも覚える。"""
 
     async def __call__(self, config, request, prompt, on_activity=None):

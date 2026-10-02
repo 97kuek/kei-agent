@@ -47,7 +47,7 @@ async def _serve(executor):
         await task
 
 
-class FakeClaude:
+class FakeRunModel:
     """runner.run_model の代わり。経過を流してから結果を返す。"""
 
     def __init__(self, result: runner.RunResult):
@@ -69,7 +69,7 @@ async def server(config, monkeypatch):
     """研究エージェントを立てて、(住所, 偽の claude) を返す。"""
     from kei_agent_modules.research.agent import Executor
 
-    claude = FakeClaude(runner.RunResult(
+    claude = FakeRunModel(runner.RunResult(
         session_id="sess-9", text="できたよ", cost_usd=0.12,
         requested_domains=[("example.com", "データを取るため")]))
     monkeypatch.setattr(runner, "run_model", claude)

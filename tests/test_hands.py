@@ -10,7 +10,7 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from fakes import FakeClaude, FakePueue, FakeSlack
+from fakes import FakeAI, FakePueue, FakeSlack
 
 from kei_agent.conversation import hands as hands_module
 from kei_agent.conversation.assistant import Assistant
@@ -24,7 +24,7 @@ FINAL = "<<kei-agent-final>>\n{}\n<<kei-agent-final-end>>"
 
 @pytest.fixture
 def hands(config, store, monkeypatch):
-    claude = FakeClaude()
+    claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     config = replace(config, agent_profiles={**config.agent_profiles,
                                              "research": replace(config.agent_profiles["research"],

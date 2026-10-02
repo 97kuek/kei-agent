@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from fakes import FakeClaude, FakeHub, FakePueue, FakeSlack
+from fakes import FakeAI, FakeHub, FakePueue, FakeSlack
 from slack_sdk.errors import SlackApiError
 
 from kei_agent.conversation.assistant import Assistant
@@ -35,7 +35,7 @@ STOP = "kei_agent_module:time:stop"
 def env(config, store, monkeypatch):
     slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C3": "3-work", "C4": "2-linear-algebra",
                        "C9": "0-kei-agent"})
-    monkeypatch.setattr(runner, "run_model", FakeClaude())
+    monkeypatch.setattr(runner, "run_model", FakeAI())
     assistant = Assistant(config, store, slack, JobManager(config, store, FakePueue()), "xoxb-test", "UBOT",
                           team_url="https://example.slack.com/", hub=FakeHub())
     module = assistant.modules["time"]
