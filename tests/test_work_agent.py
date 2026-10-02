@@ -1,11 +1,10 @@
 """仕事のモジュール（modules/work/）: 担当プロセス（Outlook の予定）と、本体側の見せ方。"""
 
-import asyncio
 import json
-import socket
 from datetime import datetime
 
 import pytest
+from fakes import free_port, serving
 
 from kei_agent.execution.a2a import Agent
 from kei_agent_modules.work import module as work
@@ -23,12 +22,6 @@ EVENTS = [
     {"subject": "全社イベント", "start": "2026-09-25T00:00:00.0000000", "end": "2026-09-26T00:00:00.0000000",
      "location": "本社", "organizer": "総務", "all_day": True, "url": "", "id": "3"},
 ]
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def test_events_are_grouped_by_day():
@@ -57,8 +50,6 @@ def test_requested_period_preserves_tomorrow_intent():
 @pytest.fixture
 async def server(config, monkeypatch):
     """仕事エージェントを立てる（会社の連携は偽物）。"""
-    import uvicorn
-
     from kei_agent.framework import modules
     from kei_agent_a2a import launch
     from kei_agent_modules.work import connector
@@ -71,18 +62,10 @@ async def server(config, monkeypatch):
         return EVENTS
 
     monkeypatch.setattr(connector, "events", events)
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    app = launch.build_app(modules.builtin()["work"], base, TOKEN, executor=Executor(config))
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield base, asked
-    server.should_exit = True
-    await task
+    port = free_port()
+    app = launch.build_app(modules.builtin()["work"], f"http://127.0.0.1:{port}", TOKEN, executor=Executor(config))
+    async with serving(app, port) as base:
+        yield base, asked
 
 
 async def test_card_and_list_events_come_back_in_the_envelope(server, monkeypatch):

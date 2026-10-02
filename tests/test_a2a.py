@@ -3,11 +3,10 @@
 本物のサーバーを 127.0.0.1 に立てて、名刺を読み、仕事を頼んで、結果が返るところまでを見る。
 """
 
-import asyncio
 import json
-import socket
 
 import pytest
+from fakes import free_port, serving
 
 from kei_agent.execution.a2a import A2AError, Agent
 
@@ -31,32 +30,11 @@ def test_a2a_app_refuses_to_start_without_a_password(token):
         build_app("http://127.0.0.1:8787", token)
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-async def _serving(app, port):
-    """app を 127.0.0.1:port に立てて、立ち上がったら住所を渡す。"""
-    import uvicorn
-
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):  # 立ち上がるまで待つ
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    await task
-
-
 @pytest.fixture
 async def server():
     """大学エージェントを立てて、住所を返す。"""
-    port = _free_port()
-    async for base in _serving(build_app(f"http://127.0.0.1:{port}", TOKEN), port):
+    port = free_port()
+    async with serving(build_app(f"http://127.0.0.1:{port}", TOKEN), port) as base:
         yield base
 
 
@@ -67,7 +45,7 @@ async def stranger():
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route
 
-    port = _free_port()
+    port = free_port()
 
     async def card(request):
         # 名刺だけは読めるが、仕事の窓口は JSON を返さない
@@ -79,7 +57,7 @@ async def stranger():
 
     app = Starlette(routes=[Route("/.well-known/agent-card.json", card),
                             Route("/{path:path}", hello, methods=["GET", "POST"])])
-    async for base in _serving(app, port):
+    async with serving(app, port) as base:
         yield base
 
 

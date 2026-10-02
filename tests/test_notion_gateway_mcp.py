@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from fakes import FakeNotionAPI
+from fakes import FakeNotionAPI, serving
 from mcp import Client
 from test_notion_gateway import MASTER, area
 
@@ -243,14 +242,10 @@ async def test_long_answers_are_cut_with_a_note(tools, api, world):
 
 async def test_mcp_over_http_decides_the_client_from_the_token(api, world, gw_config):
     import httpx2
-    import uvicorn
     from mcp.client.streamable_http import streamable_http_client
 
     settings = load_gateway_config(gw_config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": MASTER, "NOTION_TOKEN": "ntn_x"})
     gateway = Gateway(api, settings.roots, logging.getLogger("kei-agent-notion-gateway"))
-    server = uvicorn.Server(uvicorn.Config(build_app(settings, gateway), host="127.0.0.1", port=0,
-                                           log_level="warning"))
-    serving = asyncio.create_task(server.serve())
 
     class Streams:
         def __init__(self, reader, writer):
@@ -266,25 +261,16 @@ async def test_mcp_over_http_decides_the_client_from_the_token(api, world, gw_co
         headers = {"Authorization": f"Bearer {gateway_client_token(MASTER, client)}"}
         async with (
             httpx2.AsyncClient(headers=headers) as http,
-            streamable_http_client(f"http://127.0.0.1:{port}/mcp", http_client=http) as (reader, writer),
+            streamable_http_client(f"{base}/mcp", http_client=http) as (reader, writer),
             Client(Streams(reader, writer)) as session,
         ):
             assert {tool.name for tool in (await session.list_tools()).tools} == TOOLS
             return await session.call_tool("read", {"target_id": target})
 
-    try:
-        for _ in range(200):
-            if server.started:
-                break
-            await asyncio.sleep(0.02)
-        port = server.servers[0].sockets[0].getsockname()[1]
+    async with serving(build_app(settings, gateway)) as base:
         assert not (await read_as("research", world.research.page)).is_error
         assert (await read_as("research", world.course.page)).is_error
         assert not (await read_as("course", world.course.page)).is_error
         async with httpx2.AsyncClient() as http:
-            master = await http.post(f"http://127.0.0.1:{port}/mcp", json={},
-                                     headers={"Authorization": f"Bearer {MASTER}"})
+            master = await http.post(f"{base}/mcp", json={}, headers={"Authorization": f"Bearer {MASTER}"})
         assert master.status_code == 401
-    finally:
-        server.should_exit = True
-        await serving

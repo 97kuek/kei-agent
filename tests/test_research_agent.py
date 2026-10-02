@@ -4,13 +4,11 @@
 claude そのものは動かさず、偽の runner に差し替える。
 """
 
-import asyncio
-import contextlib
 import json
-import socket
 from dataclasses import replace
 
 import pytest
+from fakes import free_port, serving
 
 from kei_agent.execution import agents, jobs, runner
 from kei_agent.execution.a2a import Agent
@@ -22,29 +20,13 @@ pytest.importorskip("uvicorn")
 TOKEN = "test-token"
 
 
-@contextlib.asynccontextmanager
-async def _serve(executor):
+def _serve(executor):
     """研究エージェントを 127.0.0.1 の空いている番地に立てて、住所を返す。"""
-    import uvicorn
-
     from kei_agent_a2a import launch
 
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    base = f"http://127.0.0.1:{port}"
-    app = launch.build_app(modules.builtin()["research"], base, TOKEN, executor=executor)
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    task = asyncio.create_task(server.serve())
-    for _ in range(100):
-        if server.started:
-            break
-        await asyncio.sleep(0.05)
-    try:
-        yield base
-    finally:
-        server.should_exit = True
-        await task
+    port = free_port()
+    return serving(launch.build_app(modules.builtin()["research"], f"http://127.0.0.1:{port}", TOKEN,
+                                    executor=executor), port)
 
 
 class FakeRunModel:

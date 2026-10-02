@@ -1,9 +1,12 @@
 """テストで使う偽物。Slack・AI・Notion・ジョブの偽物は kei_agent.testing にある（モジュールを作る人も使う）。
-ここには、このリポジトリのテストだけが使うもの（GitHub・依頼のファイル・研究テーマ）を置く。
+ここには、このリポジトリのテストだけが使うもの（GitHub・依頼のファイル・研究テーマ・本物の HTTP で立てるサーバー）を置く。
 """
 
+import asyncio
+import contextlib
 import json
 import re
+import socket
 from pathlib import Path
 
 from kei_agent.conversation import ask
@@ -32,6 +35,35 @@ def make_assistant(config, store, channels: dict[str, str] | None = None, *, pue
     slack = FakeSlack(channels or {})
     jobs = JobManager(config, store, pueue if pueue is not None else FakePueue())
     return Assistant(config, store, slack, jobs, "xoxb-test", "UBOT", **kwargs), slack
+
+
+def free_port() -> int:
+    """127.0.0.1 の空いているポート。"""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@contextlib.asynccontextmanager
+async def serving(app, port: int = 0):
+    """app を 127.0.0.1 に uvicorn で立て、立ち上がったら住所（`http://127.0.0.1:<port>`）を渡す。
+
+    port が 0 なら空いている番地に立てる。名刺に自分の住所を書くアプリは、先に free_port() で番地を決めて渡す。
+    """
+    import uvicorn
+
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(100):  # 立ち上がるまで待つ
+            if server.started:
+                break
+            await asyncio.sleep(0.05)
+        port = port or server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        await task
 
 
 def write_request(cwd: Path, **payload) -> Path:
