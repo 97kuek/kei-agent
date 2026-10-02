@@ -106,8 +106,6 @@ ACCOUNT_NOTION = "mcp__claude_ai_Notion"
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
 # config.example.toml は、新しく使う人の既定の柵（読ませない場所・接続先）になる。本物の設定はリポジトリの外
 PROTECTED_PATHS = ("src/kei_agent/execution/guard.py", "config.example.toml", "deploy/")
-# 依存するライブラリが変わる差分。取り込む前の確認で、いちばん上に出す
-DEPENDENCY_PATHS = ("pyproject.toml", "uv.lock")
 # 差分に入っていてはいけない文字列（秘密情報）
 SECRET_PATTERNS = (
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
@@ -214,7 +212,10 @@ def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
                 "strictAllowlist": True,
             },
             "filesystem": {
-                "allowWrite": [str(p) for p in config.allow_write],
+                # 書けるのは、書ける担当のときだけ（Codex の provider_permissions と同じ）。読むだけの担当は、
+                # コマンドからも作業場に書かない
+                "allowWrite": [str(p) for p in config.allow_write] if policy.files == "write" else [],
+                **({} if policy.files == "write" else {"denyWrite": [str(ws.cwd)]}),
                 # sandbox は既定で PC 全体を読めるので、秘密情報の置き場所を塞ぐ
                 "denyRead": [str(p) for p in denied_reads(config, policy.name)],
             },
@@ -223,9 +224,29 @@ def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
     }
 
 
+# 子プロセスに渡す環境変数（ここに無いものは渡さない）。鍵は名前の決まりが無いので、除く一覧ではなく渡す一覧にする
+# （GH_TOKEN・ANTHROPIC_API_KEY・AWS_*・SSH の鍵の窓口 SSH_AUTH_SOCK なども渡らない）
+PASSED_ENV = frozenset({
+    "HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "LANG", "TERM", "TZ", "__CF_USER_TEXT_ENCODING",
+    # コマンドの置き場所（pyenv・Volta・Homebrew・Xcode）
+    "PYENV_ROOT", "VOLTA_HOME", "HOMEBREW_PREFIX", "HOMEBREW_CELLAR", "HOMEBREW_REPOSITORY", "SDKROOT",
+    "COREPACK_ENABLE_AUTO_PIN",
+    # 社内の網の中継と証明書（あれば）
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+    # どのアカウントで動くか（フォルダの場所。担当ごとの値は runner.account_env が上書きする）
+    "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+    *KEPT_CLAUDE_ENV,
+})
+# KEI_AGENT_ は Kei Agent の場所の設定（KEI_AGENT_HOME など）。合言葉は下の決まりで除く
+PASSED_ENV_PREFIXES = ("LC_", "XDG_", "KEI_AGENT_")
+
+
 def strip_env(base: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in base.items() if k in KEPT_CLAUDE_ENV or not (
-        k.startswith(STRIPPED_ENV_PREFIXES) or _KEI_AGENT_SECRET_ENV.match(k))}
+    """子プロセスに渡す環境。渡す一覧にあるものだけ（Kei Agent の合言葉と、除く一覧に当たるものは、念のため重ねて除く）。"""
+    return {k: v for k, v in base.items()
+            if (k in PASSED_ENV or k.startswith(PASSED_ENV_PREFIXES))
+            and (k in KEPT_CLAUDE_ENV or not (k.startswith(STRIPPED_ENV_PREFIXES) or _KEI_AGENT_SECRET_ENV.match(k)))}
 
 
 # Kei Agent 自身の差分の確認（docs/architecture.md）
@@ -240,10 +261,6 @@ def changed_files(repo: Path, base: str, head: str) -> list[str]:
 
 def touches_protected(files: list[str]) -> list[str]:
     return [f for f in files if any(f == p or f.startswith(p) for p in PROTECTED_PATHS)]
-
-
-def touches_dependencies(files: list[str]) -> list[str]:
-    return [f for f in files if f in DEPENDENCY_PATHS]
 
 
 def check_change(repo: Path, base: str, head: str) -> list[str]:

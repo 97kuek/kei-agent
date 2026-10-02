@@ -588,3 +588,11 @@ async def test_codex_nonzero_exit_never_returns_its_completed_message(config, tm
 
     assert result.is_error and result.failure_kind == "runtime"
     assert result.text == ""
+
+
+def test_env_passes_only_what_the_cli_needs():
+    """鍵は名前の決まりが無いので、渡す一覧にあるものだけを渡す（GitHub・API の鍵、SSH の鍵の窓口は渡らない）。"""
+    env = guard.strip_env({"HOME": "/h", "PATH": "/bin", "LANG": "ja_JP.UTF-8", "LC_ALL": "C", "KEI_AGENT_HOME": "/k",
+                           "GH_TOKEN": "x", "GITHUB_TOKEN": "x", "ANTHROPIC_API_KEY": "x", "AWS_SECRET_ACCESS_KEY": "x",
+                           "SSH_AUTH_SOCK": "/tmp/agent", "S2_API_KEY": "x", "KEI_AGENT_HANDS_TOKEN": "x"})
+    assert env == {"HOME": "/h", "PATH": "/bin", "LANG": "ja_JP.UTF-8", "LC_ALL": "C", "KEI_AGENT_HOME": "/k"}

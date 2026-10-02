@@ -29,9 +29,13 @@ def _accounts(config, tmp_path):
                    module_folders={"workdev": tmp_path / "work"})
 
 
-def _contract(config, actor, provider):
+def _request(config, actor, provider):
     ws = themes.resolve(config, "vlm") if actor == "research" else themes.agent_workspace(config, actor)
-    return resolve_contract(config, runner.ExecutionRequest(ws, resolve(actor, provider, ACTORS[actor]), None, "C", "1"))
+    return runner.ExecutionRequest(ws, resolve(actor, provider, ACTORS[actor]), None, "C", "1")
+
+
+def _contract(config, actor, provider):
+    return resolve_contract(config, _request(config, actor, provider))
 
 
 @pytest.mark.parametrize("actor", ACTORS)
@@ -44,6 +48,30 @@ def test_claude_and_codex_deny_the_same_reads(config, tmp_path, actor):
     assert set(claude["sandbox"]["filesystem"]["denyRead"]) == expected
     codex = preflight(config, _contract(config, actor, "codex"), "codex_cli").filesystem
     assert expected <= {path for path, mode in codex.items() if mode == "deny"}
+
+
+@pytest.mark.parametrize("actor", ACTORS)
+def test_claude_and_codex_write_only_where_the_actor_may(config, tmp_path, actor):
+    """作業場の外に書かない。書けない担当は、Claude のコマンドからも作業場に書けない（Codex と同じ）。"""
+    config = replace(_accounts(config, tmp_path), allow_write=(tmp_path / "cache",))
+    contract = _contract(config, actor, "claude")
+    claude = guard.build_settings(config, contract.workspace, contract.policy)["sandbox"]["filesystem"]
+    codex = preflight(config, _contract(config, actor, "codex"), "codex_cli").filesystem
+    cwd = str(contract.workspace.cwd)
+    writable = {path for path, mode in codex.items() if mode == "write"}
+    if contract.policy.files == "write":
+        assert claude["allowWrite"] == [str(tmp_path / "cache")] and "denyWrite" not in claude
+        assert {cwd, str(tmp_path / "cache")} <= writable
+    else:
+        assert claude["allowWrite"] == [] and claude["denyWrite"] == [cwd]
+        assert writable == set()
+
+
+def test_no_actor_brings_in_the_account_user_settings(config):
+    """アカウントのユーザー設定（許可ルール・フック・MCP）は、連携を使う担当にも読ませない。"""
+    for actor in ("work", "course", "research"):
+        cmd = runner.build_command(config, _request(config, actor, "claude"))
+        assert cmd[cmd.index("--setting-sources") + 1] == ""
 
 
 def test_accounts_and_other_accounts_workspaces_are_never_readable(config, tmp_path):

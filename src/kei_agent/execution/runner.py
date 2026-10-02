@@ -159,9 +159,9 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
         "-p",
         "--output-format", "stream-json",
         "--verbose",
-        # アカウントの連携（Box・Microsoft 365）は、その担当のプロファイルのユーザー設定から読む。
-        # ほかの担当はユーザー設定（フックやプラグイン、広い許可ルール）を持ち込まない
-        "--setting-sources", "user" if policy.connectors else "",
+        # どの担当も、アカウントのユーザー設定（フック・プラグイン・広い許可ルール・MCP）を持ち込まない。
+        # アカウントの連携（Box・Microsoft 365）はログインに付いてくるので、設定を読まなくても使える
+        "--setting-sources", "",
         "--settings", json.dumps(guard.build_settings(config, ws, policy), ensure_ascii=False),
         "--permission-mode", "dontAsk",
     ]
@@ -172,6 +172,7 @@ def _build_claude_command(config: Config, ws: Workspace, session_id: str | None,
     if not policy.connectors:
         # ユーザーやプロジェクトの MCP も、アカウントの連携も読まない
         cmd.append("--strict-mcp-config")
+    # 連携を使う担当でも、使えるのは制限の表で許した道具だけ（ユーザー設定を読まないので、dontAsk がほかを断る）
     if contract.prompt_text:
         # --resume のときは効かない（会話を始めたときの版が残る）。版が変われば本体が会話を始め直す
         cmd += ["--append-system-prompt", contract.prompt_text]
