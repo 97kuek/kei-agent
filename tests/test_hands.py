@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 from dataclasses import replace
 
 import httpx
@@ -14,7 +15,7 @@ from fakes import FakeClaude, FakePueue, FakeSlack
 from kei_agent.conversation import hands as hands_module
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.hands import Hands, HandsError
-from kei_agent.conversation.hands_server import build_app
+from kei_agent.conversation.hands_server import build_app, build_mcp
 from kei_agent.execution import runner
 from kei_agent.execution.jobs import JobManager
 
@@ -115,3 +116,17 @@ async def test_the_door_checks_the_password(hands):
         assert (await client.post("/mcp", json=body, headers=headers)).status_code == 401
         wrong = await client.post("/mcp", json=body, headers={**headers, "authorization": "Bearer nope"})
         assert wrong.status_code == 401
+
+
+async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
+    """道具が別のスレッドで動くと、記録の SQLite が使えない（作ったスレッドでしか使えない）。"""
+    h, claude = hands
+    claude.answer(FINAL.format("済みました"))
+    mcp = build_mcp(h)
+
+    async def call(name, args):
+        return json.loads((await mcp.call_tool(name, args)).content[0].text)
+
+    ticket = (await call("run", {"workspace": "vlm", "request": "まとめて"}))["ticket"]
+    assert (await call("status", {"ticket": ticket}))["status"] == "done"
+    assert (await call("workspaces", {}))["workspaces"]
