@@ -702,6 +702,6 @@ def test_the_improve_module_takes_the_kei_agent_channel():
 
     spec = modules.builtin()["improve"]
     assert spec.core_channels == ("improve",) and spec.port is None
-    assert (spec.actor.files, spec.actor.shell, spec.actor.default_use_case) == ("write", True, "improve_design")
+    assert (spec.actor.data, spec.actor.default_use_case) == ("own", "improve_design")
     assert {u.name for u in spec.actor.use_cases} == {"improve_design", "improve_fix", "improve_issue"}
     assert (spec.path / spec.actor.prompt).name == "improve.md"

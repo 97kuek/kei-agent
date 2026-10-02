@@ -108,19 +108,32 @@ def _within_reach(config: Config, policy: AgentPolicy) -> AgentPolicy:
     return policy
 
 
-def prompt_version(config: Config, actor: str, workspace: Workspace | None = None) -> str:
+HEAD_PROMPT = "head.md"
+
+
+def with_head(config: Config, text: str) -> str:
+    """頭（ChatGPT・Dot）から頼まれた回の指示書。担当の指示書のあとに、頭への報告の書き方（prompts/head.md）を足す。"""
+    path = config.prompt_file(HEAD_PROMPT)
+    return f"{text.rstrip()}\n{path.read_text(encoding='utf-8')}" if path.is_file() else text
+
+
+def prompt_version(config: Config, actor: str, workspace: Workspace | None = None, *, for_head: bool = False) -> str:
     """その担当の会話の指示・skill の版。変わったら、古い会話を再開しない。"""
     policy = _within_reach(config, policy_of(actor))
     skills = (skill_dir(config, policy), *shared_skill_dirs(config, policy))
     if workspace is None:
-        return prompt_fingerprint(prompt_text(config, config.prompt_file(policy.prompt, module=policy.name)), *skills)
-    return prompt_fingerprint(prompt_text(config, prompt_path(config, policy, workspace), workspace.profile), *skills)
+        text = prompt_text(config, config.prompt_file(policy.prompt, module=policy.name))
+    else:
+        text = prompt_text(config, prompt_path(config, policy, workspace), workspace.profile)
+    return prompt_fingerprint(with_head(config, text) if for_head else text, *skills)
 
 
 def resolve_contract(config: Config, request: ExecutionRequest) -> ExecutionContract:
     read_only = is_read_only(request)
     policy = _within_reach(config, policy_of(request.recipe.actor, request.recipe.use_case, read_only=read_only))
     text = prompt_text(config, prompt_path(config, policy, request.workspace), request.workspace.profile)
+    if request.for_head:
+        text = with_head(config, text)
     skills = skill_dir(config, policy)
     shared = shared_skill_dirs(config, policy)
     return ExecutionContract(

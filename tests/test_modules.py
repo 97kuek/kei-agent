@@ -38,8 +38,9 @@ def test_the_knowledge_module_is_described_by_its_definition():
     spec = modules.builtin()["knowledge"]
     assert (spec.label, spec.port, spec.channels) == ("知識", 8792, {"knowledge": ("knowledge",)})
     assert [s.name for s in spec.schedules] == ["literature", "reading"]
-    offline = {u.name for u in spec.actor.use_cases if u.offline}
-    assert offline == {"knowledge_pick", "knowledge_summary"} and spec.actor.default_use_case == "knowledge_answer"
+    names = {u.name for u in spec.actor.use_cases}
+    assert {"knowledge_pick", "knowledge_summary"} <= names and spec.actor.default_use_case == "knowledge_answer"
+    assert spec.actor.data == "own"
 
 
 @pytest.mark.parametrize(("text", "message"), [

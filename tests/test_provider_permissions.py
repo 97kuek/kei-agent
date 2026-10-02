@@ -1,5 +1,4 @@
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -34,36 +33,39 @@ def test_codex_profile_carves_out_secret_reads_and_scopes_writes(config):
     assert profile.filesystem[":root"] == "read"
     assert profile.filesystem[str(denied_reads(config)[0])] == "deny"
     assert profile.filesystem[str(config.research_root / "vlm")] == "write"
-    assert profile.network_domains == {"export.arxiv.org": "allow"}
-    assert "features.network_proxy=true" in profile.config_overrides
+    # 自分のデータを読む研究のコマンドは、どこへでも出られる（接続先の一覧も通信の中継も使わない）
+    assert profile.network_open and profile.network_domains == {}
+    assert "permissions.kei_agent_scoped.network.enabled=true" in profile.config_overrides
+    assert not any("network.domains" in item or "network_proxy" in item for item in profile.config_overrides)
     assert 'permissions.kei_agent_scoped.extends=":read-only"' in profile.config_overrides
     assert "~/.codex" in DEFAULT_DENY_READ                         # Codex の認証の置き場所も既定で読ませない
     # 読むだけの回は、どこにも書けない
     assert "write" not in preflight(config, _contract(config, read_only=True), "codex_cli").filesystem.values()
 
 
-def test_codex_profile_rejects_disallowed_domain(config):
-    bad_config = replace(config, allowed_domains=("*",))
-    with pytest.raises(CapabilityUnavailable, match="domain"):
-        preflight(bad_config, _contract(bad_config), "codex_cli")
+def test_codex_profile_ignores_the_allowed_domains(config):
+    """接続先の一覧（config.toml とテーマで許可したもの）は、もう通信の範囲を決めない。"""
+    wide = replace(config, allowed_domains=("*",))
+    profile = preflight(wide, _contract(wide), "codex_cli")
+    assert profile.network_open and profile.network_domains == {}
 
 
-@pytest.mark.parametrize("agent,case", [("course", "course_explain"), ("work", "work_single_source")])
-def test_connector_agents_read_only_their_workspace_and_skills(config, agent, case):
-    """連携だけを使う担当は、個人のファイル（ホーム）を読めず、自分の作業場と skill を読むだけ。書き込みも通信もない。"""
+@pytest.mark.parametrize("agent,case,network", [("course", "course_explain", True),
+                                                 ("work", "work_single_source", False)])
+def test_connector_agents_write_their_workspace_and_reach_out_only_with_own_data(config, agent, case, network):
+    """連携を使う担当も、作業場に書けて、秘密情報の置き場所は読めない。コマンドの通信は、自分のデータを読む
+    担当（course）はどこへでも、会社のデータを読む担当（work）はどこへも出さない。"""
     workspace = themes.agent_workspace(config, agent)
     contract = resolve_contract(config, runner.ExecutionRequest(workspace, resolve(agent, "codex", case),
                                                                 None, "C1", "1.1"))
     profile = preflight(config, contract, "codex_cli")
 
-    # PC 全体を拒否すると Codex が起動できないので、システムは読めてホームは拒否する
     assert profile.filesystem[":root"] == "read"
-    assert profile.filesystem[str(Path.home())] == "deny"
-    assert profile.filesystem[str(workspace.cwd)] == "read"
-    assert profile.filesystem[str(contract.skill_dir)] == "read"
-    assert "write" not in profile.filesystem.values()
-    assert profile.network_domains == {}
-    assert "permissions.kei_agent_scoped.network.enabled=false" in profile.config_overrides
+    assert profile.filesystem[str(workspace.cwd)] == "write"
+    assert all(profile.filesystem[str(denied)] == "deny" for denied in denied_reads(config, agent))
+    assert profile.network_open is network and profile.network_domains == {}
+    enabled = "true" if network else "false"
+    assert f"permissions.kei_agent_scoped.network.enabled={enabled}" in profile.config_overrides
 
 
 def test_only_agents_with_commands_get_network_domains(config):

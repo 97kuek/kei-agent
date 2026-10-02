@@ -55,13 +55,16 @@ def test_a_project_keeps_kei_agent_files_out_of_its_git(tmp_path):
     assert not (theirs.cwd / "AGENTS.md").exists()
 
 
-def test_workdev_writes_code_with_the_work_account_but_never_reads_mail():
+def test_workdev_writes_code_with_the_work_account_but_never_goes_outside():
+    """workdev は会社のデータを読む実行役。作業場に書いてコマンドを使うが、Web もコマンドの通信も無い。"""
     spec = modules.builtin()["workdev"]
-    assert spec.prefixes == {"work-": "project"}
+    assert spec.prefixes == {"work-": "project"} and spec.actor.data == "company"
     policy = policy_of("workdev")
-    assert (policy.files, policy.shell, policy.web, policy.notion) == ("write", True, True, "none")
-    # 外の文（メール）と、コマンド・Web の外へ出す口を、1回の実行に揃えない
-    assert not policy.connectors and policy_of("work").connectors and not policy_of("work").shell
+    assert (policy.files, policy.shell, policy.web, policy.network, policy.notion) == (
+        "write", True, False, False, "none")
+    # 会社のデータを読む work も、外へ出る口を持たない（メールの連携は work だけ）
+    work = policy_of("work")
+    assert not policy.connectors and work.connectors and not work.web and not work.network
 
 
 def test_only_a_head_ending_in_a_dash_can_be_a_pattern(tmp_path):

@@ -28,9 +28,6 @@ core_channels = ["improve"]
 
 [actor]
 prompt = "fixer.md"
-files = "write"
-shell = true
-web = false
 default_use_case = "fixer_talk"
 
 [use_cases.fixer_talk]
@@ -40,7 +37,6 @@ claude = { model = "claude-sonnet-5", effort = "high" }
 claude = { model = "claude-sonnet-5", effort = "high" }
 
 [use_cases.fixer_summary]
-offline = true
 claude = { model = "claude-haiku-4-5" }
 '''
 

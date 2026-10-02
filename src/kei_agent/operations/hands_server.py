@@ -34,7 +34,9 @@ WELL_KNOWN = "/.well-known/"
 INSTRUCTIONS = (
     "Kei Agent の手。作業場（研究テーマ・プロジェクト・大学・仕事・知識）で Claude Code か Codex を動かす。"
     "まず workspaces で頼める作業場を見て、run で頼む。重さは light（抜き出し・要約）・normal（ふつうの作業）・"
-    "deep（設計・計画・厳密な見直し）。続きを頼むときは、前の結果の conversation を渡す。"
+    "deep（設計・計画・厳密な見直し）。比べる・絞るなど決まった仕事は use_case で名前で選べる。"
+    "仕事・仕事の開発（会社のデータ）は外へ出られないので、外の情報が要るなら頭が調べて request に入れる。"
+    "続きを頼むときは、前の結果の conversation を渡す。"
     "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
     "status が accepted なら、あとで status に ticket を渡して結果を見る。needs_input なら、本文の確認に答えて、"
     "同じ conversation で run する。担当・アカウント・届く範囲は作業場から決まり、変えられない"
@@ -48,19 +50,23 @@ def build_mcp(hands: Hands) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY,
               description="頼める作業場の一覧。name（run に渡す）・kind（研究テーマ・プロジェクト・担当）・"
-                          "agent（受け持つ担当）・engines（選べる AI）・weights（選べる重さ）")
+                          "agent（受け持つ担当）・engines（選べる AI）・weights（選べる重さ）・"
+                          "use_cases（名前で選べる用途。manual はいちばん強いモデルなど）・max_minutes（上限時間の最大）")
     async def workspaces() -> dict[str, Any]:
         return {"workspaces": hands.workspaces()}
 
     @mcp.tool(description="作業場で AI を動かす。workspace は workspaces の name、request は頼みごと、"
                           "weight は light・normal・deep、engine は claude・codex（空なら作業場の既定）、"
                           "conversation は続きを頼むときの番号（空なら新しい会話）。"
-                          "返すのは status（done・needs_input・failed・accepted）・text・conversation・"
+                          "use_case は重さの代わりに用途を名前で選ぶとき（workspaces の use_cases）、"
+                          "read_only は読むだけで書かない・動かさないとき、minutes は上限時間（workspaces の max_minutes まで）。"
+                          "返すのは status（done・needs_input・failed・accepted）・text（頭への報告）・conversation・"
                           "files（作業場の outputs にできたファイル）・ticket")
     async def run(workspace: str, request: str, weight: str = "normal", engine: str = "",
-                  conversation: str = "") -> dict[str, Any]:
+                  conversation: str = "", use_case: str = "", read_only: bool = False,
+                  minutes: int = 0) -> dict[str, Any]:
         try:
-            return await hands.run(workspace, request, weight, engine, conversation)
+            return await hands.run(workspace, request, weight, engine, conversation, use_case, read_only, minutes)
         except HandsError as e:
             raise ToolError(str(e)) from None
 

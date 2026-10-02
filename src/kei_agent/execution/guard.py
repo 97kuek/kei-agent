@@ -172,7 +172,8 @@ def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> di
     if policy.files == "write":
         allow.append(_abs_rule("Edit", ws.cwd))
     if policy.shell:
-        allow.append("Bash")
+        # 手分け（サブエージェント）も、同じ制限の中で動く
+        allow += ["Bash", *SUBAGENT_TOOLS]
     if policy.web:
         allow += ["WebSearch", "WebFetch"]
     if policy.plugin:
@@ -192,7 +193,7 @@ def claude_permissions(config: Config, ws: Workspace, policy: AgentPolicy) -> di
             *(() if policy.shell else ("Bash",)),
             *(() if policy.web else ("WebSearch", "WebFetch")),
             *(() if policy.plugin else ("Skill",)),
-            *SUBAGENT_TOOLS,
+            *(() if policy.shell else SUBAGENT_TOOLS),
             # Notion はゲートウェイだけ。アカウントに付いた Notion 連携は、どの担当にも使わせない
             ACCOUNT_NOTION]
     return {"allow": allow, "deny": deny}
@@ -207,10 +208,9 @@ def build_settings(config: Config, ws: Workspace, policy: AgentPolicy) -> dict:
             "failIfUnavailable": True,
             "autoAllowBashIfSandboxed": True,
             "allowUnsandboxedCommands": False,
-            "network": {
-                "allowedDomains": list(dict.fromkeys(config.allowed_domains + ws.allowed_domains)),
-                "strictAllowlist": True,
-            },
+            # コマンドの通信。外へ出てよい実行役（自分のデータ）はどこへでも、会社のデータを読む実行役はどこへも出さない
+            "network": ({"allowedDomains": [], "strictAllowlist": False} if policy.network
+                        else {"allowedDomains": [], "strictAllowlist": True}),
             "filesystem": {
                 # 書けるのは、書ける担当のときだけ（Codex の provider_permissions と同じ）。読むだけの担当は、
                 # コマンドからも作業場に書かない

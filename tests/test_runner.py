@@ -62,7 +62,8 @@ def test_settings_limit_theme_to_its_directory_and_block_secrets(config):
     assert f"Edit(/{ws.cwd}/**)" in allow
     assert settings["sandbox"]["enabled"] is True
     assert settings["sandbox"]["allowUnsandboxedCommands"] is False
-    assert settings["sandbox"]["network"]["allowedDomains"] == ["export.arxiv.org"]
+    # 自分のデータを読む研究のコマンドは、どこへでも出られる
+    assert settings["sandbox"]["network"] == {"allowedDomains": [], "strictAllowlist": False}
     filesystem = settings["sandbox"]["filesystem"]
     assert filesystem["denyRead"] == [str(p) for p in guard.denied_reads(config)]
     assert filesystem["allowWrite"] == [str(p) for p in config.allow_write]
@@ -74,11 +75,13 @@ def test_settings_limit_theme_to_its_directory_and_block_secrets(config):
     assert "mcp__claude_ai_Notion" in deny
 
 
-def test_settings_add_domains_allowed_for_the_theme(config):
-    """Slack で許可した接続先は、基本の接続先に足して使う。"""
+def test_settings_network_follows_the_data_not_the_theme_domains(config):
+    """コマンドの通信は線で決まる。テーマで許可した接続先は効かず、会社のデータを読む担当はどこへも出さない。"""
     ws = replace(themes.resolve(config, "vlm"), allowed_domains=("zenodo.org",))
-    domains = guard.build_settings(config, ws, policy_of("research"))["sandbox"]["network"]["allowedDomains"]
-    assert domains == ["export.arxiv.org", "zenodo.org"]
+    network = guard.build_settings(config, ws, policy_of("research"))["sandbox"]["network"]
+    assert network == {"allowedDomains": [], "strictAllowlist": False}
+    company = guard.build_settings(config, ws, policy_of("workdev"))["sandbox"]["network"]
+    assert company == {"allowedDomains": [], "strictAllowlist": True}
 
 
 def test_settings_overview_reads_all_themes_but_writes_only_overview(config):
@@ -265,16 +268,15 @@ def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
     assert all(value == {"enabled": True} for value in tools.values())
 
 
-def test_codex_turns_off_tools_that_claude_agents_do_not_have(config):
-    """サブエージェント・画像の生成・プラグインの導入は、どの担当にも渡さない。画像を開くのはファイルを読む担当だけ。"""
+def test_codex_turns_off_only_plugin_suggestions(config):
+    """プラグインの導入の依頼だけは、どの担当にも渡さない。サブエージェント・画像の生成・画像を開く道具は使える。"""
     def disabled(command):
         return {command[i + 1] for i, arg in enumerate(command) if arg == "--disable"}
 
     research = runner.build_command(config, request(config, provider="codex"))
     course = runner.build_command(config, request(config, actor="course", provider="codex", use_case="course_explain"))
 
-    assert set(runner.CODEX_OFF_FEATURES) <= disabled(research) and "view_image" not in disabled(research)
-    assert set(runner.CODEX_OFF_FEATURES) | {"view_image"} <= disabled(course)
+    assert disabled(research) == disabled(course) == {"tool_suggest"}
 
 
 def test_apply_codex_events_maps_thread_message_and_activities():

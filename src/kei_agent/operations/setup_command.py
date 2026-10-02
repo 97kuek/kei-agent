@@ -53,7 +53,6 @@ ABOUT = (("所属", "例: ○○大学 ○○学部の学生"), ("研究", "例:
 # 本体の秘密情報の値の頭（取り違えやすいので確かめる）
 PREFIXES = {"SLACK_BOT_TOKEN": ("xoxb-",), "SLACK_APP_TOKEN": ("xapp-",), "KEI_AGENT_ALLOWED_USER_ID": ("U", "W")}
 # 実行役ができること（module.toml の [actor] の files・notion）の言い方
-FILE_WORDS = {"read": "ファイルを読む", "write": "ファイルに書く"}
 NOTION_WORDS = {"read": "Notion を読む", "write": "Notion に書く"}
 INTRO = """Kei Agent のはじめの設定。質問に答えると、{home} に次のものを作る:
   profile.md（話し方とあなたのこと）、agents.csv（使うモジュールと AI）、config.toml（置き場所など）、secrets/（秘密情報）
@@ -137,7 +136,7 @@ def abilities(spec: modules.ModuleSpec) -> str:
     parts = []
     actor = spec.actor
     if actor is not None:
-        can = [FILE_WORDS.get(actor.files, ""), "コマンド" if actor.shell else "", "Web" if actor.web else "",
+        can = ["ファイル・コマンド", "Web" if actor.data != "company" else "外へは出ない（会社のデータ）",
                NOTION_WORDS.get(actor.notion, ""),
                f"連携（{'・'.join(c.name for c in actor.connectors)}）" if actor.connectors else ""]
         parts.append("AI: " + ("・".join(c for c in can if c) or "渡した材料だけ"))

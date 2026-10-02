@@ -81,7 +81,8 @@ async def execute(config: Config, ws: Workspace, ask: dict, updater: TaskUpdater
         config,
         runner.ExecutionRequest(
             ws, recipe, ask.get("session_id"), ask.get("channel", ""), ask.get("thread_ts", ""),
-            read_only=bool(ask.get("read_only")),
+            read_only=bool(ask.get("read_only")), for_head=bool(ask.get("for_head")),
+            timeout_minutes=int(ask["timeout_minutes"]) if ask.get("timeout_minutes") else None,
         ),
         ask["prompt"], on_activity=on_activity,
     )

@@ -22,7 +22,7 @@ import logging
 import secrets
 import time
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from kei_agent.conversation.auto_messages import today_line
 from kei_agent.conversation.response_output import OutputError, finalize_conversation
@@ -46,6 +46,16 @@ SHORT_SECONDS = 20
 KEEP_DAYS = 7
 # 作業場を本体に持つ種類（研究テーマ・プロジェクト・研究全体）。ほかは担当のプロセスに頼む
 WORKSPACE_KINDS = (ChannelKind.THEME, ChannelKind.PROJECT, ChannelKind.OVERVIEW)
+
+
+@dataclass(frozen=True)
+class Plan:
+    """受け付けた頼みごとの中身（作業場・AI・用途・読むだけ・上限時間）。"""
+    ws: object
+    provider: str
+    use_case: str
+    read_only: bool = False
+    minutes: int | None = None
 
 
 class HandsError(ValueError):
@@ -106,20 +116,33 @@ class Hands:
         what = {ChannelKind.THEME: "研究テーマ", ChannelKind.PROJECT: "プロジェクト"}.get(ws.kind, "担当")
         return {"name": ws.channel_name, "kind": what, "agent": spec.label,
                 "engines": list(self.config.agent_profiles[ws.module].allowed_engines),
-                "weights": list(modules.WEIGHTS)}
+                "weights": list(modules.WEIGHTS),
+                # 重さの代わりに名前で選べる用途（manual は、いちばん強いモデルなど、名前でだけ選ぶもの）
+                "use_cases": [{"name": u.name, "manual": u.manual} for u in spec.actor.use_cases],
+                "max_minutes": self._max_minutes(ws, spec)}
+
+    def _max_minutes(self, ws, spec) -> int:
+        """頭が決められる上限時間（分）。担当の上限と config.toml の上限の、長いほう。"""
+        own = ws.timeout_minutes or spec.actor.timeout_minutes or self.config.run_timeout_minutes
+        return max(own, self.config.run_timeout_minutes)
 
     # 頼む
 
     async def run(self, workspace: str, request: str, weight: str = "normal", engine: str = "",
-                  conversation: str = "") -> dict:
-        """作業場で AI を動かす。短ければ答えを、長ければ受付番号を返す。受け付けられなければ HandsError。"""
-        ws, provider, use_case = self._plan(workspace, request, weight, engine)
+                  conversation: str = "", use_case: str = "", read_only: bool = False,
+                  minutes: int = 0) -> dict:
+        """作業場で AI を動かす。短ければ答えを、長ければ受付番号を返す。受け付けられなければ HandsError。
+
+        use_case を渡せば重さより先に使う（workspaces の use_cases の名前）。read_only なら、書く・動かす・通信する
+        手段を外す。minutes は上限時間（workspaces の max_minutes まで。0 なら担当の既定）。
+        """
+        plan = self._plan(workspace, request, weight, engine, use_case, read_only, minutes)
         conversation = conversation or f"c-{secrets.token_hex(6)}"
         ticket = f"t-{secrets.token_hex(6)}"
-        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "workspace": ws.channel_name,
+        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "workspace": plan.ws.channel_name,
                                             "conversation": conversation, "started_at": time.time()},
                          keep_days=KEEP_DAYS)
-        task = asyncio.create_task(self._work(ticket, ws, provider, use_case, request, conversation))
+        task = asyncio.create_task(self._work(ticket, plan, request, conversation))
         self._tasks[ticket] = task
         task.add_done_callback(lambda _: self._tasks.pop(ticket, None))
         done, _ = await asyncio.wait({task}, timeout=SHORT_SECONDS)
@@ -128,7 +151,8 @@ class Hands:
         return {"status": "accepted", "ticket": ticket, "conversation": conversation,
                 "text": "受け付けました。終わったら status で結果を見てください"}
 
-    def _plan(self, workspace: str, request: str, weight: str, engine: str):
+    def _plan(self, workspace: str, request: str, weight: str, engine: str, use_case: str = "",
+              read_only: bool = False, minutes: int = 0) -> Plan:
         if not request.strip():
             raise HandsError("頼みごとが空です")
         if weight not in modules.WEIGHTS:
@@ -153,14 +177,20 @@ class Hands:
         if (until := self.assistant.store.limit_until(provider)) > time.time():
             raise HandsError(f"{provider} は利用上限で止まっています（{_clock(until)} ごろに明ける）。"
                              "ほかの AI が選べれば engine で選んでください")
-        return ws, provider, spec.actor.use_case_for(weight)
+        names = {u.name for u in spec.actor.use_cases}
+        if use_case and use_case not in names:
+            raise HandsError(f"{workspace} の用途は {' / '.join(sorted(names))} のどれかです（workspaces の use_cases）")
+        top = self._max_minutes(ws, spec)
+        if minutes and not 1 <= minutes <= top:
+            raise HandsError(f"minutes は 1〜{top} 分にしてください")
+        return Plan(ws, provider, use_case or spec.actor.use_case_for(weight), bool(read_only), minutes or None)
 
-    async def _work(self, ticket: str, ws, provider: str, use_case: str, request: str, conversation: str) -> dict:
+    async def _work(self, ticket: str, plan: Plan, request: str, conversation: str) -> dict:
         """作業をして、結果を受付番号の記録に残す。どこで失敗しても、記録は failed にする（running のまま残さない）。"""
         try:
             # 同じ会話の続きは1つずつ（同時に動かすと、同じ会話が枝分かれして片方が消える）
             async with self.assistant.thread_locks[(CHANNEL, conversation)]:
-                out = await self._run_once(ws, provider, use_case, request, conversation)
+                out = await self._run_once(plan, request, conversation)
         except Exception:
             log.exception("手の口の作業に失敗しました")
             out = {"status": "failed", "text": "作業に失敗しました（くわしくは Kei Agent のログ）",
@@ -168,10 +198,11 @@ class Hands:
         self.records.update("ticket", ticket, **out)
         return {**out, "ticket": ticket}
 
-    async def _run_once(self, ws, provider: str, use_case: str, request: str, conversation: str) -> dict:
+    async def _run_once(self, plan: Plan, request: str, conversation: str) -> dict:
         assistant, store = self.assistant, self.assistant.store
+        ws, provider = plan.ws, plan.provider
         actor = ws.module
-        version = prompt_version(self.config, actor)
+        version = prompt_version(self.config, actor, for_head=True)
         run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "mcp")
         # 会話を作業場に結び付けておく（AI が頼んだ研究のジョブを、この作業場のものとして受け付けるため）
         store.upsert_thread(CHANNEL, conversation, ws.channel_name, None)
@@ -184,9 +215,9 @@ class Hands:
                     themes.ensure_workspace(ws)
                     ws = replace(ws, allowed_domains=tuple(settings.theme_domains(store, ws.channel_name)))
                     before = snapshot_outputs(ws.cwd) if ws.cwd is not None else {}
-                result = await self._attempt(ws, provider, use_case, today_line() + request, session_id, conversation)
+                result = await self._attempt(replace(plan, ws=ws), today_line() + request, session_id, conversation)
                 if result.session_missing:
-                    result = await self._attempt(ws, provider, use_case, today_line() + request, None, conversation)
+                    result = await self._attempt(replace(plan, ws=ws), today_line() + request, None, conversation)
         finally:
             store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None,
                           **(result.recipe_fields() if result else {}))
@@ -204,12 +235,12 @@ class Hands:
         return {"status": _status(result), "text": _text(result), "conversation": conversation, "files": files,
                 "engine": result.provider or provider, "model": result.model or ""}
 
-    async def _attempt(self, ws, provider: str, use_case: str, prompt: str, session_id: str | None, conversation: str):
-        if ws.kind in WORKSPACE_KINDS:
-            return await self.assistant.run_agent(ws, prompt, session_id, CHANNEL, conversation,
-                                                  provider=provider, use_case=use_case)
-        return await self.assistant.ask_agent(ws.module, prompt, session_id, CHANNEL, conversation,
-                                              provider=provider, use_case=use_case)
+    async def _attempt(self, plan: Plan, prompt: str, session_id: str | None, conversation: str):
+        options = {"provider": plan.provider, "use_case": plan.use_case, "read_only": plan.read_only,
+                   "for_head": True, "timeout_minutes": plan.minutes}
+        if plan.ws.kind in WORKSPACE_KINDS:
+            return await self.assistant.run_agent(plan.ws, prompt, session_id, CHANNEL, conversation, **options)
+        return await self.assistant.ask_agent(plan.ws.module, prompt, session_id, CHANNEL, conversation, **options)
 
     # 様子
 

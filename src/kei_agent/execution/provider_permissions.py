@@ -28,20 +28,20 @@ class PermissionProfile:
     filesystem: dict[str, str]
     network_domains: dict[str, str]
     config_overrides: tuple[str, ...]
+    # コマンドの通信がどこへでも出られるか
+    network_open: bool = False
 
 
 def _toml_map(values: dict[str, str]) -> str:
     return "{" + ",".join(f"{json.dumps(key)}={json.dumps(value)}" for key, value in values.items()) + "}"
 
 
-def _overrides(filesystem: dict[str, str], network_domains: dict[str, str]) -> tuple[str, ...]:
+def _overrides(filesystem: dict[str, str], network_open: bool) -> tuple[str, ...]:
     return (
         f'default_permissions={json.dumps(PROFILE_NAME)}',
         f'permissions.{PROFILE_NAME}.extends=":read-only"',
         f"permissions.{PROFILE_NAME}.filesystem={_toml_map(filesystem)}",
-        f"permissions.{PROFILE_NAME}.network.enabled={'true' if network_domains else 'false'}",
-        f"permissions.{PROFILE_NAME}.network.domains={_toml_map(network_domains)}",
-        "features.network_proxy=true",
+        f"permissions.{PROFILE_NAME}.network.enabled={'true' if network_open else 'false'}",
     )
 
 
@@ -82,16 +82,13 @@ def preflight(config: Config, contract: ExecutionContract, runtime: Runtime,
     if contract.workspace.cwd is None:
         raise CapabilityUnavailable("workspace path is missing")
 
-    # 接続先の許可はコマンド（sandbox の中の Bash）にだけ効く。コマンドを持たない担当には通信させない
-    domains = (tuple(dict.fromkeys((*config.allowed_domains, *contract.workspace.allowed_domains)))
-               if contract.policy.shell else ())
-    if any(not guard.valid_domain(domain, allow_wildcard=True) for domain in domains):
-        raise CapabilityUnavailable("domain allowlist contains an unsupported pattern")
-    network_domains = {domain: "allow" for domain in domains}
+    # コマンドの通信。外へ出てよい実行役（自分のデータ）はどこへでも、会社のデータを読む実行役はどこへも出さない
+    network_open = contract.policy.network and contract.policy.shell
+    network_domains: dict[str, str] = {}
     filesystem = _filesystem(config, contract)
 
     if "mcp.allowlist" in contract.capabilities and not config.notion_gateway_url:
         raise CapabilityUnavailable("Notion gateway is not configured")
     if runtime == "claude_cli":
-        return PermissionProfile(filesystem, network_domains, ())
-    return PermissionProfile(filesystem, network_domains, _overrides(filesystem, network_domains))
+        return PermissionProfile(filesystem, network_domains, (), network_open)
+    return PermissionProfile(filesystem, network_domains, _overrides(filesystem, network_open), network_open)

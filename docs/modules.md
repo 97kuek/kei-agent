@@ -40,7 +40,6 @@ uv run kei-agent doctor                                 # 確かめる
 - 同じフォルダのファイルは `from . import texts` のように読める
 - 枠の版は `api = 1`。合わない版のモジュールは読み込まない
 - できること（`[actor]` の `files`・`shell`・`web`・`notion`・連携の道具）を超えることは、コアが実行のときに止める
-- 外の文（記事・論文）を材料に渡す用途は `offline = true` にする
 - AI に書かせてよいのは、自分のフォルダ（`core.state_dir`）か、`files = "write"` のときの作業場だけ
 - 秘密情報は `[secrets]` に名前と説明だけを書く。値はコード・ログ・Slack に出さない
 - 指示書の返答は `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間だけが Slack に出る。印が無いと答えが空になる
@@ -66,9 +65,7 @@ optional = ["notion"]           # あれば使うモジュール
 
 [actor]                         # AI の実行役（provider は agents.csv の engine）
 prompt = "knowledge.md"         # 指示書
-files = "none"                  # none / read / write
-shell = false
-web = true
+# data = "company"              # 会社のデータを読む実行役（外へ出られない）。書かなければ own
 notion = "none"                 # none / read / write
 timeout_minutes = 10
 default_use_case = "knowledge_answer"
@@ -86,7 +83,6 @@ default_use_case = "knowledge_answer"
 # tools = ["search_events"]
 
 [use_cases.knowledge_pick]      # 用途ごとのモデル（コアの一覧の中からだけ）
-offline = true                  # Web を使わない回
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
 # manual = true                 # [[knowledge-pick]] と書いたときだけ使う

@@ -171,13 +171,13 @@ async def test_the_same_conversation_runs_one_at_a_time(hands, monkeypatch):
     h, claude = hands
     running, most = 0, 0
 
-    async def attempt(ws, provider, use_case, prompt, session_id, conversation):
+    async def attempt(plan, prompt, session_id, conversation):
         nonlocal running, most
         running += 1
         most = max(most, running)
         await asyncio.sleep(0.01)
         running -= 1
-        return await original(ws, provider, use_case, prompt, session_id, conversation)
+        return await original(plan, prompt, session_id, conversation)
 
     original = h._attempt
     monkeypatch.setattr(h, "_attempt", attempt)

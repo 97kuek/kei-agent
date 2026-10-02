@@ -11,9 +11,6 @@ core_channels = ["improve"]
 # テストを回す（コマンドを使う）。柵（guard.py・config.example.toml・deploy/）に触れた差分は取り込まない
 [actor]
 prompt = "improve.md"
-files = "write"
-shell = true
-web = true
 notion = "none"
 default_use_case = "improve_design"
 
@@ -29,6 +26,5 @@ codex = { model = "gpt-6-sol", effort = "high" }
 
 # 要望を、公開の issue 用に要約する（軽いモデル。Web は使わない）
 [use_cases.improve_issue]
-offline = true
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }

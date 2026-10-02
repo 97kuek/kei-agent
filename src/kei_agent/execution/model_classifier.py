@@ -65,7 +65,7 @@ async def classify_module(config: Config, store, spec: modules.ModuleSpec, promp
     if not spec.actor.classify:
         return spec.actor.default_use_case
     # 手動指定だけの用途（manual）は、分類器には選ばせない
-    cases = [u.name for u in spec.actor.use_cases if not u.offline and not u.manual]
+    cases = [u.name for u in spec.actor.use_cases if not u.manual]
     return str(await _classify(config, store, spec.name, prompt, frozenset(cases), spec.actor.default_use_case,
                                ", ".join(cases), spec.actor.classify, provider=provider))
 

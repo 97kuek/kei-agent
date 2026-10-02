@@ -8,10 +8,9 @@ description = "仕事のプロジェクトのチャンネル（#work-<名前>）
 # 研究テーマと同じく、作業場の中だけを書き、コマンドも Web も使う。Outlook・Teams などの連携と Notion は持たない
 # （メールなどの外の文と、コマンド・Web の外へ出す口を、1回の実行に揃えないため）
 [actor]
+# 会社のデータを読む。外へ出られない（Web もコマンドの通信も無し）
+data = "company"
 prompt = "workdev.md"
-files = "write"
-shell = true
-web = true
 notion = "none"
 # プロジェクトの作業場を置く場所（agents.csv の workdev の行の folder で変えられる）
 workspace = "~/work"

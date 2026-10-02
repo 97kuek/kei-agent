@@ -50,12 +50,10 @@ ${name} = ["${name}"]
 ''')
 
 ACTOR = Template('''
-# AI の実行役（provider は agents.csv の engine）。どこまで触れるかは、ここに書いたものが制限の表の行になる
+# AI の実行役（provider は agents.csv の engine）。道具は線から決まる（作業場の読み書き・コマンド・Web）
 [actor]
 prompt = "${name}.md"
-files = "none"                  # none / read / write（作業場のファイル）
-shell = false                   # コマンドを使うか
-web = false                     # Web を使うか
+# data = "company"              # 会社のデータを読むなら（外へ出られなくなる）
 notion = "none"                 # none / read / write（Notion ゲートウェイ）
 default_use_case = "${use_case}"
 

@@ -71,7 +71,7 @@ API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV", "LIST_JOBS", "MAIN_CLIENT",
            "NO_JSON", "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
            "NotionError", "OrchestratorError", "Pueue", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl",
-           "TogglError", "Workspace", "action_id", "ai_runs_shell", "append_blocks", "ask_orchestrator", "asked_days",
+           "TogglError", "Workspace", "action_id", "ai_runs_shell", "ai_writes_notion", "append_blocks", "ask_orchestrator", "asked_days",
            "body_json", "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
            "provider_of", "put_request", "records", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings",
@@ -86,6 +86,14 @@ def ai_runs_shell(actor: str) -> bool:
     """その名前の AI の実行役が、シェル（コマンド）を使えるか。実行役がいなければ False。"""
     try:
         return policy_of(actor).shell
+    except ValueError:
+        return False
+
+
+def ai_writes_notion(actor: str) -> bool:
+    """その名前の AI の実行役が、Notion（自分のホーム）に書けるか。実行役がいなければ False。"""
+    try:
+        return policy_of(actor).notion == "write"
     except ValueError:
         return False
 

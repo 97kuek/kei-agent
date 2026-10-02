@@ -69,6 +69,8 @@ class AgentPolicy:
     web: bool
     # Notion ゲートウェイ（利用者の名前はエージェントの名前）
     notion: Access
+    # コマンドの通信（どこへでも出られる）。会社のデータを読む実行役と、読むだけの実行には無い
+    network: bool = False
     connectors: tuple[Connector, ...] = ()
     # 1回の上限時間（分）。None なら config.toml の run_timeout_minutes
     timeout_minutes: int | None = None
@@ -77,7 +79,7 @@ class AgentPolicy:
         """読むだけの実行では、書く・動かす手段を外す（連携は、もとから読む道具だけ）。"""
         if not read_only:
             return self
-        return replace(self, files=_read(self.files), shell=False, notion=_read(self.notion))
+        return replace(self, files=_read(self.files), shell=False, network=False, notion=_read(self.notion))
 
     @property
     def codex_apps(self) -> tuple[CodexApp, ...]:
@@ -101,26 +103,22 @@ POLICIES: dict[str, AgentPolicy] = {
 
 
 def module_policy(spec: modules.ModuleSpec) -> AgentPolicy:
-    """モジュールの実行役の制限（module.toml の [actor]）。連携は、書いてある道具だけを使える。"""
+    """モジュールの実行役の制限。道具は線から決まる（module.toml の [actor] data）。
+
+    自分のデータ（own）を読む実行役は、作業場の読み書き・コマンド・Web・コマンドの通信をすべて使える。
+    会社のデータ（company）を読む実行役は、作業場の読み書きとコマンドだけ（外へ出られない）。
+    連携は、書いてある（読む）道具だけを使える。
+    """
     assert spec.actor is not None
     actor = spec.actor
     connectors = tuple(
         Connector(c.name, c.claude_server, c.claude_tools,
                   tuple(CodexApp(app.name, _codex_tools(app.namespace, app.tools)) for app in c.codex_apps))
         for c in actor.connectors)
-    return AgentPolicy(spec.name, actor.prompt, plugin=actor.plugin, files=actor.files, shell=actor.shell,
-                       web=actor.web, notion=actor.notion, connectors=connectors,
-                       timeout_minutes=actor.timeout_minutes)
-
-
-def is_offline(use_case: UseCase | str | None) -> bool:
-    """Web を使わない用途か（module.toml の offline = true）。
-
-    材料をプロンプトで渡す用途では、外の文（記事・論文の要旨）を読むが、外には出られない回にする
-    （外の文・個人の情報・外への出口の3つを1つの回に揃えない。docs/agents/knowledge-agent.md）。
-    """
-    owner = modules.use_case_owner(str(use_case)) if use_case else None
-    return bool(owner and owner.actor and any(u.name == use_case and u.offline for u in owner.actor.use_cases))
+    outward = actor.data != "company"
+    return AgentPolicy(spec.name, actor.prompt, plugin=actor.plugin, files="write", shell=True,
+                       web=outward, notion=actor.notion, connectors=connectors,
+                       timeout_minutes=actor.timeout_minutes, network=outward)
 
 
 def policy_of(actor: str, use_case: UseCase | str | None = None, *, read_only: bool = False) -> AgentPolicy:
@@ -133,5 +131,4 @@ def policy_of(actor: str, use_case: UseCase | str | None = None, *, read_only: b
         policy = module_policy(spec)
     else:
         raise ValueError(f"未知のagentです: {actor}")
-    policy = policy.narrowed(read_only or name == "router")
-    return replace(policy, web=False) if is_offline(use_case) else policy
+    return policy.narrowed(read_only or name == "router")

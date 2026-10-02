@@ -9,9 +9,6 @@ description = "Moodle の課題を授業ホームに取り込み、締切を知�
 [actor]
 prompt = "course.md"
 plugin = true
-files = "none"
-shell = false
-web = false
 notion = "write"
 timeout_minutes = 5
 # 作業場（前提のメモの AGENTS.md を置く）。agents.csv の course の行の folder で変えられる

@@ -63,13 +63,9 @@ class Module:
 AI_TOML = MEMO_TOML + '''
 [actor]
 prompt = "memo.md"
-files = "none"
-shell = false
-web = false
 default_use_case = "memo_sum"
 
 [use_cases.memo_sum]
-offline = true
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
 '''

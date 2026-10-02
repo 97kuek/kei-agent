@@ -11,22 +11,17 @@ optional = ["notion", "research"]
 # AI の実行役（provider は agents.csv の engine）。外の記事を読むので、Notion・コマンド・手元のファイルは持たない
 [actor]
 prompt = "knowledge.md"
-files = "none"
-shell = false
-web = true
 notion = "none"
 timeout_minutes = 10
 # 自由な質問の用途（分類器は動かさない）
 default_use_case = "knowledge_answer"
 
-# 用途ごとのモデル（コアのモデルの一覧の中から）。offline = true は Web を使わない回（外の文を材料として渡すため）
+# 用途ごとのモデル（コアのモデルの一覧の中から）
 [use_cases.knowledge_pick]
-offline = true
 claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
 
 [use_cases.knowledge_summary]
-offline = true
 claude = { model = "claude-sonnet-5", effort = "medium" }
 codex = { model = "gpt-6-luna", effort = "medium" }
 

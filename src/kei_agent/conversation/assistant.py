@@ -501,7 +501,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
                         channel: str = "", thread_ts: str = "",
                         on_activity=None, *, provider: str | None = None,
                         use_case: UseCase | None = None, request_text: str | None = None,
-                        read_only: bool = False) -> runner.RunResult:
+                        read_only: bool = False, for_head: bool = False,
+                        timeout_minutes: int | None = None) -> runner.RunResult:
         """作業場で AI を1回動かす（研究テーマ・研究全体・自己改善）。担当のプロセス（A2A）があれば、そちらに頼む。
 
         担当は作業場で決まる（themes.actor_of。研究テーマを受け持つモジュールがあれば、そのモジュールの担当）。
@@ -536,16 +537,19 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
                 # 担当のプロセスに、作業場（チャンネルの名前）と許可済みの接続先を添えて頼む
                 return await agents.run_in_workspace(agent, ws, prompt, session_id, channel, thread_ts,
                                                      use_case, on_activity, provider=recipe.provider,
-                                                     read_only=read_only)
+                                                     read_only=read_only, for_head=for_head,
+                                                     timeout_minutes=timeout_minutes)
             return await runner.run_model(
-                self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts, read_only),
+                self.config, runner.ExecutionRequest(ws, recipe, session_id, channel, thread_ts, read_only,
+                                                     for_head=for_head, timeout_minutes=timeout_minutes),
                 prompt, on_activity,
             )
 
     async def ask_agent(self, actor: str, prompt: str, session_id: str | None = None,
                         channel: str = "", thread_ts: str = "", on_activity=None, *,
                         provider: str | None = None, read_only: bool = False,
-                        use_case: UseCase | str | None = None) -> runner.RunResult:
+                        use_case: UseCase | str | None = None, for_head: bool = False,
+                        timeout_minutes: int | None = None) -> runner.RunResult:
         """モジュールのエージェントに自由な依頼（`ask`）を1回頼む。結果は研究の run_agent と同じ形。
 
         用途を渡さなければ、エージェントがその担当の分類器で決める。
@@ -558,7 +562,8 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if provider not in PROVIDERS:
             return runner.RunResult(is_error=True, errors=[NO_PROVIDER])
         payload = {"prompt": prompt, "session_id": session_id, "channel": channel, "thread_ts": thread_ts,
-                   "provider": provider, "read_only": read_only}
+                   "provider": provider, "read_only": read_only, "for_head": for_head,
+                   "timeout_minutes": timeout_minutes}
         if use_case is not None:
             payload["use_case"] = str(use_case)
         with self.claude_running():

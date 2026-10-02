@@ -11,8 +11,9 @@ from kei_agent.workspaces import themes
 ROUTER = {"filesystem.deny_read", "filesystem.read"}
 RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.domain_allowlist",
             "mcp.allowlist"}
-COURSE = {"filesystem.deny_read", "mcp.allowlist", "app.allowlist"}
-WORK = {"filesystem.deny_read", "app.allowlist"}
+# モジュールの実行役は、どれも作業場の読み書きとコマンドを持つ（コマンドの通信の範囲は provider の設定で決まる）
+COURSE = RESEARCH | {"app.allowlist"}
+WORK = RESEARCH - {"mcp.allowlist"} | {"app.allowlist"}
 
 
 @pytest.mark.parametrize("actor,case,provider,model,effort,prompt_name,has_skills,capabilities", [

@@ -45,14 +45,20 @@ GATEWAY_TOKEN_ENV = "KEI_AGENT_NOTION_GATEWAY_TOKEN"
 GATEWAY_AUTH_ENV = "KEI_AGENT_NOTION_GATEWAY_AUTH"
 # 二の柵のフック1回の上限（plugin/<agent>/hooks/hooks.json と同じ）
 HOOK_TIMEOUT_SECONDS = 5
-# Claude の担当が持たない Codex の道具（サブエージェント、画像の生成、プラグインの導入の依頼）。どの担当でも切る
-CODEX_OFF_FEATURES = ("multi_agent", "image_generation", "tool_suggest")
+# どの担当でも切る Codex の機能（プラグインの導入の依頼。アカウントに連携を足させない）
+CODEX_OFF_FEATURES = ("tool_suggest",)
 _CONFIG_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-def run_timeout_seconds(config: Config, ws: Workspace, policy: AgentPolicy | None = None) -> float:
-    """1回の上限時間（秒）。作業場の指定、担当の指定、config.toml の順に使う。"""
+def run_timeout_seconds(config: Config, ws: Workspace, policy: AgentPolicy | None = None,
+                        requested: int | None = None) -> float:
+    """1回の上限時間（秒）。作業場の指定、担当の指定、config.toml の順に使う。
+
+    requested（頭が決めた分）があれば、それを使う。長くても、担当の上限と config.toml の上限の長いほうまで。
+    """
     minutes = ws.timeout_minutes or (policy.timeout_minutes if policy else None) or config.run_timeout_minutes
+    if requested:
+        minutes = min(requested, max(minutes, config.run_timeout_minutes))
     return minutes * 60
 
 
@@ -209,6 +215,10 @@ class ExecutionRequest:
     channel: str
     thread_ts: str
     read_only: bool = False
+    # 頭（ChatGPT・Dot）から頼まれた回。Slack 向けの書式の代わりに、頭への報告の書き方を足す（prompts/head.md）
+    for_head: bool = False
+    # 頭が決めた上限時間（分）。担当の上限と config.toml の上限の、長いほうまで
+    timeout_minutes: int | None = None
 
 
 async def verify_codex_profile(codex_bin: str, cwd: Path, profile: PermissionProfile,
@@ -637,7 +647,7 @@ async def _run_model(
 
     stderr_task = asyncio.create_task(proc.stderr.read())
     try:
-        await asyncio.wait_for(read_stdout(), timeout=run_timeout_seconds(config, ws, policy))
+        await asyncio.wait_for(read_stdout(), timeout=run_timeout_seconds(config, ws, policy, request.timeout_minutes))
     except TimeoutError:
         result.timed_out = True
         result.is_error = True

@@ -62,7 +62,7 @@ def daily(assistant):
 def test_the_daily_module_takes_daily_and_review(config):
     spec = modules.builtin()["daily"]
     assert spec.core_schedules == ("daily", "review") and spec.port is None
-    assert (spec.actor.files, spec.actor.shell, spec.actor.web) == ("read", False, False)
+    assert (spec.actor.data, spec.actor.notion) == ("own", "none")
     assert {u.name for u in spec.actor.use_cases} == {"daily_write", "review_write", "review_talk"}
     assert task_names(config)[-3:] == ("daily", "review", "maintenance")
     # モジュールがオフなら、Daily と振り返りは動かさない（App Home にも出さない）

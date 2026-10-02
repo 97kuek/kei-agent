@@ -89,8 +89,11 @@ _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cas
 _SECRET = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_KEYS = {"description", "required", "generate", "own_file", "group"}
 _DEPENDS_KEYS = {"requires", "optional"}
-_ACTOR_KEYS = {"prompt", "plugin", "files", "shell", "web", "notion", "timeout_minutes", "default_use_case",
+_ACTOR_KEYS = {"prompt", "plugin", "data", "notion", "timeout_minutes", "default_use_case",
                "classify", "connectors", "workspace", "weights"}
+# 実行役が読むデータ。company（会社のデータ）を読む実行役は、外へ出られない（Web もコマンドの通信も無し）。
+# own（自分のデータ）は、作業場の読み書き・コマンド・Web をすべて使える（越えてはいけない線は docs/extensibility.md）
+DATA_KINDS = ("own", "company")
 # 頭（Dots など）が伝える重さ。module.toml の [actor] weights で、重さ → 用途を決める
 WEIGHTS = ("light", "normal", "deep")
 # 実行役の作業場に最初に置く前提のメモ（AGENTS.md）のひな形（モジュールのフォルダにあれば使う）
@@ -99,7 +102,7 @@ _CONNECTOR_KEYS = {"name", "claude_server", "claude_tools", "codex_apps"}
 _CODEX_APP_KEYS = {"name", "namespace", "tools"}
 # skill と二の柵のフック（Claude Code の plugin）の置き場所。モジュールのフォルダの中
 PLUGIN_DIR = "plugin"
-_USE_CASE_KEYS = {"offline", "manual", *PROVIDERS}
+_USE_CASE_KEYS = {"manual", *PROVIDERS}
 _RECIPE_KEYS = {"model", "effort"}
 _PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
@@ -118,8 +121,6 @@ class ModuleError(ValueError):
 @dataclass(frozen=True)
 class UseCaseSpec:
     name: str
-    # Web を使わない回（外の文を材料として渡す回。docs/agents/knowledge-agent.md）
-    offline: bool
     # provider → (model, effort)。model が使ってよいものかは、コアのモデルの一覧（model_policy）で確かめる
     recipes: dict[str, tuple[str, str]]
     # 依頼者が依頼の頭に [[名前]] と書いたときだけ使う用途（分類器は選ばない。いちばん強いモデルなど）
@@ -145,12 +146,11 @@ class ConnectorSpec:
 
 @dataclass(frozen=True)
 class ActorSpec:
-    """AI の実行役。provider は agents.csv の engine で選び、どこまで触れるかはここに書いたものが制限の表の行になる。"""
+    """AI の実行役。provider は agents.csv の engine で選ぶ。道具は線から決まる（読むデータ data と Notion・連携）。"""
     prompt: str
     plugin: bool
-    files: str
-    shell: bool
-    web: bool
+    # 読むデータ（DATA_KINDS）。company なら外へ出られない
+    data: str
     notion: str
     timeout_minutes: int | None
     # 自由な質問の用途。classify を書かなければ、分類器を動かさずにこれを使う
@@ -252,7 +252,7 @@ def _use_cases(data: dict, where: str) -> tuple[UseCaseSpec, ...]:
             recipes[provider] = (recipe["model"], str(recipe.get("effort", "")))
         if not recipes:
             raise ModuleError(f"{at}: claude か codex の、少なくとも片方のモデルを書いてください")
-        found.append(UseCaseSpec(name, bool(spec.get("offline", False)), recipes, bool(spec.get("manual", False))))
+        found.append(UseCaseSpec(name, recipes, bool(spec.get("manual", False))))
     return tuple(found)
 
 
@@ -290,9 +290,10 @@ def _connectors(value: object, at: str) -> tuple[ConnectorSpec, ...]:
 def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorSpec:
     at = f"{where} の [actor]"
     _check_keys(data, _ACTOR_KEYS, at)
-    for key in ("files", "notion"):
-        if data.get(key, "none") not in ACCESS:
-            raise ModuleError(f"{at} の {key} は {' / '.join(ACCESS)} のどれかにしてください")
+    if data.get("notion", "none") not in ACCESS:
+        raise ModuleError(f"{at} の notion は {' / '.join(ACCESS)} のどれかにしてください")
+    if data.get("data", "own") not in DATA_KINDS:
+        raise ModuleError(f"{at} の data は {' / '.join(DATA_KINDS)} のどれかにしてください（会社のデータを読むなら company）")
     if not use_cases:
         raise ModuleError(f"{at}: 実行役には、少なくとも1つの [use_cases.<名前>] が要ります")
     default = str(data.get("default_use_case") or next((u.name for u in use_cases if not u.manual), ""))
@@ -310,16 +311,15 @@ def _actor(data: dict, use_cases: tuple[UseCaseSpec, ...], where: str) -> ActorS
     if plugin and not (Path(where).parent / PLUGIN_DIR / ".claude-plugin" / "plugin.json").is_file():
         raise ModuleError(f"{at} の plugin = true には、同じフォルダに {PLUGIN_DIR}/.claude-plugin/plugin.json が要ります")
     classify = str(data.get("classify") or "")
-    if classify and len([u for u in use_cases if not u.offline and not u.manual]) < 2:
-        raise ModuleError(f"{at} の classify は、Web を使う用途（offline でないもの）が2つ以上あるときに書いてください")
+    if classify and len([u for u in use_cases if not u.manual]) < 2:
+        raise ModuleError(f"{at} の classify は、手動指定でない用途が2つ以上あるときに書いてください")
     weights = data.get("weights", {})
     if not isinstance(weights, dict) or set(weights) - set(WEIGHTS):
         raise ModuleError(f"{at} の weights は {{ {' / '.join(WEIGHTS)} = \"用途\" }} の形にしてください")
     usable = {u.name for u in use_cases if not u.manual}
     if unknown := sorted(str(v) for v in weights.values() if v not in usable):
         raise ModuleError(f"{at} の weights の用途 {', '.join(unknown)} が、[use_cases] の手動指定でない用途にありません")
-    return ActorSpec(prompt=prompt, plugin=plugin, files=data.get("files", "none"),
-                     shell=bool(data.get("shell", False)), web=bool(data.get("web", False)),
+    return ActorSpec(prompt=prompt, plugin=plugin, data=str(data.get("data", "own")),
                      notion=data.get("notion", "none"), timeout_minutes=timeout, default_use_case=default,
                      use_cases=use_cases, classify=classify,
                      connectors=_connectors(data.get("connectors", []), at),

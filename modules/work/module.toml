@@ -7,11 +7,10 @@ description = "会社のアカウントの Outlook・Teams・SharePoint を読�
 # AI の実行役（provider は agents.csv の engine）。会社のアカウントは agents.csv の work の行の claude_account / codex_account。
 # 手元のファイル・コマンド・Web・Notion は使わない。送信・投稿・作成・削除は、道具を渡さないうえに二の柵（plugin）が断る
 [actor]
+# 会社のデータを読む。外へ出られない（Web もコマンドの通信も無し）
+data = "company"
 prompt = "work.md"
 plugin = true
-files = "none"
-shell = false
-web = false
 notion = "none"
 timeout_minutes = 5
 default_use_case = "work_single_source"

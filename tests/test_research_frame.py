@@ -22,9 +22,6 @@ label = "実験"
 
 [actor]
 prompt = "lab.md"
-files = "write"
-shell = true
-web = true
 default_use_case = "lab_run"
 classify = "ふつうの作業は lab_run、計画は lab_plan。"
 
@@ -205,7 +202,7 @@ async def test_joining_a_theme_channel_shows_the_modules_welcome(lab, config):
 
 def test_research_is_the_builtin_module_that_takes_theme_channels():
     spec = modules.builtin()["research"]
-    assert spec.catch_all and spec.port == 8788 and spec.actor.shell and spec.actor.files == "write"
+    assert spec.catch_all and spec.port == 8788 and spec.actor.data == "own"
     manual = {u.name for u in spec.actor.use_cases if u.manual}
     assert manual == {"manual_astra", "manual_fable"} and spec.actor.default_use_case == "research_execute"
     assert (spec.path / spec.actor.prompt).name == "research.md"

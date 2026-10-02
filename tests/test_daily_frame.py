@@ -24,13 +24,9 @@ core_schedules = ["daily", "review"]
 
 [actor]
 prompt = "brief.md"
-files = "read"
-shell = false
-web = false
 default_use_case = "brief_write"
 
 [use_cases.brief_write]
-offline = true
 claude = { model = "claude-sonnet-5", effort = "medium" }
 '''
 

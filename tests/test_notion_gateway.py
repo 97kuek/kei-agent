@@ -114,12 +114,13 @@ def test_homes_come_from_config_toml_not_from_notion_json(settings, world, gw_co
 def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_config):
     """[notion.homes] にホームを書いたモジュールは、そのホームだけに届く client になる（利用者のモジュールも）。
 
-    シェルを使える AI の実行役がいなければ、Python から /notion/v1 も使える（研究は MCP だけ）。
+    AI の実行役が Notion に書けるか、コマンドを使えなければ、Python から /notion/v1 も使える。
+    コマンドを使えて Notion を読むだけの実行役がいる client（diary）には開けない。
     """
     from kei_agent.framework import modules
     from kei_agent_modules.notion.clients import proxy_clients
 
-    for name, actor in (("weather", ""), ("diary", '[actor]\nprompt = "diary.md"\nshell = true\n'
+    for name, actor in (("weather", ""), ("diary", '[actor]\nprompt = "diary.md"\nnotion = "read"\n'
                                                    '[use_cases.diary_answer]\nclaude = { model = "claude-sonnet-5" }\n')):
         folder = tmp_path / "modules" / name
         folder.mkdir(parents=True)
@@ -131,7 +132,8 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
 
     roots = client_roots(notion)
     assert roots["weather"] == {notion_id(weather)} and notion_id(weather) in roots["kei-agent"]
-    assert proxy_clients(notion) == {"kei-agent", "course", "weather"}      # diary と研究は、AI がシェルを使える
+    # diary は、AI がコマンドを使えて Notion を読むだけ。研究と授業は、AI が Notion に書ける
+    assert proxy_clients(notion) == {"kei-agent", "course", "research", "weather"}
     tokens = Tokens(MASTER, roots)
     assert tokens.client(f"Bearer {gateway_client_token(MASTER, 'weather')}") == "weather"
     assert tokens.client(f"Bearer {gateway_client_token(MASTER, 'nobody')}") is None
@@ -349,11 +351,11 @@ async def test_kei_agent_reaches_all_three_homes(http, world, home):
         assert (await send(http, "kei-agent", SHAPES[name], getattr(world, home))).status_code == 200
 
 
-async def test_research_gets_no_raw_proxy_even_inside_its_home(http, api, world):
-    refused = await send(http, "research", SHAPES["get_page"], world.research)
+async def test_research_gets_the_raw_proxy_only_inside_its_home(http, api, world):
+    """研究の AI は Notion に書けるので /notion/v1 も使える。届くのは自分のホームの中だけ。"""
+    assert (await send(http, "research", SHAPES["get_page"], world.research)).status_code == 200
+    refused = await send(http, "research", SHAPES["get_page"], world.course)
     assert refused.status_code == 403
-    assert refused.json()["message"] == "Kei Agent gateway: research can't use the Notion API proxy"
-    assert api.forwarded == []
 
 
 def _mention(page):
@@ -576,7 +578,7 @@ def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_p
     assert task.theme_names == ["vlm"]
 
     with pytest.raises(NotionError) as refused:
-        via("research").request("GET", f"/pages/{world.research.page}")
+        via("research").request("GET", f"/pages/{world.course.page}")
     assert refused.value.status == 403
 
 

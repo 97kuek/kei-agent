@@ -1,6 +1,6 @@
 """担当の用途で AI を1回だけ動かす。モジュールの窓口の run_ai（本体側の kei_agent.api と、担当側の kei_agent_a2a.api）。
 
-会話にはせず、答えの本文を返す。どこまで触れるかは制限の表（module.toml の [actor] と、用途の offline）が決める。
+会話にはせず、答えの本文を返す。どこまで触れるかは制限の表（module.toml の [actor] の data と Notion・連携）が決める。
 """
 
 from __future__ import annotations

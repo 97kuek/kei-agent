@@ -14,8 +14,9 @@ def test_every_actor_has_one_policy():
 
 
 def test_course_reads_box_and_writes_notion_only_through_the_gateway():
+    """授業は自分のデータを読む実行役なので、作業場・コマンド・Web・通信をすべて持つ。Notion はゲートウェイだけ。"""
     course = policy_of("course")
-    assert (course.files, course.shell, course.web) == ("none", False, False)
+    assert (course.files, course.shell, course.web, course.network) == ("write", True, True, True)
     assert course.notion == "write" and course.notion_tools is None
     assert [c.name for c in course.connectors] == ["box"]
     assert all("upload" not in tool and "move" not in tool for tool in course.connectors[0].claude_tools)

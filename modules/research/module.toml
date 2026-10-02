@@ -11,9 +11,6 @@ optional = ["notion"]
 [actor]
 prompt = "research.md"
 plugin = true
-files = "write"
-shell = true
-web = true
 notion = "write"
 default_use_case = "research_execute"
 # 頭（Dots など）が伝える重さ → 用途（Slack からの依頼は、これまでどおり classify で選ぶ）

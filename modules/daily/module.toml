@@ -11,9 +11,6 @@ core_schedules = ["daily", "review"]
 # スレッドの記録）を読むだけ。何も書き換えず、コマンド・Web・Notion は使わない
 [actor]
 prompt = "daily.md"
-files = "read"
-shell = false
-web = false
 notion = "none"
 default_use_case = "daily_write"
 
