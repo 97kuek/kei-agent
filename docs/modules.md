@@ -155,12 +155,12 @@ class Module:
 | `agenda(days, kinds)` | 朝の一覧・振り返りの予定（会議・授業・締切）。読めなければ `None` |
 | `material(now)` | Daily と振り返りの材料 |
 | `head_materials(days)` | 頭（手の口の道具）に渡す材料。種類 → 項目の dict（知識の `reading` など） |
-| `head_action(name, params)` | 頭（手の口の道具）から頼まれた操作。受け持たない名前なら `None`、受け付けられなければ `ValueError`（時間記録の `timer` など） |
 | `on_reaction(event, added)` | リアクション。`True` を返すと、ほかには回らない |
 | `on_event(kind, data)` | 出来事（下の表） |
 | `on_slash_command(name, body)` | スラッシュコマンド。返した文は本人にだけ見える。3秒以内に返す |
 | `on_action(name, body)` / `on_view(name, body)` | 投稿のボタン / 入力の画面。どちらも依頼者のときだけ |
 | `home()` / `on_home_action(name, action)` | App Home の項目を作る / 押された |
+| `head_action(name, params)` | 頭（手の口の道具）から頼まれた操作。Slack につながず App Home やボタンが無いときの入口（時間記録の `timer`、声の `voice`） |
 | `on_start()` | 起動して Slack につながったあと |
 
 | 出来事 | 配るところ | 中身 |
@@ -178,11 +178,12 @@ class Module:
 | 記録と設定 | `records`（`put`・`get`・`update`・`items`・`delete`）・`settings`・`schedule_detail`・`state_dir` |
 | ボタンと App Home | `action_id`・`view_id`・`home_action_id`・`home_checkboxes`・`selected_values` |
 | Daily・振り返り | `morning`・`mark_shown`・`digest`・`gather_prepare`・`gather_agenda`・`publish`・`last_ran` |
-| そのほか | `emit`・`spawn`・`notify_trouble`・`notice_once`・`sync_calendar`・`themes`・`provider`・`contains_secret`・`is_status_inquiry`・`checked_sections`・`final_answer` |
+| そのほか | `owner_id`・`emit`・`spawn`・`notify_trouble`・`notice_once`・`sync_calendar`・`themes`・`provider`・`contains_secret`・`is_status_inquiry`・`checked_sections`・`final_answer` |
 | 自分を直す（自己改善） | `repo_root`・`check_change`・`restart_for_update`・`last_update`・`busy` |
 
 - `run_ai(用途, 文, req=)` は、答えをスレッドにも出す。返すのは答えの本文そのまま（Slack に出す部分は `final_answer(本文)`）
 - 細かい引数は `src/kei_agent/api.py`
+- 本体が Slack につながないとき（[architecture.md](architecture.md#頭と手)）、Slack の窓口の投稿（`post`・`reply`・`update`・`upload`・`publish` など）は知らせとしてたまり、頭が出す。`react`・`progress`・`open_view`・App Home は何もしない。`owner_id` は依頼者の ID
 
 ## agent.py
 

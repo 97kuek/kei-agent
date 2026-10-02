@@ -4,6 +4,7 @@
   言い方と顔は担当が決める。App Home の「知らせる」を切っていれば渡さない
 - App Home（home / on_home_action）… 「知らせる」「聞く（マイク）」のチェック。どちらも既定は切で、再起動しても戻る。
   「聞く」を変えたら、担当にマイクを開ける・閉じるを伝える（知らせを切っていても、聞くのは止められる。逆も同じ）
+- 頭から（head_action の voice）… 同じ2つのスイッチ。Slack につながず App Home が無いときは、こちらで変える
 """
 
 from __future__ import annotations
@@ -37,8 +38,19 @@ class Module:
         if name != SWITCHES:
             return
         chosen = selected_values(action)
-        self.core.records.put(SWITCH, NOTIFY_KEY, {"on": NOTIFY_KEY in chosen})
-        listen = LISTEN_KEY in chosen
+        await self._switch(NOTIFY_KEY in chosen, LISTEN_KEY in chosen)
+
+    async def head_action(self, name: str, params: dict) -> dict | None:
+        """頭（手の口の voice）からの切り替え。None を渡したほうは変えない。今の2つのスイッチを返す。"""
+        if name != "voice":
+            return None
+        notify, listen = params.get("notify"), params.get("listen")
+        await self._switch(self.is_on(NOTIFY_KEY) if notify is None else bool(notify),
+                           self.is_on(LISTEN_KEY) if listen is None else bool(listen))
+        return {"notify": self.is_on(NOTIFY_KEY), "listen": self.is_on(LISTEN_KEY)}
+
+    async def _switch(self, notify: bool, listen: bool) -> None:
+        self.core.records.put(SWITCH, NOTIFY_KEY, {"on": notify})
         if listen != self.is_on(LISTEN_KEY):
             self.core.records.put(SWITCH, LISTEN_KEY, {"on": listen})
             # 常に録らない。入れたときだけ開ける（担当はマイクを開けていないあいだ、繋がりごと切っている）

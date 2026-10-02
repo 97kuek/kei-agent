@@ -291,6 +291,15 @@ class Hands:
         except ValueError as e:
             raise HandsError(str(e)) from None
 
+    # 声（App Home の「知らせる」「聞く（マイク）」の代わり。声のモジュール）
+
+    async def voice(self, notify: bool | None = None, listen: bool | None = None) -> dict:
+        """声のスイッチを変える（渡さなかったほうは変えない）。今の2つのスイッチを返す。"""
+        try:
+            return await self.assistant.module_head_action("voice", {"notify": notify, "listen": listen})
+        except ValueError as e:
+            raise HandsError(str(e)) from None
+
     # ファイル（Slack の添付の代わり。頭が渡したものは inputs/ に置き、作業でできた outputs/ のものを読む）
 
     def _folder(self, workspace: str):

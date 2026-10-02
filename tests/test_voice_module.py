@@ -57,3 +57,15 @@ async def test_the_microphone_can_be_switched_even_while_notices_are_off(env):
     assert told == [("notify", {"kind": "listen", "on": True})]
     assert not assistant.modules["voice"].is_on("notify")
 
+
+
+async def test_the_head_switches_notices_and_the_microphone(env):
+    """App Home の代わりに、頭が手の口の voice で切り替える。指定しなかったほうは変えない。"""
+    from kei_agent.conversation.hands import Hands
+    assistant, told = env
+    h = Hands(assistant)
+    assert await h.voice(notify=True) == {"notify": True, "listen": False}
+    assert told == []
+    assert await h.voice(listen=True) == {"notify": True, "listen": True}
+    assert told == [("notify", {"kind": "listen", "on": True})]
+    assert await h.voice() == {"notify": True, "listen": True}

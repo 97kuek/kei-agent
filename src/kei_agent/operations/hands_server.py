@@ -106,6 +106,14 @@ def build_mcp(hands: Hands) -> MCPServer:
         except HandsError as e:
             raise ToolError(str(e)) from None
 
+    @mcp.tool(description="声のスイッチ。notify は出来事（作業の終わり・締切など）を声で知らせるか、listen はマイクで会話するか。"
+                          "渡さなかったほうは変えない（何も渡さなければ今の様子）。返すのは notify・listen")
+    async def voice(notify: bool | None = None, listen: bool | None = None) -> dict[str, Any]:
+        try:
+            return await hands.voice(notify, listen)
+        except HandsError as e:
+            raise ToolError(str(e)) from None
+
     @mcp.tool(description="作業場（研究テーマ・プロジェクト）の inputs/ に、文のファイルを置く（Slack の添付を渡すとき）。"
                           "name はフォルダを含まない名前、content は中身。返す path を run の頼みごとに書いて伝える")
     async def put_file(workspace: str, name: str, content: str) -> dict[str, Any]:

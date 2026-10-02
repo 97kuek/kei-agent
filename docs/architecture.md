@@ -1,16 +1,29 @@
 # 仕組み
 
 - Kei Agent のいまの作り（本体と、モジュールの枠）
-- 担当ごとの中身は [`agents.md`](agents.md)、モジュールの作り方は [`modules.md`](modules.md)
+- 担当ごとの中身は [`agents.md`](agents.md)、モジュールの作り方は [`modules.md`](modules.md)、Dot への指示は [`dots.md`](dots.md)
 
 ![プロセスと通信](images/architecture.svg)
+
+## 頭と手
+
+| 役 | 受け持つもの | 動く場所 |
+|---|---|---|
+| 頭（OpenAI の Dot） | Slack の受け答え、どの作業場に何を頼むかの判断、決まった時刻の処理（朝の一覧と Daily・振り返り・締切・読みもの・論文の新着・夜の Task・Kei Agent の知らせ）、AI が書く Notion、Outlook の予定 | OpenAI のクラウド。Mac を閉じていても動く |
+| 手（Kei Agent） | 作業場で AI を動かす、秘密情報を使う取り込み（Moodle・Toggl）、ジョブ、保守とバックアップ、知らせの置き場 | 自分の Mac（launchd）。手の口（MCP）で頭に呼ばれる |
+
+- 頭から手へは、OpenAI の Secure MCP Tunnel で手の口に届く（下の「手の口」）。手は Slack にいない
+- Slack のトークン（`SLACK_BOT_TOKEN`・`SLACK_APP_TOKEN`）が無いと、本体は Slack につながずに動く（`operations/app.py`）。Slack に出すつもりの投稿は `Outbox`（`conversation/outbox.py`）に知らせとしてため、頭が手の口の `notices` で読んで自分の名前で出す。リアクション・作業中の表示・App Home・ボタンは何もしない
+- トークンを戻すと、本体は Slack の受け口にもなる（下の「Slack の受け口」「振り分けと A2A」）。そのときも手の口は開く
+- 頭が選べるのは、作業場・頼みごと・重さ・表で許した AI だけ。担当・アカウント・届く範囲は作業場から決まる
 
 ## プロセス
 
 | プロセス | 番地 | 起動 | 中身 |
 |---|---|---|---|
-| 本体 | 8786 | `kei-agent` | Slack の受け口・振り分け・制限の表・定期処理・App Home。Daily・振り返り、時間記録、自己改善もこの中で動く |
+| 本体 | 8786（手の口は 8785） | `kei-agent` | 手の口・知らせの置き場・制限の表・定期処理・状態。Slack につなぐときは、Slack の受け口・振り分け・App Home も。Daily・振り返り、時間記録、自己改善もこの中で動く |
 | 大学・研究・仕事・知識 | 8787・8788・8789・8792 | `kei-agent-module <名前>` | 担当（[agents.md](agents.md)） |
+| トンネル | 8784（点検の画面） | `deploy/run-tunnel.sh` | OpenAI の Secure MCP Tunnel。Mac から OpenAI へ出ていき、頭の呼び出しを手の口へ渡す |
 | 声 | 8790 | `kei-agent-module voice` | 喋る・聞く（下の「声」） |
 | Notion ゲートウェイ | 8791 | `kei-agent-module notion` | Notion への唯一の口（下の「Notion」） |
 
@@ -36,6 +49,8 @@
 
 ## Slack の受け口
 
+Slack のトークンがあるときだけ。いまの運用では使わない（Slack の受け口は頭）。
+
 | 項目 | 中身 |
 |---|---|
 | つなぎ方 | Socket Mode。頼めるのは `KEI_AGENT_ALLOWED_USER_ID` の1人だけ |
@@ -53,6 +68,8 @@
 
 ## 振り分けと A2A
 
+チャンネルからの振り分けは、Slack につなぐときだけ。頭からは手の口の `run` に作業場の名前を渡す（行き先は同じ表で決まる）。
+
 | チャンネル | 行き先 |
 |---|---|
 | 研究テーマ | 研究 |
@@ -69,7 +86,7 @@
 
 ## 手の口（MCP）
 
-- 頭（OpenAI Dots。今は Claude Code・Codex）から、作業場で AI を動かしてもらう入口。Slack の受け口と並ぶもう1つの入口（計画は [#17](https://github.com/97kuek/kei-agent/issues/17)）
+- 頭（OpenAI の Dot。Claude Code・Codex からも呼べる）から、作業場で AI を動かしてもらう入口。いまはこれが Kei Agent の唯一の入口（計画は [#17](https://github.com/97kuek/kei-agent/issues/17)）
 - AI を動かす道具（`workspaces`・`run`・`status`）と投稿の道具（`post`）は `conversation/hands.py`、読む道具（`agenda`・`reading`・`recent`・`jobs`）の材料は `scheduling/materials.py`、口そのもの（MCP・合言葉）は `operations/hands_server.py`。読む道具は AI を動かさない（`agenda` だけは、担当が予定を読むのに AI を使うことがある）
 - 本体のプロセスの中で `config.toml` の `[hands] url`（127.0.0.1 だけ）に開く。合言葉は秘密情報の `KEI_AGENT_HANDS_TOKEN`（`Authorization: Bearer`）。どちらかが無ければ開かない
 
@@ -87,11 +104,12 @@
 | `create_workspace` | 研究テーマ・プロジェクトの作業場を作る（既存のフォルダも使える）。研究テーマは研究ホームにも登録する |
 | `put_file` / `read_file` | 作業場の `inputs/` に文のファイルを置く／`outputs/` のファイルを読む（Slack の添付の代わり） |
 | `timer` | 時間を測る（開始・停止・様子）。止めた記録は Toggl と時間記録へ。時間記録のモジュールの `head_action` |
+| `voice` | 声のスイッチ（知らせる・聞く）。App Home の代わり。声のモジュールの `head_action` |
 
 - 返す項目: `status`（`done`・`needs_input`・`failed`・`accepted`・`running`）・`text`・`conversation`・`files`（作業場の `outputs/` にできたもの）・`ticket`
 - 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
 - 会話は `mcp` という名前のチャンネルとして記録する（Slack のスレッドとは混ざらない）。研究テーマ・プロジェクトでは、やり取りを作業場の `.kei-agent/threads/<会話の番号>.md` にも残す（Slack の受け口と同じ置き場所）
-- Slack のトークンが無いと、本体は Slack につながずに動く。Slack に出すつもりの投稿は `Outbox`（`conversation/outbox.py`）にため、頭が `notices` で読む。リアクション・作業中の表示・App Home・ボタンは何もしない（[dots.md](dots.md)）
+- 頭に渡す知らせは、Slack につないでいないときだけたまる（上の「頭と手」）
 - ChatGPT（Dots）からは、OpenAI の Secure MCP Tunnel を通して届く。トンネルのプログラム（`tunnel-client`。`deploy/run-tunnel.sh` が launchd で動かす）がこの Mac から OpenAI へ出ていき、届いた呼び出しに合言葉を付けて手の口へ渡す。番号は `[hands] tunnel`、鍵はトンネルだけの `kei-agent-tunnel.zsh`。手の口は OAuth を使わず、`/.well-known/` には本文の無い 404 を返す
 - ChatGPT の MCP のアプリは、作ったときの道具の一覧を使い続ける（あとでサーバーが道具を増やしても、読み直しに来るだけで見える一覧は変わらない）。道具を足したり変えたりしたら、ChatGPT で MCP を作り直す
 
@@ -149,7 +167,7 @@
 | 定型の A2A の返事 | 印は要らない。経過・例外・パスを含むものは出さない |
 
 - 満たさなければ、中身を含まない決まった文を出す（`safe_failure`）
-- 最後の合図（❓ 🧵 🛠 📦 ✅ 🗑）は印の中の末尾に書き、本体がボタンや状態にする（[using.md](using.md#返事の最後の合図)）
+- 最後の合図（❓ 🧵 🛠 📦 ✅ 🗑）は印の中の末尾に書き、Slack につなぐときは本体がボタンや状態にする（❓ は返事待ち、🧵 は区切りのボタン、🛠 📦 ✅ 🗑 は自己改善）。頭からの `run` では、❓ が `needs_input` になる
 
 ## 柵
 
@@ -278,6 +296,6 @@
 | `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
 | `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |
 | `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め（頭に渡す材料 `materials.py` も）、締切、毎晩の保守、予定カレンダー、時間 |
-| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py` と、役割ごとに混ぜる部品）、手の口で AI を動かす（`hands.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
+| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py` と、役割ごとに混ぜる部品）、手の口で AI を動かす（`hands.py`）、Slack の代わりの知らせの置き場（`outbox.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
 | `operations/` | 起動（`app.py`）、手の口の MCP（`hands_server.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、モジュールのひな形、取り込みの確かめ |
 | `testing/` | モジュールのテストの道具（[modules.md](modules.md#テストの書き方kei_agenttesting)） |
