@@ -7,7 +7,8 @@ import pytest
 from fakes import check_notion_body
 
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.notion_hub import HubSetup, HubState, HubStore, load_hub
+from kei_agent.storage.notion_hub import HubState, HubStore, load_hub
+from kei_agent.storage.notion_hub_setup import HubSetup
 from kei_agent.storage.notion_store import plain_text
 
 

@@ -236,7 +236,7 @@
 - 要求ごとに、触れる ID がホームの子孫かを親をたどって確かめる。外なら 403
 - `/mcp` の道具は12個: `read` `search` `query` `create_page` `update_page` `append_blocks` `replace_content` `update_block` `delete_block` `create_database` `update_data_source` `move`
 - 記録に残すのは時刻・client・操作・対象の ID・成否だけ。本文は残さない
-- DB と項目は名前で読む。Notion の画面で名前を変えるなら、`notion.py`・`notion_store.py`・`notion_hub.py`・`modules/course/notion_setup.py` も直す
+- DB と項目は名前で読む。Notion の画面で名前を変えるなら、`notion.py`・`notion_store.py`・`notion_hub.py`・`notion_hub_setup.py`・`modules/course/notion_setup.py` も直す
 
 ### 共通ホーム
 
@@ -264,7 +264,7 @@
 | 領域 | 中身 |
 |---|---|
 | `configuration/` | `config.toml`・担当の表 `agents.csv`（`agents_table.py`）・既存のフォルダの対応 `themes.toml` とチャンネル名の決まり（`places.py`）・起動スクリプトが知りたい場所 |
-| `storage/` | SQLite（`store.py`・`records.py`・App Home で変えた値 `settings.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`） |
+| `storage/` | SQLite（`store.py`・`records.py`・App Home で変えた値 `settings.py`）と Notion（`notion.py` の土台・研究ホーム `notion_store.py`・共通ホーム `notion_hub.py`（作るのは `notion_hub_setup.py`）） |
 | `framework/` | モジュールの定義の読み込み（`modules.py`）、使ってよいモデルの一覧とその確かめ（`models.py`）、動いている版 |
 | `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
 | `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |
