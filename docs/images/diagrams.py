@@ -1,4 +1,4 @@
-"""文書の図（全体図 overview.svg と、プロセスと通信の図 architecture.svg）を作る。
+"""文書の図（全体図 overview.svg、プロセスと通信の図 architecture.svg、Dots を頭にしたときの構想図 dots-plan.svg）を作る。
 
 アイコンは icons/ の PNG を SVG に埋め込む（GitHub でそのまま見える）。図を直すときは、ここを書き換えて
 `uv run python docs/images/diagrams.py` を動かす。文字が枠からはみ出しそうなら、そこを知らせる。
@@ -192,8 +192,62 @@ def architecture() -> Drawing:
     return d
 
 
+def dots_plan() -> Drawing:
+    """構想図（GitHub issue #17）: Dots が頭、Kei Agent が手。いつも動く部分は家の機械、仕事は Mac、研究は研究室。"""
+    d = Drawing("dots-plan", 1240, 780)
+    d.card(30, 40, 200, 96, "依頼者", ("ChatGPT・スマホ・", "Slack から Dot に頼む"), colors=OUTSIDE, icons=("user",))
+    d.arrow([(130, 136), (130, 176)])
+    d.card(30, 176, 200, 108, "Stack-chan", ("ふだんの会話は", "GPT-Live-1 で速く", "頼みごとは Dot へ"),
+           colors=OUTSIDE, icons=("speaker",), size=26)
+    d.arrow([(230, 88), (262, 88)])
+    d.arrow([(230, 230), (262, 230)])
+
+    d.frame(262, 20, 958, 280, "OpenAI（クラウド。Mac を常に起こしておかなくてよい）", colors=AI, icons=("chatgpt",))
+    d.card(282, 64, 300, 216, "Dot（頭）", (
+        "考える・どの手を使うか選ぶ", "予定で動く: Daily・振り返り・", "締切の知らせ・読みもの・夜の Task",
+        "途中の確認は Dot が答える", "（作法の範囲だけ。線は越えられない）", "Stack-chan の道具で喋らせる"),
+        colors=("#ffffff", AI[1]), icons=("chatgpt",), size=28)
+    d.card(602, 64, 290, 100, "Notion に書く", ("AI が書くものは全部 Dot が直接",
+                                                "（日別記録・学び・ノート）"),
+           colors=("#ffffff", AI[1]), icons=("notion",), size=26)
+    d.card(602, 180, 290, 100, "Codex クラウド", ("自己改善は GitHub の PR で", "（いいよ → 取り込んで入れ替え）"),
+           colors=("#ffffff", AI[1]), icons=("code",), links=("github",), size=26)
+    d.card(912, 64, 288, 216, "GPT-Live-1", ("Stack-chan の声の会話", "", "Dot と同じ ChatGPT Pro の", "中で動かす"),
+           colors=("#ffffff", AI[1]), icons=("speaker",), size=26)
+
+    d.arrow([(432, 300), (432, 360)], "Secure MCP Tunnel（機械から外へ出るだけ）", label_at=(432, 330))
+
+    d.frame(262, 360, 480, 300, "家の小さな機械（いつも動く。Raspberry Pi など）", icons=("server",))
+    d.card(282, 404, 440, 96, "手の口（MCP）", ("workspaces・run・status（作業場で AI を動かす）",
+                                               "agenda・reading・recent・jobs（材料を読む）"),
+           colors=HOST, icons=("server",), size=26)
+    d.card(282, 512, 214, 128, "取り込みと保守", ("Moodle・予定・Toggl", "毎晩の保守と", "バックアップ"),
+           colors=MODULE, icons=("database",), links=("moodle", "toggl"), size=24)
+    d.card(508, 512, 214, 128, "Notion の口", ("機械的な取り込み", "だけが書く"),
+           colors=("#ffffff", "#8b95a7"), icons=("notion",), dash=True, size=24)
+
+    d.arrow([(742, 452), (782, 452)], "A2A", label_at=(762, 434))
+    d.frame(782, 360, 210, 300, "MacBook Air", icons=("mac",))
+    d.card(796, 404, 182, 236, "仕事・仕事の開発", ("会社のアカウントの", "Claude Code", "会社のデータは", "ここだけで読む",
+                                               "Mac を開いている", "間だけ使える"),
+           icons=("work",), links=("outlook", "teams", "sharepoint"), size=24)
+    d.arrow([(620, 660), (620, 684), (1115, 684), (1115, 660)], "SSH", label_at=(868, 684))
+    d.frame(1010, 360, 210, 300, "研究室のサーバー", icons=("server",))
+    d.card(1024, 404, 182, 236, "研究", ("テーマの作業場で", "Claude Code・Codex", "長い処理はジョブ", "（個人のアカウント）"),
+           icons=("research",), size=24)
+
+    d.card(30, 404, 200, 120, "#0-kei-agent", ("動けなくなったとき", "だけ直接知らせる", "（ほかは Dot へ）"),
+           colors=OUTSIDE, icons=("slack",), size=24)
+    d.arrow([(262, 464), (230, 464)])
+    d.text(262, 722, "越えてはいけない線（秘密情報・鍵、会社と個人のアカウントを混ぜない、作業場の外に書かない、外へ送らない）は、"
+                     "Kei Agent が", size=12, color=SUB)
+    d.text(262, 742, "Claude にも Codex にも同じ固さで守らせる。頭（Dot）が選べるのは作業場・頼みごと・重さ・表で許した AI だけ",
+           size=12, color=SUB)
+    return d
+
+
 def main() -> None:
-    for drawing in (overview(), architecture()):
+    for drawing in (overview(), architecture(), dots_plan()):
         path = HERE / f"{drawing.name}.svg"
         path.write_text(drawing.svg(), encoding="utf-8")
         print(f"書いた: {path.relative_to(HERE.parent.parent)}")
