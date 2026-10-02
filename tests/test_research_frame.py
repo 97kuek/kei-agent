@@ -111,7 +111,7 @@ async def test_the_classifier_never_picks_a_manual_use_case(tmp_path, config, st
 ])
 def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, message):
     """いちばん強いモデル（fable・astra）は手動指定の用途でしか書けない。自由な質問の既定にも手動指定は使えない。"""
-    home = make_home(tmp_path, 'modules = ["lab"]\n')
+    home = make_home(tmp_path, agents=["lab"])
     _lab(home / "modules", LAB_TOML.replace(*change))
     with pytest.raises((ConfigError, modules.ModuleError), match=message):
         load_config(env={"KEI_AGENT_HOME": str(home)})
@@ -120,7 +120,7 @@ def test_a_lab_definition_that_breaks_the_rules_is_refused(tmp_path, change, mes
 # ほかのどれにも当たらないチャンネル
 
 def test_one_module_can_take_every_unclaimed_channel(tmp_path):
-    home = make_home(tmp_path, 'modules = ["course", "lab"]\n')
+    home = make_home(tmp_path, agents=["course", "lab"])
     _lab(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "1-vlm-counting")
@@ -135,7 +135,7 @@ def test_one_module_can_take_every_unclaimed_channel(tmp_path):
 
 def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
     """受け持てるのは、オンのモジュールのうち1つだけ（研究をオフにすれば、自分のモジュールに受け持たせられる）。"""
-    home = make_home(tmp_path, 'modules = ["lab", "lab2"]\n')
+    home = make_home(tmp_path, agents=["lab", "lab2"])
     _lab(home / "modules")
     other = home / "modules" / "lab2"
     other.mkdir()

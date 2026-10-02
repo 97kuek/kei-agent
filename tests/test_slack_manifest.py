@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from fakes import write_config
+from fakes import make_home
 
 from kei_agent.configuration.config import load_config
 from kei_agent.framework import modules
@@ -13,11 +13,9 @@ from kei_agent.operations import cli, slack_manifest
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _config(tmp_path, text=""):
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    write_config(home / "config.toml", text)
-    return load_config(env={"KEI_AGENT_HOME": str(home)})
+def _config(tmp_path, agents=None):
+    """agents は担当の表でオンにするモジュール。None なら表を置かない（組み込みを全部使う）。"""
+    return load_config(env={"KEI_AGENT_HOME": str(make_home(tmp_path, agents=agents))})
 
 
 def test_the_repository_manifest_is_the_generated_one(tmp_path):
@@ -34,7 +32,7 @@ def test_slash_commands_follow_the_modules_that_are_on(tmp_path):
                      "should_escape": False}
     assert "commands" in everything["oauth_config"]["scopes"]["bot"]
 
-    without = slack_manifest.build(_config(tmp_path, 'modules = ["research"]\n'))
+    without = slack_manifest.build(_config(tmp_path, ["research"]))
     assert "slash_commands" not in without["features"]
     assert "commands" not in without["oauth_config"]["scopes"]["bot"]
 
@@ -48,7 +46,7 @@ def test_a_users_module_brings_its_command(tmp_path):
     (folder / "module.py").write_text("class Module:\n    def __init__(self, core):\n        pass\n\n"
                                       "    async def on_slash_command(self, name, body):\n        return ''\n",
                                       encoding="utf-8")
-    config = _config(tmp_path, 'modules = ["stamp"]\n')
+    config = _config(tmp_path, ["stamp"])
     command, = slack_manifest.build(config, name="わたしの助手")["features"]["slash_commands"]
     assert command == {"command": "/stamp", "description": "スタンプを押す", "should_escape": False}
     assert '"わたしの助手"' in slack_manifest.render(config, name="わたしの助手")

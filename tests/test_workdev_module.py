@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import replace
 
 import pytest
-from fakes import write_config
+from fakes import make_home
 
 from kei_agent.configuration.config import load_config
 from kei_agent.execution.agent_policy import policy_of
@@ -14,12 +14,7 @@ from kei_agent.workspaces.themes import ChannelKind
 
 
 def _config(tmp_path, folder=""):
-    home = tmp_path / "home"
-    home.mkdir()
-    write_config(home / "config.toml", 'modules = ["work", "workdev", "research"]\n')
-    if folder:
-        text = (home / "agents.csv").read_text().replace("workdev,true,,,", f"workdev,true,,{folder},")
-        (home / "agents.csv").write_text(text)
+    home = make_home(tmp_path, agents=["work", {"module": "workdev", "folder": folder}, "research"])
     return load_config(env={"KEI_AGENT_HOME": str(home)})
 
 

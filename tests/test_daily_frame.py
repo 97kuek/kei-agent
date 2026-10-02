@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, write_config
+from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.conversation.request import Request
@@ -109,9 +109,7 @@ def test_core_schedules_are_checked(tmp_path):
     with pytest.raises(modules.ModuleError, match="run_schedule"):
         modules.load_code(modules.load_spec(folder))
     # 受け持てるのは1つだけ
-    home = tmp_path / "home"
-    home.mkdir()
-    write_config(home / "config.toml", 'modules = ["brief", "brief2"]\n')
+    home = make_home(tmp_path, agents=["brief", "brief2"])
     _brief(home / "modules")
     other = _brief(home / "modules" / "x", BRIEF_TOML.replace('name = "brief"', 'name = "brief2"')
                    .replace("brief_write", "brief2_write"))
