@@ -4,6 +4,7 @@
 
 - Dot が使うのは、Kei Agent の手の口（MCP。[architecture.md](architecture.md) の「手の口」）と、Dot 自身の連携（Notion・Slack・Outlook・Web）
 - 会社の Outlook の予定は、Dot の Outlook 連携が読む（予定だけ。メール・Teams・SharePoint は仕事の担当だけが読む）
+- Slack では、Dot は `@ueki.keitaro-kei`（エージェント）として話しかけられ、スレッドに自分の名前で返す。Mac を閉じていても答える。Mac のボット `@Kei Agent` は、Mac が開いているときだけ、自分へのメンションと自分が始めたスレッドにだけ答える
 - 手の口は MacBook Air で動く。閉じている間は手の口の道具（`post` も）が使えないので、どの予定も Notion と Dot 自身の連携だけで終わるように書いてある
 - Kei Agent に残す決まった時刻の処理は、秘密情報を使う取り込み（Moodle の課題・Toggl）と、保守とバックアップ（`maintenance`）。Dot の予定には秘密情報（URL の token・API キー）を置く場所が無いため。ほかの処理は `schedules.csv` で止める（下の「Kei Agent 側で止めるもの」）
 
