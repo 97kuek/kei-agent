@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 import pytest
-from fakes import write_config
+from fakes import write_agents
 
 from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution.execution_contract import prompt_text, prompt_version
@@ -28,7 +28,7 @@ def _home(tmp_path, config: str = "", profile: str | None = None, prompts: dict[
 
 def test_config_comes_from_the_user_folder_and_says_how_to_start_without_one(tmp_path):
     home = _home(tmp_path)
-    write_config(home / "config.toml", '[notion]\nhub_home = "abc"\n')
+    write_agents(home, [{"module": "overview", "notion": "abc"}])
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     assert config.user_dir == home.resolve() and config.notion.hub_home == "abc"
     with pytest.raises(ConfigError, match="config.example.toml を写して"):

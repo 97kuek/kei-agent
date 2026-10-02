@@ -9,6 +9,6 @@ Claude Code・Codex・自己改善の AI が、このリポジトリを直す前
 - モジュールのオンオフ・チャンネル・AI は `~/.config/kei-agent/agents.csv`。`config.toml` には書かない
 - モデル名は `src/kei_agent/framework/models.py` と `module.toml` の `[use_cases]` にだけ書く
 - 柵（`src/kei_agent/execution/guard.py`・`config.example.toml`・`deploy/`）は変えない。要るときは人に頼む
-- 本物の状態・秘密情報・launchd に触れない。テストは `tests/fakes.py` の偽物と `write_config` を使う
+- 本物の状態・秘密情報・launchd に触れない。テストは `tests/fakes.py` の偽物と、設定を書く `write_config`・`write_agents`・`write_schedules` を使う
 - コメント・文書・Slack の文は日本語。文書には今の状態だけを書く（経緯は Git の履歴に）
 - コミットの1行目は `feat:`・`fix:`・`docs:` などを頭に付けた英語の短い文

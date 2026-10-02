@@ -43,8 +43,8 @@ OWNER = "UME"
 BOT = "UBOT"
 # 置き場所（テストの一時フォルダの下に作る）
 PLACES = ("agent_root", "state_dir")
-# 研究と大学の置き場所（担当の表の folder 列に書く）
-FOLDERS = ("research_root", "course_root")
+# 研究と大学の置き場所（担当の表の folder 列に書く）。担当 → 一時フォルダの下の名前
+FOLDERS = {"research": "research_root", "course": "course_root"}
 
 
 async def settle(assistant: Assistant) -> None:
@@ -115,9 +115,9 @@ class ModuleKit:
         names = self._with_requires([self.name, *others])
         (home / "config.toml").write_text(self._config_text(settings, extra), encoding="utf-8")
         # モジュールのオンオフ・チャンネル・AI は担当の表に（AI はどれも claude）
-        (home / agents_table.AGENTS_FILE).write_text(agents_table.from_config(
-            {"modules": names, "channels": extra.get("channels", {}), **{key: str(self.tmp / key) for key in FOLDERS}},
-            {actor: "claude" for actor in model_actors()}), encoding="utf-8")
+        (home / agents_table.AGENTS_FILE).write_text(agents_table.build(
+            names, channels=extra.get("channels", {}), folders={name: str(self.tmp / key) for name, key in FOLDERS.items()},
+            providers={actor: "claude" for actor in model_actors()}), encoding="utf-8")
         self.config = load_config(env={"KEI_AGENT_HOME": str(home), "KEI_AGENT_ALLOWED_USER_ID": OWNER})
         self.store = Store(self.config.db_path)
         self.slack = FakeSlack(self._channel_map())

@@ -108,7 +108,7 @@ def req(text="直して", ts="20.1"):
 # 本体のチャンネルの会話を受け持つ
 
 def test_a_module_takes_the_kei_agent_channel(tmp_path):
-    home = make_home(tmp_path, 'modules = ["fixer"]\n')
+    home = make_home(tmp_path, agents=["fixer"])
     _fixer(home / "modules")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     ws = themes.resolve(config, "0-kei-agent")
@@ -128,7 +128,7 @@ def test_only_known_core_channels_can_be_taken(tmp_path):
 
 
 def test_only_one_module_may_take_a_core_channel(tmp_path):
-    home = make_home(tmp_path, 'modules = ["fixer", "fixer2"]\n')
+    home = make_home(tmp_path, agents=["fixer", "fixer2"])
     _fixer(home / "modules")
     other = _fixer(home / "modules" / "x", FIXER_TOML.replace('name = "fixer"', 'name = "fixer2"')
                    .replace("fixer_", "fixer2_"))

@@ -128,7 +128,7 @@ def change(name: str, add: bool, *, env: dict[str, str] | None = None, dry_run: 
     existed = table.is_file()
     try:
         # 表が無ければ、今の動き（組み込み全部がオン、AI は未選択）と同じ表から始める
-        text = agents_table.read_text(table) if existed else agents_table.from_config({})
+        text = agents_table.read_text(table) if existed else agents_table.build()
         names = agents_table.parse(text)["modules"]
     except agents_table.TableError as e:
         print(f"❌ 設定を読めない（{table.name}）: {e}")

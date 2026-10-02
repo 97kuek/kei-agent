@@ -4,10 +4,12 @@
 
 import asyncio
 import contextlib
+import csv
+import io
 import json
-import re
 import socket
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
 
 from kei_agent.conversation import ask
@@ -67,11 +69,17 @@ async def serving(app, port: int = 0):
         await task
 
 
-def make_home(tmp_path: Path, text: str = "") -> Path:
-    """tmp_path の下に設定のフォルダ（home）を作り、text を config.toml として write_config で書く。"""
+def make_home(tmp_path: Path, text: str = "", *, agents: str | Iterable[str | dict] | None = None,
+              schedules: str | Iterable[str | dict] | None = None) -> Path:
+    """tmp_path の下に設定のフォルダ（home）を作り、text を config.toml に書く。agents・schedules を渡すと、
+    write_agents・write_schedules で表も書く（渡さなければ表は無い）。"""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     write_config(home / "config.toml", text)
+    if agents is not None:
+        write_agents(home, agents)
+    if schedules is not None:
+        write_schedules(home, schedules)
     return home
 
 
@@ -151,82 +159,47 @@ def make_theme(config, name="vlm", keywords=("vision language model counting",))
     return ws
 
 
-_TABLE = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]")
-_TOP_KEY = re.compile(r"^\s*(modules|research_root|course_root)\s*=")
-
-
-def _without_tables(text: str) -> str:
-    """TOML の文から、表に書くもの（modules・research_root・course_root の行と、[channels]・[agents]・[notion] の表）を
-    消す。テストは設定を config.toml の形で書き、write_config がそれを表に分ける。"""
-    out: list[str] = []
-    skipping = False
-    lines = text.splitlines(keepends=True)
-    i = 0
-    while i < len(lines):
-        row = lines[i]
-        if table := _TABLE.match(row):
-            name = table.group(1).strip()
-            skipping = name in ("channels", "agents", "notion") or name.startswith(("agents.", "notion."))
-        if skipping:
-            i += 1
-            continue
-        if _TOP_KEY.match(row) and not any(_TABLE.match(r) for r in lines[:i]):
-            # 複数の行にまたがる配列（modules = [ …）は、閉じ括弧の行まで消す
-            if "[" in lines[i].split("#", 1)[0]:
-                while "]" not in lines[i].split("#", 1)[0] and i + 1 < len(lines):
-                    i += 1
-            i += 1
-            continue
-        out.append(row)
-        i += 1
-    return "".join(out)
-
-
-def _without_keys(text: str, drop: dict[str, set[str]]) -> str:
-    """TOML の文から、表ごとの決まったキーの行を消す（1行で書いた値だけ。"" は一番外側）。"""
-    out, table = [], ""
-    for line in text.splitlines(keepends=True):
-        if header := _TABLE.match(line):
-            table = header.group(1).strip()
-        key = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=", line)
-        if key and key.group(1) in drop.get(table, ()):
-            continue
-        out.append(line)
-    return "".join(out)
-
-
 def write_config(path: Path, text: str) -> Path:
-    """config.toml を書く。テストでは config.toml の形でまとめて書いてよく、モジュール・チャンネル・AI・作業場・
-    Notion のホーム（modules・[channels]・[agents]・[notion]・research_root・course_root）は同じフォルダの
-    agents.csv に、定期処理の時刻は schedules.csv に分けて書く。"""
-    import tomllib
-
-    from kei_agent.configuration import agents_table, schedules_table
-    from kei_agent.framework import modules
-
-    # 利用者のモジュール（同じフォルダの modules/）も、表の行にできるように読んでおく
-    modules.register_user_modules(path.parent / "modules")
-    try:
-        data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        data = {}
-    if any(key in data for key in agents_table.REPLACED_KEYS):
-        (path.parent / agents_table.AGENTS_FILE).write_text(agents_table.from_config(data), encoding="utf-8")
-        text = _without_tables(text)
-    # 定期処理の時刻とオンオフは schedules.csv に（[schedule] の時刻と [maintenance] の time・enabled）
-    known = schedules_table.known_names()
-    schedule, maintenance = data.get("schedule", {}), data.get("maintenance", {})
-    times = {key: value for key, value in schedule.items() if key in known}
-    if times or {"time", "enabled"} & set(maintenance):
-        rows = [f"{name},{'true' if value else 'false'},{value}" for name, value in times.items()]
-        if {"time", "enabled"} & set(maintenance):
-            time = maintenance.get("time", schedules_table.CORE_TIMES["maintenance"])
-            on = maintenance.get("enabled", True) and bool(time)
-            rows.append(f"maintenance,{'true' if on else 'false'},{time}")
-        (path.parent / schedules_table.SCHEDULES_FILE).write_text("name,enabled,time\n" + "\n".join(rows) + "\n",
-                                                                  encoding="utf-8")
-        text = _without_keys(text, {"schedule": set(times), "maintenance": {"time", "enabled"}})
+    """config.toml を text のとおりに書く（全体の設定だけ。担当は write_agents、定期処理は write_schedules で書く）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
+
+def _table(columns: tuple[str, ...], rows: str | Iterable[str | dict], key: str) -> str:
+    """表の中身。rows が文字列ならそのまま（見出しの行も含める）。並びなら、1つが1行（名前だけなら enabled は true。
+    辞書なら書いた列だけ埋め、enabled を省くと true）。"""
+    if isinstance(rows, str):
+        return rows
+    out = io.StringIO()
+    writer = csv.DictWriter(out, columns, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        row = {key: row} if isinstance(row, str) else dict(row)
+        enabled = row.get("enabled", True)
+        row["enabled"] = ("true" if enabled else "false") if isinstance(enabled, bool) else enabled
+        writer.writerow(row)
+    return out.getvalue()
+
+
+def write_agents(home: Path, rows: str | Iterable[str | dict]) -> Path:
+    """担当の表（home の agents.csv）を書く。表に無いモジュールはオフ。
+
+    例: `write_agents(home, ["research", {"module": "knowledge", "channels": "knowledge reading"}])`
+    """
+    from kei_agent.configuration import agents_table
+
+    path = home / agents_table.AGENTS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_table(agents_table.COLUMNS, rows, "module"), encoding="utf-8")
+    return path
+
+
+def write_schedules(home: Path, rows: str | Iterable[str | dict]) -> Path:
+    """定期処理の表（home の schedules.csv）を書く。例: `write_schedules(home, [{"name": "reading", "time": "06:30"}])`"""
+    from kei_agent.configuration import schedules_table
+
+    path = home / schedules_table.SCHEDULES_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_table(schedules_table.COLUMNS, rows, "name"), encoding="utf-8")
+    return path

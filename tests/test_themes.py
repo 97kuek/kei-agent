@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 import pytest
-from fakes import write_config
+from fakes import write_agents, write_config
 
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind
@@ -119,7 +119,8 @@ def test_example_config_in_repo_loads_without_personal_values(tmp_path):
 
 def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path):
     from kei_agent.configuration.config import load_config
-    path = write_config(tmp_path / "config.toml", '[agents.research]\nprovider = "codex"\n')
+    path = write_config(tmp_path / "config.toml", "")
+    write_agents(tmp_path, [{"module": "research", "engine": "codex"}])
     config = load_config(path, env={"KEI_AGENT_CODEX_BIN": "codex-test"})
     assert config.codex_bin == "codex-test"
     assert config.agent_profiles["research"].provider == "codex"

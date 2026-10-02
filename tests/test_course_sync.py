@@ -310,10 +310,10 @@ def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):
     import os
     from pathlib import Path
 
-    from fakes import write_config
+    from fakes import write_agents
 
     from kei_agent.storage.notion import gateway_client_token
-    write_config(Path(os.environ["KEI_AGENT_HOME"]) / "config.toml", '[notion]\ncourse_home = "abc"\n')
+    write_agents(Path(os.environ["KEI_AGENT_HOME"]), [{"module": "course", "notion": "abc"}])
     monkeypatch.setenv("KEI_AGENT_NOTION_GATEWAY_TOKEN", "master")
     client = notion_sync._client(STATE)
     assert client.notion.base_url.endswith("/notion/v1")

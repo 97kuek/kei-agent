@@ -34,7 +34,7 @@ def _change(home, name, on, calls=None, **kw):
 
 
 def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
-    home = make_home(tmp_path, 'modules = ["research"]\n')
+    home = make_home(tmp_path, agents=["research"])
     before = (home / "agents.csv").read_text(encoding="utf-8")
     _stamp(home)
     calls = []
@@ -58,7 +58,7 @@ def test_without_a_table_it_starts_from_every_builtin_module(tmp_path, capsys):
 
 
 def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
-    home = make_home(tmp_path, 'modules = ["course", "work"]\n')
+    home = make_home(tmp_path, agents=["course", "work"])
     assert _change(home, "research", True, launchd=False) == 0
     assert "deploy/install.sh research" in capsys.readouterr().out     # 登録は自分で
     assert set(_on(home)) == {"course", "research", "work"}
@@ -68,7 +68,7 @@ def test_the_launchd_step_when_it_was_not_changed(tmp_path, capsys):
 
 
 def test_nothing_is_written_when_the_new_config_would_break(tmp_path, capsys):
-    home = make_home(tmp_path, 'modules = ["notion", "stamp"]\n')
+    home = make_home(tmp_path, agents=["notion", "stamp"])
     _stamp(home, requires='"notion"')
     before = (home / "agents.csv").read_text(encoding="utf-8")
     assert _change(home, "notion", False) == 1
@@ -85,7 +85,7 @@ def test_a_broken_table_is_left_alone(tmp_path, capsys):
 
 
 def test_dry_run_unknown_and_already_on(tmp_path, capsys):
-    home = make_home(tmp_path, 'modules = ["research"]\n')
+    home = make_home(tmp_path, agents=["research"])
     assert _change(home, "work", True, dry_run=True) == 0
     assert _on(home) == ["research"]
     assert _change(home, "nothing", True) == 1
@@ -95,7 +95,7 @@ def test_dry_run_unknown_and_already_on(tmp_path, capsys):
 
 
 def test_the_list_shows_what_each_module_brings(tmp_path, capsys):
-    home = make_home(tmp_path, 'modules = ["research", "time"]\n')
+    home = make_home(tmp_path, agents=["research", "time"])
     _stamp(home)
     assert module_command.list_modules(env={"KEI_AGENT_HOME": str(home)}) == 0
     out = capsys.readouterr().out
