@@ -14,6 +14,8 @@ dependencies = [
     # Notion のモジュール（modules/notion）のゲートウェイの MCP の口
     "mcp>=2,<3",
     "slack-bolt>=1.30.0",
+    # 本体の中で開く口（本体の A2A の口・手の口）と、担当プロセスの A2A サーバー
+    "uvicorn>=0.53.0",
 ]
 
 [project.scripts]
@@ -39,7 +41,6 @@ build-backend = "uv_build"
 # A2A のサーバー側（モジュールの担当プロセス）に必要なもの
 agents = [
     "a2a-sdk[http-server]>=1.1.4",
-    "uvicorn>=0.53.0",
 ]
 dev = [
     "pytest>=9.1.1",

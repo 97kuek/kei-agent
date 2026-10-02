@@ -680,12 +680,12 @@ dependencies = [
     { name = "aiohttp" },
     { name = "mcp" },
     { name = "slack-bolt" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 agents = [
     { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "uvicorn" },
 ]
 dev = [
     { name = "pytest" },
@@ -697,13 +697,11 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "mcp", specifier = ">=2,<3" },
     { name = "slack-bolt", specifier = ">=1.30.0" },
+    { name = "uvicorn", specifier = ">=0.53.0" },
 ]
 
 [package.metadata.requires-dev]
-agents = [
-    { name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" },
-    { name = "uvicorn", specifier = ">=0.53.0" },
-]
+agents = [{ name = "a2a-sdk", extras = ["http-server"], specifier = ">=1.1.4" }]
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
