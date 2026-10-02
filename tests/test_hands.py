@@ -130,3 +130,10 @@ async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
     ticket = (await call("run", {"workspace": "vlm", "request": "まとめて"}))["ticket"]
     assert (await call("status", {"ticket": ticket}))["status"] == "done"
     assert (await call("workspaces", {}))["workspaces"]
+
+
+async def test_only_the_tools_that_just_read_say_so(hands):
+    h, _ = hands
+    tools = {t.name: t.annotations for t in await build_mcp(h).list_tools()}
+    assert tools["workspaces"].read_only_hint and tools["status"].read_only_hint
+    assert tools["run"] is None or not tools["run"].read_only_hint

@@ -12,6 +12,7 @@ import urllib.parse
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -21,6 +22,8 @@ from kei_agent.conversation.hands import Hands, HandsError
 log = logging.getLogger(__name__)
 
 MCP_PATH = "/mcp"
+# 読むだけの道具の印（ChatGPT は、この印の無い道具を書き込みとして扱い、プランによっては使わせない）
+READ_ONLY = ToolAnnotations(read_only_hint=True)
 HEALTH_PATH = "/health"
 INSTRUCTIONS = (
     "Kei Agent の手。作業場（研究テーマ・プロジェクト・大学・仕事・知識）で Claude Code か Codex を動かす。"
@@ -35,7 +38,8 @@ def build_mcp(hands: Hands) -> MCPServer:
     """道具はどれも async にする（async でない道具は別のスレッドで動き、記録の SQLite が使えない）。"""
     mcp = MCPServer("kei-agent-hands", instructions=INSTRUCTIONS)
 
-    @mcp.tool(description="頼める作業場の一覧。name（run に渡す）・kind（研究テーマ・プロジェクト・担当）・"
+    @mcp.tool(annotations=READ_ONLY,
+              description="頼める作業場の一覧。name（run に渡す）・kind（研究テーマ・プロジェクト・担当）・"
                           "agent（受け持つ担当）・engines（選べる AI）・weights（選べる重さ）")
     async def workspaces() -> dict:
         return {"workspaces": hands.workspaces()}
@@ -52,7 +56,8 @@ def build_mcp(hands: Hands) -> MCPServer:
         except HandsError as e:
             raise ToolError(str(e)) from None
 
-    @mcp.tool(description="受付番号（run が返した ticket）の作業の様子と結果。status が running なら、まだ動いている")
+    @mcp.tool(annotations=READ_ONLY,
+              description="受付番号（run が返した ticket）の作業の様子と結果。status が running なら、まだ動いている")
     async def status(ticket: str) -> dict:
         try:
             return hands.status(ticket)
