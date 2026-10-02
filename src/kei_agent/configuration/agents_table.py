@@ -151,26 +151,26 @@ def with_enabled(text: str, name: str, on: bool) -> str:
     return out.getvalue()
 
 
-def from_config(data: dict, providers: dict[str, str] | None = None) -> str:
-    """modules・channels・agents・notion・research_root・course_root の辞書から表を作る（setup・モジュールの追加・
-    テストの道具が使う）。providers は担当ごとの provider。あれば agents より先に使う。"""
-    providers = providers or {}
+def build(enabled: list[str] | None = None, *, channels: dict[str, list[str]] | None = None,
+          folders: dict[str, str] | None = None, notion: dict[str, str] | None = None,
+          providers: dict[str, str] | None = None) -> str:
+    """表を作る（setup・モジュールの追加・テストの道具が使う）。知っているモジュールはどれも行にする。
+
+    - enabled … オンにするモジュール（並べた順に行にする）。None なら組み込みを全部
+    - channels … チャンネルの種類（module.toml の [channels] の名前か overview）→ チャンネルの名前
+    - folders・notion・providers … 行の名前 → folder・notion・engine の列（notion の共通ホームは overview の行）
+    """
+    channels, folders, notion, providers = channels or {}, folders or {}, notion or {}, providers or {}
     known = modules.known()
-    on = data.get("modules", list(modules.builtin()))
-    channels = data.get("channels", {})
-    agents = data.get("agents", {})
-    folders = {module: str(data[key]) for key, module in FOLDER_KEYS.items() if data.get(key)}
-    notion = data.get("notion", {})
-    homes = {**{name: str(home) for name, home in (notion.get("homes") or {}).items()},
-             **{row: str(notion[key]) for row, key in NOTION_KEYS.items() if notion.get(key)}}
+    on = list(modules.builtin()) if enabled is None else enabled
     out = io.StringIO()
     writer = csv.DictWriter(out, COLUMNS, lineterminator="\n")
     writer.writeheader()
 
-    def row(name: str, enabled: bool, names: object, actor: bool) -> None:
-        provider = (providers.get(name) or str(agents.get(name, {}).get("provider", ""))) if actor else ""
-        writer.writerow({"module": name, "enabled": "true" if enabled else "false", "channels": " ".join(names or ()),
-                         "folder": folders.get(name, ""), "notion": homes.get(name, ""), "engine": provider})
+    def row(name: str, is_on: bool, names: object, actor: bool) -> None:
+        writer.writerow({"module": name, "enabled": "true" if is_on else "false", "channels": " ".join(names or ()),
+                         "folder": str(folders.get(name, "")), "notion": str(notion.get(name, "")),
+                         "engine": providers.get(name, "") if actor else ""})
 
     row(ROUTER, True, (), True)
     row(OVERVIEW, True, channels.get(OVERVIEW, ()), False)

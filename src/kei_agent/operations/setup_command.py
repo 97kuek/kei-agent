@@ -242,18 +242,18 @@ def step_config(asker: Asker, path: Path, home: Path, env: dict[str, str],
     else:
         names = choose_modules(asker, modules.known())
         engine = choose_engine(asker, which)
-        where = {"research_root": asker.text("  研究テーマの作業場を置く場所", "~/research")} if "research" in names else {}
+        folders = {"research": asker.text("  研究テーマの作業場を置く場所", "~/research")} if "research" in names else {}
         notion: dict[str, str] = {}
         if "notion" in names:
             print("  Notion のホームのページ（URL か ID。使わないものは Enter。あとから agents.csv の notion 列に書いてもよい）")
-            homes = [("hub_home", "共通ホーム（Daily・振り返り・予定・時間の記録）"),
-                     *([("research_home", "研究ホーム")] if "research" in names else []),
-                     *([("course_home", "授業ホーム")] if "course" in names else [])]
-            for key, label in homes:
+            homes = [(agents_table.OVERVIEW, "共通ホーム（Daily・振り返り・予定・時間の記録）"),
+                     *([("research", "研究ホーム")] if "research" in names else []),
+                     *([("course", "授業ホーム")] if "course" in names else [])]
+            for row, label in homes:
                 if found := ask_page(asker, f"  {label}"):
-                    notion[key] = found
-        table_text = agents_table.from_config({"modules": names, **where, "notion": notion},
-                                              {actor: engine for actor in model_actors()})
+                    notion[row] = found
+        table_text = agents_table.build(names, folders=folders, notion=notion,
+                                        providers={actor: engine for actor in model_actors()})
     if path.exists():
         print(f"  もうある: {path}（書き換えない）")
     else:
