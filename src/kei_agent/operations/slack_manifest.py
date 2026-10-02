@@ -21,7 +21,7 @@ HEADER = """# Slack App「Kei Agent」の manifest。kei-agent manifest が作�
 SCOPES = ("app_mentions:read", "channels:history", "channels:read", "groups:history", "groups:read", "chat:write",
           "files:read", "files:write", "reactions:read", "reactions:write", "assistant:write")
 EVENTS = ("app_mention", "message.channels", "message.groups", "member_joined_channel", "channel_rename",
-          "group_rename", "reaction_added", "reaction_removed", "channel_archive", "group_archive", "app_home_opened")
+          "group_rename", "reaction_added", "reaction_removed", "app_home_opened")
 
 
 def build(config: Config, name: str = "Kei Agent") -> dict:
@@ -51,7 +51,7 @@ def build(config: Config, name: str = "Kei Agent") -> dict:
         "oauth_config": {"scopes": {"bot": [*SCOPES, *(["commands"] if commands else [])]}},
         "settings": {
             "event_subscriptions": {"bot_events": list(EVENTS)},
-            # ボタン（接続先の申し出など）と、App Home の設定画面に使う
+            # ボタン（引き継ぎの提案など）と、App Home の画面に使う
             "interactivity": {"is_enabled": True},
             "org_deploy_enabled": False,
             "socket_mode_enabled": True,

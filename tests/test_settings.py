@@ -3,62 +3,22 @@ from dataclasses import replace
 from fakes import write_agents, write_config, write_schedules
 
 from kei_agent.configuration.config import MaintenanceConfig, ScheduleConfig
-from kei_agent.conversation import settings_actions
-from kei_agent.execution import guard
 from kei_agent.storage import settings
 
 
-def test_domains_are_kept_per_theme(store):
-    settings.allow_domain(store, "amr-query", "zenodo.org", "特徴量を落とすため")
-    settings.allow_domain(store, "amr-query", "zenodo.org", "二度目")  # 同じものは1つにまとめる
-    settings.allow_domain(store, "other", "example.com", "")
+def test_old_domain_tables_are_dropped(tmp_path):
+    """使わなくなった接続先の表は、既存のデータベースからも消える。"""
+    import sqlite3
 
-    assert settings.theme_domains(store, "amr-query") == ["zenodo.org"]
-    assert settings.all_theme_domains(store) == {"amr-query": ["zenodo.org"], "other": ["example.com"]}
+    from kei_agent.storage.store import Store
 
-    settings.remove_domain(store, "amr-query", "zenodo.org")
-    assert settings.theme_domains(store, "amr-query") == []
-    # テーマを片づけたら、そのテーマの許可も消す
-    settings.allow_domain(store, "amr-query", "zenodo.org", "")
-    settings.allow_domain(store, "amr-query", "github.com", "")
-    settings.drop_theme(store, "amr-query")
-    assert settings.theme_domains(store, "amr-query") == []
-
-
-def test_parse_connect_requests_takes_only_exact_domain_names():
-    """ボタンから足せるのは、ぴったりのドメイン名だけ。まとめての許可や IP、パスは受け付けない。"""
-    text = "\n".join([
-        "取れなかった。",
-        "🔒 接続: zenodo.org（CASTELLA の特徴量を落とすため）",
-        "🔒 接続: *.github.com（全部）",
-        "🔒 接続: 10.0.0.1（社内）",
-        "🔒 接続: https://zenodo.org/records（URL）",
-        "🔒 接続: localhost（手元）",
-        "🔒 接続: huggingface.co (重み)",
-    ])
-    assert settings_actions.parse_connect_requests(text) == [
-        ("zenodo.org", "CASTELLA の特徴量を落とすため"),
-        ("huggingface.co", "重み"),
-    ]
-
-
-def test_valid_domain():
-    assert guard.valid_domain("zenodo.org")
-    assert guard.valid_domain("objects.githubusercontent.com")
-    assert not guard.valid_domain("*.github.com")
-    assert guard.valid_domain("*.github.com", allow_wildcard=True)
-    assert not guard.valid_domain("*", allow_wildcard=True)
-    assert not guard.valid_domain("zenodo.org/records")
-
-
-def test_domain_request_is_resolved_once(store):
-    req_id = settings.add_request(store, "C1", "10.1", "amr-query", "zenodo.org", "特徴量")
-    req = settings.get_request(store, req_id)
-    assert (req["domain"], req["status"]) == ("zenodo.org", "pending")
-
-    assert settings.resolve_request(store, req_id, "allowed") is True
-    assert settings.resolve_request(store, req_id, "denied") is False  # 2回押しても1回分
-    assert settings.get_request(store, req_id)["status"] == "allowed"
+    db = tmp_path / "state.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE theme_domains (theme TEXT, domain TEXT)")
+        conn.execute("CREATE TABLE domain_requests (id INTEGER PRIMARY KEY)")
+    store = Store(db)
+    names = {r["name"] for r in store.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert not names & {"theme_domains", "domain_requests"}
 
 
 def test_schedule_time_comes_from_the_config(config):
@@ -91,3 +51,13 @@ def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
     assert config.schedule.module_times["reading"] == "06:30"
     assert config.schedule.module_times["literature"] == "07:00"          # 書かなければ module.toml の既定
     assert "research-strategy" not in config.overview_channels
+
+
+def test_an_old_allowed_domains_key_is_read_past(tmp_path):
+    """[sandbox] allowed_domains が残った config.toml でも起動できる（通信の範囲は担当の線で決まる）。"""
+    from kei_agent.configuration.config import load_config
+
+    path = tmp_path / "config.toml"
+    write_config(path, '[sandbox]\nallowed_domains = ["export.arxiv.org"]\nallow_write = ["~/.cache/uv"]\n')
+    write_agents(tmp_path, ["research"])
+    assert load_config(path, env={}).allow_write

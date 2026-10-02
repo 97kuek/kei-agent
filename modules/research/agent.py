@@ -4,7 +4,7 @@
 出し入れ。依頼は JSON で届く。
 
     ask         {"channel_name": "amr-query", "prompt": "図を作って", "session_id": null,
-                 "channel": "C1", "thread_ts": "1.2", "allowed_domains": ["example.com"]}
+                 "channel": "C1", "thread_ts": "1.2"}
     submit-job  {"cwd": "~/research/amr-query", "command": "uv run x.py", "label": "kei-agent-3"}
     list-jobs   {}
     cancel-job / forget-job  {"task_id": 12}
@@ -42,7 +42,7 @@ SKILLS = [
     AgentSkill(
         id=ASK,
         name="研究用 provider を1回動かす",
-        description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、テーマの作業場で"
+        description="JSON（channel_name・prompt・session_id）を受け取り、テーマの作業場で"
                     "選択済み provider を1回動かして、答えを返す",
         tags=["research"],
         examples=['{"channel_name": "amr-query", "prompt": "図を作って"}'],
@@ -86,9 +86,8 @@ class Executor(SkillExecutor):
         await self._job(updater, skill, ask)
 
     def workspace(self, ask: dict) -> Workspace:
-        """研究はテーマの作業場で動かす。許可済みの接続先は、本体が依頼に添えてくる。"""
-        return channel_workspace(self.config, str(ask.get("channel_name") or ""), ask.get("allowed_domains") or (),
-                                 create=not ask.get("read_only"))
+        """研究はテーマの作業場で動かす。"""
+        return channel_workspace(self.config, str(ask.get("channel_name") or ""), create=not ask.get("read_only"))
 
     async def _job(self, updater: TaskUpdater, skill: str, ask: dict) -> None:
         """長い処理（pueue のジョブ）。どのスレッドのジョブかはオーケストレーターが覚えている。"""

@@ -46,8 +46,6 @@ settings:
       - "group_rename"
       - "reaction_added"
       - "reaction_removed"
-      - "channel_archive"
-      - "group_archive"
       - "app_home_opened"
   interactivity:
     is_enabled: true

@@ -1,9 +1,8 @@
 """App Home（Slack で Kei Agent を開いたときのタブ）に出す設定画面。
 
 見出しと操作だけの1画面にする（説明文は置かない）。置くのは、動いているもの、担当ごとの AI、
-モジュールの項目（class Module の home。声の「知らせる」「聞く」など）、
-テーマごとに許可した接続先だけ。
-基本の接続先など `config.toml` の柵は出さない。
+モジュールの項目（class Module の home。声の「知らせる」「聞く」など）だけ。
+`config.toml` の柵は出さない。
 """
 
 from __future__ import annotations
@@ -17,17 +16,14 @@ from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.store import Store
 
-ADD_DOMAIN_CALLBACK = "kei_agent_add_domain"
 REFRESH_ACTION = "kei_agent_home_refresh"
 PROVIDER_ACTION = "kei_agent_home_provider"      # :<担当>
 MODULE_ACTION = "kei_agent_home_module"          # :<モジュール>:<名前>
-REMOVE_DOMAIN_ACTION = "kei_agent_home_remove_domain"
-ADD_DOMAIN_ACTION = "kei_agent_home_add_domain"
 # 本体の実行役の表示名。モジュールの実行役は module.toml の label（agent_labels）
 CORE_AGENT_LABELS: dict[str, str] = {}
 CROSS_AGENT_LABELS = {"router": "振り分け"}
 # 決まった時刻の処理は、スレッドを持たない実行として記録される
-TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "domain": "接続先の返事", "voice": "声からの依頼",
+TRIGGER_LABELS = {"message": "依頼", "job": "ジョブの結果", "voice": "声からの依頼",
                   "night": "夜間の Task", "handoff": "引き継ぎ", "daily": "Daily", "review": "振り返り"}
 
 
@@ -94,7 +90,7 @@ def _now_working(config: Config, store: Store, now: float | None = None) -> list
     return lines
 
 
-def build_home(config: Config, store: Store, theme_names: list[str], is_owner: bool,
+def build_home(config: Config, store: Store, is_owner: bool,
                module_sections: list[tuple[str, list[dict]]] = ()) -> dict:
     """module_sections は、モジュールの表示名と項目（class Module の home が返した blocks）。定期実行の下に並べる。"""
     if not is_owner:
@@ -125,43 +121,4 @@ def build_home(config: Config, store: Store, theme_names: list[str], is_owner: b
     for label, items in module_sections:
         blocks += [{"type": "divider"}, _mrkdwn(f"*{label}*"), *items]
 
-    blocks += [{"type": "divider"}, _mrkdwn("*接続先*")]
-    domains = settings.all_theme_domains(store)
-    for theme in theme_names:
-        allowed = domains.get(theme, [])
-        # テーマ名は先頭の番号を外したもの（themes.theme_name）。`#` を付けると
-        # `#1-amr-query` というチャンネル名とずれて、別のものに見えてしまう
-        block = _mrkdwn(f"*{theme}*  " + ("、".join(f"`{domain}`" for domain in allowed) if allowed else "なし"))
-        if allowed:
-            block["accessory"] = {"type": "static_select", "action_id": REMOVE_DOMAIN_ACTION,
-                                  "placeholder": {"type": "plain_text", "text": "外す"},
-                                  "options": [_option(domain, f"{theme}\t{domain}") for domain in allowed]}
-        blocks.append(block)
-    blocks.append({"type": "actions", "elements": [_button("足す", ADD_DOMAIN_ACTION, "add")]} if theme_names
-                  else _context("研究テーマのチャンネルはまだありません"))
     return {"type": "home", "blocks": blocks}
-
-
-def build_add_domain_modal(theme_names: list[str]) -> dict:
-    options = [_option(theme, theme) for theme in theme_names]
-    return {
-        "type": "modal",
-        "callback_id": ADD_DOMAIN_CALLBACK,
-        "title": {"type": "plain_text", "text": "接続先を足す"},
-        "submit": {"type": "plain_text", "text": "足す"},
-        "close": {"type": "plain_text", "text": "やめる"},
-        "blocks": [
-            {"type": "input", "block_id": "theme", "label": {"type": "plain_text", "text": "テーマ"},
-             "element": {"type": "static_select", "action_id": "value", "options": options}},
-            {"type": "input", "block_id": "domain", "label": {"type": "plain_text", "text": "ドメイン"},
-             "hint": {"type": "plain_text", "text": "例: zenodo.org、*.example.com"},
-             "element": {"type": "plain_text_input", "action_id": "value"}},
-        ],
-    }
-
-
-def read_add_domain(view: dict) -> tuple[str, str]:
-    values = view.get("state", {}).get("values", {})
-    theme = (values.get("theme", {}).get("value", {}).get("selected_option") or {}).get("value", "")
-    domain = (values.get("domain", {}).get("value", {}).get("value") or "").strip().lower()
-    return theme, domain

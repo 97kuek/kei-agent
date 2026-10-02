@@ -75,9 +75,9 @@ def test_settings_limit_theme_to_its_directory_and_block_secrets(config):
     assert "mcp__claude_ai_Notion" in deny
 
 
-def test_settings_network_follows_the_data_not_the_theme_domains(config):
-    """コマンドの通信は線で決まる。テーマで許可した接続先は効かず、会社のデータを読む担当はどこへも出さない。"""
-    ws = replace(themes.resolve(config, "vlm"), allowed_domains=("zenodo.org",))
+def test_settings_network_follows_the_data(config):
+    """コマンドの通信は線で決まる。自分のデータを読む担当はどこへでも、会社のデータを読む担当はどこへも出さない。"""
+    ws = themes.resolve(config, "vlm")
     network = guard.build_settings(config, ws, policy_of("research"))["sandbox"]["network"]
     assert network == {"allowedDomains": [], "strictAllowlist": False}
     company = guard.build_settings(config, ws, policy_of("workdev"))["sandbox"]["network"]
@@ -407,18 +407,6 @@ def test_apply_events():
     })
     assert (result.session_id, result.text, result.is_error, result.cost_usd) == ("s1", "完了", False, 0.1)
     assert result.activities == ["実行している: 一覧を見る"]
-
-
-def test_apply_event_keeps_domains_claude_asked_for():
-    """Bash の allowed_domains で広げようとした接続先は、sandbox では断られる。Kei Agent がボタンにできるよう覚えておく。"""
-    result = runner.RunResult()
-    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
-        "type": "tool_use", "name": "Bash",
-        "input": {"command": "curl -I https://huggingface.co/x", "description": "重みのサイズを見る",
-                  "allowed_domains": ["huggingface.co", "cdn-lfs.huggingface.co"]}}]}})
-    runner.apply_event(result, {"type": "assistant", "message": {"content": [{
-        "type": "tool_use", "name": "Bash", "input": {"command": "ls", "allowed_domains": ["huggingface.co"]}}]}})
-    assert result.requested_domains == [("huggingface.co", "重みのサイズを見る"), ("cdn-lfs.huggingface.co", "重みのサイズを見る")]
 
 
 def test_missing_session_detected():

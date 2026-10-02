@@ -1,4 +1,3 @@
-from dataclasses import replace
 
 import pytest
 
@@ -20,7 +19,7 @@ def _contract(config, *, provider="codex", read_only=False):
 
 
 @pytest.mark.parametrize("missing", ["filesystem.deny_read", "filesystem.write_scope",
-                                     "network.domain_allowlist", "mcp.allowlist"])
+                                     "network.policy", "mcp.allowlist"])
 def test_codex_preflight_rejects_unenforceable_required_capability(config, missing):
     with pytest.raises(CapabilityUnavailable, match=missing):
         preflight(config, _contract(config), "codex_cli", unavailable={missing})
@@ -34,20 +33,13 @@ def test_codex_profile_carves_out_secret_reads_and_scopes_writes(config):
     assert profile.filesystem[str(denied_reads(config)[0])] == "deny"
     assert profile.filesystem[str(config.research_root / "vlm")] == "write"
     # 自分のデータを読む研究のコマンドは、どこへでも出られる（接続先の一覧も通信の中継も使わない）
-    assert profile.network_open and profile.network_domains == {}
+    assert profile.network_open
     assert "permissions.kei_agent_scoped.network.enabled=true" in profile.config_overrides
     assert not any("network.domains" in item or "network_proxy" in item for item in profile.config_overrides)
     assert 'permissions.kei_agent_scoped.extends=":read-only"' in profile.config_overrides
     assert "~/.codex" in DEFAULT_DENY_READ                         # Codex の認証の置き場所も既定で読ませない
     # 読むだけの回は、どこにも書けない
     assert "write" not in preflight(config, _contract(config, read_only=True), "codex_cli").filesystem.values()
-
-
-def test_codex_profile_ignores_the_allowed_domains(config):
-    """接続先の一覧（config.toml とテーマで許可したもの）は、もう通信の範囲を決めない。"""
-    wide = replace(config, allowed_domains=("*",))
-    profile = preflight(wide, _contract(wide), "codex_cli")
-    assert profile.network_open and profile.network_domains == {}
 
 
 @pytest.mark.parametrize("agent,case,network", [("course", "course_explain", True),
@@ -63,14 +55,14 @@ def test_connector_agents_write_their_workspace_and_reach_out_only_with_own_data
     assert profile.filesystem[":root"] == "read"
     assert profile.filesystem[str(workspace.cwd)] == "write"
     assert all(profile.filesystem[str(denied)] == "deny" for denied in denied_reads(config, agent))
-    assert profile.network_open is network and profile.network_domains == {}
+    assert profile.network_open is network
     enabled = "true" if network else "false"
     assert f"permissions.kei_agent_scoped.network.enabled={enabled}" in profile.config_overrides
 
 
-def test_only_agents_with_commands_get_network_domains(config):
-    """接続先の許可は sandbox の中のコマンドにだけ効く。コマンドを持たない振り分けには通信させない。"""
+def test_only_agents_with_commands_reach_out(config):
+    """コマンドの通信は sandbox の中のコマンドにだけ効く。コマンドを持たない振り分けには通信させない。"""
     request = runner.ExecutionRequest(themes.resolve(config, "vlm"), resolve("router", "codex", UseCase.ROUTING),
                                       None, "C1", "1.1")
-    assert preflight(config, resolve_contract(config, request), "codex_cli").network_domains == {}
+    assert not preflight(config, resolve_contract(config, request), "codex_cli").network_open
 

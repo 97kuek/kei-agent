@@ -1,13 +1,11 @@
-"""Slack（ボタンと App Home）から変える設定: テーマごとの接続先と、一時的に切り替えた担当の AI。定期処理の見出し。
+"""Slack（App Home）から変える設定: 一時的に切り替えた担当の AI。定期処理の見出し。
 
-柵そのもの（書き込み先、読ませない場所、基本の接続先）は `config.toml` に残し、ここでは扱わない。
-保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。テーマのディレクトリは Claude が書けるので、そこに置くと Claude が自分で
-許可を足せてしまう（docs/architecture.md）。
+柵そのもの（書き込み先、読ませない場所）は `config.toml` に残し、ここでは扱わない。
+保存先は Kei Agent の SQLite（表は store.py の SCHEMA）。
 """
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import replace
 from datetime import datetime
 
@@ -66,57 +64,6 @@ def failed_schedules(config: Config, store: Store, now: datetime) -> list[str]:
         elif row["name"] in ("daily", "review") and detail.get("status") == "posted" and not detail.get("notion_url"):
             failed.append(f"{label}（Notion に残せず）")
     return failed
-
-
-
-# テーマごとの接続先
-
-def theme_domains(store: Store, theme: str) -> list[str]:
-    return [r["domain"] for r in store.theme_domains(theme)]
-
-
-def all_theme_domains(store: Store) -> dict[str, list[str]]:
-    result: dict[str, list[str]] = {}
-    for r in store.theme_domains():
-        result.setdefault(r["theme"], []).append(r["domain"])
-    return result
-
-
-def allow_domain(store: Store, theme: str, domain: str, reason: str) -> None:
-    store.add_theme_domain(theme, domain.strip().lower(), reason)
-
-
-def remove_domain(store: Store, theme: str, domain: str) -> None:
-    store.remove_theme_domains(theme, domain)
-
-
-def drop_theme(store: Store, theme: str) -> None:
-    """テーマを閉じたら、そのテーマで許可した接続先も消す。"""
-    store.remove_theme_domains(theme)
-
-
-# Claude からの接続の申し出（返答から拾うのは conversation.settings_actions.parse_connect_requests）
-
-def add_request(store: Store, channel: str, thread_ts: str, theme: str, domain: str, reason: str) -> int:
-    return store.add_domain_request(channel, thread_ts, theme, domain, reason)
-
-
-def get_request(store: Store, request_id: int) -> sqlite3.Row | None:
-    return store.domain_request(request_id)
-
-
-def resolve_request(store: Store, request_id: int, status: str) -> bool:
-    """まだ決まっていない申し出を allowed / denied にする。もう決まっていたら False（ボタンの2度押し）。"""
-    return store.resolve_domain_request(request_id, status)
-
-
-def pending_requests(store: Store, channel: str, thread_ts: str) -> int:
-    return store.count_pending_domain_requests(channel, thread_ts)
-
-
-def take_decisions(store: Store, channel: str, thread_ts: str) -> list[sqlite3.Row]:
-    """決まったが、まだ Claude に伝えていない申し出。取り出したら伝えたことにする。"""
-    return store.take_domain_decisions(channel, thread_ts)
 
 
 # 決まった時刻の処理

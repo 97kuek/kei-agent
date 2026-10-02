@@ -150,10 +150,10 @@ def test_app_home_shows_when_it_differs_from_the_table(tmp_path):
     home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
     config = _load(home)
     store = Store(config.db_path)
-    text = str(build_home(config, store, [], True))
+    text = str(build_home(config, store, True))
     assert "agents.csv では" not in text
     settings.set_agent_provider(store, "knowledge", "claude")
-    assert "agents.csv では Codex（起動し直すと戻る）" in str(build_home(config, store, [], True))
+    assert "agents.csv では Codex（起動し直すと戻る）" in str(build_home(config, store, True))
 
 
 def test_the_folder_column_decides_where_agents_work(tmp_path):

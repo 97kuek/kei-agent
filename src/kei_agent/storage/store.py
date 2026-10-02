@@ -66,26 +66,6 @@ CREATE TABLE IF NOT EXISTS deferred_runs (
     done INTEGER NOT NULL DEFAULT 0
 );
 -- Slack から変える設定（settings.py）
-CREATE TABLE IF NOT EXISTS theme_domains (
-    theme TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    reason TEXT,
-    added_at REAL NOT NULL,
-    PRIMARY KEY (theme, domain)
-);
-CREATE TABLE IF NOT EXISTS domain_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel TEXT NOT NULL,
-    thread_ts TEXT NOT NULL,
-    theme TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    reason TEXT,
-    status TEXT NOT NULL,
-    created_at REAL NOT NULL,
-    resolved_at REAL,
-    -- 決めた内容を Claude に伝えて作業を再開したか
-    resumed INTEGER NOT NULL DEFAULT 0
-);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -225,6 +205,8 @@ ADDED_COLUMNS = {
                 # 区切って引き継いだ先のスレッド
                 "handed_off_to": "TEXT"},
 }
+# 使わなくなった表。既存のデータベースからも消す
+DROPPED_TABLES = ("theme_domains", "domain_requests")
 
 
 class Store:
@@ -246,6 +228,8 @@ class Store:
                 for name, kind in columns.items():
                     if name not in have:
                         self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+            for table in DROPPED_TABLES:
+                self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     def snapshot(self, path: Path) -> None:
         """いまのデータベースを、書き込みと混ざらない形で別ファイルに写す。
@@ -522,63 +506,6 @@ class Store:
         return row["agent"] if row else None
 
     # Slack から変える設定（settings.py）
-
-    def theme_domains(self, theme: str | None = None) -> list[sqlite3.Row]:
-        if theme is None:
-            return self.conn.execute("SELECT theme, domain FROM theme_domains ORDER BY theme, domain").fetchall()
-        return self.conn.execute(
-            "SELECT theme, domain FROM theme_domains WHERE theme = ? ORDER BY domain", (theme,)).fetchall()
-
-    def add_theme_domain(self, theme: str, domain: str, reason: str) -> None:
-        with self.conn:
-            self.conn.execute(
-                "INSERT OR IGNORE INTO theme_domains (theme, domain, reason, added_at) VALUES (?, ?, ?, ?)",
-                (theme, domain, reason, time.time()),
-            )
-
-    def remove_theme_domains(self, theme: str, domain: str | None = None) -> None:
-        """domain を省くと、そのテーマの接続先をすべて消す。"""
-        with self.conn:
-            if domain is None:
-                self.conn.execute("DELETE FROM theme_domains WHERE theme = ?", (theme,))
-            else:
-                self.conn.execute("DELETE FROM theme_domains WHERE theme = ? AND domain = ?", (theme, domain))
-
-    def add_domain_request(self, channel: str, thread_ts: str, theme: str, domain: str, reason: str) -> int:
-        with self.conn:
-            cur = self.conn.execute(
-                """INSERT INTO domain_requests (channel, thread_ts, theme, domain, reason, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
-                (channel, thread_ts, theme, domain, reason, time.time()),
-            )
-        return int(cur.lastrowid)
-
-    def domain_request(self, request_id: int) -> sqlite3.Row | None:
-        return self.conn.execute("SELECT * FROM domain_requests WHERE id = ?", (request_id,)).fetchone()
-
-    def resolve_domain_request(self, request_id: int, status: str) -> bool:
-        with self.conn:
-            cur = self.conn.execute(
-                "UPDATE domain_requests SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
-                (status, time.time(), request_id),
-            )
-        return cur.rowcount == 1
-
-    def count_pending_domain_requests(self, channel: str, thread_ts: str) -> int:
-        row = self.conn.execute(
-            "SELECT COUNT(*) AS n FROM domain_requests WHERE channel = ? AND thread_ts = ? AND status = 'pending'",
-            (channel, thread_ts)).fetchone()
-        return int(row["n"])
-
-    def take_domain_decisions(self, channel: str, thread_ts: str) -> list[sqlite3.Row]:
-        with self.conn:
-            rows = self.conn.execute(
-                """SELECT * FROM domain_requests WHERE channel = ? AND thread_ts = ?
-                   AND status != 'pending' AND resumed = 0 ORDER BY id""", (channel, thread_ts)).fetchall()
-            self.conn.execute(
-                "UPDATE domain_requests SET resumed = 1 WHERE channel = ? AND thread_ts = ? AND status != 'pending'",
-                (channel, thread_ts))
-        return rows
 
     def setting(self, key: str) -> str | None:
         row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()

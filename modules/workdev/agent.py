@@ -4,7 +4,7 @@
 （agents.csv の workdev の行の claude_account・codex_account）。依頼は JSON で届く。
 
     ask  {"channel_name": "work-billing", "prompt": "テストを直して", "session_id": null,
-          "channel": "C1", "thread_ts": "1.2", "allowed_domains": ["example.com"]}
+          "channel": "C1", "thread_ts": "1.2"}
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ SKILLS = [
     AgentSkill(
         id=ASK,
         name="プロジェクトで provider を1回動かす",
-        description="JSON（channel_name・prompt・session_id・allowed_domains）を受け取り、プロジェクトの作業場で"
+        description="JSON（channel_name・prompt・session_id）を受け取り、プロジェクトの作業場で"
                     "選択済み provider を1回動かして、答えを返す",
         tags=["work", "code"],
         examples=['{"channel_name": "work-billing", "prompt": "テストを直して"}'],
@@ -32,6 +32,5 @@ class Executor(SkillExecutor):
         await self.pick(updater, metadata, text, (ASK,), ASK)
 
     def workspace(self, ask: dict) -> Workspace:
-        """プロジェクトの作業場で動かす。許可済みの接続先は、本体が依頼に添えてくる。"""
-        return channel_workspace(self.config, str(ask.get("channel_name") or ""), ask.get("allowed_domains") or (),
-                                 create=not ask.get("read_only"))
+        """プロジェクトの作業場で動かす。"""
+        return channel_workspace(self.config, str(ask.get("channel_name") or ""), create=not ask.get("read_only"))

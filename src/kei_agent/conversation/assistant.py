@@ -3,7 +3,7 @@
 Slack Bolt に依存しないようにし、Slack API は `slack`（AsyncWebClient と同じメソッドを持つもの）として受け取る。
 役割ごとの処理は、次のファイルに分けて Assistant に混ぜている。
 
-- settings_actions.py: 接続先の申し出のボタンと App Home
+- settings_actions.py: ボタンのメッセージの書き換えと App Home
 - handoff.py: 長くなったスレッドを区切って、新しいスレッドで続ける
 - theme_invite.py: 研究テーマのチャンネルに招かれたとき、フォルダの置き場所を聞く
 - startup_checks.py: 担当の名刺と版、Notion の DB の形の確かめ
@@ -98,7 +98,7 @@ HISTORY_MAX_MESSAGES = 600
 # 履歴を読むときのページ数の上限（とても長いスレッドで、いつまでも読み続けないように）
 HISTORY_MAX_PAGES = 20
 # スレッドのログに残すときの、依頼の出どころの呼び名
-WHO_BY_TRIGGER = {"job": "Kei Agent（ジョブ完了）", "domain": "Kei Agent（接続先の返事）", "voice": "依頼者（声）"}
+WHO_BY_TRIGGER = {"job": "Kei Agent（ジョブ完了）", "voice": "依頼者（声）"}
 
 
 class ThemeRuns:
@@ -481,13 +481,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if channel:
             self.channel_names.pop(channel, None)
 
-    async def on_channel_archive(self, event: dict) -> None:
-        """テーマのチャンネルをアーカイブしたら、そのテーマで許可した接続先を消す。"""
-        channel = event.get("channel")
-        if not channel:
-            return
-        settings.drop_theme(self.store, await self.channel_name(channel))
-
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return
@@ -534,7 +527,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             return runner.RunResult(is_error=True, errors=[str(e)])
         with self.claude_running():
             if agent is not None:
-                # 担当のプロセスに、作業場（チャンネルの名前）と許可済みの接続先を添えて頼む
+                # 担当のプロセスに、作業場（チャンネルの名前）を添えて頼む
                 return await agents.run_in_workspace(agent, ws, prompt, session_id, channel, thread_ts,
                                                      use_case, on_activity, provider=recipe.provider,
                                                      read_only=read_only, for_head=for_head,
@@ -657,12 +650,10 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             if await self._dispatch(req, owner, ""):
                 return self._work_results.pop(id(req), None)
         themes.ensure_workspace(ws)
-        if ws.kind is ChannelKind.THEME:
-            ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
-            if ws.channel_name not in self.registered_themes:
-                # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
-                self.registered_themes.add(ws.channel_name)
-                await self.register_theme(req.channel, ws)
+        if ws.kind is ChannelKind.THEME and ws.channel_name not in self.registered_themes:
+            # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
+            self.registered_themes.add(ws.channel_name)
+            await self.register_theme(req.channel, ws)
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
             try:
                 return await self.run(req, ws)
@@ -685,7 +676,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         研究テーマのチャンネルは、テーマのフォルダ。folder を渡したとき（モジュールのフォルダの中）は、モジュールが
         会話を受け持つチャンネル（モジュールのチャンネル、Kei Agent のチャンネル）で、そのフォルダを作業場にする。
         hide に書いた頭で始まる行は、Slack に出さない（合図の行など）。
-        添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。
+        添付の保存・できたファイルの添付・引き継ぎの提案・ジョブは、研究と同じ流れ。
         モジュールの on_message から呼ばれる（スレッドのロックと同時実行の上限は、取り次いだ _dispatch が持っている）。
         """
         ws = themes.resolve(self.config, req.channel_name)
@@ -698,7 +689,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             if ws.kind not in (ChannelKind.THEME, ChannelKind.PROJECT) or themes.actor_of(ws) != actor:
                 raise ValueError(f"#{req.channel_name} は、{actor} が受け持つ研究テーマ・プロジェクトのチャンネルではありません")
             themes.ensure_workspace(ws)
-            ws = replace(ws, allowed_domains=tuple(settings.theme_domains(self.store, ws.channel_name)))
             if ws.kind is ChannelKind.THEME and ws.channel_name not in self.registered_themes:
                 # 招待のイベントを取りこぼしていても、1テーマ = 1チャンネル = 1ディレクトリ = Notion の1行を保つ
                 self.registered_themes.add(ws.channel_name)
@@ -814,17 +804,15 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             self.theme_runs.end(req.channel_name, req.thread_ts)
             return result
 
-        connect = self.new_connect_requests(ws, result.text, result.requested_domains)
-        # 返事待ちは、依頼者の判断を待つときだけ（❓ の確認・失敗したジョブのあと・接続の許可待ち）。エラーで止まった回は
+        # 返事待ちは、依頼者の判断を待つときだけ（❓ の確認・失敗したジョブのあと）。エラーで止まった回は
         # ⚠️ を付けるだけにする（返信すれば、止まった依頼の続きとしてやる）
-        awaiting = req.awaiting_after or bool(connect) or (not result.is_error and AWAITING_MARKER in result.text)
+        awaiting = req.awaiting_after or (not result.is_error and AWAITING_MARKER in result.text)
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         if awaiting:
             self.emit("awaiting", theme=req.channel_name)
         await self._reply(req, ws, ui, result, awaiting, hide)
         await self._attach_outputs(req, ws.cwd, before)
         await self.mark_answered(req, result.is_error)
-        await self.ask_for_domains(req, ws, connect)
         await self.handle_job_requests(ws.cwd)
         waiting_for_job = any(j.channel == req.channel and j.thread_ts == req.thread_ts
                               for j in self.store.active_jobs())

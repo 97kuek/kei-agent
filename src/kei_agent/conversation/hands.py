@@ -213,7 +213,6 @@ class Hands:
             async with assistant.semaphore:
                 if ws.kind in WORKSPACE_KINDS:
                     themes.ensure_workspace(ws)
-                    ws = replace(ws, allowed_domains=tuple(settings.theme_domains(store, ws.channel_name)))
                     before = snapshot_outputs(ws.cwd) if ws.cwd is not None else {}
                 result = await self._attempt(replace(plan, ws=ws), today_line() + request, session_id, conversation)
                 if result.session_missing:

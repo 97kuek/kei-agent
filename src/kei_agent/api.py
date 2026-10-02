@@ -463,9 +463,8 @@ class Core:
         研究テーマのチャンネル（[channels] に "*" で受け持つもの）は、テーマのフォルダが作業場。folder（このモジュールの
         フォルダ core.state_dir の中）を渡すと、会話を受け持つほかのチャンネル（モジュールのチャンネル、core_channels の
         本体のチャンネル）で、そのフォルダを作業場にする。hide に書いた頭で始まる行は Slack に出さない（合図の行など）。
-        添付の保存・できたファイルの添付・接続先の許可・引き継ぎの提案・ジョブは、研究と同じ流れ。担当のプロセスには
-        ask の依頼に channel_name（作業場）と allowed_domains（許可済みの接続先）が添えて届く（プロセスの無いモジュールは
-        本体の中で動かす）。返すのは AI の答えのうち Slack に出す部分（hide の行も含む。答えられなかったら空文字）。
+        添付の保存・できたファイルの添付・引き継ぎの提案・ジョブは、研究と同じ流れ。担当のプロセスには
+        ask の依頼に channel_name（作業場）が添えて届く（プロセスの無いモジュールは本体の中で動かす）。返すのは AI の答えのうち Slack に出す部分（hide の行も含む。答えられなかったら空文字）。
         """
         result = await self._assistant.work_in_workspace(
             req, self.name, folder=self._inside(folder) if folder is not None else None, hide=tuple(hide))

@@ -365,20 +365,6 @@ async def test_narration_goes_to_the_status_not_the_answer(env, steps):
     assert "了解、進めるね" not in "\n".join(slack.thinking() + slack.texts() + slack.streamed())
 
 
-async def test_run_uses_domains_allowed_for_the_theme(env, store, monkeypatch):
-    assistant, slack, claude, _ = env
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    seen = []
-
-    async def spy(config, request, *args, **kwargs):
-        seen.append(request.workspace.allowed_domains)
-        return await claude(config, request, *args, **kwargs)
-
-    monkeypatch.setattr(runner, "run_model", spy)
-    await mention(assistant, "x")
-    assert seen == [("zenodo.org",)]
-
-
 async def test_question_suspends_the_session_and_mentions_the_owner(env):
     """依頼者の判断を待つときは、Slack 側でも「返事待ち」に見せ、メンションで知らせる。"""
     assistant, slack, claude, _ = env
@@ -625,99 +611,6 @@ def test_theme_runs_remembers_overlap():
     runs.begin("vlm", "3.1")
     runs.begin("other", "3.2")  # テーマが違えば混ざらない
     assert runs.end("vlm", "3.1") is False and runs.end("other", "3.2") is False
-
-
-# 接続先の申し出（🔒 接続:）
-
-def _buttons(slack, name):
-    """投稿されたボタンのうち、action_id が name のもの（新しい順）と、その投稿。"""
-    return [(el, kw) for _, kw in reversed(slack.calls) for block in kw.get("blocks") or []
-            for el in block.get("elements", []) if el.get("action_id") == name]
-
-
-def _press(el, user="UME", message_ts="99.1"):
-    return {"user": {"id": user}, "actions": [{"action_id": el["action_id"], "value": el["value"]}],
-            "container": {"channel_id": "C1", "message_ts": message_ts}, "channel": {"id": "C1"}}
-
-
-async def test_connect_request_becomes_buttons_and_resumes_when_allowed(env, store):
-    assistant, slack, claude, _ = env
-    claude.behaviors = [
-        {"text": "Zenodo につながらなかった。\n🔒 接続: zenodo.org（CASTELLA の特徴量を落とすため）"},
-        {"text": "落とせたよ"},
-    ]
-    await mention(assistant, "落として")
-
-    (allow, post), = _buttons(slack, "kei_agent_domain_allow")
-    assert post["thread_ts"] == "10.1" and "zenodo.org" in post["text"]
-    assert slack.statuses()[-1] == "suspended"  # 返事待ちに見せる
-    assert len(_mentions(slack)) == 1
-
-    await assistant.on_domain_action(_press(allow))
-    await settle(assistant)
-
-    assert settings.theme_domains(store, "vlm") == ["zenodo.org"]
-    update = [kw for name, kw in slack.calls if name == "chat_update"][-1]
-    assert "許可しました" in update["text"] and not any(b.get("type") == "actions" for b in update["blocks"])
-    resumed = claude.calls[1]
-    assert resumed["session_id"] == "sess-1" and "zenodo.org" in resumed["prompt"] and "許可" in resumed["prompt"]
-
-
-async def test_connect_request_is_answered_only_by_the_owner_and_denial_resumes(env, store):
-    """ほかの人が押しても何も変わらない。断ったら、そのことを伝えて続きをやらせる。"""
-    assistant, slack, claude, _ = env
-    claude.behaviors = [{"text": "🔒 接続: zenodo.org（特徴量）"}, {"text": "別の入手先を探すね"}]
-    await mention(assistant, "落として")
-
-    (allow, _), = _buttons(slack, "kei_agent_domain_allow")
-    await assistant.on_domain_action(_press(allow, user="USOMEONE"))
-    await settle(assistant)
-    assert settings.theme_domains(store, "vlm") == [] and len(claude.calls) == 1
-
-    (deny, _), = _buttons(slack, "kei_agent_domain_deny")
-    await assistant.on_domain_action(_press(deny))
-    await settle(assistant)
-    assert settings.theme_domains(store, "vlm") == []
-    assert "断" in claude.calls[1]["prompt"]
-
-
-async def test_several_requests_resume_once_after_all_answered(env):
-    assistant, slack, claude, _ = env
-    claude.behaviors = [{"text": "🔒 接続: zenodo.org（特徴量）\n🔒 接続: huggingface.co（重み）"}, {"text": "続けたよ"}]
-    await mention(assistant, "落として")
-
-    second, first = [el for el, _ in _buttons(slack, "kei_agent_domain_allow")]
-    await assistant.on_domain_action(_press(first))
-    await settle(assistant)
-    assert len(claude.calls) == 1  # もう1つに答えるまで待つ
-
-    await assistant.on_domain_action(_press(second))
-    await assistant.on_domain_action(_press(second))  # 2度押し
-    await settle(assistant)
-    assert len(claude.calls) == 2
-    assert "zenodo.org" in claude.calls[1]["prompt"] and "huggingface.co" in claude.calls[1]["prompt"]
-
-
-async def test_connect_request_for_an_allowed_domain_asks_nothing(env):
-    assistant, slack, claude, _ = env
-    claude.behaviors = [{"text": "🔒 接続: export.arxiv.org（論文）"}]  # config.toml で許可済み
-    await mention(assistant, "探して")
-    assert not any(kw.get("blocks") for _, kw in slack.calls if "blocks" in kw and kw.get("text", "").startswith("🔒"))
-
-
-async def test_domains_asked_through_the_bash_tool_also_become_buttons(env, monkeypatch):
-    """Claude が 🔒 の行を書かず、Bash の allowed_domains で頼んだときも、ボタンを出す。"""
-    assistant, slack, claude, _ = env
-
-    async def asks_with_tool(config, request, *args, **kwargs):
-        result = await claude(config, request, *args, **kwargs)
-        result.requested_domains = [("huggingface.co", "重みを落とす")]
-        return result
-
-    monkeypatch.setattr(runner, "run_model", asks_with_tool)
-    await mention(assistant, "落として")
-    (_, post), = _buttons(slack, "kei_agent_domain_allow")
-    assert "huggingface.co" in post["text"] and "重みを落とす" in post["text"]
 
 
 async def test_updated_rules_start_a_fresh_session_once(env, monkeypatch):

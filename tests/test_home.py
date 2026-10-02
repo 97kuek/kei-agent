@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import replace
 
 import pytest
@@ -34,13 +33,11 @@ def _action(action_id, value="", user="UME", **extra):
     return {"user": {"id": user}, "trigger_id": "trig", "actions": [{"action_id": action_id, "value": value, **extra}]}
 
 
-def test_home_lists_theme_domains_but_not_schedules(config, store):
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    view = home.build_home(config, store, ["vlm"], is_owner=True)
+def test_home_shows_neither_schedules_nor_connections(config, store):
+    view = home.build_home(config, store, is_owner=True)
     text = _texts(view)
-    # テーマ名に `#` は付けない（`1-vlm` のようなチャンネル名とずれて見えるので）
-    assert "*vlm*" in text and "#vlm" not in text and "`zenodo.org`" in text
-    assert "export.arxiv.org" not in text  # 基本の接続先は出さない
+    # 通信の範囲は担当の線で決まるので、接続先の欄は無い
+    assert "接続先" not in text
     # 定期処理の時刻とオンオフは schedules.csv だけで変える（App Home には出さない）
     assert "定期実行" not in text and not any(b.get("accessory", {}).get("type") == "timepicker" for b in view["blocks"])
 
@@ -49,7 +46,7 @@ def test_home_shows_agent_provider_controls(config, store):
     from kei_agent.configuration.config import AgentProfile, model_actors
 
     config = replace(config, agent_profiles={name: AgentProfile() for name in model_actors()})
-    view = home.build_home(config, store, [], is_owner=True)
+    view = home.build_home(config, store, is_owner=True)
     course, = [b["accessory"] for b in view["blocks"]
                if b.get("accessory", {}).get("action_id") == "kei_agent_home_provider:course"]
     # 選んでいなければ、欄に「未選択」と出るだけ（説明文は置かない）
@@ -68,7 +65,7 @@ def test_home_shows_agent_provider_controls(config, store):
 
 
 def test_home_for_someone_else_changes_nothing(config, store):
-    view = home.build_home(config, store, ["vlm"], is_owner=False)
+    view = home.build_home(config, store, is_owner=False)
     assert "依頼者だけ" in _texts(view)
     assert not any(b.get("accessory") or b["type"] == "actions" for b in view["blocks"])
 
@@ -82,26 +79,12 @@ async def test_opening_or_refreshing_home_publishes_it(env):
     assert _published(slack)["user_id"] == "UME"
 
 
-async def test_remove_domain_from_home_with_the_button_or_the_select(env, store):
-    assistant, slack = env
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    await assistant.on_home_action(_action("kei_agent_home_remove_domain", "vlm\tzenodo.org"))
-    assert settings.theme_domains(store, "vlm") == []
-    assert "zenodo.org" not in _texts(_published(slack)["view"])
-
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    view = home.build_home(assistant.config, store, ["vlm"], is_owner=True)
-    remove, = [b["accessory"] for b in view["blocks"]
-               if b.get("accessory", {}).get("action_id") == home.REMOVE_DOMAIN_ACTION]
-    await assistant.on_home_action(_action(home.REMOVE_DOMAIN_ACTION, selected_option=remove["options"][0]))
-    assert settings.theme_domains(store, "vlm") == []
-
-
 async def test_someone_else_cannot_change_settings(env, store):
     assistant, slack = env
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    await assistant.on_home_action(_action("kei_agent_home_remove_domain", "vlm\tzenodo.org", user="USOMEONE"))
-    assert settings.theme_domains(store, "vlm") == ["zenodo.org"]
+    voice = assistant.modules["voice"]
+    await assistant.on_home_action(_action("kei_agent_home_module:voice:switches", user="USOMEONE",
+                                           selected_options=[{"value": "notify"}]))
+    assert not voice.is_on("notify") and not [name for name, _ in slack.calls if name == "views_publish"]
 
 
 def _checked(*values):
@@ -150,31 +133,6 @@ async def test_home_provider_action_changes_the_next_agent_run(env, config, stor
     assert seen == {"model": "gpt-6-sol", "effort": "xhigh"}
 
 
-async def test_add_domain_through_modal(env, store):
-    assistant, slack = env
-    await assistant.on_home_action(_action("kei_agent_home_add_domain", "add"))
-    opened, = [kw for name, kw in slack.calls if name == "views_open"]
-    assert opened["view"]["callback_id"] == home.ADD_DOMAIN_CALLBACK
-
-    def submitted(theme, domain):
-        return {"user": {"id": "UME"}, "view": {"state": {"values": {
-            "theme": {"value": {"selected_option": {"value": theme}}},
-            "domain": {"value": {"value": domain}}}}}}
-
-    assert "domain" in await assistant.on_add_domain(submitted("vlm", "https://zenodo.org"))
-    assert "theme" in await assistant.on_add_domain(submitted("nothere", "zenodo.org"))
-    assert await assistant.on_add_domain(submitted("vlm", "*.githubusercontent.com")) is None
-    assert settings.theme_domains(store, "vlm") == ["*.githubusercontent.com"]
-
-
-async def test_archiving_the_channel_drops_theme_domains(env, store):
-    assistant, slack = env
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    await assistant.on_channel_archive({"type": "channel_archive", "channel": "C1"})
-    await asyncio.sleep(0)
-    assert settings.theme_domains(store, "vlm") == []
-
-
 # いま動いているもの
 
 
@@ -190,7 +148,7 @@ def test_home_shows_what_is_running(config, store):
     store.upsert_thread("C5", "20.1", "research-overview", None)
     store.set_awaiting("C5", "20.1", True)
 
-    text = _texts(home.build_home(config, store, ["vlm"], is_owner=True))
+    text = _texts(home.build_home(config, store, is_owner=True))
 
     assert "動いているもの" in text
     assert "#vlm" in text and "依頼" in text            # 動いている依頼
@@ -201,8 +159,7 @@ def test_home_shows_what_is_running(config, store):
 
 def test_home_has_no_explanations_and_says_when_nothing_is_running(config, store):
     """見出しと操作だけ。説明の文（context）は「なし」などの状態だけにする。"""
-    settings.allow_domain(store, "vlm", "zenodo.org", "")
-    blocks = home.build_home(config, store, ["vlm"], is_owner=True)["blocks"]
+    blocks = home.build_home(config, store, is_owner=True)["blocks"]
     assert blocks[1]["text"]["text"] == "*動いているもの*" and blocks[2]["elements"][0]["text"] == "なし"
     contexts = [e["text"] for b in blocks if b["type"] == "context" for e in b["elements"]]
     assert contexts == ["なし"]

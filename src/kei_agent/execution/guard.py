@@ -104,7 +104,7 @@ SUBAGENT_TOOLS = ("Task", "Agent")
 ACCOUNT_NOTION = "mcp__claude_ai_Notion"
 
 # Kei Agent 自身に直させないもの（リポジトリからの相対パス）
-# config.example.toml は、新しく使う人の既定の柵（読ませない場所・接続先）になる。本物の設定はリポジトリの外
+# config.example.toml は、新しく使う人の既定の柵（書き込み先・読ませない場所）になる。本物の設定はリポジトリの外
 PROTECTED_PATHS = ("src/kei_agent/execution/guard.py", "config.example.toml", "deploy/")
 # 差分に入っていてはいけない文字列（秘密情報）
 SECRET_PATTERNS = (
@@ -118,21 +118,10 @@ SECRET_PATTERNS = (
 # 1つのファイルの変更量の上限。研究データや重みが紛れ込むのを防ぐ
 MAX_DIFF_BYTES = 1_000_000
 
-_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_DOMAIN = re.compile(rf"^(?:{_LABEL}\.)+[a-z][a-z0-9-]{{0,61}}[a-z0-9]$")
-
 
 def is_owner(config: Config, user_id: str | None) -> bool:
     """依頼者本人か。依頼を受けるのも、ボタンを押せるのも、この人だけ。"""
     return bool(config.allowed_user_id) and user_id == config.allowed_user_id
-
-
-def valid_domain(domain: str, allow_wildcard: bool = False) -> bool:
-    """ぴったりのドメイン名か。allow_wildcard なら先頭の `*.` だけ許す（App Home から自分で足すとき）。"""
-    domain = domain.strip().lower()
-    if allow_wildcard and domain.startswith("*."):
-        domain = domain[2:]
-    return bool(_DOMAIN.match(domain))
 
 
 def _abs_rule(tool: str, path: Path) -> str:

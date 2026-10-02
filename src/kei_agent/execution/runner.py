@@ -383,9 +383,6 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     activities: list[str] = field(default_factory=list)
     timed_out: bool = False
-    # Bash の allowed_domains で広げようとした接続先と、そのときの説明。sandbox では断られるので、
-    # Kei Agent が依頼者に [許可する] [断る] を聞く（docs/architecture.md）
-    requested_domains: list[tuple[str, str]] = field(default_factory=list)
     # 契約の上限に達したときの、明ける時刻（エポック秒）。分からないときは UNKNOWN_LIMIT_RESET
     limit_reset_at: float | None = None
     failure_kind: Literal["quota", "timeout", "session_missing", "capability", "login", "runtime"] | None = None
@@ -430,11 +427,6 @@ def apply_event(result: RunResult, event: dict) -> str | None:
                 tool_input = block.get("input") or {}
                 activity = describe_tool(block.get("name", ""), tool_input)
                 result.activities.append(activity)
-                known = {d for d, _ in result.requested_domains}
-                for domain in tool_input.get("allowed_domains") or []:
-                    if isinstance(domain, str) and domain not in known:
-                        known.add(domain)
-                        result.requested_domains.append((domain, str(tool_input.get("description") or "")))
         return activity
     if etype == "result":
         result.session_id = event.get("session_id") or result.session_id

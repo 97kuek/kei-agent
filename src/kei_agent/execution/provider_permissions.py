@@ -15,7 +15,7 @@ Runtime = Literal["claude_cli", "codex_cli"]
 PROFILE_NAME = "kei_agent_scoped"
 _SUPPORTED = frozenset({
     "filesystem.read", "filesystem.deny_read", "filesystem.write_scope",
-    "network.domain_allowlist", "mcp.allowlist", "app.allowlist",
+    "network.policy", "mcp.allowlist", "app.allowlist",
 })
 
 
@@ -26,7 +26,6 @@ class CapabilityUnavailable(RuntimeError):
 @dataclass(frozen=True)
 class PermissionProfile:
     filesystem: dict[str, str]
-    network_domains: dict[str, str]
     config_overrides: tuple[str, ...]
     # コマンドの通信がどこへでも出られるか
     network_open: bool = False
@@ -84,11 +83,10 @@ def preflight(config: Config, contract: ExecutionContract, runtime: Runtime,
 
     # コマンドの通信。外へ出てよい実行役（自分のデータ）はどこへでも、会社のデータを読む実行役はどこへも出さない
     network_open = contract.policy.network and contract.policy.shell
-    network_domains: dict[str, str] = {}
     filesystem = _filesystem(config, contract)
 
     if "mcp.allowlist" in contract.capabilities and not config.notion_gateway_url:
         raise CapabilityUnavailable("Notion gateway is not configured")
     if runtime == "claude_cli":
-        return PermissionProfile(filesystem, network_domains, (), network_open)
-    return PermissionProfile(filesystem, network_domains, _overrides(filesystem, network_open), network_open)
+        return PermissionProfile(filesystem, (), network_open)
+    return PermissionProfile(filesystem, _overrides(filesystem, network_open), network_open)

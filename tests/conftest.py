@@ -35,7 +35,6 @@ def config(tmp_path: Path) -> Config:
         state_dir=tmp_path / "state",
         repo_root=REPO_ROOT,
         allowed_user_id="UME",
-        allowed_domains=("export.arxiv.org",),
         allow_write=(tmp_path / "cache",),
         deny_read=(tmp_path / "secrets",),
         # 個別の unit test は既存経路の振る舞いを検証する。製品の config.toml は未選択で始まる。

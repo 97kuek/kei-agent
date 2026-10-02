@@ -211,7 +211,6 @@ class Config:
     agent_profiles: dict[str, AgentProfile] = field(default_factory=_default_agent_profiles)
     # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
     handoff_after_turns: int = 8
-    allowed_domains: tuple[str, ...] = ()
     allow_write: tuple[Path, ...] = ()
     # config.toml の [sandbox] deny_read（書かなければ None）。実際に読ませない場所は柵が決める（guard.denied_reads）
     deny_read: tuple[Path, ...] | None = None
@@ -365,7 +364,9 @@ DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "co
 CHANNELS_KEYS = {"overview", "improve"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
 SCHEDULE_TIME_KEYS = ("daily", "review", "night")
-SANDBOX_KEYS = {"allowed_domains", "allow_write", "deny_read"}
+SANDBOX_KEYS = {"allow_write", "deny_read"}
+# 通信の範囲は担当の線（module.toml の [actor] data）で決まる。[sandbox] にこのキーが残っていても読まない
+IGNORED_SANDBOX_KEYS = {"allowed_domains"}
 
 
 def _check_keys(data: dict, known: set[str], where: str) -> None:
@@ -663,7 +664,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
                 "[channels]")
-    _check_keys(sandbox, SANDBOX_KEYS, "[sandbox]")
+    _check_keys(sandbox, SANDBOX_KEYS | IGNORED_SANDBOX_KEYS, "[sandbox]")
     paths = data.get("paths", {})
     _check_keys(paths, PATHS_KEYS, "[paths]")
     module_schedules = [s for spec in enabled for s in spec.schedules]
@@ -693,7 +694,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         job_parallel=int(data.get("job_parallel", 1)),
         agent_profiles=_agent_profiles(data.get("agents", {}), where),
         handoff_after_turns=int(data.get("handoff_after_turns", 8)),
-        allowed_domains=tuple(sandbox.get("allowed_domains", ())),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
         deny_read=tuple(_expand(p) for p in sandbox["deny_read"]) if "deny_read" in sandbox else None,
         claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),

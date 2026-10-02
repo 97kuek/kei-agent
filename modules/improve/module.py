@@ -112,7 +112,7 @@ class Module:
                 return
             req = replace(req, text=WORKING_NOTE + req.text)
         answer = await self.core.work(req, folder=self.talks / req.thread_ts, hide=HIDDEN)
-        # 合図は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。ジョブの完了や接続の許可で自動で再開した回と、
+        # 合図は、依頼者の投稿で始まった回の返事にあるときだけ受け付ける。ジョブの完了で自動で再開した回と、
         # 様子を聞かれただけの回（読むだけで動く）の返事では動かない
         if req.trigger != "message" or is_status_inquiry(req.text):
             return

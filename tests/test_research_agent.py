@@ -5,7 +5,6 @@ claude そのものは動かさず、偽の runner に差し替える。
 """
 
 import json
-from dataclasses import replace
 
 import pytest
 from fakes import free_port, serving
@@ -40,7 +39,7 @@ class FakeRunModel:
         ws = request.workspace
         self.calls.append({"cwd": ws.cwd, "prompt": prompt, "session_id": request.session_id,
                            "channel": request.channel, "thread_ts": request.thread_ts,
-                           "allowed_domains": ws.allowed_domains, "recipe": request.recipe})
+                           "recipe": request.recipe})
         if on_activity:
             await on_activity("Bash: テスト")
         return self.result
@@ -52,8 +51,7 @@ async def server(config, monkeypatch):
     from kei_agent_modules.research.agent import Executor
 
     claude = FakeRunModel(runner.RunResult(
-        session_id="sess-9", text="できたよ", cost_usd=0.12,
-        requested_domains=[("example.com", "データを取るため")]))
+        session_id="sess-9", text="できたよ", cost_usd=0.12))
     monkeypatch.setattr(runner, "run_model", claude)
     async with _serve(Executor(config)) as base:
         yield base, claude
@@ -72,7 +70,7 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
     from kei_agent.workspaces import themes
 
     base, claude = server
-    ws = replace(themes.resolve(config, "vlm"), allowed_domains=("example.com",))
+    ws = themes.resolve(config, "vlm")
     activities = []
 
     result = await agents.run_in_workspace(
@@ -81,13 +79,10 @@ async def test_the_orchestrator_gets_the_result_and_the_progress(server, config)
 
     assert result.text == "できたよ" and result.session_id == "sess-9" and not result.is_error
     assert result.cost_usd == 0.12
-    # JSON では組が配列になるので、戻してから接続先の許可に使う
-    assert result.requested_domains == [("example.com", "データを取るため")]
     call, = claude.calls
     assert call["cwd"] == config.research_root / "vlm"
     assert call["prompt"] == "図を作って" and call["session_id"] == "sess-1"
     assert call["channel"] == "C1" and call["thread_ts"] == "10.1"
-    assert call["allowed_domains"] == ("example.com",)
     # tool activity だけを流す。モデルの途中 text はオーケストレーターへも渡さない
     assert activities == ["Bash: テスト"]
 
@@ -108,10 +103,9 @@ async def test_a_broken_request_or_a_channel_without_a_directory_is_refused(serv
 
 
 def test_to_result_keeps_only_what_it_knows():
-    """知らない項目が増えても落ちない。組は JSON で配列になるので戻す。"""
-    result = agents.to_result({"text": "できた", "requested_domains": [["example.com", "なぜ"]],
-                                 "これは知らない": 1})
-    assert result.text == "できた" and result.requested_domains == [("example.com", "なぜ")]
+    """知らない項目が増えても落ちない。"""
+    result = agents.to_result({"text": "できた", "is_error": False, "これは知らない": 1})
+    assert result.text == "できた" and not result.is_error
 
 
 async def test_a_dead_agent_becomes_an_error_result(config):

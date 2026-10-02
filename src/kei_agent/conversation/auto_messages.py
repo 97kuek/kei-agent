@@ -99,19 +99,6 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
     )
 
 
-def domain_resume_prompt(decisions) -> str:
-    """接続先の申し出に依頼者が答えたあと、会話を再開するときに渡す文。"""
-    lines = [f"{HEADER} 接続先の申し出に、依頼者が答えました。"]
-    for d in decisions:
-        if d["status"] == "allowed":
-            lines.append(f"- `{d['domain']}`: 許可されました。次のコマンドからつながります")
-        else:
-            lines.append(f"- `{d['domain']}`: 断られました。このテーマでは使えません")
-    lines.append("止まっていた作業を続けてください。断られたものがあれば、別の入手先を探すか、"
-                 "ここで止めてどうするかを報告してください。")
-    return "\n".join(lines)
-
-
 HANDOFF_MEMO_PROMPT = (
     f"{HEADER} 依頼者が、このスレッドを区切って新しいスレッドで続けることにしました。"
     "新しいスレッドの最初に置く引き継ぎメモを書いてください。道具は使わず、この会話で分かっていることだけで書きます。\n\n"

@@ -61,7 +61,7 @@ def required_capabilities(policy: AgentPolicy) -> frozenset[str]:
     if policy.files == "write":
         required.add("filesystem.write_scope")
     if policy.shell:
-        required.add("network.domain_allowlist")
+        required.add("network.policy")
     if policy.notion != "none":
         required.add("mcp.allowlist")
     if policy.connectors:

@@ -108,7 +108,7 @@ async def test_module_items_are_for_the_owner_and_a_broken_one_is_left_out(env, 
     monkeypatch.setattr(assistant.modules["lamp"], "home", lambda: 1 / 0)
     await assistant.publish_home("UME")
     shown = json.dumps(_published(slack), ensure_ascii=False)
-    assert "ランプ" not in shown and "接続先" in shown
+    assert "ランプ" not in shown and "動いているもの" in shown
 
 
 @pytest.mark.parametrize(("hook", "message"), [

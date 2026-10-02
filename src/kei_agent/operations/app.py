@@ -15,7 +15,7 @@ from slack_bolt.async_app import AsyncApp
 
 from kei_agent import api
 from kei_agent.configuration.config import load_config
-from kei_agent.conversation import home, theme_invite
+from kei_agent.conversation import theme_invite
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.execution import jobs
 from kei_agent.execution.jobs import JobManager
@@ -93,8 +93,6 @@ async def serve() -> None:
         ("group_rename", assistant.on_channel_rename),
         ("reaction_added", assistant.on_reaction_added),
         ("reaction_removed", assistant.on_reaction_removed),
-        ("channel_archive", assistant.on_channel_archive),
-        ("group_archive", assistant.on_channel_archive),
         ("app_home_opened", assistant.on_home_opened),
     ):
         app.event(name)(guard(handler))
@@ -106,7 +104,6 @@ async def serve() -> None:
             await guard(handler)(body)
         return wrapped
 
-    app.action(re.compile(r"^kei_agent_domain_(allow|deny)$"))(acked(assistant.on_domain_action))
     app.action(re.compile(r"^kei_agent_home_"))(acked(assistant.on_home_action))
     app.action(re.compile(r"^kei_agent_handoff_(accept|decline)$"))(acked(assistant.on_handoff_action))
     app.action(re.compile(r"^kei_agent_theme_place_(default|existing)$"))(acked(assistant.on_theme_place_action))
@@ -137,18 +134,6 @@ async def serve() -> None:
         except Exception:
             log.exception("テーマの置き場所を決められませんでした")
             errors = {theme_invite.FOLDER_BLOCK: "決められませんでした。Kei Agent のログを見てください"}
-        if errors:
-            await ack(response_action="errors", errors=errors)
-        else:
-            await ack()
-
-    @app.view(home.ADD_DOMAIN_CALLBACK)
-    async def add_domain(ack, body):
-        try:
-            errors = await assistant.on_add_domain(body)
-        except Exception:
-            log.exception("接続先を足せませんでした")
-            errors = {"domain": "足せませんでした。Kei Agent のログを見てください"}
         if errors:
             await ack(response_action="errors", errors=errors)
         else:

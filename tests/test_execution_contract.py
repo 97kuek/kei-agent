@@ -9,7 +9,7 @@ from kei_agent.execution.model_policy import UseCase, resolve
 from kei_agent.workspaces import themes
 
 ROUTER = {"filesystem.deny_read", "filesystem.read"}
-RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.domain_allowlist",
+RESEARCH = {"filesystem.deny_read", "filesystem.read", "filesystem.write_scope", "network.policy",
             "mcp.allowlist"}
 # モジュールの実行役は、どれも作業場の読み書きとコマンドを持つ（コマンドの通信の範囲は provider の設定で決まる）
 COURSE = RESEARCH | {"app.allowlist"}

@@ -87,15 +87,6 @@ school = ""
 # pick_course = ["course"]
 
 [sandbox]
-# Bash（sandbox内）から接続してよいドメイン
-allowed_domains = [
-  "export.arxiv.org",
-  "arxiv.org",
-  "api.semanticscholar.org",
-  "pypi.org",
-  "files.pythonhosted.org",
-]
-# テーマごとに要る接続先は、ここには書かず Slack で許可する（App Home か、Kei Agent が聞いてくるボタン）
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）
 allow_write = ["~/.cache/uv"]
 # sandbox の Bash から読ませない場所。sandbox は既定で PC 全体を読めるので、

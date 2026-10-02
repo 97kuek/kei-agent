@@ -72,8 +72,7 @@ def ran(monkeypatch):
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
     """研究はテーマの作業場で、大学と仕事はいつも同じ自分の作業場で動く。"""
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
-           "use_case": str(use_case), "provider": "claude", "channel_name": "vlm",
-           "allowed_domains": ["example.com"]}
+           "use_case": str(use_case), "provider": "claude", "channel_name": "vlm"}
     updater = _Updater()
 
     await _executor(kind, config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
@@ -85,8 +84,6 @@ async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, stor
     assert (request.channel, request.thread_ts) == ("C1", "1.2")
     assert request.workspace.cwd == {"research": config.research_root / "vlm", "course": config.course_root,
                                      "work": config.state_dir / "agents" / "work"}[kind]
-    if kind == "research":
-        assert request.workspace.allowed_domains == ("example.com",)
     reply = updater.envelope()
     assert reply["ok"] and reply["data"]["session_id"] == "s-1"
     assert set(reply["data"]) <= set(FIELDS)

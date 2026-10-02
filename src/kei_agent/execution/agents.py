@@ -25,7 +25,7 @@ ASK = "ask"
 MODEL_SKILLS = (ASK,)
 # `ask` の返事（封筒の data）のうち、受け取る RunResult の項目（知らない項目が増えても落ちないように、ここで絞る）
 FIELDS = ("session_id", "text", "is_error", "cost_usd", "duration_ms", "errors", "activities",
-          "timed_out", "requested_domains", "limit_reset_at", "provider", "failure_kind",
+          "timed_out", "limit_reset_at", "provider", "failure_kind",
           "actor", "use_case", "model", "effort")
 # 相手が入れ替わっている最中につながらなかったときに、待ってやり直す回数と秒数
 RETRIES, RETRY_WAIT = 1, 3.0
@@ -107,10 +107,7 @@ async def ask(agent: a2a.Agent, skill: str, params: dict | None = None,
 
 def to_result(data: dict) -> runner.RunResult:
     """封筒の `data` を RunResult に戻す。"""
-    result = runner.RunResult(**{k: v for k, v in data.items() if k in FIELDS})
-    # JSON では組が配列になるので、戻しておく（接続先の許可を聞くときに使う）
-    result.requested_domains = [(d[0], d[1]) for d in result.requested_domains if len(d) >= 2]
-    return result
+    return runner.RunResult(**{k: v for k, v in data.items() if k in FIELDS})
 
 
 async def run_ask(agent: a2a.Agent, payload: dict,
@@ -140,7 +137,7 @@ async def run_in_workspace(agent: a2a.Agent, ws, prompt: str, session_id: str | 
                            timeout_minutes: int | None = None) -> runner.RunResult:
     """担当のプロセスに、チャンネルの作業場（研究テーマなど）で provider を1回動かしてもらう（どの担当とも同じ ask）。
 
-    ほかの担当と同じ依頼の形に、作業場のチャンネルの名前と、許可済みの接続先を足す（担当は channel_workspace で作業場を作る）。
+    ほかの担当と同じ依頼の形に、作業場のチャンネルの名前を足す（担当は channel_workspace で作業場を作る）。
     """
     return await run_ask(agent, {
         "channel_name": ws.channel_name,
@@ -148,7 +145,6 @@ async def run_in_workspace(agent: a2a.Agent, ws, prompt: str, session_id: str | 
         "session_id": session_id,
         "channel": channel,
         "thread_ts": thread_ts,
-        "allowed_domains": list(ws.allowed_domains),
         "use_case": str(use_case),
         "provider": provider,
         "read_only": read_only,
