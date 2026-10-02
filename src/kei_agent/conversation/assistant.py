@@ -5,6 +5,11 @@ Slack Bolt に依存しないようにし、Slack API は `slack`（AsyncWebClie
 
 - settings_actions.py: 接続先の申し出のボタンと App Home
 - handoff.py: 長くなったスレッドを区切って、新しいスレッドで続ける
+- theme_invite.py: 研究テーマのチャンネルに招かれたとき、フォルダの置き場所を聞く
+- startup_checks.py: 担当の名刺と版、Notion の DB の形の確かめ
+- module_bridge.py: モジュールへの取り次ぎ（取り込み・予定・材料・出来事・App Home・ボタン・リアクション）
+- limits.py: AI の利用上限で止まった依頼を覚えて、明けたらやり直す
+- background.py: Slack の外から置かれた依頼と、研究のジョブの見張り
 """
 
 from __future__ import annotations
@@ -16,21 +21,20 @@ from collections import defaultdict
 from collections.abc import Coroutine
 from contextlib import contextmanager, suppress
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 
 from kei_agent import api
 from kei_agent.configuration.config import Config
-from kei_agent.conversation import ask, router
+from kei_agent.conversation import router
 from kei_agent.conversation.auto_messages import (
     history_prompt,
-    interrupted_prompt,
-    job_resume_prompt,
-    job_status_label,
     today_line,
 )
+from kei_agent.conversation.background import BackgroundLoops
 from kei_agent.conversation.handoff import Handoff, strip_handoff
 from kei_agent.conversation.home import agent_labels
+from kei_agent.conversation.limits import LimitDeferral
+from kei_agent.conversation.module_bridge import ModuleBridge
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.response_output import (
     OutputError,
@@ -44,20 +48,18 @@ from kei_agent.conversation.slack_text import (
     DONE_REACTION,
     FAILED_PREFIX,
     FAILED_REACTION,
-    HOLD_REACTION,
-    NIGHT_REACTION,
     SEEN_REACTION,
     clean_text,
-    format_duration,
     is_status_inquiry,
     split_text,
     strip_lines,
 )
+from kei_agent.conversation.startup_checks import StartupChecks
 from kei_agent.conversation.theme_invite import ThemeInvite
 from kei_agent.conversation.thread_ui import ThreadUI
 from kei_agent.execution import a2a, agents, guard, runner, updates
 from kei_agent.execution.execution_contract import prompt_version
-from kei_agent.execution.jobs import JobManager, missing_outputs
+from kei_agent.execution.jobs import JobManager
 from kei_agent.execution.model_policy import (
     PROVIDERS,
     ModelPolicyError,
@@ -66,7 +68,7 @@ from kei_agent.execution.model_policy import (
     is_manual,
     resolve,
 )
-from kei_agent.framework import modules, version
+from kei_agent.framework import modules
 from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
@@ -88,12 +90,8 @@ log = logging.getLogger(__name__)
 NOTIFY_AFTER_SECONDS = 60
 # 依頼者が画面を見ていないはずの回（ジョブの完了で再開した回）。短くても、終わったら知らせる
 UNATTENDED_TRIGGERS = ("job",)
-# 名刺（エージェントのスキル）を読み直す間隔。入れ替えても、これだけたてば新しいスキルを使える
-SKILLS_TTL_SECONDS = 600
 # 問題の知らせは、前の知らせからこの秒数のうちに起きたものを、同じ1通に書き足す（通知が鳴るのは最初の1回）
 TROUBLE_GROUP_SECONDS = 30 * 60
-# 古い版の担当を起動し直してから、名刺を読み直すまでの秒数
-STALE_RECHECK_SECONDS = 20
 # スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
 HISTORY_PAGE = 200
 HISTORY_MAX_MESSAGES = 600
@@ -146,7 +144,8 @@ NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがない�
 VOICE_USE_CASES = {"research": "research_extract"}
 
 
-class Assistant(SettingsActions, Handoff, ThemeInvite):
+class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBridge, LimitDeferral,
+                BackgroundLoops):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
@@ -487,99 +486,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             return
         settings.drop_theme(self.store, await self.channel_name(channel))
 
-    async def check_agents(self) -> dict[str, list[str]]:
-        """つないでいるエージェントの名刺を読んで、生きているか、何ができるか、本体と同じ版かを見る。
-
-        古い版のまま動いている担当は起動し直す（手作業のデプロイで担当だけ起動し直し忘れると、古いコードが
-        新しい設定を読めずに止まる）。
-        """
-        skills: dict[str, list[str]] = {}
-        stale: list[str] = []
-        for name, agent in self.agents.items():
-            try:
-                card = await agent.card()
-            except Exception as e:
-                await self.notify_trouble(f"{name} のエージェントにつながりません（{agent.base_url}）: "
-                                          f"{type(e).__name__}: {e}")
-                continue
-            self._remember_skills(name, card)
-            skills[name] = [s["id"] for s in self.agent_skills[name] if s.get("id")]
-            log.info("%s のエージェントにつながりました（%s）: %s", name, card.get("name", "?"),
-                     "、".join(skills[name]) or "できることなし")
-            if version.differs(str(card.get("version") or "")):
-                log.warning("%s の担当が古い版のまま動いています（本体 %s、担当 %s）", name, version.RUNNING,
-                            card.get("version"))
-                stale.append(name)
-        if stale:
-            self.spawn(self._restart_stale_agents(stale))
-        return skills
-
-    async def _restart_stale_agents(self, names: list[str]) -> None:
-        """古い版の担当を起動し直し、少し待って確かめる。それでも古ければ知らせる。"""
-        for name in names:
-            await asyncio.to_thread(updates.restart_service, name)
-        await asyncio.sleep(STALE_RECHECK_SECONDS)
-        for name in names:
-            try:
-                theirs = str((await self.agents[name].card()).get("version") or "")
-            except Exception:
-                theirs = ""
-            if theirs != version.RUNNING:
-                await self.notify_trouble(f"{name} の担当が古い版のまま動いています。"
-                                          "deploy/restart-all.sh で起動し直してください")
-
-    def _remember_skills(self, name: str, card: dict) -> None:
-        self.agent_skills[name] = list(card.get("skills") or [])
-        self.agent_skills_read_at[name] = time.time()
-
-    async def skills_of(self, name: str) -> list[dict]:
-        """そのエージェントのスキル（名刺から）。古くなっていたら読み直す。"""
-        fresh = time.time() - self.agent_skills_read_at.get(name, 0) < SKILLS_TTL_SECONDS
-        if not fresh and name in self.agents:
-            with suppress(Exception):
-                self._remember_skills(name, await self.agents[name].card())
-        return self.agent_skills.get(name, [])
-
-    async def check_notion_schema(self) -> list[str]:
-        """Notion の項目のずれを起動時に見て、あれば知らせる。黙って定期処理が止まるのを防ぐ。"""
-        if self.notion is None:
-            return []
-        try:
-            problems = await asyncio.to_thread(self.notion.schema_problems)
-        except Exception:
-            log.exception("Notion の設定を確かめられませんでした")
-            await self.notify_trouble("Notion の設定を確かめられませんでした")
-            return []
-        if problems:
-            await self.notify_trouble(
-                "研究 Notion の設定が Kei Agent の使う形とずれています。夜間の Task などが止まります。\n"
-                + "\n".join(f"• {p}" for p in problems))
-        return problems
-
-    async def check_hub_schema(self) -> list[str]:
-        """共通ホームの問題は知らせるが、他の agent や研究 Notion の起動を止めない。"""
-        if self.hub is None:
-            await self.notify_trouble(
-                "共通 Notion ホームを利用できません。親ページの共有と hub state を確認してください。"
-                "Daily とレトプラは Slack にだけ出し、時間の記録は Notion への送信を保留します")
-            return ["共通 Notion ホームを利用できません"]
-        try:
-            problems = await asyncio.to_thread(self.hub.schema_problems)
-        except Exception:
-            log.exception("共通 Notion ホームの設定を確かめられませんでした")
-            self.hub = None
-            await self.notify_trouble("共通 Notion ホームの設定を確認できません。Daily とレトプラは Notion に保存できません")
-            return ["共通 Notion ホームの確認に失敗しました"]
-        if problems:
-            self.hub = None
-            await self.notify_trouble("共通 Notion ホームの項目を確認してください:\n"
-                                      + "\n".join(f"• {p}" for p in problems))
-        elif not self.hub.has_time_db:
-            await self.notify_trouble(
-                "共通 Notion ホームに「時間記録」がまだありません。kei-agent-hub-setup --apply で作って再起動してください"
-                "（それまで時間は Toggl にだけ送り、Notion への送信は保留します）")
-        return problems
-
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return
@@ -588,230 +494,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
             await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, slack_url, f"{ws.cwd}/")
         except NotionError as e:
             await self.notify_trouble(f"Notion にテーマ「{ws.channel_name}」を登録できませんでした: {e}")
-
-    def _own_night_reaction(self, event: dict) -> bool:
-        """依頼者が自分のメッセージに 🌙 をつけた（外した）か。"""
-        item = event.get("item") or {}
-        return (event.get("reaction") == NIGHT_REACTION and item.get("type") == "message"
-                and self.is_allowed(event.get("user")) and event.get("item_user") == event.get("user"))
-
-    def _usable(self, name: str) -> bool:
-        """そのモジュールを動かせるか（担当プロセスを持つなら、その住所がある。使っていない担当は黙って飛ばす）。"""
-        return modules.known()[name].port is None or name in self.agents
-
-    async def module_prepare(self, kind: str, day: str) -> list[str]:
-        """Daily・振り返りの前の取り込み（class Module の prepare）。うまくいかなかったことの短い名前を返す。"""
-        failed: list[str] = []
-        for name, module in self.modules.items():
-            prepare = getattr(module, "prepare", None)
-            if prepare is None or not self._usable(name):
-                continue
-            try:
-                failed += [str(label) for label in await prepare(kind, day) or []]
-            except Exception:
-                log.exception("モジュール「%s」の取り込みが落ちました", name)
-                failed.append(f"{modules.known()[name].label}の取り込み")
-        return failed
-
-    async def module_agenda(self, days: int, kinds: frozenset[str] | None = None,
-                            ) -> tuple[dict[str, list[dict]], list[str]]:
-        """モジュールの予定（class Module の agenda）。読めたモジュールの名前 → 予定と、読めなかったモジュールの表示名。
-
-        kinds を渡すと、その種類（meeting / class / due）だけを頼む（振り返りの締切のために、会議を AI で読まない）。
-        読めなかった（None を返した・落ちた）モジュールは、予定が無いのとは分ける（予定カレンダーの行を
-        「要確認」にしないため）。
-        """
-        found: dict[str, list[dict]] = {}
-        failed: list[str] = []
-        for name, module in self.modules.items():
-            agenda = getattr(module, "agenda", None)
-            if agenda is None or not self._usable(name):
-                continue
-            try:
-                items = await agenda(days, kinds)
-            except Exception:
-                log.exception("モジュール「%s」の予定を読めませんでした", name)
-                items = None
-            if items is None:
-                failed.append(modules.known()[name].label)
-                continue
-            found[name] = [item for item in items if isinstance(item, dict)
-                           and (kinds is None or item.get("kind", "meeting") in kinds)]
-        return found, failed
-
-    async def module_reaction(self, event: dict, added: bool) -> bool:
-        """モジュールの投稿へのリアクション（朝の読みものへの 👍 など）。どれかのモジュールが扱ったら True。"""
-        for name, module in self.modules.items():
-            on_reaction = getattr(module, "on_reaction", None)
-            if on_reaction is None:
-                continue
-            try:
-                if await on_reaction(event, added):
-                    return True
-            except Exception:
-                # 1つのモジュールが落ちても、ほかのモジュールと 🌙 は止めない
-                log.exception("モジュール「%s」がリアクションを扱えませんでした", name)
-                await self.notify_trouble(f"モジュール「{name}」がリアクションを扱えませんでした")
-        return False
-
-    def emit(self, kind: str, **fields) -> None:
-        """出来事を配る（受け取るのは on_event を持つモジュール。声なら喋る）。投げっぱなしで、届かなくても
-        呼んだ側は気にしない。空の中身（None と空文字）は外して渡す。
-        """
-        data = {key: value for key, value in fields.items() if value not in (None, "")}
-        for name, module in self.modules.items():
-            on_event = getattr(module, "on_event", None)
-            if callable(on_event):
-                self.spawn(self._deliver_event(name, on_event, kind, dict(data)))
-
-    @staticmethod
-    async def _deliver_event(name: str, on_event, kind: str, data: dict) -> None:
-        try:
-            await on_event(kind, data)
-        except Exception:
-            # 知らせを受け取れなかっただけで、配った側の仕事は終わっている
-            log.exception("モジュール「%s」が出来事（%s）を受け取れませんでした", name, kind)
-
-    def module_home(self) -> list[tuple[str, list[dict]]]:
-        """App Home に並べる、モジュールの項目（class Module の home）。作れなかったモジュールは飛ばす。"""
-        sections = []
-        for name, module in self.modules.items():
-            build = getattr(module, "home", None)
-            if not callable(build):
-                continue
-            try:
-                blocks = [block for block in build() or [] if isinstance(block, dict)]
-            except Exception:
-                log.exception("モジュール「%s」の App Home の項目を作れませんでした", name)
-                continue
-            if blocks:
-                sections.append((modules.known()[name].label, blocks))
-        return sections
-
-    async def module_home_action(self, module: str, name: str, action: dict) -> bool:
-        """App Home のモジュールの項目が押された（class Module の on_home_action）。扱ったら True。"""
-        on_home_action = getattr(self.modules.get(module), "on_home_action", None)
-        if not callable(on_home_action):
-            return False
-        try:
-            await on_home_action(name, action)
-        except Exception:
-            log.exception("モジュール「%s」が App Home の操作（%s）を扱えませんでした", module, name)
-            await self.notify_trouble(f"モジュール「{module}」が App Home の操作を扱えませんでした")
-        return True
-
-    def _module_target(self, value: str) -> tuple[object, str] | None:
-        """モジュールの action_id / callback_id（api.MODULE_PREFIX）から、そのモジュールと名前。"""
-        if not value.startswith(api.MODULE_PREFIX):
-            return None
-        module, _, name = value.removeprefix(api.MODULE_PREFIX).partition(":")
-        found = self.modules.get(module)
-        return (found, name) if found is not None and name else None
-
-    async def module_action(self, body: dict) -> None:
-        """モジュールの投稿のボタンなどが押された（class Module の on_action）。押せるのは依頼者だけ。"""
-        if not self.is_allowed(body.get("user", {}).get("id")):
-            return
-        action = (body.get("actions") or [{}])[0]
-        target = self._module_target(str(action.get("action_id") or ""))
-        on_action = getattr(target[0], "on_action", None) if target else None
-        if callable(on_action):
-            await on_action(target[1], body)
-
-    async def module_view(self, body: dict) -> dict | None:
-        """モジュールの入力の画面が送られた（class Module の on_view）。欄の下に出す理由を返すと、画面は閉じない。"""
-        view = body.get("view") or {}
-        target = self._module_target(str(view.get("callback_id") or ""))
-        on_view = getattr(target[0], "on_view", None) if target else None
-        if not callable(on_view):
-            return None
-        if not self.is_allowed(body.get("user", {}).get("id")):
-            first = next(iter(view.get("blocks") or [{}]), {}).get("block_id", "")
-            return {first: "依頼者だけが使えます"} if first else None
-        return await on_view(target[1], body)
-
-    async def module_slash(self, name: str, body: dict) -> str:
-        """モジュールのスラッシュコマンド（class Module の on_slash_command）。打った人にだけ見せる文を返す。"""
-        if not self.is_allowed(str(body.get("user_id") or "")):
-            return "この操作は利用できません"
-        for module_name, spec in ((n, modules.known()[n]) for n in self.modules):
-            if name in spec.slash_commands:
-                return str(await self.modules[module_name].on_slash_command(name, body) or "")
-        return "このコマンドを受け持つモジュールがありません"
-
-    async def module_material(self, now: float, skip: str = "") -> list[str]:
-        """Daily と振り返りの材料に、モジュールが足す行（class Module の material）。作れなかったモジュールは飛ばす。"""
-        lines: list[str] = []
-        for name, module in self.modules.items():
-            if name == skip:
-                continue
-            material = getattr(module, "material", None)
-            if not callable(material):
-                continue
-            try:
-                lines += [str(line) for line in await material(now) or []]
-            except Exception:
-                log.exception("モジュール「%s」の材料を作れませんでした", name)
-        return lines
-
-    async def module_head_materials(self, days: int) -> dict[str, list[dict]]:
-        """頭（手の口）に渡す材料（class Module の head_materials）。種類 → 項目。作れなかったモジュールは飛ばす。
-
-        材料は手元の記録から作るもの（担当のプロセスに聞きに行かない）ので、担当の住所が無くても読む。
-        """
-        found: dict[str, list[dict]] = {}
-        for name, module in self.modules.items():
-            materials = getattr(module, "head_materials", None)
-            if not callable(materials):
-                continue
-            try:
-                given = await materials(days) or {}
-            except Exception:
-                log.exception("モジュール「%s」の頭への材料を作れませんでした", name)
-                continue
-            for kind, items in given.items():
-                found.setdefault(str(kind), []).extend(item for item in items if isinstance(item, dict))
-        return found
-
-    async def on_reaction_added(self, event: dict) -> None:
-        """自分のメッセージに 🌙 をつけると、夜間の Task になる。モジュールの投稿へのリアクションは、そのモジュールが扱う。"""
-        if await self.module_reaction(event, added=True) or not self._own_night_reaction(event):
-            return
-        channel, ts = event["item"]["channel"], event["item"]["ts"]
-        name = await self.channel_name(channel)
-        try:
-            ws = themes.resolve(self.config, name)
-        except ValueError:
-            return
-        if ws.kind is not ChannelKind.THEME:
-            return
-        message = await self.fetch_message(channel, ts) or {}
-        req = Request(channel, name, message.get("thread_ts") or ts, None, "")
-        if self.notion is None:
-            await self.post(req, f"{FAILED_PREFIX} Notion が設定されていないので、今夜の Task にできません")
-            return
-        text = clean_text(message.get("text", ""))
-        title = (text.splitlines() or ["Slack からの Task"])[0][:60] or "Slack からの Task"
-        link = await self.permalink(channel, ts)
-        quoted = "\n".join(f"> {line}" for line in text.splitlines()) or "> （本文なし）"
-        body = f"Slack で 🌙 をつけて作った Task。\n\n{quoted}\n\n元のメッセージ: {link}"
-        try:
-            task = await asyncio.to_thread(self.notion.create_night_task, title, name, link, body)
-        except NotionError as e:
-            await self.post(req, f"{FAILED_PREFIX} Notion に Task を作れなかったよ")
-            await self.notify_trouble(f"🌙 の Task を Notion に作れませんでした: {e}")
-            return
-        await self.post(req, f"🌙 今夜の Task にしたよ: <{task.url}|{task.title}>")
-
-    async def on_reaction_removed(self, event: dict) -> None:
-        if (await self.module_reaction(event, added=False) or not self._own_night_reaction(event)
-                or self.notion is None):
-            return
-        link = await self.permalink(event["item"]["channel"], event["item"]["ts"])
-        try:
-            await asyncio.to_thread(self.notion.cancel_night_task, link)
-        except NotionError as e:
-            await self.notify_trouble(f"🌙 を外した Task を Notion で取り消せませんでした: {e}")
 
     async def run_agent(self, ws: Workspace, prompt: str, session_id: str | None = None,
                         channel: str = "", thread_ts: str = "",
@@ -1075,94 +757,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
         async with self.thread_locks[(req.channel, req.thread_ts)], self.semaphore:
             await on_message(req, skill=skill, params=dict(params or {}))
         return True
-
-    async def hold_until_limit_ends(self, req: Request) -> bool:
-        """上限で止まってやり直し待ちのスレッドに書かれたら、いまは動かさず、明けてからこの続きとしてやる（True）。
-
-        すぐ動かすと、同じ上限にまた当たって知らせが重なる。やり直しの予約をこの依頼に置き換え、依頼に ⏳ を付ける
-        （投稿はしない）。進み具合を聞かれただけなら、止まっている理由をその場で答える。そのスレッドの担当の AI が
-        もう上限でなければ（明けた・別の provider に切り替えた）、何もしない（False。予約を取り消して動かす）。
-        """
-        pending = self.store.pending_deferred_for(req.channel, req.thread_ts)
-        if not pending:
-            return False
-        try:
-            ws = themes.resolve(self.config, req.channel_name)
-        except ValueError:
-            return False
-        actor = self.actor_for(req, ws)
-        provider = settings.selected_provider(self.config, self.store, actor)
-        until = self.store.limit_until(provider) if provider else 0.0
-        if until <= time.time():
-            return False
-        when = datetime.fromtimestamp(until).strftime("%H:%M")
-        if is_status_inquiry(req.text):
-            await self.post(req, f"{provider} の利用上限で止まっているよ。{when} ごろに続きからやるね。")
-            await self.mark_answered(req, failed=False)
-            return True
-        # 添付は、控えに残せる形（保存した場所）にしてから待たせる。止まった依頼の添付も引き継ぐ
-        saved = await download_files(req.files, ws.cwd, self.bot_token) if req.files and ws.cwd is not None else []
-        earlier = [path for _, payload in pending for path in payload.get("saved_files") or []]
-        req = replace(req, files=[], saved_files=list(dict.fromkeys([*earlier, *req.saved_files, *saved])))
-        # 待たせた依頼の ⏳ は、やり直すときに外す（前に待たせたものも覚えておく）
-        held = [ts for _, payload in pending for ts in payload.get("held") or []]
-        for deferred_id, _ in pending:
-            self.store.finish_deferred(deferred_id)
-        payload = {**req.to_payload(), "provider": provider,
-                   "held": held + ([req.message_ts] if req.message_ts else [])}
-        self.store.defer_run("request", payload, until)
-        if req.message_ts:
-            await self._react(self.slack.reactions_add, req.channel, req.message_ts, HOLD_REACTION)
-        return True
-
-    async def drop_deferred_for(self, req: Request) -> None:
-        """上限で止まって自動でやり直す予定だった依頼を、このスレッドのぶんだけ取り消す。
-
-        依頼者が「続けて」と書いたあとに、同じ依頼が裏でもう一度走ると、二重に作業してしまう。
-        """
-        canceled = [deferred_id for deferred_id, _ in self.store.pending_deferred_for(req.channel, req.thread_ts)]
-        for deferred_id in canceled:
-            self.store.finish_deferred(deferred_id)
-        if canceled:
-            await self.post(req, "上限で止まっていた依頼は、自動のやり直しをやめて、この続きとして進めるね。")
-
-    async def tell_if_waiting(self, req: Request) -> bool:
-        """同じスレッドの前の作業が続いているときは、黙って待たせずに一言返す。
-
-        「今どんな感じ？」のような進み具合を尋ねるだけの一言は、新しい依頼としてキューの
-        後ろに積まず、いまの状況をその場で組み立てて即答する（True を返し、以降の処理は行わない）。
-        """
-        if req.trigger not in ("message", "voice"):
-            return False
-        locked = self.thread_locks[(req.channel, req.thread_ts)].locked()
-        jobs = [j for j in self.store.active_jobs() if j.channel == req.channel and j.thread_ts == req.thread_ts]
-        if not locked and not jobs:
-            return False
-        if is_status_inquiry(req.text):
-            await self.post(req, self._busy_status_text(req, locked, jobs))
-            await self.mark_answered(req, failed=False)
-            return True
-        if locked:
-            await self.post(req, "いま前の作業をしているから、終わったら取りかかるね。")
-        return False
-
-    def _busy_status_text(self, req: Request, locked: bool, jobs: list) -> str:
-        """まだのこと・止まっている理由を、いまの状況から短く組み立てる。"""
-        now = time.time()
-        lines = []
-        if locked:
-            run = next((r for r in self.store.open_runs()
-                       if r["channel"] == req.channel and r["thread_ts"] == req.thread_ts), None)
-            if run:
-                lines.append(f"まだ前の依頼を claude が処理してるよ（{format_duration(now - run['started_at'])}経過）。"
-                             "終わったらこのまま返事するね。")
-            else:
-                lines.append("まだ前の依頼を claude が処理してるよ。終わったらこのまま返事するね。")
-        for job in jobs:
-            started = job.started_at or job.submitted_at
-            lines.append(f"ジョブ「{job.name}」もまだ動いてるよ（{format_duration(now - started)}経過）。"
-                         "終わったら知らせるね。")
-        return "\n".join(lines)
 
     async def run(self, req: Request, ws: Workspace, hide: tuple[str, ...] = ()) -> runner.RunResult:
         """1回分の依頼を claude に渡し、結果をスレッドに返す。スレッドのロックを取ってから呼ぶ。
@@ -1469,204 +1063,12 @@ class Assistant(SettingsActions, Handoff, ThemeInvite):
 
     # Slack の外からの依頼（声のレイヤなど。docs/architecture.md）
 
-    async def ask_loop(self) -> None:
-        """同じ Mac に置かれた依頼を、数秒ごとに拾う。"""
-        failing = False
-        ask.recover_asks(self.config)
-        while True:
-            try:
-                await self.handle_asks()
-                failing = False
-            except Exception as e:
-                log.exception("外からの依頼を拾えませんでした")
-                if not failing:
-                    await self.notify_trouble(f"外からの依頼を拾えません: {type(e).__name__}: {e}")
-                failing = True
-            await asyncio.sleep(ask.POLL_SECONDS)
 
-    async def handle_asks(self) -> None:
-        pending = ask.claim_asks(self.config)
-        if not pending:
-            return
-        try:
-            ids = await self.channel_ids()
-        except Exception:
-            # 拾った依頼を「処理中」のまま置き去りにしない。戻して次の周回で拾い直す
-            ask.recover_asks(self.config)
-            raise
-        for item in pending:
-            try:
-                theme = str(item.payload.get("theme") or "")
-                text = str(item.payload.get("text") or "").strip()
-                kind = item.payload.get("kind", "request")
-                channel = ids.get(theme)
-                if not channel or not text:
-                    await self.notify_trouble(
-                        f"外からの依頼を渡せませんでした（テーマ: {theme or '不明'}）: {text[:100] or '（空）'}")
-                    ask.complete_ask(item)
-                    continue
-                header = "📌 声で決まったこと" if kind == "note" else "🎤 声からの依頼"
-                thread_ts = item.payload.get("thread_ts")
-                if thread_ts is not None and (not isinstance(thread_ts, str) or not thread_ts.strip()):
-                    await self.notify_trouble(
-                        f"外からの依頼を渡せませんでした（テーマ: {theme}）: 保存された Slack スレッドが不正です")
-                    ask.complete_ask(item)
-                    continue
-                if thread_ts is None:
-                    resp = await self.slack.chat_postMessage(channel=channel, text=f"{header}\n{text}")
-                    thread_ts = resp["ts"]
-                if "thread_ts" not in item.payload:
-                    ask.record_thread(item, thread_ts)
-                if kind == "note":
-                    ask.complete_ask(item)
-                    continue
-                await self.submit(Request(
-                    channel=channel, channel_name=theme, thread_ts=thread_ts, message_ts=None,
-                    text=text, trigger="voice",
-                ))
-                ask.complete_ask(item)
-            except Exception:
-                ask.retry_ask(item)
-                raise
 
-    # 契約の上限（Claude AI usage limit）
 
-    def limit_until(self, reset_at: float, now: float | None = None) -> float:
-        """いつやり直すか。明ける時刻が古いまま返ることがあるので、過去ならしばらく待つ。"""
-        now = time.time() if now is None else now
-        if reset_at <= now:
-            return now + self.LIMIT_FALLBACK_SECONDS
-        return reset_at + self.LIMIT_MARGIN_SECONDS
 
-    async def note_limit(self, reply: agents.Reply, agent: str, provider: str) -> None:
-        """エージェントが上限に当たったことを、本体の1か所に集める（約束は本体が持つ）。
 
-        provider ごとに待つ・やり直すの管理をオーケストレーターで持つ。
-        """
-        if reply.limit_reset_at is None:
-            return
-        if not provider:
-            return
-        until = self.limit_until(reply.limit_reset_at)
-        if until <= self.store.limit_until(provider):
-            return
-        self.store.set_limit_until(provider, until)
-        when = datetime.fromtimestamp(until).strftime("%H:%M")
-        await self.notify_trouble(f"{agent} の {provider} 利用上限に当たりました。{when} ごろまで待ちます。")
 
-    async def defer_for_limit(self, req: Request, reset_at: float, provider: str, *, mention: bool = False) -> None:
-        """上限に達した依頼を、明けてからやり直すものとして覚えておく。mention なら、知らせに依頼者へのメンションを付ける。"""
-        until = self.limit_until(reset_at)
-        if not provider:
-            raise ValueError("provider が未選択です")
-        self.store.set_limit_until(provider, max(self.store.limit_until(provider), until))
-        self.store.defer_run("request", {**req.to_payload(), "provider": provider}, until)
-        when = datetime.fromtimestamp(until).strftime("%H:%M")
-        text = f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。"
-        await self.post(req, f"<@{self.config.allowed_user_id}> {text}" if mention else text)
-        self.emit("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
 
-    # 再起動で途中で止まった依頼
 
-    async def resume_interrupted(self) -> int:
-        """前回の終了時に動いていた依頼を、スレッドに一言添えてやり直す。"""
-        interrupted = self.store.interrupted_requests()
-        self.store.end_open_runs()
-        for deferred_id, payload in interrupted:
-            self.store.finish_deferred(deferred_id)
-            req = Request.from_payload(payload)
-            if not req.text.strip():
-                continue
-            if req.trigger == "handoff":
-                # 引き継ぎは、普通の依頼として投げ直すと会話が続くだけになる。もう一度区切らせる
-                try:
-                    await self.post(req, "🧵 入れ替えで引き継ぎが途中で止まったので、もう一度まとめるね。")
-                except Exception:
-                    log.warning("中断を知らせられません", exc_info=True)
-                self.spawn(self.hand_off(req))
-                continue
-            try:
-                await self.post(req, f"{FAILED_PREFIX} さっきの作業は Kei Agent の入れ替えで途中で止まっちゃった。"
-                                     "いまの状態を確かめて、続きからやり直すね。")
-            except Exception:
-                log.warning("中断を知らせられません", exc_info=True)
-            # 元のメッセージの 👀 は残したまま。やり直しが終われば ✅ か ⚠️ に変わる
-            await self.submit(replace(req, text=interrupted_prompt(req.text), retried=True))
-        if interrupted:
-            log.info("再起動で止まっていた依頼を %d 件やり直します", len(interrupted))
-        return len(interrupted)
 
-    async def retry_deferred(self, now: float | None = None) -> None:
-        """上限で止まった依頼を、明けたらやり直す。"""
-        now = time.time() if now is None else now
-        for deferred_id, payload in self.store.due_deferred("request", now):
-            self.store.finish_deferred(deferred_id)
-            req = replace(Request.from_payload(payload), retried=True)
-            for ts in payload.get("held") or []:
-                await self._react(self.slack.reactions_remove, req.channel, ts, HOLD_REACTION)
-            original_provider = payload.get("provider")
-            if original_provider:
-                actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
-                if settings.selected_provider(self.config, self.store, actor) != original_provider:
-                    await self.post(req, "使うモデルが切り替わったので、この依頼は自動で再実行しなかったよ。必要ならもう一度頼んでね。")
-                    continue
-            await self.submit(req)
-
-    # ジョブ
-
-    async def handle_job_requests(self, cwd: Path) -> None:
-        for o in await self.jobs.process_requests(cwd):
-            # 依頼のチャンネルとスレッドは Claude が書いたものなので、知っているスレッドのときだけ投稿する
-            known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
-            req = Request(o.channel, "", o.thread_ts, None, "")
-            if o.error:
-                text = f"ジョブ「{o.job.name}」を投入できなかったよ: {o.error}" if o.job else o.error
-                if known:
-                    await self.post(req, f"{FAILED_PREFIX} {text}")
-                else:
-                    await self.notify_trouble(f"{cwd.name} のジョブの依頼を投入できなかった: {text}")
-                continue
-            # 投入できた依頼は、JobManager がスレッドを確かめてある（jobs._check_thread）
-            await self.post(req, f"🧪 ジョブ {o.job.id}「{o.job.name}」を投入したよ: `{o.job.command}`")
-
-    async def poll_jobs(self) -> None:
-        """テーマのディレクトリに残った依頼を処理し、終わったジョブを報告する。"""
-        root = self.config.research_root
-        folders = [p for p in root.iterdir()] if root.is_dir() else []
-        # 既存のフォルダを使うテーマ（themes.toml）のジョブの依頼も拾う
-        folders += [p for p in themes.places(self.config).values() if p not in folders]
-        for cwd in sorted(p for p in folders if (p / ".kei-agent" / "requests").is_dir()):
-            await self.handle_job_requests(cwd)
-        for job in await self.jobs.refresh():
-            self.jobs.mark_reported(job)
-            row = self.store.get_thread(job.channel, job.thread_ts)
-            if row is None:
-                continue
-            req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
-            missing = missing_outputs(job)
-            note = f"。ただ {'、'.join(missing)} ができていない" if missing else ""
-            await self.post(req, f"🧪 ジョブ {job.id}「{job.name}」が終わったよ"
-                                 f"（{job_status_label(job.status)}{note}）。結果を見てみるね")
-            await self.submit(replace(
-                req, text=job_resume_prompt(job), trigger="job",
-                outputs_since=job.submitted_at, awaiting_after=job.status != "succeeded" or bool(missing),
-            ))
-
-    async def job_loop(self) -> None:
-        failing = False
-        while True:
-            # やり直しが落ちても、ジョブの確認は止めない
-            try:
-                await self.retry_deferred()
-            except Exception:
-                log.exception("定期のやり直しに失敗しました: retry_deferred")
-            try:
-                await self.poll_jobs()
-                failing = False
-            except Exception as e:
-                log.exception("ジョブの確認に失敗しました")
-                if not failing:
-                    # 失敗が続いている間は、最初の1回だけ知らせる
-                    await self.notify_trouble(f"ジョブの状態を確認できません（pueue が止まっていませんか）: {type(e).__name__}: {e}")
-                failing = True
-            await asyncio.sleep(self.config.job_poll_seconds)

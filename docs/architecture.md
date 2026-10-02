@@ -269,6 +269,6 @@
 | `workspaces/` | チャンネルから作業場を決める（`themes.py`。研究テーマ・プロジェクト・モジュール）、作業場のファイル |
 | `execution/` | AI の起動口（`runner.py`）、制限の表、用途ごとのモデル、実行の条件、権限、柵（`guard.py`）、用途の分類、担当に頼む口（A2A）、ジョブ、新しい版での起動し直し |
 | `scheduling/` | 定期実行（`schedule.py`）、朝の一覧、材料集め（頭に渡す材料 `materials.py` も）、締切、毎晩の保守、予定カレンダー、時間 |
-| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py`）、手の口で AI を動かす（`hands.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
+| `conversation/` | Slack の依頼から返事までの本筋（`assistant.py` と、役割ごとに混ぜる部品）、手の口で AI を動かす（`hands.py`）、振り分け、出力契約、引き継ぎ、App Home、置き場所の選び方、日付の言い方 |
 | `operations/` | 起動（`app.py`）、手の口の MCP（`hands_server.py`）と `kei-agent` のコマンド（setup・doctor・manifest・module・agents）、モジュールのひな形、取り込みの確かめ |
 | `testing/` | モジュールのテストの道具（[modules.md](modules.md#テストの書き方kei_agenttesting)） |
