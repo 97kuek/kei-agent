@@ -88,6 +88,7 @@
 - 担当・アカウント・届く範囲は作業場から決まる。線は Slack から頼んだときと同じ実行の仕組みが守る
 - 会話は `mcp` という名前のチャンネルとして記録する（Slack のスレッドとは混ざらない）
 - ChatGPT（Dots）からは、OpenAI の Secure MCP Tunnel を通して届く。トンネルのプログラム（`tunnel-client`。`deploy/run-tunnel.sh` が launchd で動かす）がこの Mac から OpenAI へ出ていき、届いた呼び出しに合言葉を付けて手の口へ渡す。番号は `[hands] tunnel`、鍵はトンネルだけの `kei-agent-tunnel.zsh`。手の口は OAuth を使わず、`/.well-known/` には本文の無い 404 を返す
+- ChatGPT の MCP のアプリは、作ったときの道具の一覧を使い続ける（あとでサーバーが道具を増やしても、読み直しに来るだけで見える一覧は変わらない）。道具を足したり変えたりしたら、ChatGPT で MCP を作り直す
 
 ## AI の動かし方
 
