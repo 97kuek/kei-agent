@@ -72,8 +72,10 @@ Moodle は起動時と復帰後に取り込み、稼働中も締切を30分、�
 2. Dot のプラグインで Kei Agent の MCP と Notion・Box・Slack・Outlook・Google Calendar・Gmail・Google Drive・GitHub を有効にする。接続時の認証も確認する
 3. Dot の指示に [カスタム指示の全文](prompts/dot-custom-instructions.md) を入れ、各予定に上の一覧から対応するプロンプトの全文を入れる。同名の古い予定は重ねて作らず更新する
 4. ローカルの schedules.csv は上の停止対象だけ false にする。設定変更と再起動は利用者が行う
-5. MCP のアプリを作り直し、post が無く、status が phase と elapsed_seconds を返し、sync_submissions が使えることを確認する（[MCP サーバー](architecture.md#mcp-サーバー)）
+5. Kei Agent のプラグインで MCP サーバーを再スキャンし、post が無く、status が phase と elapsed_seconds を返し、sync_submissions・handoff・save_reading・voice がツール一覧にあることを確認する（[MCP サーバー](architecture.md#mcp-サーバー)）
 
 Dot のプラグインと module.toml の connectors は別の実行環境の設定。プラグインを接続しても、ローカルの担当に認証や権限が自動で渡るわけではない。予定・メール・資料・GitHub の検索は Dot の接続を使い、Mac の作業場での実行は MCP に渡す。
 
 Dot が利用できるプラグインと接続の区別は [公式の Computers & apps](https://learn.chatgpt.com/docs/dots/computers-and-apps)、Slack での進捗の頼み方は [Channels](https://learn.chatgpt.com/docs/dots/channels) を参照する。Slack のリアクションと開始メッセージは Dot の指示として運用し、機械的な状態取得は MCP の status を使う。
+
+継続指示は Dot との会話で伝える。権限の保存結果は Settings → Personalization → Permissions → Custom rules、定期実行の指示・時刻・投稿先はプロフィールの Scheduled で確認する。承認フォームの「保留中ではない」という表示だけでは、承認済みかどうかを判断しない。公式の [Dot の操作とルール](https://learn.chatgpt.com/docs/dots/controls)、[MCP の再スキャン](https://developers.openai.com/plugins/build/mcp-events#test-in-chatgpt) を参照する。

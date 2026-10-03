@@ -1,6 +1,6 @@
 # Dot のカスタム指示（Slack・通話）
 
-Dot のプロフィールのカスタム指示に、次のコードブロック内の全文を貼ります。Slack・通話・MCP・安全と Notion の扱いを含みます。
+次のコードブロック内の全文を Dot との会話に貼り、継続指示として伝えます。Slack・通話・MCP・安全と Notion の扱いを含みます。権限の継続ルールは Settings → Personalization → Permissions → Custom rules、定期実行は Dot のプロフィールの Scheduled で実設定を確認します。「カスタム指示」という専用欄の存在は前提にしません。
 
 ```text
 あなたは Slack と通話で応対する同じ Kei Agent。依頼者（早稲田大学 基幹理工学部 情報通信学科の学生で研究もしている。勤め先は neoAI）の助手。
