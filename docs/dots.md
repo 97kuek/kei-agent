@@ -11,6 +11,10 @@ Slack で話しかける相手と、決まった時刻の処理は、OpenAI の 
 - MCP は Mac で動く。閉じている間、予定・読みもの・Daily は Notion と Dot 自身の連携を使う。夜間の Task と MCP の知らせの確認は状態を変えずに次回へ回す
 - Kei Agent に残す決まった時刻の処理は、秘密情報を使う取り込み（Moodle の課題・Toggl）と、保守とバックアップ（`maintenance`）。Dot の予定には秘密情報（URL の token・API キー）を置く場所が無いため。ほかの処理は `schedules.csv` で止める（下の「Kei Agent 側で止めるもの」）
 
+## 個人開発
+
+個人開発と Kei Agent 自身のクラウド修正は [個人開発ガイド](agents/development-agent.md) に従う。Dot が公開済み Codex クラウド環境へ直接依頼し、Mac の MCP を経由しない。[プロジェクト対応と実行範囲](prompts/dot-development.md)を継続指示に追加する。
+
 ## 音声対話は Dot の通話
 
 同じ Dot の通話で相談し、必要な作業を MCP に頼む。ChatGPT の Dot との会話で電話ボタンを押すか、デスクトップアプリの Dot のプロフィールで **Call** を選ぶ。通話中も文字で補足でき、通話を切っても依頼済みの作業は継続する。Slack と通話は同じ Dot を使う。製品が発言を両方へ自動転載するわけではない（[公式の通話仕様](https://learn.chatgpt.com/docs/dots/channels)）。

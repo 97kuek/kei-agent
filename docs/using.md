@@ -1,24 +1,25 @@
 # 使い方
 
-- Slack で頼むときの案内。Slack で受け答えするのは Dot で、作業場の作業は Mac の実行サービスが受け持つ
+- Slack で頼むときの案内。Slack で受け答えするのは Dot で、ローカルの作業は Mac、個人開発は Codex クラウドが受け持つ
 - Dot に全文コピペする指示は [プロンプト一覧](prompts/README.md)、担当ごとの中身は [`agents.md`](agents.md)、Dot の接続と予定は [`dots.md`](dots.md#dot-側の設定)、Mac の常駐は [`deploy/README.md`](../deploy/README.md)
 
 ## チャンネル
 
 | チャンネル | 頼むこと | Dot が頼む先 |
 |---|---|---|
-| `#0-kei-agent` | Kei Agent への要望・不具合 | [修正の依頼と PR](agents/work-agent.md#kei-agent-の修正) |
 | `#0-overview` | 全体の相談。朝の一覧と Daily、振り返りが届く | Dot が答える。テーマの中身は研究の担当 |
 | `#1-<テーマ>` | そのテーマの研究 | [研究](agents/research-agent.md)（テーマの作業場） |
 | `#2-course` | 授業と課題 | Dot が Notion・Box を直接読む。Moodle の同期は Mac（[大学](agents/course-agent.md)） |
 | `#3-work` | 会社の予定・メール・資料 | 予定・メールは Dot が Outlook を読む。Teams・SharePoint は[仕事](agents/work-agent.md) |
 | `#work-<名前>` | 仕事のプロジェクトのコードを書く・テストを動かす（作業場は `~/work/<名前>`） | [仕事](agents/work-agent.md#プロジェクトのチャンネル) |
 | `#4-knowledge` | 朝の読みもの（1記事1親投稿）と、各記事・論文のスレッドでの質問 | [知識](agents/knowledge-agent.md) |
+| `#5-kei-agent` | Kei Agent への要望・不具合 | [個人開発](agents/development-agent.md) |
+| `#5-<プロジェクト>` | 個人のアプリ・サイトの実装と PR 作成 | [個人開発](agents/development-agent.md)（Codex クラウド） |
 
 - 話しかけるときは Slack の Dot をメンションする。Dot に頼めるのは持ち主の1人だけ
-- 先頭の番号（`1-` のような1〜2桁と `-`）は並び順のため。番号の後ろが作業場の名前になる
-- 新しい研究テーマやプロジェクトは、チャンネルを作って Dot に頼むと、作業場を作ってから受ける（MCP の `create_workspace`）
-- Mac を閉じている間も Dot は答える。Moodle の同期と作業場の作業（研究・Teams・SharePoint・コード）だけは、Mac を開くまで待つ
+- 先頭の番号（`1-` のような1〜2桁と `-`）は並び順のため。Mac の作業場では番号の後ろが名前になる。個人開発は登録したチャンネル ID・リポジトリ・クラウド環境の対応表で選ぶ
+- 新しい研究テーマやMacで扱う仕事のプロジェクトは、チャンネルを作って Dot に頼むと、作業場を作ってから受ける（MCP の `create_workspace`）
+- Mac を閉じている間も Dot と個人開発のクラウドタスクは動く。Moodle の同期と作業場の作業（研究・Teams・SharePoint・ローカルのコード）だけは、Mac を開くまで待つ
 
 ## 返事の見え方
 
@@ -52,9 +53,9 @@
 
 [予定と Mac の停止対象](dots.md#予定の一覧) を参照。設定する指示の全文は [プロンプト一覧](prompts/README.md) にある。
 
-## 自己改善（`#0-kei-agent`）
+## 自己改善（`#5-kei-agent`）
 
-[仕事・コード変更](agents/work-agent.md#kei-agent-の修正) に、ローカル実行とクラウドでの PR 作成の違いをまとめている。
+[個人開発](agents/development-agent.md)の1プロジェクトとして扱う。PR 作成までクラウドで進め、マージ・本番反映は指示を待つ。
 
 ## 声
 

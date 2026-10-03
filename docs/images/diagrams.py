@@ -98,34 +98,35 @@ class Drawing:
 
 
 def overview() -> Drawing:
-    d = Drawing("overview", 880, 570, "Kei Agent — 担当と実行場所",
-                "Dot は任意の窓口。研究・仕事は Mac の AI、大学・知識の対話は Dot の役割。")
-    d.frame(160, 72, 700, 156, "クラウド / 任意のオーケストレーション", CLOUD)
-    d.frame(160, 255, 700, 289, "Mac", MAC)
+    d = Drawing("overview", 880, 705, "Kei Agent — 担当と実行場所",
+                "Dot が対話と担当分けを受け持つ。個人開発はクラウド、研究・仕事は Mac で実行。")
+    d.frame(160, 72, 700, 285, "クラウド / 任意のオーケストレーション", CLOUD)
+    d.frame(160, 385, 700, 289, "Mac", MAC)
     d.node(76, 145, "slack", "Slack / 通話", "依頼・結果", size=42, label_size=13)
     d.node(258, 145, "chatgpt", "Dot", "対話・担当への依頼", size=46)
     d.arrow([(107, 145), (225, 145)], "会話", both=True)
-    d.node(500, 145, "moodle", "course / 大学", "予定・課題の相談", size=40, label_size=13)
-    d.node(733, 145, "document", "knowledge / 知識", "資料を読み、整理する", size=40, label_size=13)
+    d.node(500, 145, "moodle", "大学", "予定・課題の相談", size=40, label_size=13)
+    d.node(733, 145, "document", "知識", "資料を読み、整理する", size=40, label_size=13)
     d.arrow([(291, 137), (467, 137)], "Dot が担当")
-    d.arrow([(285, 113), (285, 103), (733, 103), (733, 116)], "Dot が担当",
-            label_at=(612, 104))
-    d.node(258, 325, "server", "Kei Agent MCP", "run・status・notices", size=42, label_size=13)
-    d.arrow([(258, 215), (258, 294)], "MCP", both=True, label_at=(289, 248))
-    d.node(494, 325, "research", "研究エージェント", "research / ローカル AI", size=42, label_size=13)
-    d.node(730, 325, "work", "work / 仕事", "会社の AI", size=42, label_size=13)
-    d.arrow([(289, 325), (462, 325)], "A2A")
-    d.arrow([(284, 295), (284, 285), (730, 285), (730, 295)], "A2A",
-            label_at=(612, 285))
-    d.node(258, 456, "moodle", "course / Moodle 同期", "機械同期 / ICS・API", size=40, label_size=12)
-    d.node(494, 456, "code", "Claude Code / Codex CLI", "テーマの作業場で実行", size=40, label_size=12)
-    d.node(730, 456, "claude", "Claude Code", "会社の作業場・資料", size=40, label_size=12)
-    d.arrow([(258, 398), (258, 428)], "A2A", label_at=(309, 418))
-    d.arrow([(494, 398), (494, 428)], "CLI", label_at=(520, 418))
-    d.arrow([(730, 398), (730, 428)], "CLI", label_at=(756, 418))
-    d.text(76, 312, "Dot を使わず", size=11, color=LINE)
-    d.text(76, 332, "MCP / CLI から", size=11, color=LINE)
-    d.text(76, 352, "直接使うことも可能", size=10, color=LINE)
+    d.arrow([(285, 113), (285, 103), (733, 103), (733, 116)], "Dot が担当", label_at=(612, 104))
+    d.node(500, 275, "code", "個人開発エージェント", "#5-<プロジェクト>", size=40, label_size=13)
+    d.node(733, 275, "chatgpt", "Codex クラウド", "実装・テスト・PR", size=40, label_size=13)
+    d.arrow([(286, 216), (286, 266), (466, 266)], "Dot が担当", label_at=(379, 260))
+    d.arrow([(530, 266), (700, 266)], "クラウド委任")
+    d.node(258, 455, "server", "Kei Agent MCP", "run・status・notices", size=42, label_size=13)
+    d.arrow([(258, 215), (258, 424)], "MCP", both=True, label_at=(228, 380))
+    d.node(494, 455, "research", "研究エージェント", "research / ローカル AI", size=42, label_size=13)
+    d.node(730, 455, "work", "仕事", "会社の AI", size=42, label_size=13)
+    d.arrow([(289, 455), (462, 455)], "A2A")
+    d.arrow([(284, 425), (284, 415), (730, 415), (730, 425)], "A2A", label_at=(612, 415))
+    d.node(258, 586, "moodle", "Moodle 同期", "機械同期 / ICS・API", size=40, label_size=12)
+    d.node(494, 586, "code", "Claude Code / Codex CLI", "テーマの作業場で実行", size=40, label_size=12)
+    d.node(730, 586, "claude", "Claude Code", "会社の作業場・資料", size=40, label_size=12)
+    for x in (258, 494, 730):
+        d.arrow([(x, 528), (x, 558)], "A2A" if x == 258 else "CLI", label_at=(x + 32, 548))
+    d.text(76, 442, "Dot を使わず", size=11, color=LINE)
+    d.text(76, 462, "MCP / CLI から", size=11, color=LINE)
+    d.text(76, 482, "直接使うことも可能", size=10, color=LINE)
     return d
 
 
@@ -293,15 +294,15 @@ def research_execution() -> Drawing:
 
 def codex_execution() -> Drawing:
     d = Drawing("codex-execution", 880, 560, "Codex — クラウドとローカル CLI の実行経路",
-                "このリポジトリの実行器はローカル CLI。Codex クラウドは別途設定する外部の作業経路。")
-    d.frame(18, 70, 410, 462, "クラウド / 外部ワークフロー", CLOUD)
+                "個人開発は Dot の標準クラウド委任。研究・仕事のローカル実行は MCP → CLI。")
+    d.frame(18, 70, 410, 462, "クラウド / 個人開発", CLOUD)
     d.frame(452, 70, 410, 462, "Mac / Kei Agent の実装", MAC)
-    d.node(112, 149, "chatgpt", "Dot / 利用者", "指示・環境を別途設定", size=42, label_size=13)
+    d.node(112, 149, "chatgpt", "Dot / 利用者", "公開済み環境を選択", size=42, label_size=13)
     d.node(327, 149, "github", "GitHub", "リポジトリ", size=42)
     d.node(220, 300, "chatgpt", "Codex クラウド", "クラウドの作業環境", size=46)
-    d.arrow([(112, 220), (112, 265), (190, 285)], "外部から依頼", label_at=(115, 255))
+    d.arrow([(112, 220), (112, 265), (190, 285)], "標準クラウド委任", label_at=(115, 255))
     d.arrow([(327, 219), (327, 267), (251, 285)], "コードを取得", label_at=(327, 254))
-    d.node(220, 449, "github", "差分 / Pull Request", "レビューして反映", size=40, label_size=13)
+    d.node(220, 449, "github", "差分 / Pull Request", "マージ・本番反映は指示待ち", size=40, label_size=13)
     d.arrow([(220, 373), (220, 418)], "変更を提出", label_at=(268, 398))
     d.node(539, 149, "server", "Kei Agent MCP", "Dot などから run", size=42, label_size=12)
     d.node(764, 149, "research", "研究エージェント", "research / 担当プロセス", size=42)
@@ -316,7 +317,7 @@ def codex_execution() -> Drawing:
     d.text(744, 444, "自動では行わない", size=12, color=LINE)
     d.text(744, 482, "会社の仕事は現在 Claude", size=11, color=LINE)
     d.text(744, 503, "通信を制限して実行", size=11, color=LINE)
-    d.text(20, 552, "クラウドへのジョブ投入 API は未実装。左の経路は、利用者が Codex 側の接続・権限を用意した場合。",
+    d.text(20, 552, "クラウドの受付・進捗・PR の結果返却は Dot。Mac の MCP・Outbox を経由しない。",
            size=12, anchor="start", color=LINE)
     return d
 
