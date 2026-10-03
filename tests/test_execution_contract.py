@@ -109,3 +109,35 @@ def test_only_agents_that_reach_notion_get_the_shared_notion_skill(config):
     assert resolve_contract(config, request).shared_skill_dirs == (notion,)
     contract = resolve_contract(replace(config, notion=NotionConfig()), request)
     assert contract.policy.notion == "none" and contract.shared_skill_dirs == ()  # ホームが無ければ渡さない
+
+
+@pytest.mark.parametrize("actor,workspace,case", [
+    ("research", "vlm", "research_execute"),
+    ("work", "work", "work_execute"),
+])
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_head_prompt_and_parser_share_the_final_boundary(config, actor, workspace, case, provider):
+    from kei_agent.conversation.hands import _status, _text
+    from kei_agent.conversation.response_output import FINAL_CLOSE, FINAL_OPEN, OutputError, finalize_conversation
+
+    ws = themes.resolve(config, workspace)
+    request = runner.ExecutionRequest(ws, resolve(actor, provider, case), None, "mcp", "test", for_head=True)
+    contract = resolve_contract(config, request)
+    head = (config.repo_root / "prompts/head.md").read_text()
+    assert contract.prompt_text.endswith(head)
+    assert f"`{FINAL_OPEN}` と `{FINAL_CLOSE}` のちょうど1組で囲む" in head
+    assert "この印は安全に本文を取り出すための契約で、頭への返答でも必須" in head
+    assert FINAL_OPEN not in next(line for line in head.splitlines() if "返事の書式" in line)
+    assert contract.prompt_version == prompt_version(config, actor, ws, for_head=True)
+    assert contract.prompt_version != prompt_version(config, actor, ws)
+    body = "## 報告\n| 結果 | ファイル |\n| --- | --- |\n| 完了 | outputs/result.txt |\n❓ 確認: 続けますか"
+    marked = f"内部の経過\n{FINAL_OPEN}\n{body}\n{FINAL_CLOSE}"
+    result = runner.RunResult(text=marked)
+    assert _status(result) == "needs_input"
+    assert _text(result) == body
+    assert finalize_conversation(marked) == body
+    for invalid in (body, f"{FINAL_OPEN}{body}", marked + "後書き", marked + marked,
+                    f"{FINAL_OPEN}{FINAL_CLOSE}"):
+        with pytest.raises(OutputError):
+            finalize_conversation(invalid)
+        assert _status(runner.RunResult(text=invalid)) == "failed"

@@ -94,6 +94,9 @@ Dot が MCP の run に作業場の名前を渡す。作業場から agents.csv 
 
 ## AI の動かし方
 
+- 個人設定の `prompts/head.md` を差し替えている場合も、次の最終報告の契約に合わせる
+- `for_head` の最終報告も `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の1組で囲む。表・見出しは使えるが、印の外の経過は返さず、閉じる印の後ろに文がある応答は拒否する。確認の合図は印の内側の最後の行に置く
+
 - AI を起動するのは `runner.run_model` だけ（Claude も Codex も）
 - 1回の条件は `ExecutionRequest` と `ExecutionContract` にまとめる
 - 触れる範囲は制限の表（`agent_policy.py`）が決める。担当ごとの表は [agents.md](agents.md#触れる範囲制限の表)
