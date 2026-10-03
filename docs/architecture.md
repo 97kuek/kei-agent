@@ -92,7 +92,21 @@ Dot が MCP の run に作業場の名前を渡す。作業場から agents.csv 
 - ChatGPT（Dots）からは、OpenAI の Secure MCP Tunnel を通して届く。トンネルのプログラム（`tunnel-client`。`deploy/run-tunnel.sh` が launchd で動かす）がこの Mac から OpenAI へ出ていき、届いた呼び出しに合言葉を付けて MCP へ渡す。番号は `[hands] tunnel`、鍵はトンネルだけの `kei-agent-tunnel.zsh`。MCP は OAuth を使わず、`/.well-known/` には本文の無い 404 を返す
 - MCP の道具を変更した場合の Dot 側での再スキャンは [接続手順](dots.md) を参照
 
+### run の依頼IDと再送
+
+- `client_request_id` は任意（英数字で始まる128字まで、英数字・`.`・`_`・`:`・`-`）。省略・空文字は従来どおり毎回新規受付
+- IDは本体のDB内で共通。クライアントは依頼ごとにUUIDなど衝突しないIDを作って引数と一緒に保存する。同じIDと同じ引数の再送は元のticket・会話・結果を返す。実行中ならそのticketを待つ。同じIDで引数が異なると拒否する
+- 比較する引数は workspace・request・weight・engine・conversation・use_case・read_only・minutes。省略した引数はAPIの既定値として比較し、本文の空白も区別する。再送時に空のconversationを返却済みの番号へ置き換えない
+- `conversation` は会話を続ける番号。続きの質問・確認への回答・新しい作業には、同じconversationでも新しいclient_request_idを使う
+- 受付は既存SQLiteの `module_records` に保存する。依頼ID・引数のSHA-256・ticketの対応と、最初のticketを同一トランザクションで作り、コミットした後にだけ実行する。並列再送でも予約を取得した一つだけが実行する。依頼本文は重複防止の記録には保存しない
+- 本体は1プロセスで実行する。再起動後の未完了ticketは既存のstatusと同様にfailedとなり、同じIDで再実行しない。中断時点までの副作用の有無は保証できないため、結果を確かめてから新しいIDでやり直す
+- ticketの結果は従来どおり7日後の保守で削除する。ID・指紋・ticketの小さな対応記録は期限なしで残す。結果削除後の再送は元ticketを示すエラーとなり、再実行しない。DBや対応記録を削除・過去へ復元すると、その分の重複防止は失われる
+- スキーマ変更・既存データの移行は不要。導入前の受付やIDなしの受付は重複防止の対象外。MCPクライアントは道具を再スキャンして新しい引数を使う
+
 ## AI の動かし方
+
+- 個人設定の `prompts/head.md` を差し替えている場合も、次の最終報告の契約に合わせる
+- `for_head` の最終報告も `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の1組で囲む。表・見出しは使えるが、印の外の経過は返さず、閉じる印の後ろに文がある応答は拒否する。確認の合図は印の内側の最後の行に置く
 
 - AI を起動するのは `runner.run_model` だけ（Claude も Codex も）
 - 1回の条件は `ExecutionRequest` と `ExecutionContract` にまとめる

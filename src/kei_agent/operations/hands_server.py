@@ -37,6 +37,7 @@ INSTRUCTIONS = (
     "deep（設計・計画・厳密な見直し）。比べる・絞るなど決まった仕事は use_case で名前で選べる。"
     "仕事（会社のデータ。仕事の担当と、そのプロジェクト work-*）は外へ出られないので、外の情報が要るなら依頼元の MCP クライアントで調べて request に入れる。"
     "続きを頼むときは、前の結果の conversation を渡す。"
+    "run の依頼ごとに client_request_id を作り、応答喪失の再送では同じIDと同じ引数を使う。新しい依頼・続きには新しいIDを使う。"
     "長い会話を区切るときは handoff に workspace と conversation を渡し、返った新しい conversation で run する。"
     "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
     "Kei Agent からの知らせを notices で読み、利用者が指定・許可した宛先へ配信する。配信成功した ID だけ notices の done に渡す。"
@@ -62,13 +63,15 @@ def build_mcp(hands: Hands) -> MCPServer:
                           "conversation は続きを頼むときの番号（空なら新しい会話）。"
                           "use_case は重さの代わりに用途を名前で選ぶとき（workspaces の use_cases）、"
                           "read_only は読むだけで書かない・動かさないとき、minutes は上限時間（workspaces の max_minutes まで）。"
+                          "client_request_id は任意の依頼ID。同じID・同じ引数は元ticketを返し、異なる引数は拒否。省略時は毎回新規実行。"
                           "返すのは status（done・needs_input・failed・accepted）・text（結果の説明）・conversation・"
                           "files（作業場の outputs にできたファイル）・ticket・phase・elapsed_seconds")
     async def run(workspace: str, request: str, weight: str = "normal", engine: str = "",
                   conversation: str = "", use_case: str = "", read_only: bool = False,
-                  minutes: int = 0) -> dict[str, Any]:
+                  minutes: int = 0, client_request_id: str = "") -> dict[str, Any]:
         try:
-            return await hands.run(workspace, request, weight, engine, conversation, use_case, read_only, minutes)
+            return await hands.run(workspace, request, weight, engine, conversation, use_case, read_only, minutes,
+                                   client_request_id)
         except HandsError as e:
             raise ToolError(str(e)) from None
 

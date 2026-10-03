@@ -20,6 +20,7 @@
 研究ホームの「Task」DB で、担当が「Kei Agent」で状態が「今夜やる」のものを、作った順に5件まで読む。
 1件ずつ、Kei Agent の MCP の run に頼む（workspace は Task のテーマ、request は Task の題と本文、weight は normal、
 conversation は Task のページの ID から - を除いたもの。翌日に同じ会話で続きを頼めるように）。
+依頼ごとに client_request_id を作り、引数とともに保存する。応答喪失の再送は同じID・同じ引数、翌日の続きは新しいIDにする。
 - 受付番号が返ったら status で終わるまで見る。予定の終わりまでに終わらなければ、状態を「実行中」にして「結果」に ticket を書き、
   毎時の予定が status で確認し、完了なら「完了」、needs_input なら「確認待ち」にして結果を書き足す。実行中の Task に同じ依頼を重ねない
 - 終わったら Task の状態を「完了」（needs_input なら「確認待ち」）にし、「結果」に要点を3行で書く

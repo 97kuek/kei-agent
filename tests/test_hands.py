@@ -608,3 +608,136 @@ async def test_mcp_run_rejects_unmarked_empty_and_ambiguous_answers(hands, text)
     assert out["status"] == "failed" and h.status(out["ticket"])["phase"] == "failed"
     assert all(hidden not in out["text"] for hidden in ("/Users", "secret.txt", "ProviderRuntimeError", "private-model"))
     assert "一つめ" not in out["text"] and "二つめ" not in out["text"]
+
+
+async def test_request_replay_through_mcp_returns_original_ticket(hands):
+    h, ai = hands
+    ai.answer(final_answer("完了"))
+    mcp = build_mcp(h)
+    args = {"workspace": "vlm", "request": "まとめて", "client_request_id": "request-1"}
+    first = (await mcp.call_tool("run", args)).structured_content
+    # 受付後に上限が変わっていても、同じ依頼を拒否したり再実行したりしない。
+    h.assistant.store.set_limit_until("claude", 9999999999)
+    second = (await mcp.call_tool("run", args)).structured_content
+    assert first == second
+    assert len(ai.calls) == 1
+
+
+@pytest.mark.parametrize("changed", [
+    {"workspace": "overview"}, {"request": "別の仕事"}, {"weight": "deep"}, {"engine": "codex"},
+    {"conversation": "another"}, {"use_case": "research_extract"}, {"read_only": True}, {"minutes": 1},
+])
+async def test_request_id_refuses_any_changed_payload(hands, changed):
+    h, ai = hands
+    ai.answer(final_answer("完了"))
+    args = {"workspace": "vlm", "request": "まとめて", "client_request_id": "request-1"}
+    await h.run(**args)
+    with pytest.raises(HandsError, match="別の依頼内容"):
+        await h.run(**(args | changed))
+    assert len(ai.calls) == 1
+
+
+async def test_parallel_retries_and_lost_response_share_one_execution(hands, monkeypatch):
+    h, ai = hands
+    gate = asyncio.Event()
+    real = runner.run_model
+
+    async def slow(*args, **kwargs):
+        await gate.wait()
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_model", slow)
+    monkeypatch.setattr(hands_module, "SHORT_SECONDS", 0.01)
+    ai.answer(final_answer("完了"))
+    args = {"workspace": "vlm", "request": "まとめて", "client_request_id": "request-1"}
+    # 通信待ちだけを取り消す。受け付け済みの作業は継続する。
+    lost = asyncio.create_task(h.run(**args))
+    await asyncio.sleep(0)
+    lost.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await lost
+    replies = await asyncio.gather(*(Hands(h.assistant).run(**args) for _ in range(8)))
+    assert len({r["ticket"] for r in replies}) == 1
+    assert len({r["conversation"] for r in replies}) == 1
+    assert all(r["status"] == "accepted" for r in replies)
+    assert len(h.records.items("ticket")) == 1
+    gate.set()
+    done = await h.run(**args)
+    assert done["status"] == "done"
+    assert len(ai.calls) == 1
+
+
+async def test_distinct_request_ids_continue_same_conversation(hands):
+    h, ai = hands
+    ai.answer(final_answer("完了"), session_id="session-1")
+    first = await h.run("vlm", "まとめて", conversation="thread-1", client_request_id="first")
+    ai.answer(final_answer("続き"))
+    second = await h.run("vlm", "まとめて", conversation="thread-1", client_request_id="second")
+    assert first["ticket"] != second["ticket"]
+    assert first["conversation"] == second["conversation"]
+    assert len(ai.calls) == 2
+    assert ai.calls[-1]["session_id"] == "session-1"
+
+
+async def test_replay_survives_database_reopen_and_result_expiry(hands):
+    from kei_agent.storage.store import Store
+
+    h, ai = hands
+    ai.answer(final_answer("完了"))
+    args = {"workspace": "vlm", "request": "まとめて", "client_request_id": "request-1"}
+    first = await h.run(**args)
+    original = h.assistant.store
+    reopened = Store(original.path)
+    h.assistant.store = reopened
+    restarted = Hands(h.assistant)
+    try:
+        assert await restarted.run(**args) == first
+        reopened.drop_expired_module_records(9999999999)
+        with pytest.raises(HandsError, match="保存期限"):
+            await restarted.run(**args)
+        with pytest.raises(HandsError, match="別の依頼内容"):
+            await restarted.run(**(args | {"request": "別の仕事"}))
+        assert len(ai.calls) == 1
+    finally:
+        h.assistant.store = original
+        reopened.conn.close()
+
+
+async def test_interrupted_request_is_not_reexecuted(hands):
+    h, ai = hands
+    ai.answer(final_answer("完了"))
+    args = {"workspace": "vlm", "request": "まとめて", "client_request_id": "request-1"}
+    first = await h.run(**args)
+    # 永続受付後、作業の完了を保存する前に本体が停止した場合。
+    h.records.update("ticket", first["ticket"], status="running", phase="queued")
+    replay = await Hands(h.assistant).run(**args)
+    assert replay["ticket"] == first["ticket"] and replay["status"] == "failed"
+    assert len(ai.calls) == 1
+
+
+@pytest.mark.parametrize("key", [" ", "a/b", "a" * 129, "日本語"])
+async def test_invalid_request_id_does_not_reserve_or_execute(hands, key):
+    h, ai = hands
+    with pytest.raises(HandsError, match="client_request_id"):
+        await h.run("vlm", "まとめて", client_request_id=key)
+    assert not h.records.items("request") and not ai.calls
+
+
+@pytest.mark.parametrize("options", [{}, {"client_request_id": ""}])
+async def test_legacy_requests_without_id_still_execute_each_time(hands, options):
+    h, ai = hands
+    ai.answer(final_answer("1回目"))
+    first = await h.run("vlm", "まとめて", **options)
+    ai.answer(final_answer("2回目"))
+    second = await h.run("vlm", "まとめて", **options)
+    assert first["ticket"] != second["ticket"] and len(ai.calls) == 2
+    assert not h.records.items("request")
+
+
+async def test_invalid_request_does_not_consume_id(hands):
+    h, ai = hands
+    with pytest.raises(HandsError, match="空です"):
+        await h.run("vlm", "", client_request_id="request-1")
+    assert not h.records.items("request") and not h.records.items("ticket")
+    ai.answer(final_answer("完了"))
+    assert (await h.run("vlm", "まとめて", client_request_id="request-1"))["status"] == "done"
