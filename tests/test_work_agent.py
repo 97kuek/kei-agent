@@ -95,14 +95,15 @@ async def test_card_and_list_events_come_back_in_the_envelope(server, monkeypatc
 
 
 def test_connector_drops_the_body_of_an_event():
-    """会議の本文（参加リンクなど）は持ち込まない。"""
+    """会議の全文は持ち込まず、参加に必要な情報は保持する。"""
     from kei_agent_modules.work import connector
 
     event = connector._event({"subject": "定例", "start": "2026-09-25T11:00", "end": "2026-09-25T13:00",
-                              "location": "Teams", "organizer": "c@example.com", "body": "参加リンク"})
-    assert set(event) == {"id", "subject", "start", "end", "all_day", "location", "organizer", "free", "url"}
+                              "location": "Teams", "organizer": "c@example.com", "body": "会議の全文", "join_url": "https://teams.microsoft.com/l/meetup-join/test", "passcode": "123456"})
+    assert set(event) == {"id", "subject", "start", "end", "all_day", "location", "organizer", "free", "url", "join_url", "passcode"}
     assert event["start"] == "2026-09-25T11:00"
     assert event["id"] == ""
+    assert event["join_url"].startswith("https://teams.microsoft.com/") and event["passcode"] == "123456"
 
 
 def test_calendar_text_escapes_values_from_outlook():

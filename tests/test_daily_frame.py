@@ -17,7 +17,7 @@ from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
 from kei_agent.workspaces.themes import ChannelKind
 
-BRIEF_TOML = '''api = 1
+BRIEF_TOML = '''api = 2
 name = "brief"
 label = "まとめ"
 core_schedules = ["daily", "review"]
@@ -189,4 +189,4 @@ async def test_run_ai_keeps_the_request_thread_informed(env):
     """req を渡した回は、そのスレッドの経過と答えを見せる（Daily のように、スレッドを持たない回は見せない）。"""
     scheduler, assistant, slack, claude = env
     text = await assistant.cores["brief"].run_ai("brief_write", "まとめて", req=Request("C9", "kei-agent", "7.1", "7.1", "x"))
-    assert "結果です" in text and slack.streamed()[-1] == "結果です"
+    assert "結果です" in text and slack.texts()[-1] == "結果です"

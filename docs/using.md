@@ -1,9 +1,9 @@
 # 使い方
 
-- Slack で頼むときの案内。Slack で受け答えするのは Dot（`@ueki.keitaro-kei`）で、作業場の作業は Mac の Kei Agent が受け持つ
-- Dot への指示は [`dots.md`](dots.md)、担当ごとの中身は [`agents.md`](agents.md)、入れ方は [`deploy/README.md`](../deploy/README.md)
+- Slack で頼むときの案内。Slack で受け答えするのは Dot で、作業場の作業は Mac の実行サービスが受け持つ
+- Dot に全文コピペする指示は [プロンプト一覧](prompts/README.md)、担当ごとの中身は [`agents.md`](agents.md)、Dot の接続と予定は [`dots.md`](dots.md#dot-側の設定)、Mac の常駐は [`deploy/README.md`](../deploy/README.md)
 
-![Kei Agent の1日](images/schedule.png)
+![Kei Agent の1日](images/schedule.svg)
 
 ## チャンネル
 
@@ -12,28 +12,31 @@
 | `#0-kei-agent` | Kei Agent への要望・不具合。Kei Agent の困りごとの知らせも届く | 直すのは Codex（クラウド）。GitHub の PR になる |
 | `#0-overview` | 全体の相談。朝の一覧と Daily、振り返りが届く | Dot が答える。テーマの中身は研究の担当 |
 | `#1-<テーマ>` | そのテーマの研究 | [研究](agents/research-agent.md)（テーマの作業場） |
-| `#2-course` | 授業と課題 | Dot が授業ホームを読む。Box の資料・Toggl の集計は[大学](agents/course-agent.md) |
-| `#3-work` | 会社の予定・メール・資料 | 予定は Dot が Outlook を読む。メール・Teams・資料は[仕事](agents/work-agent.md) |
+| `#2-course` | 授業と課題 | Dot が Notion・Box を直接読む。Moodle の同期は Mac（[大学](agents/course-agent.md)） |
+| `#3-work` | 会社の予定・メール・資料 | 予定・メールは Dot が Outlook を読む。Teams・SharePoint は[仕事](agents/work-agent.md) |
 | `#work-<名前>` | 仕事のプロジェクトのコードを書く・テストを動かす（作業場は `~/work/<名前>`） | [仕事](agents/work-agent.md#プロジェクトのチャンネル) |
-| `#4-knowledge` | 朝の読みもの、記事と論文の質問 | [知識](agents/knowledge-agent.md) |
+| `#4-knowledge` | 朝の読みもの（1記事1親投稿）と、各記事・論文のスレッドでの質問 | [知識](agents/knowledge-agent.md) |
 
-- 話しかけるときは `@ueki.keitaro-kei` を付ける。Dot に頼めるのは持ち主の1人だけ
+- 話しかけるときは Slack の Dot をメンションする。Dot に頼めるのは持ち主の1人だけ
 - 先頭の番号（`1-` のような1〜2桁と `-`）は並び順のため。番号の後ろが作業場の名前になる
-- 新しい研究テーマやプロジェクトは、チャンネルを作って Dot に頼むと、作業場を作ってから受ける（手の口の `create_workspace`）
-- Mac を閉じている間も Dot は答える。作業場の作業（研究・仕事のメールと資料・コード）だけは、Mac を開くまで待つ
+- 新しい研究テーマやプロジェクトは、チャンネルを作って Dot に頼むと、作業場を作ってから受ける（MCP の `create_workspace`）
+- Mac を閉じている間も Dot は答える。Moodle の同期と作業場の作業（研究・Teams・SharePoint・コード）だけは、Mac を開くまで待つ
 
 ## 返事の見え方
 
 | 見えるもの | 意味 |
 |---|---|
 | Dot の名前の返信 | 結論だけ。話し方は `profile.md` と同じ（一人称「僕」、短く） |
-| 👀 → ✅（できなければ ⚠️） | 受け取った → 終わった。Dot がリアクションを付けられるときだけ |
+| 開始メッセージ・👀 | 受付・実行中。MCP の `status` では `phase` で待機中と実行中を区別でき、`elapsed_seconds` で受付からの秒数を確認できる |
+| ✅ / ❓ / ⚠️ | 結果を返した / 確認待ち / 失敗・中断。Dot のリアクション操作が使えなければ文で伝える |
 | 同じスレッドの続き | 長い作業は受付番号で待ち、終わったら同じスレッドに返す |
 | 「ChatGPT のアプリで承認待ち」 | Dot が ChatGPT のアプリでしか受けられない承認を待っている（個人の Drive のリンクを共有するなど） |
 | 添付 | 作業場で新しくできた文のファイル |
 
-- 同じスレッドの続きは、同じ会話として作業場に残る（研究テーマなら `.kei-agent/threads/<スレッドの番号>.md`）
+- Dot が同じスレッドの番号を MCP の `conversation` に渡すと、同じ会話として続く。研究テーマ・プロジェクトでは `.kei-agent/threads/<会話の番号>.md` に残る
 - 確認が要るときは、同じスレッドで聞かれる。答えれば続きをやる
+
+個人の予定・メール・資料・GitHub は Dot の接続済みプラグインで確認する。接続の役割と設定は [dots.md](dots.md#dot-側の設定) にまとめている。
 
 ## 頼み方の例
 
@@ -49,16 +52,20 @@
 
 ## 定期実行
 
+[dots.md](dots.md) の予定とローカルの停止対象を設定した構成。
+
 | 時刻 | 届くもの | 場所 | 動かすもの |
 |---|---|---|---|
 | 毎時 | Kei Agent からの知らせ（ジョブが終わった・困りごと・課題の新着など） | 元のチャンネル | Dot |
-| 07:00 | 論文の新着、読みもの | `#0-overview` | Dot |
-| 07:40 | Outlook の会議を共通ホームの「予定カレンダー」へ | — | Dot |
+| 07:00 | 論文の新着 | `#0-overview` | Dot |
+| 07:00 | 読みもの（1記事ごとに独立した親投稿） | `#4-knowledge` | Dot |
+| 07:40 | Outlook・Google Calendar の予定を共通ホームの「予定カレンダー」へ | — | Dot |
 | 08:00 | 今日の予定（授業・会議・締切）と、そのスレッドに Daily | `#0-overview` | Dot |
-| 08:00 | Moodle の課題を授業ホームへ | — | Kei Agent |
+| 起動・復帰時と30分ごと | Moodle の課題を授業ホームへ | — | Mac の実行サービス |
+| 10分ごと（API 設定時） | Moodle の提出・受験終了を確認し、Notion に反映 | — | Mac の実行サービス |
 | 08:00・18:00 | 締切が近い課題 | `#0-overview` | Dot |
 | 21:00 | 振り返り（今日の成果・未完了）と、明日・明後日の締切 | `#0-overview` | Dot |
-| 22:00 | Toggl の取り込み、保守（古いファイルの整理とバックアップ） | — | Kei Agent |
+| 22:00 | Toggl の取り込み、保守（古いファイルの整理とバックアップ） | — | Mac の実行サービス |
 | 00:00 | 今夜やる Task | 元のスレッド | Dot が Kei Agent に頼む |
 
 - Dot の予定は [dots.md](dots.md)。Kei Agent の時刻とオンオフは `~/.config/kei-agent/schedules.csv`（[deploy/README.md](../deploy/README.md#定期処理の表schedulescsv)）
@@ -76,13 +83,15 @@
 
 ## 声
 
+音声で相談して作業を進めるときは [Dot の通話](dots.md#音声対話は-dot-の通話) を使う。スタックちゃんが届くまでの代用もこの通話。カスタム指示を設定すると、通話からの作業依頼も Slack に親投稿を作り、進捗・結果をそのスレッドに残す。以下のスイッチは、明示的に使う場合の Mac の音声機能。
+
 | スイッチ | 入れると |
 |---|---|
-| 知らせる | 作業の終わり・止まり・返事待ち・締切・上限を声で知らせる。マイクは開かない |
+| 知らせる | 作業の終わり・止まり・返事待ち・上限を声で知らせる。マイクは開かない |
 | 聞く | マイクで会話する。喋っている途中で割り込める。切るとつながりごと切れる |
 
-- 切り替えは Dot に頼む（手の口の `voice`）。どちらも既定は切
-- 予定・締切・Kei Agent の様子は、すぐ答える
-- 研究・授業・仕事の中身は、本体を通して担当に読むだけで聞いてから答える
+- 切り替えは Dot に頼む（MCP の `voice`）。どちらも既定は切
+- 本体から受け取った予定・締切と、Kei Agent の処理状態を答える
+- Mac の音声機能から研究・仕事の中身を聞くと、本体を通して担当に読むだけで確認する。大学・知識の相談は Dot の通話で Notion・Box・Web を直接使う
 - 作業を頼むと、読み上げて確かめてから依頼にする（Kei Agent からの知らせとして Slack に出る）
 - 話した中身は残さない。会話の間は、喋ったぶんだけ料金がかかる

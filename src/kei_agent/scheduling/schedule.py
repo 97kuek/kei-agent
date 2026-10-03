@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import socket
 import time
 from contextlib import suppress
@@ -20,6 +19,7 @@ from datetime import time as dtime
 import aiohttp
 
 from kei_agent.configuration.config import Config
+from kei_agent.configuration.schedules_table import CLOUD_SCHEDULES
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import AWAITING_MARKER, clean_text, format_duration
@@ -199,6 +199,8 @@ class Scheduler:
         """上限で止まった決まった時刻の処理を、明けてからやり直す（猶予の時間を過ぎていても動かす）。"""
         for deferred_id, payload in self.store.due_deferred("schedule", now):
             self.store.finish_deferred(deferred_id)
+            if payload["name"] in CLOUD_SCHEDULES:
+                continue
             if not self.store.schedule_ran(payload["name"], payload["day"]):
                 await self.run_or_defer(payload["name"], payload["day"], now)
 
@@ -277,7 +279,7 @@ class Scheduler:
         )
         if message:
             text += f"\n## 元の Slack のメッセージ\n\n{clean_text(message.get('text', ''))}\n"
-        req = Request(channel, channel_name, thread_ts, None, text, trigger="night", files=message.get("files") or [])
+        req = Request(channel, channel_name, thread_ts, None, text, trigger="night")
         result = await self.assistant.process(req)
 
         if result is None or result.is_error:
@@ -288,8 +290,6 @@ class Scheduler:
             status = "確認待ち" if contract_failed or AWAITING_MARKER in result.text else "完了"
             summary = "返答を利用者向けの形に整えられませんでした" if contract_failed else summarize(shown)
         await asyncio.to_thread(notion.update_task, task.id, status, summary)
-        if status == "完了" and message_ts:
-            await self.assistant.react_done(channel, message_ts)
         return {**info, "status": status, "summary": summary}
 
     # Daily と振り返り
@@ -373,23 +373,14 @@ class Scheduler:
 
 
 async def _run_once(name: str, record: bool) -> None:
-    from slack_sdk.web.async_client import AsyncWebClient
-
     from kei_agent.configuration.config import load_config
-    from kei_agent.execution.jobs import JobManager
-    from kei_agent.storage.notion_hub import load_hub
-    from kei_agent.storage.notion_store import load_notion
+    from kei_agent.conversation.service import create_assistant
 
     config = load_config()
     store = Store(config.db_path)
-    slack = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    auth = await slack.auth_test()
     pueue = jobs.queue(config)
-    await pueue.ensure_group()  # 夜間の Task がジョブを投入することがある
-    assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
-                          os.environ["SLACK_BOT_TOKEN"], auth["user_id"],
-                          notion=load_notion(config), team_url=auth.get("url", ""),
-                          team_id=auth.get("team_id", ""), hub=load_hub(config))
+    await pueue.ensure_group()
+    assistant = create_assistant(config, store, pueue)
     scheduler = Scheduler(config, store, assistant)
     day = date.today().isoformat()
     detail = await scheduler.run_task(name, day, record=record)

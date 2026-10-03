@@ -76,20 +76,17 @@ def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_
     """話し方や所属はプロフィールから。振り分け・選別のように JSON だけを返す係には足さない。"""
     home = _home(tmp_path, profile="# プロフィール\n\n<!-- 書き方の説明 -->\n## 話し方\n\n- 一人称は「僕」\n")
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    course = prompt_text(config, config.prompt_file("course.md"))
+    course = prompt_text(config, config.prompt_file("research.md", module="research"))
     assert course.rstrip().endswith("## 依頼者のプロフィール\n\n## 話し方\n\n- 一人称は「僕」")
     assert "# プロフィール" not in course and "書き方の説明" not in course     # 題とコメントは差し込まない
     # JSON だけを返す係は、作業場で差し込まないと決める（振り分け・分類の作業場と、知識の選別・要約の回）
     from kei_agent.conversation import router
     ws = router.workspace(config)
     assert ws.profile is False and "依頼者のプロフィール" not in prompt_text(config, ws.system_prompt, ws.profile)
-    digest = config.prompt_file("knowledge-digest.md", module="knowledge")
-    assert digest == config.repo_root / "modules" / "knowledge" / "knowledge-digest.md" and digest.is_file()
-    assert "依頼者のプロフィール" not in prompt_text(config, digest, profile=False)
     # プロフィールを変えたら、指示の版も変わる（古い会話を、前の話し方のまま続けない）
-    before = prompt_version(config, "course")
+    before = prompt_version(config, "research")
     (home / "profile.md").write_text("## 話し方\n\n- 一人称は「私」\n", encoding="utf-8")
-    assert prompt_version(config, "course") != before
+    assert prompt_version(config, "research") != before
     # 例のプロフィールをそのまま写しても、書き方の説明は指示書に入らない
     (home / "profile.md").write_text((config.repo_root / "profile.example.md").read_text(encoding="utf-8"),
                                      encoding="utf-8")
@@ -98,15 +95,15 @@ def test_profile_is_added_to_conversation_prompts_but_not_to_json_only_ones(tmp_
 
 
 def test_a_prompt_can_be_replaced_as_a_whole(tmp_path):
-    home = _home(tmp_path, prompts={"course.md": "# 自分の大学エージェント\n"})
+    home = _home(tmp_path, prompts={"custom.md": "# 自分の担当\n"})
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    assert config.prompt_file("course.md") == home.resolve() / "prompts" / "course.md"
+    assert config.prompt_file("custom.md") == home.resolve() / "prompts" / "custom.md"
     assert config.prompt_file("work.md") == config.repo_root / "prompts" / "work.md"
-    assert prompt_text(config, config.prompt_file("course.md")) == "# 自分の大学エージェント\n"
+    assert prompt_text(config, config.prompt_file("custom.md")) == "# 自分の担当\n"
     # モジュールの指示書はモジュールのフォルダにある。同じ名前を利用者のフォルダに置けば、それも差し替えられる
-    assert config.prompt_file("knowledge.md", module="knowledge") == config.repo_root / "modules" / "knowledge" / "knowledge.md"
-    (home / "prompts" / "knowledge.md").write_text("# 自分の知識の担当\n", encoding="utf-8")
-    assert config.prompt_file("knowledge.md", module="knowledge") == home.resolve() / "prompts" / "knowledge.md"
+    assert config.prompt_file("research.md", module="research") == config.repo_root / "modules" / "research" / "research.md"
+    (home / "prompts" / "research.md").write_text("# 自分の知識の担当\n", encoding="utf-8")
+    assert config.prompt_file("research.md", module="research") == home.resolve() / "prompts" / "research.md"
 
 
 def test_launch_scripts_can_ask_where_the_secrets_are(tmp_path):
@@ -132,3 +129,10 @@ def test_tests_never_point_at_the_real_state(tmp_path):
     for path in (config.state_dir, config.research_root, config.agent_root, config.course_root, config.db_path):
         assert not path.is_relative_to(Path.home() / ".local" / "state")
         assert path not in (Path.home() / "research", Path.home() / "kei-agent", Path.home() / "course")
+
+
+def test_retired_handoff_button_config_is_refused(tmp_path):
+    """廃止したボタンの設定を、効いているように黙って受け付けない。"""
+    home = _home(tmp_path, "handoff_after_turns = 8\n")
+    with pytest.raises(ConfigError, match="handoff_after_turns"):
+        load_config(env={"KEI_AGENT_HOME": str(home)})

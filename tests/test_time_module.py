@@ -1,39 +1,26 @@
-"""時間記録のモジュール（段階3の時間記録の②。modules/time/）。
-
-`/toggl` と固定したカードで測り、Toggl と共通ホームの「時間記録」に送る。送れなかったものは見回りで送り直し、
-Toggl のアプリで直接測った記録は定期処理で取り込む。記録はモジュールの記録（本体の表からは一度だけ写す）。
-"""
+"""MCP の時間計測と Toggl・Notion への送信、直接計測の取り込み。"""
 
 import asyncio
 import sys
 import time
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from fakes import FakeAI, FakeHub, FakeSlack, make_assistant
-from slack_sdk.errors import SlackApiError
+from fakes import FakeAI, FakeHub, make_assistant
 
 from kei_agent.execution import runner
-from kei_agent.execution.agents import Reply
 from kei_agent.framework import modules
 from kei_agent.scheduling.timelog import TogglAmbiguousWrite, TogglError
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.records import Records
-from kei_agent.storage.store import Store
 from kei_agent.testing.kit import settle
-from kei_agent_modules.time import commands, entries, importer
-from kei_agent_modules.time.entries import Entries
-
-START = "kei_agent_module:time:start"
-STOP = "kei_agent_module:time:stop"
+from kei_agent_modules.time import entries, importer
 
 
 @pytest.fixture
 def env(config, store, monkeypatch):
     monkeypatch.setattr(runner, "run_model", FakeAI())
     channels = {"C1": "1-vlm", "C2": "2-course", "C3": "3-work", "C4": "2-linear-algebra", "C9": "0-kei-agent"}
-    assistant, slack = make_assistant(config, store, channels, team_url="https://example.slack.com/", hub=FakeHub())
+    assistant, slack = make_assistant(config, store, channels, hub=FakeHub())
     module = assistant.modules["time"]
     # Toggl の設定は、使うテストだけが入れる
     monkeypatch.setattr(sys.modules[type(module).__module__], "load_toggl", lambda: None)
@@ -42,18 +29,6 @@ def env(config, store, monkeypatch):
 
 def use_toggl(monkeypatch, module, toggl):
     monkeypatch.setattr(sys.modules[type(module).__module__], "load_toggl", lambda: toggl)
-
-
-
-
-def press(action_id, value="start", channel="C1", name="1-vlm", user="UME"):
-    where = {"id": channel, "name": name} if name else {"id": channel}
-    return {"user": {"id": user}, "trigger_id": "trig", "channel": where,
-            "actions": [{"action_id": action_id, "value": value}]}
-
-
-def toggl_command(text="", channel="C1", name="1-vlm", user="UME"):
-    return {"user_id": user, "channel_id": channel, "channel_name": name, "text": text, "trigger_id": "trig"}
 
 
 class RecordingToggl:
@@ -71,345 +46,259 @@ async def measure(module, channel, theme, domain="research", minutes=25):
     """25分測って止めた記録（止めたあとの送信まで）。"""
     entry, _ = module.entries.start("UME", domain, channel, theme, started_at=time.time() - minutes * 60)
     stopped = module.entries.stop("UME", ended_at=entry.started_at + minutes * 60)
-    await module._after_change(stopped=stopped, post_cards=False)
+    await module._sync(stopped)
     return module.entries.entry(stopped.id)
 
 
-# カード
+async def timer(module, action="status", **params):
+    return await module.head_action("timer", {"action": action, **params})
 
-async def test_the_card_starts_and_stops_one_timer(env):
+
+async def review_entry(module):
+    entry, _ = module.entries.start("UME", "research", "C1", "vlm", started_at=time.time() - 1500)
+    module.entries.stop("UME", ended_at=entry.started_at + 1500)
+    return module.entries.set_delivery(entry.id, toggl_state="needs_review")
+
+
+async def test_timer_switches_and_returns_complete_entries_without_cards(env):
     assistant, module, slack = env
-    await assistant.module_action(press(START))
-    entry = module.entries.active("UME")
-    assert entry is not None and entry.description == "研究 / vlm" and entry.channel_name == "vlm"
-    card = module.core.records.get("card", "C1")
-    assert card["ts"] and card["buttons"] == "kei_agent_module:time:"
-    posted = slack.posted()[-1]
-    assert [el["action_id"] for el in posted["blocks"][1]["elements"]] == [STOP, "kei_agent_module:time:memo"]
-
-    await assistant.module_action(press(STOP, entry.id))
-    assert module.entries.active("UME") is None
-    assert module.entries.entry(entry.id).ended_at is not None
-    update = [kw for name, kw in slack.calls if name == "chat_update"][-1]
-    assert update["ts"] == card["ts"] and update["blocks"][1]["elements"][0]["action_id"] == START
-
-
-async def test_stale_stops_and_other_people_leave_the_timer_alone(env):
-    assistant, module, slack = env
-    await assistant.module_action(press(START, user="USOMEONE"))
-    assert module.entries.active("USOMEONE") is None and slack.posted() == []
-    await assistant.module_action(press(START))
-    running = module.entries.active("UME")
-    await assistant.module_action(press(STOP, "old-entry"))
-    assert module.entries.active("UME") == running
+    started = await timer(module, "start", domain="research", label="vlm")
+    running = started["running"]
+    assert running["description"] == "研究 / vlm"
+    assert running["id"] and running["memo"] == "" and running["toggl_state"] == "pending"
+    assert running["notion_state"] == "pending" and started["needs_review"] == []
+    switched = await timer(module, "start", domain="course", label="線形代数")
+    assert switched["running"]["description"] == "大学 / 線形代数"
+    assert switched["stopped"]["id"] == running["id"]
+    assert module.entries.active("UME").channel == "C2"
+    stopped = await timer(module, "stop")
+    assert stopped["running"] is None and stopped["stopped"]["description"] == "大学 / 線形代数"
+    assert stopped["stopped"]["notion_state"] == "done"
+    assert (await timer(module))["running"] is None and slack.posted() == []
+    assert assistant.hub.recorded[-1][2] == "線形代数"
 
 
-@pytest.mark.parametrize(("by_card", "channel", "name", "domain", "description"), [
-    # ボタンの body にチャンネル名がないときも、番号付きの名前で見分ける
-    (True, "C3", "", "work", "仕事 / work"),
-    # 非公開のチャンネルは privategroup と届くので、Slack に名前を聞く
-    (False, "C3", "privategroup", "work", "仕事 / work"),
-    # 授業ごとのチャンネル（pick_course に無いもの）は、チャンネルの名前で測る
-    (False, "C4", "2-linear-algebra", "course", "大学 / linear-algebra"),
+@pytest.mark.parametrize("params", [
+    {"action": "start", "domain": "play", "label": "x"},
+    {"action": "start", "domain": "research", "label": " "},
+    {"action": "jump"}, {"action": "memo", "memo": " "},
+    {"action": "resolve", "resolution": "recorded"},
+    {"action": "resolve", "entry_id": "x"},
+    {"action": "resolve", "entry_id": "x", "resolution": "retry"},
 ])
-async def test_the_raw_channel_name_decides_the_domain(env, by_card, channel, name, domain, description):
-    assistant, module, slack = env
-    if by_card:
-        await assistant.module_action(press(START, channel=channel, name=name))
-    else:
-        await assistant.module_slash("toggl", toggl_command(channel=channel, name=name))
-    entry = module.entries.active("UME")
-    assert (entry.domain, entry.description) == (domain, description)
-
-
-async def test_a_deleted_card_is_posted_again(env):
-    assistant, module, slack = env
-    module.entries.set_card("C1", "gone.1", module.buttons)
-
-    async def missing(**kw):
-        raise RuntimeError("message_not_found")
-
-    slack.chat_update = missing
-    await assistant.module_action(press(START))
-    assert module.entries.card("C1") not in ("", "gone.1")
-
-
-async def test_the_memo_is_saved_from_its_view(env):
-    assistant, module, slack = env
-    await assistant.module_action(press(START))
-    entry = module.entries.active("UME")
-    await assistant.module_action(press("kei_agent_module:time:memo", entry.id))
-    (_, opened), = [(n, kw) for n, kw in slack.calls if n == "views_open"]
-    assert opened["view"]["callback_id"] == "kei_agent_module:time:memo"
-
-    view = {"callback_id": "kei_agent_module:time:memo", "private_metadata": entry.id,
-            "state": {"values": {"memo": {"text": {"value": "  図の直し  "}}}}}
-    assert await assistant.module_view({"user": {"id": "UME"}, "view": view}) is None
-    assert module.entries.entry(entry.id).memo == "図の直し"
-    gone = {**view, "private_metadata": "nothing"}
-    assert await assistant.module_view({"user": {"id": "UME"}, "view": gone}) == {"memo": "この記録はもうありません"}
-
-
-# /toggl
-
-async def test_toggl_toggles_and_switches_channels_without_posting_cards(env):
-    assistant, module, slack = env
-    started = await assistant.module_slash("toggl", toggl_command())
-    first = module.entries.active("UME")
-    assert first.description == "研究 / vlm" and "始めた" in started
-
-    # 別のチャンネルで打つと、前のを止めてそこで測り始める
-    switched = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
-    await settle(assistant)
-    now = module.entries.active("UME")
-    assert (now.channel, now.domain) == ("C3", "work") and "研究 / vlm は止めた" in switched
-    assert module.entries.entry(first.id).ended_at == now.started_at
-
-    stopped = await assistant.module_slash("toggl", toggl_command(channel="C3", name="3-work"))
-    await settle(assistant)
-    assert module.entries.active("UME") is None and "止めた" in stopped
-    # カードを置いていないチャンネルに、コマンドで新しいカードを投稿しない
-    assert module.entries.card("C1") == "" and module.entries.card("C3") == "" and slack.posted() == []
-
-
-async def test_toggl_start_and_stop_words(env):
-    assistant, module, slack = env
-    assert "計測していない" in await assistant.module_slash("toggl", toggl_command("stop"))
-    await assistant.module_slash("toggl", toggl_command("開始"))
-    first = module.entries.active("UME")
-    # start は計測中でも止めずに、動いていることを伝えるだけ
-    assert "計測中" in await assistant.module_slash("toggl", toggl_command("start"))
-    assert module.entries.active("UME") == first
-    await assistant.module_slash("toggl", toggl_command("停止"))
+async def test_timer_rejects_incomplete_and_invalid_operations(env, params):
+    _, module, _ = env
+    with pytest.raises(ValueError):
+        await module.head_action("timer", params)
     assert module.entries.active("UME") is None
-    assert "使い方" in await assistant.module_slash("toggl", toggl_command("pause"))
 
 
-async def test_toggl_refuses_other_channels_and_people(env):
-    assistant, module, slack = env
-    assert "1-・2-・3-" in await assistant.module_slash("toggl", toggl_command(channel="C9", name="0-kei-agent"))
-    assert "利用できません" in await assistant.module_slash("toggl", toggl_command(user="USOMEONE"))
+async def test_memo_appends_and_updates_finished_records(env):
+    assistant, module, _ = env
+    await timer(module, "start", domain="research", label="vlm")
+    first = await timer(module, "memo", memo=" 論文を読んだ ")
+    assert first["running"]["memo"] == "論文を読んだ"
+    second = await timer(module, "memo", memo="実験した")
+    assert second["running"]["memo"] == "論文を読んだ\n実験した"
+    stopped = await timer(module, "stop")
+    entry_id = stopped["stopped"]["id"]
+    await timer(module, "memo", entry_id=entry_id, memo="結果を整理した")
+    assert module.entries.entry(entry_id).memo == "論文を読んだ\n実験した\n結果を整理した"
+    assert module.entries.entry(entry_id).notion_state == "done"
+    assert len(assistant.hub.recorded) == 2
 
 
-async def test_the_course_channel_asks_which_course(env, monkeypatch):
-    """科目を選ぶチャンネル（設定の pick_course）では、大学のモジュールに今学期の科目を聞いて選ばせる。"""
-    assistant, module, slack = env
-    asked = []
-    reply = Reply.broken("つながらない")
-
-    async def views_open(**kw):
-        slack.calls.append(("views_open", kw))
-        return {"view": {"id": "V1"}}
-
-    async def ask_agent(skill, payload):
-        asked.append(skill)
-        return reply
-
-    slack.views_open = views_open
-    monkeypatch.setattr(assistant.cores["course"], "ask_agent", ask_agent)
-
-    # 科目を読み出せないときは、選ぶ欄を出さずにそう伝える
-    await assistant.module_action(press(START, channel="C2", name="2-course"))
-    await settle(assistant)
-    (_, update), = [(n, kw) for n, kw in slack.calls if n == "views_update"]
-    assert "読み出せなかった" in str(update["view"]) and "submit" not in update["view"]
-
-    reply = Reply(ok=True, data={"items": [{"id": "P1", "subject": "信号処理"}]})
-    answer = await assistant.module_slash("toggl", toggl_command(channel="C2", name="2-course"))
-    await settle(assistant)
-    assert "科目" in answer and asked == ["list-current-courses"] * 2 and module.entries.active("UME") is None
-    update = [kw for n, kw in slack.calls if n == "views_update"][-1]
-    assert update["view_id"] == "V1" and "信号処理" in str(update["view"])
-    option = update["view"]["blocks"][0]["element"]["options"][0]
-
-    view = {"callback_id": "kei_agent_module:time:course", "private_metadata": "C2",
-            "state": {"values": {"course": {"select": {"selected_option": option}}}}}
-    assert await assistant.module_view({"user": {"id": "UME"}, "view": view}) is None
-    await settle(assistant)
-    entry = module.entries.active("UME")
-    assert (entry.domain, entry.course_page_id, entry.label, entry.description) == (
-        "course", "P1", "信号処理", "大学 / 信号処理")
-    # 選び直しを求めるのは、選んだものが読めないときだけ
-    broken = {**view, "state": {"values": {"course": {"select": {"selected_option": {"value": "x"}}}}}}
-    assert await assistant.module_view({"user": {"id": "UME"}, "view": broken}) == {"course": "科目を選び直してね"}
+async def test_memo_rejects_missing_records_and_other_owners(env):
+    _, module, _ = env
+    other, _ = module.entries.start("OTHER", "research", "C1", "vlm")
+    for params in ({"memo": "x"}, {"memo": "x", "entry_id": "missing"},
+                   {"memo": "x", "entry_id": other.id}):
+        with pytest.raises(ValueError):
+            await timer(module, "memo", **params)
+    assert module.entries.entry(other.id).memo == ""
 
 
-# Toggl と共通ホームへの送信
+async def test_status_shows_only_owners_stopped_records_needing_confirmation(env):
+    _, module, _ = env
+    own = await review_entry(module)
+    other, _ = module.entries.start("OTHER", "research", "C1", "vlm")
+    module.entries.stop("OTHER")
+    module.entries.set_delivery(other.id, toggl_state="needs_review")
+    status = await timer(module)
+    assert [e["id"] for e in status["needs_review"]] == [own.id]
+    assert status["needs_review"][0]["toggl_state"] == "needs_review"
+    assert status["needs_review"][0]["minutes"] == 25
+    assert (await timer(module, "start", domain="work", label="定例"))["needs_review"] == status["needs_review"]
 
-async def test_every_domain_goes_to_toggl_then_to_the_hub(env, monkeypatch):
-    assistant, module, slack = env
+
+@pytest.mark.parametrize("resolution", ["recorded", "missing"])
+async def test_resolve_resends_only_confirmed_missing_entries(env, monkeypatch, resolution):
+    assistant, module, _ = env
     calls = []
     use_toggl(monkeypatch, module, RecordingToggl(calls))
-    module.entries.bind_course("C2", "course-page", "マルチメディア工学A")
-    # カードのあるチャンネルなら、カードへのリンクも送る
-    links, record_time = [], assistant.hub.record_time
-    monkeypatch.setattr(assistant.hub, "record_time", lambda *args: (links.append(args[6]), record_time(*args)))
-    module.entries.set_card("C1", "5.5", module.buttons)
-
-    research = await measure(module, "C1", "vlm")
-    course = await measure(module, "C2", "course", "course")
-    work = await measure(module, "C3", "work", "work")
-
-    assert calls == [("toggl", "研究 / vlm", 1500), ("toggl", "大学 / マルチメディア工学A", 1500),
-                     ("toggl", "仕事 / work", 1500)]
-    assert assistant.hub.recorded == [(research.id, "research", "vlm", 25, "Slack"),
-                                      (course.id, "course", "マルチメディア工学A", 25, "Slack"),
-                                      (work.id, "work", "work", 25, "Slack")]
-    assert links == ["https://example.slack.com/archives/C1/p55", "", ""]
-    for entry in (research, course, work):
-        assert (entry.toggl_state, entry.notion_state) == ("done", "done")
-    # 送り終えた記録は、しばらくしたら消える（Toggl と「時間記録」に残っている）
-    row = assistant.store.module_record("time", "entry", research.id)
-    assert row["expires_at"] == pytest.approx(time.time() + entries.KEEP_DAYS * 86400, abs=60)
+    entry = await review_entry(module)
+    status = await timer(module, "resolve", entry_id=entry.id, resolution=resolution)
+    assert status["needs_review"] == [] and module.entries.entry(entry.id).sent
+    assert assistant.hub.recorded == [(entry.id, "research", "vlm", 25, "Slack")]
+    assert calls == ([] if resolution == "recorded" else [("toggl", "研究 / vlm", 1500)])
+    with pytest.raises(ValueError):
+        await timer(module, "resolve", entry_id=entry.id, resolution="missing")
+    assert len(assistant.hub.recorded) == 1
 
 
-async def test_without_toggl_the_hub_still_gets_the_time_with_the_card_link(env):
+async def test_resolve_leaves_other_owners_running_and_unreviewed_records_unchanged(env):
+    _, module, _ = env
+    other, _ = module.entries.start("OTHER", "research", "C1", "vlm")
+    module.entries.stop("OTHER")
+    module.entries.set_delivery(other.id, toggl_state="needs_review")
+    running, _ = module.entries.start("UME", "research", "C1", "vlm")
+    module.entries.set_delivery(running.id, toggl_state="needs_review")
+    for entry_id in (other.id, running.id, "missing"):
+        before = module.entries.entry(entry_id)
+        with pytest.raises(ValueError):
+            await timer(module, "resolve", entry_id=entry_id, resolution="recorded")
+        assert module.entries.entry(entry_id) == before
+    plain = module.entries.stop("UME")
+    module.entries.set_delivery(plain.id, toggl_state="pending")
+    with pytest.raises(ValueError):
+        await timer(module, "resolve", entry_id=plain.id, resolution="missing")
+
+
+async def test_ambiguous_toggl_write_waits_without_automatic_resend(env, monkeypatch):
     assistant, module, slack = env
-    await assistant.module_action(press(START))
-    entry = module.entries.active("UME")
-    await assistant.module_action(press(STOP, entry.id))
+    calls = []
+    use_toggl(monkeypatch, module, RecordingToggl(calls, fail=TogglAmbiguousWrite("POST: TimeoutError")))
+    entry = await measure(module, "C1", "vlm")
+    assert entry.toggl_state == "needs_review" and assistant.hub.recorded == []
+    notice = slack.posted()[-1]
+    assert entry.id in notice["text"] and not notice.get("blocks")
+    use_toggl(monkeypatch, module, RecordingToggl(calls))
+    await module._look_around()
+    assert calls == [] and (await timer(module))["needs_review"][0]["id"] == entry.id
 
-    sent = module.entries.entry(entry.id)
-    assert (sent.toggl_state, sent.notion_state) == ("not_configured", "done")
-    assert assistant.hub.recorded == [(entry.id, "research", "vlm", 1, "Slack")]
+
+async def test_parallel_retry_and_resolve_avoid_duplicate_delivery(env, monkeypatch):
+    assistant, module, _ = env
+    calls = []
+    use_toggl(monkeypatch, module, RecordingToggl(calls))
+    entry = await review_entry(module)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = module.core.to_thread
+
+    async def delayed(func, *args):
+        if getattr(func, "__name__", "") == "record_completed":
+            entered.set()
+            await release.wait()
+        return await original(func, *args)
+
+    monkeypatch.setattr(module.core, "to_thread", delayed)
+    resolving = asyncio.create_task(timer(module, "resolve", entry_id=entry.id, resolution="missing"))
+    await asyncio.wait_for(entered.wait(), 2)
+    retrying = asyncio.create_task(module._sync(entry))
+    competing = asyncio.create_task(timer(module, "resolve", entry_id=entry.id, resolution="missing"))
+    release.set()
+    await resolving
+    await retrying
+    with pytest.raises(ValueError):
+        await competing
+    assert calls == [("toggl", "研究 / vlm", 1500)]
+    assert len(assistant.hub.recorded) == 1 and module.entries.entry(entry.id).sent
 
 
-async def test_a_toggl_failure_is_kept_and_holds_back_the_hub(env, monkeypatch, caplog):
-    assistant, module, slack = env
-    use_toggl(monkeypatch, module, RecordingToggl([], fail=TogglError("POST /time-entries/bulk: 503")))
-    entry = await measure(module, "C3", "work", "work")
-
+async def test_toggl_failure_holds_notion_until_retry_succeeds(env, monkeypatch, caplog):
+    assistant, module, _ = env
+    use_toggl(monkeypatch, module, RecordingToggl([], fail=TogglError("POST: 503")))
+    entry = await measure(module, "C1", "vlm")
     assert (entry.toggl_state, entry.notion_state) == ("pending", "pending")
     assert assistant.hub.recorded == [] and "503" in caplog.text
     assert assistant.store.module_record("time", "entry", entry.id)["expires_at"] is None
-
     use_toggl(monkeypatch, module, RecordingToggl([]))
     await module._look_around()
     assert module.entries.entry(entry.id).sent
 
 
-async def test_an_unsure_toggl_write_waits_for_the_owner(env, monkeypatch):
-    """送ったあとに切れたら、二重に入れないよう [Togglへ再送] を出して待つ。見回りでは送り直さない。"""
+async def test_notion_retries_without_resending_toggl(env, monkeypatch):
     assistant, module, slack = env
+    hub, assistant.hub = assistant.hub, None
     calls = []
-    use_toggl(monkeypatch, module, RecordingToggl(calls, fail=TogglAmbiguousWrite("POST: TimeoutError")))
-    entry = await measure(module, "C1", "vlm")
-
-    assert entry.toggl_state == "needs_review" and assistant.hub.recorded == []
-    retry = slack.posted()[-1]["blocks"][1]["elements"][0]
-    assert (retry["action_id"], retry["value"]) == ("kei_agent_module:time:retry", entry.id)
-
     use_toggl(monkeypatch, module, RecordingToggl(calls))
-    await module._look_around()
-    assert calls == []
-    await assistant.module_action(press(retry["action_id"], entry.id))
-    assert calls == [("toggl", "研究 / vlm", 1500)] and module.entries.entry(entry.id).sent
-
-
-async def test_hub_trouble_waits_quietly_and_is_retried_by_the_look_around(env, monkeypatch):
-    """共通ホームが使えない間・失敗した記録は保留にするだけで、毎回は知らせない。見回りで送り直す。"""
-    assistant, module, slack = env
-    hub = assistant.hub
-    assistant.hub = None
     waiting = await measure(module, "C1", "vlm")
-    await module._look_around()
-    assert module.entries.entry(waiting.id).notion_state == "pending" and slack.posted() == []
-
     assistant.hub = hub
-    failing = True
-    record_time = hub.record_time
+    original = hub.record_time
 
-    def flaky(*args):
-        if failing:
-            raise NotionError("503")
-        record_time(*args)
+    def broken(*args):
+        raise NotionError("503")
 
-    monkeypatch.setattr(hub, "record_time", flaky)
-    failed = await measure(module, "C1", "vlm")
-    assert module.entries.entry(failed.id).notion_state == "pending"
-    failing = False
+    monkeypatch.setattr(hub, "record_time", broken)
     await module._look_around()
-    assert {r[0] for r in hub.recorded} == {waiting.id, failed.id}
-    assert module.entries.entry(failed.id).notion_state == "done"
+    assert module.entries.entry(waiting.id).notion_state == "pending"
+    monkeypatch.setattr(hub, "record_time", original)
+    await module._look_around()
+    assert module.entries.entry(waiting.id).sent and len(calls) == 1 and slack.posted() == []
 
 
-async def test_the_look_around_runs_in_the_background_one_at_a_time(env, monkeypatch):
-    """Toggl が遅くても、毎分の定期処理を待たせない。前の見回りが終わるまで、次は始めない。"""
-    assistant, module, slack = env
+async def test_all_domains_deliver_and_successful_entries_expire(env, monkeypatch):
+    assistant, module, _ = env
+    calls = []
+    use_toggl(monkeypatch, module, RecordingToggl(calls))
+    research = await measure(module, "C1", "vlm")
+    course = await measure(module, "C2", "線形代数", "course")
+    work = await measure(module, "C3", "定例", "work")
+    assert calls == [("toggl", "研究 / vlm", 1500), ("toggl", "大学 / 線形代数", 1500),
+                     ("toggl", "仕事 / 定例", 1500)]
+    assert assistant.hub.recorded == [(research.id, "research", "vlm", 25, "Slack"),
+                                     (course.id, "course", "線形代数", 25, "Slack"),
+                                     (work.id, "work", "定例", 25, "Slack")]
+    row = assistant.store.module_record("time", "entry", research.id)
+    assert row["expires_at"] == pytest.approx(time.time() + entries.KEEP_DAYS * 86400, abs=60)
+
+
+async def test_toggl_delivery_interrupted_mid_send_waits_for_confirmation(env, monkeypatch):
+    _, module, _ = env
+    use_toggl(monkeypatch, module, RecordingToggl([]))
+    started, _ = module.entries.start("UME", "research", "C1", "vlm")
+    stopped = module.entries.stop("UME")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(func, *args):
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(module.core, "to_thread", delayed)
+    sending = asyncio.create_task(module._sync(stopped))
+    await asyncio.wait_for(entered.wait(), 2)
+    sending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await sending
+    await module._look_around()
+    assert module.entries.entry(started.id).toggl_state == "needs_review"
+    assert (await timer(module))["needs_review"][0]["id"] == started.id
+
+
+async def test_background_retry_runs_only_one_sweep_at_a_time(env, monkeypatch):
+    assistant, module, _ = env
+    entry = await review_entry(module)
+    module.entries.set_delivery(entry.id, toggl_state="pending")
     gate = asyncio.Event()
     runs = []
 
-    async def slow():
-        runs.append(1)
+    async def slow(entry):
+        runs.append(entry.id)
         await gate.wait()
 
-    monkeypatch.setattr(module, "_redraw_cards", slow)
+    monkeypatch.setattr(module, "_sync", slow)
     await module.tick(datetime.now())
     await asyncio.sleep(0)
     await module.tick(datetime.now())
     await asyncio.sleep(0)
-    assert runs == [1]
+    assert runs == [entry.id]
     gate.set()
     await settle(assistant)
-
-
-# 前のボタンのカード
-
-async def test_old_cards_get_the_new_buttons_once(env):
-    """本体が置いたカード（ボタンの名前が前のもの）は、起動して最初の見回りで、今のボタンに描き直す。固定はそのまま。
-    消されていたカードは置き直さずに忘れ、つながらなかったカードは次に起動したときにもう一度試す。"""
-    assistant, module, slack = env
-    module.core.records.put("card", "C1", {"channel": "C1", "ts": "11.1"})
-    module.core.records.put("card", "C3", {"channel": "C3", "ts": "33.3"})
-    entry, _ = module.entries.start("UME", "work", "C3", "work")
-
-    await module.tick(datetime.now())
-    await settle(assistant)
-    updates = {kw["ts"]: kw for name, kw in slack.calls if name == "chat_update"}
-    assert set(updates) == {"11.1", "33.3"}
-    assert updates["11.1"]["blocks"][1]["elements"][0]["action_id"] == START
-    assert updates["33.3"]["blocks"][1]["elements"][0]["value"] == entry.id       # 計測中のカードは計測中のまま
-    assert {c["buttons"] for c in module.entries.cards()} == {module.buttons}
-
-    await module.tick(datetime.now())
-    await settle(assistant)
-    assert len([n for n, _ in slack.calls if n == "chat_update"]) == 2
-
-    module.core.records.put("card", "C2", {"channel": "C2", "ts": "22.2"})
-    module.core.records.put("card", "C4", {"channel": "C4", "ts": "44.4"})
-
-    async def update(**kw):
-        if kw["channel"] == "C2":
-            raise SlackApiError("message_not_found", {"ok": False, "error": "message_not_found"})
-        raise ConnectionError("つながらない")
-
-    slack.chat_update = update
-    await module._redraw_cards()
-    assert module.entries.card("C2") == "" and module.entries.card("C4") == "44.4"
-    assert module.entries.card("C1") == "11.1" and slack.posted() == []
-
-
-# 設定
-
-def test_the_channel_prefixes_can_be_changed_and_are_checked(config, store):
-    custom = replace(config, module_settings={**config.module_settings,
-                                              "time": {"prefixes": {"5_": "research"}, "pick_course": []}})
-    module = make_assistant(custom, store, {"C7": "5_lab"})[0].modules["time"]
-    assert module.domain("5_lab") == "research" and module.domain("1-vlm") == ""
-
-    with pytest.raises(ValueError, match="research / course / work"):
-        entries.prefixes_of({"1-": "hobby"})
-    with pytest.raises(ValueError, match="表にしてください"):
-        entries.prefixes_of([])
-    # 長い頭から見る
-    assert entries.domain_of(entries.prefixes_of({"1": "work", "1-": "research"}), "1-vlm") == "research"
 
 
 def test_the_toggl_import_runs_at_22_by_default():
     assert [(s.name, s.default) for s in modules.builtin()["time"].schedules] == [("toggl_import", "22:00")]
 
-
-# Toggl で直接測った記録の取り込み（定期処理 toggl_import）
 
 class FakeToggl:
     def __init__(self, entries_):
@@ -530,66 +419,3 @@ async def test_the_material_shows_this_weeks_time(env):
                for line in await module.material(time.time()))
     assistant.hub = None
     assert (await module.material(time.time()))[-1] == "- 人: 共通 Notion ホームが使えないので分からない"
-
-
-# カードを置くコマンド（kei-agent-module time cards）
-
-async def test_the_cards_command_posts_only_where_cards_are_missing(config, store):
-    slack = FakeSlack({"C1": "1-vlm", "C2": "2-course", "C5": "0-overview", "C9": "0-kei-agent"})
-    Entries(Records(store, "time")).set_card("C2", "22.2", "kei_agent_module:time:")
-
-    assert await commands.post_cards(config, slack) == 1
-
-    posted, = slack.posted()
-    assert posted["channel"] == "C1" and posted["blocks"][1]["elements"][0]["action_id"] == START
-    card = Records(Store(config.db_path), "time").get("card", "C1")
-    assert card == {"channel": "C1", "ts": "1001.000", "buttons": "kei_agent_module:time:"}
-
-
-def test_the_cards_command_needs_the_slack_token(capsys):
-    assert commands.cards_main([]) == 1
-    assert "SLACK_BOT_TOKEN" in capsys.readouterr().out
-
-
-# 頭（手の口の timer）から測る
-
-async def test_the_head_starts_and_stops_a_timer_without_cards(env, config):
-    assistant, module, slack = env
-    from kei_agent.conversation.hands import Hands
-    h = Hands(assistant)
-    started = await h.timer("start", "research", "vlm")
-    assert started["running"]["description"] == "研究 / vlm"
-    switched = await h.timer("start", "course", "線形代数")
-    assert switched["running"]["description"] == "大学 / 線形代数" and switched["stopped"]["description"] == "研究 / vlm"
-    stopped = await h.timer("stop")
-    await settle(assistant)
-    assert stopped["running"] is None and stopped["stopped"]["description"] == "大学 / 線形代数"
-    assert (await h.timer("status"))["running"] is None
-    # カードは置かない（Slack にいないとき、カードの投稿は知らせにたまるだけになる）
-    assert slack.posted() == []
-
-
-async def test_the_head_timer_checks_its_words(env):
-    assistant, *_ = env
-    from kei_agent.conversation.hands import Hands, HandsError
-    with pytest.raises(HandsError):
-        await Hands(assistant).timer("start", "play", "x")
-    with pytest.raises(HandsError):
-        await Hands(assistant).timer("start", "research", "")
-    with pytest.raises(HandsError):
-        await Hands(assistant).timer("jump")
-
-
-async def test_head_timers_live_in_real_channels_and_fix_slack_cards(env):
-    """頭から測った記録の置き場所は本物のチャンネル（Toggl の確認の知らせが届く）。Slack のカードも合わせる。"""
-    assistant, module, slack = env
-    from kei_agent.conversation.hands import Hands
-    await module.on_action("start", press(START))
-    card_ts = module.entries.card("C1")
-    h = Hands(assistant)
-    await h.timer("start", "course", "線形代数")
-    running = module.entries.active("UME")
-    assert running.channel == "C2" and running.description == "大学 / 線形代数"
-    # Slack で始めた vlm の計測は止まり、そのカードは「計測していない」に戻る
-    updates = [kw for name, kw in slack.calls if name == "chat_update" and kw.get("ts") == card_ts]
-    assert updates and "計測中" not in (updates[-1].get("text") or "")

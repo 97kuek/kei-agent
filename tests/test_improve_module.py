@@ -1,4 +1,4 @@
-"""自己改善のモジュール（段階3の自己改善の②。modules/improve/）。Slack から Kei Agent 自身を直す流れ。
+"""自己改善のモジュール（modules/improve/）。Request の窓口から Kei Agent 自身を直す流れ。
 
 Kei Agent のチャンネルで要望を聞き、公開の issue にし、案を相談して、worktree で直し、確認してから main に取り込んで、
 新しい版で起動し直す。起動したときに結果を知らせる。記録はモジュールの記録（本体の表からは一度だけ写す）。
@@ -67,21 +67,31 @@ def edits_code(text="y = 2\n"):
     return side_effect
 
 
-async def mention(assistant, text, ts="20.1"):
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": ts, "text": f"<@UBOT> {text}".rstrip()})
+async def submit_request(assistant, text, ts="20.1", thread=None):
+    thread = thread or ts
+    assistant.remember_message("C9", thread, "owner", text, ts)
+    await assistant.submit(Request("C9", "kei-agent", thread, ts, text))
     await settle(assistant)
+
+
+async def mention(assistant, text, ts="20.1"):
+    await submit_request(assistant, text, ts)
+
+
+def remember_plan(assistant, request, answer, thread="20.1", answer_ts="20.2"):
+    assistant.remember_message("C9", thread, "owner", request, thread)
+    assistant.remember_message("C9", thread, "assistant", answer, answer_ts)
 
 
 async def agreed(assistant, slack, claude, request="直して"):
     """依頼 → 案（「こう直すけど、いい？」）まで進めたスレッドにする。"""
     claude.behaviors = [{"text": "こう直すけど、いい？"}]
     await mention(assistant, request)
-    slack.replies = [{"user": "UME", "ts": "20.1", "text": request},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "こう直すけど、いい？"}]
+    remember_plan(assistant, request, "こう直すけど、いい？")
 
 
 async def yes(assistant, ts="20.3"):
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": ts, "thread_ts": "20.1", "text": "いいよ"})
+    await submit_request(assistant, "いいよ", ts, "20.1")
     await settle(assistant)
 
 
@@ -225,7 +235,7 @@ async def test_without_a_provider_it_says_why_no_issue_was_made(env, fake_github
     await mention(assistant, "経過をもっと細かく")
 
     assert fake_github.calls == []
-    thread = [kw["text"] for kw in slack.posted() if kw.get("thread_ts") == "20.1"]
+    thread = [kw["text"] for kw in slack.messages() if kw.get("thread_ts") == "20.1"]
     assert any("選ばれていない" in text and "issue にしなかった" in text for text in thread)
 
 
@@ -235,13 +245,6 @@ async def test_a_request_without_words_opens_no_issue(env, fake_github):
 
     assert fake_github.calls == []
     assert "issue にはしなかった" in "\n".join(slack.texts())
-
-
-async def test_improve_channel_intro_says_requests_become_public_issues(env):
-    assistant, slack, claude, cfg = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C9"})
-    intro = slack.texts()[-1]
-    assert "公開の GitHub issue" in intro and "backlog" not in intro
 
 
 async def test_one_yes_fixes_merges_pushes_and_restarts(env, monkeypatch, no_real_restarts):
@@ -284,13 +287,13 @@ async def test_messages_while_fixing_never_start_the_same_fix_again(env):
     ほかの返信では、直しが裏で進んでいることを AI に伝え、同じ直しを自分で始めさせない。"""
     assistant, slack, claude, cfg = env
     await working(assistant, slack, claude)
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.5", "thread_ts": "20.1", "text": "直った？"})
+    await submit_request(assistant, "直った？", "20.5", "20.1")
     await settle(assistant)
     assert claude.calls == []
     assert "まだ直しているところだよ" in slack.texts()[-1]
     assert fix_of(assistant).status == "working"
 
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.6", "thread_ts": "20.1", "text": "おけ"})
+    await submit_request(assistant, "おけ", "20.6", "20.1")
     await settle(assistant)
     call, = claude.calls
     assert "裏で進んでいる" in call["prompt"] and "あなたは直さない" in call["prompt"]
@@ -325,9 +328,8 @@ async def test_only_one_improvement_at_a_time(env):
     await yes(assistant)
     claude.behaviors = [{"text": "案だよ"}, {"text": "🛠 着手"}]
     await mention(assistant, "2つめ", ts="21.1")
-    slack.replies = [{"user": "UME", "ts": "21.1", "text": "2つめ"},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "21.2", "text": "こう直すけど、いい？"}]
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "21.4", "thread_ts": "21.1", "text": "いいよ"})
+    remember_plan(assistant, "2つめ", "こう直すけど、いい？", "21.1", "21.2")
+    await submit_request(assistant, "いいよ", "21.4", "21.1")
     await settle(assistant)
     assert fix_of(assistant, "21.1").status == "planning"
     assert "先に進んでいる直しがある" in "\n".join(slack.texts())
@@ -391,7 +393,7 @@ async def test_protected_change_is_not_offered_for_review(env):
 # 起動したときの知らせ
 
 async def started(assistant):
-    """新しい版で起動し、Slack につながったあと（本体が入れ替えの結果を読み、モジュールの on_start を呼ぶ）。"""
+    """新しい版で起動したあと（本体が入れ替えの結果を読み、モジュールの on_start を呼ぶ）。"""
     assistant.take_update()
     await assistant.modules_started()
 
@@ -494,8 +496,7 @@ async def test_markers_in_the_answer_to_a_status_question_are_ignored(env, fake_
     assistant, slack, claude, cfg = env
     await agreed(assistant, slack, claude)
     claude.behaviors = [{"text": "まだ案のままだよ\n✅ 解決済み"}]
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": "20.5", "thread_ts": "20.1",
-                                "text": "どうなってる？"})
+    await submit_request(assistant, "どうなってる？", "20.5", "20.1")
     await settle(assistant)
 
     assert fix_of(assistant).status == "planning"
@@ -514,12 +515,11 @@ async def asked(assistant, slack, claude, request="直して"):
     """依頼 → 最初の返事まで進めたスレッドにする（要望は issue #1 になる）。"""
     claude.behaviors = [{"text": "もう直っていたよ。終わりにしていい？"}]
     await mention(assistant, request)
-    slack.replies = [{"user": "UME", "ts": "20.1", "text": request},
-                     {"user": "UBOT", "bot_id": "B1", "ts": "20.2", "text": "もう直っていたよ。終わりにしていい？"}]
+    remember_plan(assistant, request, "もう直っていたよ。終わりにしていい？")
 
 
 async def reply(assistant, text="いいよ", ts="20.3"):
-    await assistant.on_message({"channel": "C9", "user": "UME", "ts": ts, "thread_ts": "20.1", "text": text})
+    await submit_request(assistant, text, ts, "20.1")
     await settle(assistant)
 
 

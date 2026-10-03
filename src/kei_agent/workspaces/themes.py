@@ -226,6 +226,26 @@ def all_themes(config: Config) -> dict[str, Path]:
     return found
 
 
+def all_projects(config: Config) -> dict[str, Path]:
+    """既定の場所と themes.toml にある、利用可能なプロジェクトの作業場。"""
+    candidates = dict(places(config))
+    for spec in modules.enabled(config.modules):
+        root = config.module_workspace(spec.name)
+        for head in spec.prefixes:
+            for path in sorted(root.iterdir()) if root.is_dir() else ():
+                if path.is_dir() and not path.name.startswith("."):
+                    candidates.setdefault(f"{head}{path.name}", path)
+    found = {}
+    for name, path in candidates.items():
+        try:
+            ws = resolve(config, name)
+        except ValueError:
+            continue
+        if ws.kind is ChannelKind.PROJECT and path.is_dir():
+            found[name] = path
+    return found
+
+
 def _is_theme(config: Config, name: str) -> bool:
     try:
         return resolve(config, name).kind is ChannelKind.THEME

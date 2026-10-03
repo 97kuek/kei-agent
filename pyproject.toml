@@ -1,7 +1,7 @@
 [project]
 name = "kei-agent"
 version = "0.1.0"
-description = "Kei Agent: Slack から頼んだ用事を、担当のエージェント（研究・大学・仕事）に振り分けて進めるアシスタント"
+description = "Kei Agent: Dotでの対話・連携とMacの作業実行を含むパーソナルアシスタント"
 authors = [
     { name = "97kuek", email = "keitaro.ueki@icloud.com" }
 ]
@@ -9,12 +9,11 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
-    # HTTP の呼び出し（版の確かめ・A2A・Slack のファイル・声の Realtime API の WebSocket）
+    # HTTP の呼び出し（版の確かめ・A2A・声の Realtime API の WebSocket）
     "aiohttp>=3.14.3",
     # Notion のモジュール（modules/notion）のゲートウェイの MCP の口
     "mcp>=2,<3",
-    "slack-bolt>=1.30.0",
-    # 本体の中で開く口（本体の A2A の口・手の口）と、担当プロセスの A2A サーバー
+    # 本体の中で開く口（本体の A2A の口・MCP）と、担当プロセスの A2A サーバー
     "uvicorn>=0.53.0",
 ]
 
@@ -25,7 +24,7 @@ kei-agent-schedule = "kei_agent.scheduling.schedule:main"
 kei-agent-notion-setup = "kei_agent.storage.notion:main"
 kei-agent-hub-setup = "kei_agent.storage.notion_hub_setup:main"
 kei-agent-ask = "kei_agent.conversation.ask:main"
-# モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module knowledge
+# モジュールの担当プロセス（modules/<名前>/agent.py）を起動する共通のコマンド。例: kei-agent-module course
 kei-agent-module = "kei_agent_a2a.launch:main"
 
 [tool.uv.build-backend]

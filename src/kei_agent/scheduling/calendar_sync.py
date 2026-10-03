@@ -86,12 +86,10 @@ def _validated(snapshot: CalendarSnapshot) -> tuple[CalendarItem, ...]:
         end = _datetime(item.end, snapshot.source) if item.end else ""
         if item.url:
             parsed = urlparse(item.url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc or "teams.microsoft.com" in parsed.netloc:
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise IncompleteSnapshot("元 URL が予定ページではありません")
-        if "http://" in item.location or "https://" in item.location:
-            raise IncompleteSnapshot("場所に参加リンクが混ざっています")
         items.append(CalendarItem(item.source_id, item.title[:200], start, end,
-                                  item.url, item.location[:200], item.status[:100]))
+                                  item.url, item.location, item.status[:100]))
     return tuple(items)
 
 
@@ -150,7 +148,7 @@ def sync_calendar(hub: HubStore, snapshot: CalendarSnapshot, checked_at: datetim
 def outlook_items(events: list[dict]) -> tuple[CalendarItem, ...]:
     """仕事の担当が読んだ会議を、カレンダーの行にする。
 
-    AI が読んだ一覧なので、件名や時刻が読めない会議は飛ばし、参加リンクは載せない。
+    AI が読んだ一覧なので、件名や時刻が読めない会議は飛ばす。参加リンクとパスコードは保持する。
     ID が無い会議には、件名・開始・リンクから毎回同じ ID を作る。
     """
     items: list[CalendarItem] = []
@@ -170,11 +168,18 @@ def outlook_items(events: list[dict]) -> tuple[CalendarItem, ...]:
             continue
         url = str(event.get("url") or "")
         parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or "teams.microsoft.com" in parsed.netloc:
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             url = ""
         location = str(event.get("location") or "")
-        if "http://" in location or "https://" in location:
-            location = ""
+        join_url = str(event.get("join_url") or "")
+        join = urlparse(join_url)
+        if join.scheme in {"http", "https"} and join.netloc:
+            if join_url not in location:
+                location = "\n".join(filter(None, (location, join_url)))
+            url = url or join_url
+        passcode = str(event.get("passcode") or "")
+        if passcode and passcode not in location:
+            location = "\n".join(filter(None, (location, f"パスコード: {passcode}")))
         source_id = str(event.get("id") or "").strip() or "fallback:" + hashlib.sha256(
             "\0".join((title, start, url)).encode("utf-8")).hexdigest()
         if source_id in seen:

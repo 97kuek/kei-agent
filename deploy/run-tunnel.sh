@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 手の口（MCP）を、OpenAI の Secure MCP Tunnel で ChatGPT（Dots）に届ける。launchd から起動する（deploy/install.sh tunnel）。
-# トンネルのプログラム（tunnel-client）は、この Mac から OpenAI へ出ていくだけで、Mac の口は外に開かない。
+# MCP サーバーを、OpenAI の Secure MCP Tunnel で Dot に届ける。launchd から起動する（deploy/install.sh tunnel）。
+# トンネルのプログラム（tunnel-client）は、この Mac から OpenAI へ出ていくだけで、Mac の待受ポートは外に開かない。
 # 住所とトンネルの番号は config.toml の [hands] の url と tunnel。鍵（CONTROL_PLANE_API_KEY）はトンネルだけのファイル
-# kei-agent-tunnel.zsh に置く（ほかのプロセスに見せない）。手の口の合言葉は、トンネルが呼び出しに付けて渡す。
+# kei-agent-tunnel.zsh に置く（ほかのプロセスに見せない）。MCP の合言葉は、トンネルが呼び出しに付けて渡す。
 # トンネルのプログラムには、要るものだけを渡す（ほかの鍵は見せない）
 set -eu
 
@@ -13,7 +13,7 @@ require_secrets
 source "$SECRETS"
 TUNNEL_SECRETS="$SECRETS_DIR/kei-agent-tunnel.zsh"
 if [[ ! -r "$TUNNEL_SECRETS" ]]; then
-  echo "トンネルの鍵のファイルがありません: $TUNNEL_SECRETS（deploy/README.md の「手の口（MCP）」を参照）" >&2
+  echo "トンネルの鍵のファイルがありません: $TUNNEL_SECRETS（deploy/README.md の「MCP サーバー」を参照）" >&2
   exit 1
 fi
 source "$TUNNEL_SECRETS"

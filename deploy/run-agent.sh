@@ -3,7 +3,7 @@
 # 使い方: deploy/run-agent.sh <名前>。名前は常駐のプロセスを持つモジュール（module.toml に [process] がある）。
 # どれも同じ形で、違うのは名前だけ。共通の起動コマンド（kei-agent-module <名前>）が modules/<名前>/agent.py
 # （A2A ではない常駐のプロセスなら service.py）を動かす。研究（research）もモジュール。
-# 声（voice）は、口（A2A）と耳（マイク）を同じプロセスで持つ。マイクは既定では開けない（App Home から入れる）。
+# 声（voice）は、A2A サーバーとマイクを同じプロセスで持つ。マイクは既定では開けない（MCP の voice で設定する）。
 # Notion（notion）は A2A ではない常駐のプロセス（ゲートウェイ）で、Notion の鍵を持てるのはこれだけ
 set -eu
 

@@ -1,8 +1,7 @@
 """Moodle から締切を取ってくる。
 
-ウェブサービス（API）は使えるものの、トークンを発行する画面がなかったので、
-カレンダーの書き出し URL（`authtoken` 付きで、ログインなしで読める）を使う。
-URL は環境変数 `MOODLE_ICS_URL` に置く。
+締切はカレンダーの書き出し URL（`MOODLE_ICS_URL`）から取る。
+提出・受験終了の状態は別の認証付き API（moodle_api.py）で読む。
 """
 
 from __future__ import annotations

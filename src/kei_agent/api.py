@@ -1,51 +1,10 @@
-"""モジュールがコアとやり取りする窓口（枠の版 1。書き方は docs/modules.md の「module.py」）。
+"""モジュールがコアとやり取りする API（版2）。
 
-モジュールの Python（modules/<名前>/module.py）が読み込んでよい Kei Agent の部品は、この kei_agent.api だけ
-（同じフォルダのファイルは `from . import texts` のように読める）。ここに無いものに頼ると、コアを直したときに
-動かなくなる。枠を変えるときは modules.API_VERSION を上げる。
-
-module.py には `class Module` を置き、`__init__(self, core)` で窓口（Core）を受け取る。使う差し込み口だけを書く。
-
-- `async on_message(req, skill="", params=None)` … モジュールのチャンネル・会話を受け持つ本体のチャンネル
-  （module.toml の core_channels。Kei Agent のチャンネルなど）と、claim_thread したスレッドへの依頼者の書き込み。
-  研究全体のチャンネルから回ってきたときは、振り分け係が選んだ仕事が skill と params に入る（空なら
-  core.pick_skill で選べる）。答えは core.reply・core.converse・core.work で返す（どれも依頼の 👀 を ✅ に
-  変える。例外を投げたら ⚠️ と知らせ）。[channels] か core_channels があれば必須
-- `async on_reaction(event, added) -> bool` … リアクションの付け外し（Slack の reaction_added の中身）。
-  自分の投稿へのものなら扱って True を返す（ほかのモジュールと 🌙 には回らない）
-- `async run_schedule(name, day) -> dict` … module.toml の [schedules] の処理（day は YYYY-MM-DD）。
-  返した辞書は記録に残り、{"status": "error"} なら朝の Daily のときに #0-kei-agent へ知らせる。[schedules] があれば必須
-- `async tick(now)` … 毎分呼ばれる見回り（締切の知らせなど）。間隔はモジュールが決める（例: 1時間に1回だけ見る）
-- `async agenda(days, kinds=None) -> list[dict] | None` … これから days 日の、時刻のある予定。朝の一覧・
-  声のレイヤ・振り返りの材料に載る。kinds が来たら、その種類だけでよい（重い読み取りを省ける）。1件は
-  会議 `{"kind": "meeting", "subject", "start": "YYYY-MM-DDTHH:MM", "end", "location", "url", "id", "source"}`
-  （共通ホームの予定カレンダーにも source を出典として書く）、授業 `{"kind": "class", "subject", "start", "end"}`、
-  締切 `{"kind": "due", "title", "course", "at", "url", "id", "notice"}`（notice は、朝の一覧に出したら記録する
-  目印。24時間前の知らせで core.notice_once(notice) を使えば、朝に出したものを繰り返さない）。
-  読めなかったら None を返す（空の [] と分ける。予定カレンダーの行を「要確認」にしないため）
-- `async prepare(kind, day) -> list[str]` … Daily（kind = "daily"）と振り返り（"review"）の前の取り込み。
-  うまくいかなかったことの短い名前（例: "課題の取り込み"）を返すと、朝の一覧の「うまくいかなかったこと」に載る
-- `async on_event(kind, data)` … 本体やほかのモジュールが配った出来事（core.emit）。受け取ったら自分で扱う
-  （声なら喋る）。投げっぱなしなので、返事は要らない。出来事の種類は docs/modules.md の「module.py」の出来事の表
-- `home() -> list[dict]` … App Home に出す、このモジュールの項目（Slack の blocks。見出しは本体が付ける）。
-  押せるものの action_id は core.home_action_id(名前) で作る（チェックなら core.home_checkboxes）
-- `async on_home_action(name, action)` … App Home の、このモジュールの項目が押されたとき（name は
-  home_action_id に渡した名前、action は Slack の action）。依頼者のときだけ呼ばれ、終わると App Home を作り直す
-- `async on_slash_command(name, body) -> str` … module.toml の [slash_commands] のコマンドが打たれたとき（body は Slack の
-  command の中身）。返した文を、打った人にだけ見せる。Slack は3秒以内の返事を求めるので、時間のかかることは core.spawn に回す
-- `async on_action(name, body)` … このモジュールの投稿のボタンなど（action_id は core.action_id(名前) で作る）が押されたとき
-- `async on_view(name, body) -> dict | None` … このモジュールの入力の画面（callback_id は core.view_id(名前)）が送られたとき。
-  欄の下に出す理由を {block_id: 文} で返すと、画面を閉じない
-- `async material(now) -> list[str]` … Daily と振り返りの材料に足す行（今週の時間など）
-- `async head_materials(days) -> dict[str, list[dict]]` … 頭（手の口）に渡す材料。種類 → 項目（知識なら reading）。手元の記録から作る
-- `async head_action(name, params) -> dict | None` … 頭（手の口の道具）から頼まれた操作（時間記録なら timer）。受け持たない
-  名前なら None。受け付けられないときは ValueError（理由は本文。頭にそのまま返る）
-- `async on_start()` … 起動して Slack につながったあと（Kei Agent を入れ替えたあとの起動なら、その結果は
-  core.last_update() で受け取れる。途中で止まった作業の後始末など）
-- `welcome() -> str` … モジュールのチャンネル（と core_channels の本体のチャンネル）に招かれたときの案内（できること）
-- `default_question` … 本文の無いメンションのときに、担当に聞くこと
-
-依頼者だけが押せる・打てる（ボタン・画面・コマンドは、本体が依頼者か確かめてから渡す）。
+module.py は kei_agent.api のみを読み込む。class Module は必要な差し込み口を書く。
+MCP の操作は async head_action(name, params)、材料は async head_materials(days) で扱う。
+定期処理は run_schedule / tick / prepare、予定は agenda、出来事は on_event を使う。
+通知は core.post / reply / update で Outbox に保存し、Dot が取得・配信する。
+Slack の受け答えと進捗表示は Dot が扱う。
 """
 
 from __future__ import annotations
@@ -61,7 +20,7 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kei_agent.conversation import dates, home, router
+from kei_agent.conversation import dates, router
 from kei_agent.conversation.auto_messages import history_prompt
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.response_output import (
@@ -101,9 +60,7 @@ __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Co
            "contains_secret",
            "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "json_list", "json_object",
            "load_toggl", "parse_time",
-           "selected_values", "theme_name", "weekday"]
-# モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
-MODULE_PREFIX = modules.ACTION_PREFIX
+           "theme_name", "weekday"]
 # Daily・振り返りの材料（core.digest）の上限の字数
 DIGEST_CHARS = digest.MAX_DIGEST_CHARS
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
@@ -145,12 +102,6 @@ def theme_name(channel_name: str) -> str:
     return themes.theme_name(channel_name)
 
 
-def selected_values(action: dict) -> set[str]:
-    """App Home で押された action の、選ばれている値（チェックなら付いているもの全部、選ぶ形なら1つ）。"""
-    chosen = {str(option.get("value")) for option in action.get("selected_options") or []}
-    if action.get("selected_option"):
-        chosen.add(str(action["selected_option"].get("value")))
-    return chosen
 
 
 def reason_head(text: str) -> str:
@@ -258,13 +209,7 @@ class Core:
         """Kei Agent がいるチャンネル（番号を外した名前 → ID）。"""
         return await self._assistant.channel_ids()
 
-    def home_action_id(self, name: str) -> str:
-        """App Home に出す、押せるものの action_id（押されると、このモジュールの on_home_action(name, action)）。"""
-        return home.module_action_id(self.name, name)
 
-    def home_checkboxes(self, name: str, options: dict[str, str], chosen: set[str]) -> dict:
-        """App Home に出すチェック（値 → 表示名）。付いているものは chosen。押されると on_home_action(name, action)。"""
-        return home.checkboxes(self.home_action_id(name), options, chosen)
 
     def channels(self, kind: str) -> tuple[str, ...]:
         """その種類のチャンネルの名前（番号を外した名前。agents.csv で変えたものも）。module.toml の [channels] の
@@ -275,7 +220,7 @@ class Core:
 
     async def post(self, channel: str, text: str, *, thread_ts: str | None = None,
                    blocks: list[dict] | None = None, markdown: bool = False) -> str:
-        """投稿する（リンクのプレビューは付けない）。blocks を渡すとボタンなども置ける。markdown にすると、太字や
+        """投稿する（リンクのプレビューは付けない）。blocks を渡すと読める本文を保存する。markdown にすると、太字や
         箇条書きを Markdown で書ける（blocks とはいっしょに使えない）。投稿の ts を返す。"""
         where: dict = {"thread_ts": thread_ts} if thread_ts else {}
         if blocks is not None:
@@ -299,32 +244,20 @@ class Core:
     async def thread_history(self, channel: str, thread_ts: str) -> str:
         """スレッドのやりとりを、AI に渡す文にしたもの（依頼者と Kei Agent の発言を順に。省いた古い投稿も書き添える）。"""
         messages, dropped = await self._assistant.thread_messages(channel, thread_ts)
-        return history_prompt(messages, self._assistant.bot_user_id, "", None, dropped=dropped)
+        return history_prompt(messages, "", None, dropped=dropped)
 
     @asynccontextmanager
     async def progress(self, req: Request, text: str):
-        """その間、スレッドの入力欄の下に経過（text。「取り込み中…」など）を出す。"""
-        ui = self._assistant.thread_ui(req)
-        await ui.start()
-        await ui.show(text)
-        try:
-            yield
-        finally:
-            await ui.finish("")
+        """処理の開始を working イベントで通知する。表示は Dot が担当する。"""
+        self._assistant.emit("working", theme=req.channel_name)
+        yield
 
     async def update(self, channel: str, ts: str, text: str, *, blocks: list[dict] | None = None) -> None:
         """自分の投稿を書き換える（消されていたら Slack の例外がそのまま上がる）。"""
         await self._assistant.slack.chat_update(channel=channel, ts=ts, text=text,
                                                 **({"blocks": blocks} if blocks is not None else {}))
 
-    async def open_view(self, trigger_id: str, view: dict) -> dict:
-        """入力の画面を開く（trigger_id は押されてから3秒で切れる）。開いた画面（id など）を返す。"""
-        opened = await self._assistant.slack.views_open(trigger_id=trigger_id, view=view)
-        return dict(opened.get("view") or {})
 
-    async def update_view(self, view_id: str, view: dict) -> None:
-        """開いている画面を差し替える（読み込み中の画面を、あとから中身に替えるときなど）。"""
-        await self._assistant.slack.views_update(view_id=view_id, view=view)
 
     async def permalink(self, channel: str, ts: str) -> str:
         """投稿へのリンク。"""
@@ -335,25 +268,15 @@ class Core:
         info = await self._assistant.slack.conversations_info(channel=channel)
         return str(info["channel"]["name"])
 
-    def action_id(self, name: str) -> str:
-        """このモジュールの投稿に置くボタンなどの action_id（押されると on_action(name, body)）。"""
-        return modules.action_id(self.name, name)
 
-    def view_id(self, name: str) -> str:
-        """このモジュールの入力の画面の callback_id（送られると on_view(name, body)）。"""
-        return modules.action_id(self.name, name)
 
     def spawn(self, coro) -> None:
         """裏で動かす（Slack に3秒以内に返したあとに、Toggl や Notion に送るときなど）。落ちたらログに残る。"""
         self._assistant.spawn(coro)
 
-    async def react(self, channel: str, ts: str, emoji: str, *, remove: bool = False) -> None:
-        """リアクションを付ける（remove なら外す）。付け外しに失敗しても止めない。"""
-        slack = self._assistant.slack
-        await self._assistant._react(slack.reactions_remove if remove else slack.reactions_add, channel, ts, emoji)
 
     async def reply(self, req: Request, text: str, *, failed: bool = False) -> None:
-        """依頼のスレッドに答える（依頼の 👀 を ✅ に、failed なら ⚠️ に変える）。AI の担当に答えさせるなら converse。"""
+        """依頼のスレッドに答える（完了・失敗をイベントとして通知する）。AI の担当に答えさせるなら converse。"""
         for chunk in split_text(text):
             await self._assistant.post(req, chunk)
         await self._assistant.mark_answered(req, failed=failed)
@@ -460,7 +383,7 @@ class Core:
         skills = await self._assistant.skills_of(self.name)
         if not skills:
             return ASK, {}
-        await self._assistant.thread_ui(req).activity(router.STATUS_TEXT)
+        self._assistant.emit("working", theme=req.channel_name)
         choice = await router.pick(self._assistant.config, skills, req.text, store=self._assistant.store)
         return choice.skill or ASK, choice.params
 
@@ -487,7 +410,7 @@ class Core:
         req を渡すと、そのスレッドに経過（最初は status）を出し、終わったら答えのうち Slack に出す部分（final_answer）を
         見せて、依頼者の返事を待つ形にする。返すのは AI の答えの本文そのまま（JSON を読む係などのため）。
         動いている間は、Kei Agent の入れ替え（再起動）を待たせる。動かした時間は Kei Agent の稼働として記録し
-        （trigger はその見出し。App Home の最近の動きに出る）、上限に当たったら明けるまで定期処理を止める。
+        （trigger は recent に残す見出し）、上限に当たったら明けるまで定期処理を止める。
         """
         assistant = self._assistant
         config = assistant.config
@@ -500,11 +423,8 @@ class Core:
             where = config.overview_channels[0]
             workspace = replace(themes.resolve(config, where), module=self.name)
             themes.ensure_workspace(workspace)
-        ui = assistant.thread_ui(req) if req is not None else None
-        if ui is not None:
-            await ui.start()
-            if status:
-                await ui.show(status)
+        if req is not None:
+            assistant.emit("working", theme=where)
         run_id = assistant.store.start_run(req.channel if req is not None else "",
                                            req.thread_ts if req is not None else "", where, trigger or self.name)
         result = None
@@ -513,13 +433,12 @@ class Core:
                 result = await one_shot.run_result(
                     config, assistant.store, self.name, use_case, prompt, folder=target, workspace=workspace,
                     channel=req.channel if req is not None else "", thread_ts=req.thread_ts if req is not None else "",
-                    on_activity=ui.activity if ui is not None else None)
+                    on_activity=None)
         finally:
             assistant.store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None,
                                     **(result.recipe_fields() if result else {}))
-            if ui is not None and (result is None or result.is_error):
-                with suppress(Exception):
-                    await ui.finish("")
+            if req is not None and (result is None or result.is_error):
+                assistant.emit("failed", theme=where)
         if result.limit_reset_at is not None and result.provider:
             # 上限に当たった。明けるまで、その provider の定期処理を始めない
             assistant.store.set_limit_until(result.provider, max(assistant.store.limit_until(result.provider),
@@ -527,8 +446,9 @@ class Core:
         await assistant.tell_failure(self.name, result)
         if result.is_error:
             raise AIError(result.failure_reason(), result.limit_reset_at)
-        if ui is not None:
-            await ui.finish(final_answer(result.text) or safe_failure("conversation"), awaiting=True)
+        if req is not None:
+            await assistant.post(req, final_answer(result.text) or safe_failure("conversation"))
+            assistant.emit("awaiting", theme=where)
         return result.text
 
     async def converse(self, req: Request) -> None:

@@ -1,15 +1,8 @@
-"""Slack の出来事を受けて、claude -p とジョブを動かし、スレッドに返す。
+"""ローカルの依頼を受けて、claude -p とジョブを動かし、スレッドに返す。
 
-Slack Bolt に依存しないようにし、Slack API は `slack`（AsyncWebClient と同じメソッドを持つもの）として受け取る。
-役割ごとの処理は、次のファイルに分けて Assistant に混ぜている。
-
-- settings_actions.py: ボタンのメッセージの書き換えと App Home
-- handoff.py: 長くなったスレッドを区切って、新しいスレッドで続ける
-- theme_invite.py: 研究テーマのチャンネルに招かれたとき、フォルダの置き場所を聞く
-- startup_checks.py: 担当の名刺と版、Notion の DB の形の確かめ
-- module_bridge.py: モジュールへの取り次ぎ（取り込み・予定・材料・出来事・App Home・ボタン・リアクション）
-- limits.py: AI の利用上限で止まった依頼を覚えて、明けたらやり直す
-- background.py: Slack の外から置かれた依頼と、研究のジョブの見張り
+通知の保存は `slack` に受け取る Outbox の互換 API を使う。
+処理は担当への取り次ぎ・利用上限・バックグラウンドの依頼に分ける。
+通知は Outbox に保存し、Dot が利用者に届ける。
 """
 
 from __future__ import annotations
@@ -19,7 +12,7 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Coroutine
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -27,12 +20,11 @@ from kei_agent import api
 from kei_agent.configuration.config import Config
 from kei_agent.conversation import router
 from kei_agent.conversation.auto_messages import (
+    handoff_memo_for,
     history_prompt,
     today_line,
 )
 from kei_agent.conversation.background import BackgroundLoops
-from kei_agent.conversation.handoff import Handoff, strip_handoff
-from kei_agent.conversation.home import agent_labels
 from kei_agent.conversation.limits import LimitDeferral
 from kei_agent.conversation.module_bridge import ModuleBridge
 from kei_agent.conversation.request import Request
@@ -42,21 +34,14 @@ from kei_agent.conversation.response_output import (
     safe_failure,
     trouble_message,
 )
-from kei_agent.conversation.settings_actions import SettingsActions
 from kei_agent.conversation.slack_text import (
     AWAITING_MARKER,
-    DONE_REACTION,
     FAILED_PREFIX,
-    FAILED_REACTION,
-    SEEN_REACTION,
-    clean_text,
     is_status_inquiry,
     split_text,
     strip_lines,
 )
 from kei_agent.conversation.startup_checks import StartupChecks
-from kei_agent.conversation.theme_invite import ThemeInvite
-from kei_agent.conversation.thread_ui import ThreadUI
 from kei_agent.execution import a2a, agents, guard, runner, updates
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.jobs import JobManager
@@ -73,12 +58,12 @@ from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
 from kei_agent.storage.notion_hub import HubStore
 from kei_agent.storage.notion_store import NotionStore
+from kei_agent.storage.records import Records
 from kei_agent.storage.store import Store
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.theme_files import (
     append_thread_log,
     changed_files,
-    download_files,
     snapshot_outputs,
     split_uploads,
 )
@@ -92,11 +77,8 @@ NOTIFY_AFTER_SECONDS = 60
 UNATTENDED_TRIGGERS = ("job",)
 # 問題の知らせは、前の知らせからこの秒数のうちに起きたものを、同じ1通に書き足す（通知が鳴るのは最初の1回）
 TROUBLE_GROUP_SECONDS = 30 * 60
-# スレッドの履歴を読むときの、1回あたりの件数と、プロンプトに載せる上限（新しいものを残す）
-HISTORY_PAGE = 200
+# 保存した会話からプロンプトに載せる上限（新しいものを残す）
 HISTORY_MAX_MESSAGES = 600
-# 履歴を読むときのページ数の上限（とても長いスレッドで、いつまでも読み続けないように）
-HISTORY_MAX_PAGES = 20
 # スレッドのログに残すときの、依頼の出どころの呼び名
 WHO_BY_TRIGGER = {"job": "Kei Agent（ジョブ完了）", "voice": "依頼者（声）"}
 
@@ -129,43 +111,36 @@ class ThemeRuns:
         self.overlapped.discard((theme, thread_ts))
         return overlapped
 
-
-
 # run_agent が provider 未選択で止めたときの印（render_reply が案内文に変える）
 NO_PROVIDER = "provider が選ばれていません"
 # 声からの問い合わせの用途（読むだけ。軽い recipe で答える。モジュールの担当は module.toml の default_use_case）
 # Kei Agent のチャンネルの会話を受け持つモジュール（自己改善）が、オンになっていないとき
 NO_IMPROVE_OWNER = ("このチャンネルでは、Kei Agent で確認が必要なことを知らせるだけだよ。要望を聞いて直すには、"
-                    "config.toml の modules に improve を足してね。")
+                    "agents.csv の improve を enabled=true にしてね。")
 # 研究テーマ（ほかのどれにも当たらないチャンネル）を受け持つモジュールが、オンになっていないとき
-NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがないよ。研究テーマに使うなら、config.toml の modules に"
-                  " research を足してね。")
+NO_THEME_OWNER = ("このチャンネルを受け持つモジュールがないよ。研究テーマに使うなら、agents.csv の research を"
+                  " enabled=true にしてね。")
 # 声からの問い合わせで使う、読むだけの軽い用途（研究のモジュールの用途。無ければ担当の default_use_case）
 VOICE_USE_CASES = {"research": "research_extract"}
 
 
-class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBridge, LimitDeferral,
+class Assistant(StartupChecks, ModuleBridge, LimitDeferral,
                 BackgroundLoops):
     # 明ける時刻が分からないときや、返ってきた時刻が過去だったときに待つ時間
     LIMIT_FALLBACK_SECONDS = 30 * 60
     # 明けた直後に詰まらないよう、少しだけ余分に待つ
     LIMIT_MARGIN_SECONDS = 60
 
-    def __init__(self, config: Config, store: Store, slack, jobs: JobManager, bot_token: str, bot_user_id: str,
-                 notion: NotionStore | None = None, team_url: str = "", team_id: str = "",
+    def __init__(self, config: Config, store: Store, slack, jobs: JobManager,
+                 notion: NotionStore | None = None,
                  hub: HubStore | None = None):
         self.config = config
         self.notion = notion
         self.hub = hub
-        # チャンネルへのリンクを作るのに使う（例: https://example.slack.com/）
-        self.team_url = team_url
-        # 返事を流して見せるときに要る（chat.startStream）
-        self.team_id = team_id
         self.store = store
         self.slack = slack
         self.jobs = jobs
-        self.bot_token = bot_token
-        self.bot_user_id = bot_user_id
+        self.conversation_records = Records(store, "conversation")
         self.semaphore = asyncio.Semaphore(config.max_concurrent_runs)
         # 書き足している問題の知らせ（channel・ts・texts・at）
         self._trouble: dict | None = None
@@ -174,7 +149,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         # 一瞬だけ「いない」と見えるので、そこで捨てると、待っていた依頼が別のロックを取り、
         # 同じスレッド（同じセッション）の claude が2本同時に走る
         self.thread_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
-        # 手の口（hands.py）で動いている作業（受付番号 → 作業）。本体が起動し直すと空に戻る
+        # MCP（hands.py）で動いている作業（受付番号 → 作業）。本体が起動し直すと空に戻る
         self.hands_tasks: dict[str, asyncio.Task] = {}
         self.channel_names: dict[str, str] = {}
         # この起動で Notion に登録済みのテーマ（招待の取りこぼしを、使うときに埋める）
@@ -189,7 +164,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         self.idle.set()
         # 取り込んだあと、作業がなくなったら終了する（launchd が新しい版で起動し直す）
         self.restart_requested = asyncio.Event()
-        # この起動が、入れ替えたあとのものなら、その結果（Slack につながったあとに take_update で読む）
+        # この起動が、入れ替えたあとのものなら、その結果（本体が起動したあとに take_update で読む）
         self.last_update: updates.Update | None = None
         # 契約の上限に達した。この時刻までは、決まった時刻の処理も始めない
         # ほかのエージェント（A2A）。オーケストレーターとして、仕事を頼む相手（docs/architecture.md の「振り分けと A2A」）
@@ -208,7 +183,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             for spec in modules.enabled(config.modules) if (cls := modules.load_code(spec)) is not None}
 
     def take_update(self) -> updates.Update | None:
-        """Slack につながったあとに呼ぶ。入れ替えたあとの起動なら、その結果を覚えて、印を消す（deploy/run.sh が戻さない）。"""
+        """本体が起動したあとに呼ぶ。入れ替えたあとの起動なら、その結果を覚えて、印を消す（deploy/run.sh が戻さない）。"""
         self.last_update = updates.take_update(self.config)
         return self.last_update
 
@@ -229,7 +204,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         self.spawn(wait_then_restart())
 
     async def modules_started(self) -> None:
-        """起動して Slack につながったあと（class Module の on_start）。1つが落ちても、ほかは続ける。"""
+        """起動して 本体が起動したあと（class Module の on_start）。1つが落ちても、ほかは続ける。"""
         for name, module in self.modules.items():
             on_start = getattr(module, "on_start", None)
             if on_start is None:
@@ -272,13 +247,10 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if (error := task.exception()) is not None:
             log.error("裏で動かした仕事が落ちました", exc_info=error)
 
-    def thread_ui(self, req: Request) -> ThreadUI:
-        return ThreadUI(self.slack, req.channel, req.thread_ts, self.team_id, self.config.allowed_user_id)
-
     def is_allowed(self, user: str | None) -> bool:
         return guard.is_owner(self.config, user)
 
-    # Slack の読み書き
+    # 通知と会話の記録
 
     async def channel_name(self, channel: str) -> str:
         """テーマの名前（チャンネル名から、並び順のための番号を外したもの）。"""
@@ -288,7 +260,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         return self.channel_names[channel]
 
     async def channel_ids(self) -> dict[str, str]:
-        """Kei Agent が参加しているチャンネルの、名前から ID への対応。"""
+        """Outbox が通知先に使うチャンネルの、名前から論理 ID への対応。"""
         ids: dict[str, str] = {}
         cursor = None
         while True:
@@ -304,56 +276,56 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             if not cursor:
                 return ids
 
+    def remember_message(self, channel: str, thread_ts: str, user: str, text: str, ts: str | None = None) -> str:
+        """会話を端末の記録に残す。再起動や provider 変更のあとも読み直せる。"""
+        if user not in ("owner", "assistant"):
+            raise ValueError("会話の発言者は owner か assistant を指定してください")
+        ts = ts or f"{time.time_ns()}"
+        key = f"{channel}/{thread_ts}/{ts}"
+        previous = self.conversation_records.get("message", key)
+        self.conversation_records.put("message", key, {
+            "ts": ts, "user": user, "text": text, "channel": channel, "thread_ts": thread_ts,
+            "at": previous["at"] if previous else time.time(),
+        })
+        return ts
+
     async def thread_messages(self, channel: str, thread_ts: str) -> tuple[list[dict], int]:
-        """スレッドの投稿を新しいほうから HISTORY_MAX_MESSAGES 件まで。載せきれず落とした件数も返す。"""
-        messages: list[dict] = []
-        dropped = 0
-        cursor = None
-        for _ in range(HISTORY_MAX_PAGES):
-            resp = await self.slack.conversations_replies(
-                channel=channel, ts=thread_ts, limit=HISTORY_PAGE, cursor=cursor)
-            messages += resp.get("messages", [])
-            if len(messages) > HISTORY_MAX_MESSAGES:
-                dropped += len(messages) - HISTORY_MAX_MESSAGES
-                messages = messages[-HISTORY_MAX_MESSAGES:]
-            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
-            if not cursor:
-                break
-        else:
-            log.warning("スレッド %s の履歴が長すぎるので、途中で読むのをやめました", thread_ts)
-        return messages, dropped
+        messages = [message for message in self.conversation_records.items("message")
+                    if message["channel"] == channel and message["thread_ts"] == thread_ts]
+        by_ts = {message["ts"]: message for message in messages}
+        for notice in self._thread_notices(channel, thread_ts):
+            by_ts.setdefault(notice["ts"], notice)
+        messages = sorted(by_ts.values(), key=lambda message: message["at"])
+        dropped = max(0, len(messages) - HISTORY_MAX_MESSAGES)
+        return messages[-HISTORY_MAX_MESSAGES:], dropped
+
+    def _thread_notices(self, channel: str, thread_ts: str) -> list[dict]:
+        """モジュールが直接 Outbox に出した親の通知や返信も、会話の材料にする。"""
+        records = getattr(self.slack, "records", None)
+        if records is None:
+            return []
+        return [{"ts": notice["id"], "user": "assistant", "text": notice["text"], "at": notice["at"]}
+                for notice in records.items("notice")
+                if notice["channel"] == channel and (notice["thread_ts"] or notice["id"]) == thread_ts]
 
     async def fetch_message(self, channel: str, ts: str) -> dict | None:
-        resp = await self.slack.conversations_replies(channel=channel, ts=ts, inclusive=True, limit=HISTORY_PAGE)
-        return next((m for m in resp.get("messages", []) if m.get("ts") == ts), None)
+        saved = next((message for message in self.conversation_records.items("message")
+                      if message["channel"] == channel and message["ts"] == ts), None)
+        return saved or next((message for message in self._thread_notices(channel, ts) if message["ts"] == ts), None)
+
+    async def mark_answered(self, req: Request, failed: bool) -> None:
+        self.emit("failed" if failed else "done", theme=req.channel_name)
 
     async def permalink(self, channel: str, ts: str) -> str:
-        resp = await self.slack.chat_getPermalink(channel=channel, message_ts=ts)
-        return resp["permalink"]
+        # Slack の投稿リンクは Dot が持つ。本体の会話番号からは生成できない。
+        return ""
 
     async def post(self, req: Request, text: str, markdown: bool = False) -> None:
         if markdown:
-            await self.slack.chat_postMessage(channel=req.channel, thread_ts=req.thread_ts, markdown_text=text)
+            posted = await self.slack.chat_postMessage(channel=req.channel, thread_ts=req.thread_ts, markdown_text=text)
         else:
-            await self.slack.chat_postMessage(channel=req.channel, thread_ts=req.thread_ts, text=text)
-
-    async def _react(self, method, channel: str, ts: str, name: str) -> None:
-        try:
-            await method(channel=channel, timestamp=ts, name=name)
-        except Exception:
-            log.debug("リアクションを変えられません", exc_info=True)
-
-    async def react_done(self, channel: str, ts: str) -> None:
-        await self._react(self.slack.reactions_add, channel, ts, DONE_REACTION)
-
-    async def mark_answered(self, req: Request, failed: bool) -> None:
-        """答えた依頼の 👀 を外し、✅（止まったときは ⚠️）をつける。どの依頼に答えたかが一目で分かる。"""
-        if not req.message_ts:
-            return
-        await self._react(self.slack.reactions_remove, req.channel, req.message_ts, SEEN_REACTION)
-        await self._react(self.slack.reactions_add, req.channel, req.message_ts,
-                          FAILED_REACTION if failed else DONE_REACTION)
-        self.emit("failed" if failed else "done", theme=req.channel_name)
+            posted = await self.slack.chat_postMessage(channel=req.channel, thread_ts=req.thread_ts, text=text)
+        self.remember_message(req.channel, req.thread_ts, "assistant", text, posted["ts"])
 
     async def notify_owner(self, req: Request, text: str) -> None:
         """スレッド内の投稿は通知が来ないので、依頼者へのメンション付きの短い投稿を足す。"""
@@ -387,106 +359,11 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         except Exception:
             log.exception("Kei Agent の改善のチャンネルに知らせられません")
 
-    # Slack の出来事
-
-    async def on_mention(self, event: dict) -> None:
-        if not self.is_allowed(event.get("user")):
-            return
-        channel = event["channel"]
-        await self.submit(Request(
-            channel=channel,
-            channel_name=await self.channel_name(channel),
-            thread_ts=event.get("thread_ts") or event["ts"],
-            message_ts=event["ts"],
-            text=clean_text(event.get("text", "")),
-            files=event.get("files") or [],
-        ))
-
-    async def on_message(self, event: dict) -> None:
-        """スレッド内の、メンションなしの返信。Kei Agent が動いているスレッドだけに反応する。"""
-        # thread_broadcast は「以下にも投稿する」をつけた返信
-        if event.get("subtype") not in (None, "file_share", "thread_broadcast") or event.get("bot_id"):
-            return
-        thread_ts = event.get("thread_ts")
-        if not thread_ts or thread_ts == event.get("ts"):
-            return
-        if f"<@{self.bot_user_id}>" in (event.get("text") or ""):
-            return  # app_mention で処理する
-        if not self.is_allowed(event.get("user")):
-            return
-        channel = event["channel"]
-        if self.store.get_thread(channel, thread_ts) is None:
-            return
-        await self.submit(Request(
-            channel=channel,
-            channel_name=await self.channel_name(channel),
-            thread_ts=thread_ts,
-            message_ts=event["ts"],
-            text=clean_text(event.get("text", "")),
-            files=event.get("files") or [],
-        ))
-
-    async def on_member_joined(self, event: dict) -> None:
-        if event.get("user") != self.bot_user_id:
-            return
-        channel = event["channel"]
-        name = await self.channel_name(channel)
-        try:
-            ws = themes.resolve(self.config, name)
-        except ValueError as e:
-            await self.slack.chat_postMessage(channel=channel, text=f"{FAILED_PREFIX} {e}")
-            return
-        if (ws.kind in (ChannelKind.THEME, ChannelKind.PROJECT) and not ws.external and ws.cwd is not None
-                and not ws.cwd.exists()):
-            # まだフォルダの無い研究テーマ・プロジェクト: 置き場所を聞く（既定の場所に作る／既存のフォルダを使う。theme_invite.py）
-            await self.ask_theme_place(channel, ws)
-            return
-        created = themes.ensure_workspace(ws)
-        self.registered_themes.add(name)
-        if ws.kind is ChannelKind.IMPROVE:
-            # Kei Agent のチャンネル。会話は、受け持つモジュール（core_channels。自己改善）があれば、そのモジュール
-            text = "Kei Agent です。このチャンネルには、Kei Agent で確認が必要なことが起きたときに知らせます。"
-            welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
-            if welcome is not None:
-                text += "\n" + welcome()
-        elif ws.kind is ChannelKind.OVERVIEW:
-            text = f"Kei Agent です。このチャンネルでは、すべてのテーマを読んで相談に乗ります。書き込みは `{ws.cwd}` だけにします。"
-        elif ws.kind is ChannelKind.PROJECT:
-            state = "作りました" if created else "使います"
-            text = (f"Kei Agent です。このプロジェクトの作業場に `{ws.cwd}` を{state}。"
-                    f"{modules.known()[ws.module].label}の担当が、ここでコードを書いてコマンドを動かします。"
-                    "前提（言語・テストの回し方など）を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。")
-        elif ws.kind is ChannelKind.MODULE:
-            text = f"Kei Agent です。このチャンネルの用事は{modules.known()[ws.module].label}エージェントに取り次ぎます。"
-            welcome = getattr(self.modules.get(ws.module), "welcome", None)
-            if welcome is not None:
-                text += "\n" + welcome()
-        else:
-            state = "作りました" if created else "使います"
-            text = (
-                f"Kei Agent です。このチャンネルのテーマ用に `{ws.cwd}` を{state}。"
-                "研究の前提を `AGENTS.md` に書いておくと、依頼のたびに説明しなくて済みます。"
-            )
-            welcome = getattr(self.modules.get(ws.module), "welcome", None) if ws.module else None
-            if welcome is not None:
-                # テーマを受け持つモジュールの案内
-                text += "\n" + welcome()
-            # 研究ホームのテーマの行（研究ホームは Notion のモジュールができるまで本体が持つ）
-            await self.register_theme(channel, ws)
-        await self.slack.chat_postMessage(channel=channel, text=text)
-
-    async def on_channel_rename(self, event: dict) -> None:
-        """チャンネル名が変わったら、覚えている名前を捨てる（テーマの対応がずれないように）。"""
-        channel = (event.get("channel") or {}).get("id")
-        if channel:
-            self.channel_names.pop(channel, None)
-
     async def register_theme(self, channel: str, ws: Workspace) -> None:
         if self.notion is None:
             return
-        slack_url = f"{self.team_url}archives/{channel}" if self.team_url and channel else ""
         try:
-            await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, slack_url, f"{ws.cwd}/")
+            await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, "", f"{ws.cwd}/")
         except NotionError as e:
             await self.notify_trouble(f"Notion にテーマ「{ws.channel_name}」を登録できませんでした: {e}")
 
@@ -589,20 +466,17 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             if await self.hold_until_limit_ends(req):
                 return
             await self.drop_deferred_for(req)
-        if req.message_ts:
-            await self._react(self.slack.reactions_add, req.channel, req.message_ts, SEEN_REACTION)
         self.emit("working", theme=req.channel_name)
         self.spawn(self._process_and_report(req))
 
     async def _process_and_report(self, req: Request) -> None:
-        """process() が落ちても、👀 がついたまま黙って終わらないようにする。"""
+        """process() が落ちても、失敗の通知とイベントを残す。"""
         try:
             await self.process(req)
         except Exception:
             log.exception("依頼の処理が落ちました")
             try:
                 await self.post(req, safe_failure("connection"))
-                # 👀 のまま残ると、答えたのかどうかが分からなくなる
                 await self.mark_answered(req, failed=True)
             except Exception:
                 log.exception("落ちたことをスレッドに伝えられません")
@@ -660,10 +534,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             except Exception:
                 log.exception("依頼の処理に失敗しました")
                 await self.post(req, safe_failure("connection"))
-                # 👀 と「作業中」の表示を残したままにしない
                 await self.mark_answered(req, failed=True)
-                with suppress(Exception):
-                    await self.thread_ui(req).finish("")
                 return None
             finally:
                 # 途中で落ちても、このテーマを「重なって動いている」ままにしない（何度呼んでもよい）
@@ -676,7 +547,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         研究テーマのチャンネルは、テーマのフォルダ。folder を渡したとき（モジュールのフォルダの中）は、モジュールが
         会話を受け持つチャンネル（モジュールのチャンネル、Kei Agent のチャンネル）で、そのフォルダを作業場にする。
         hide に書いた頭で始まる行は、Slack に出さない（合図の行など）。
-        添付の保存・できたファイルの添付・引き継ぎの提案・ジョブは、研究と同じ流れ。
+        保存済みの添付・できたファイルの通知・ジョブは、研究と同じ流れ。
         モジュールの on_message から呼ばれる（スレッドのロックと同時実行の上限は、取り次いだ _dispatch が持っている）。
         """
         ws = themes.resolve(self.config, req.channel_name)
@@ -701,8 +572,6 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             log.exception("依頼の処理に失敗しました")
             await self.post(req, safe_failure("connection"))
             await self.mark_answered(req, failed=True)
-            with suppress(Exception):
-                await self.thread_ui(req).finish("")
             return None
         finally:
             self.theme_runs.end(req.channel_name, req.thread_ts)
@@ -724,7 +593,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         catalog = {name: skills for name in self.agents if (skills := await self.skills_of(name))}
         if not catalog:
             return False
-        await self.thread_ui(req).activity(router.STATUS_TEXT)
+        self.emit("working", theme=req.channel_name)
         choice = await router.pick_across(self.config, catalog, req.text, store=self.store)
         return await self._dispatch(req, choice.agent, choice.skill, choice.params)
 
@@ -746,7 +615,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         on_message = getattr(self.modules.get(agent), "on_message", None)
         if on_message is None:
             return False
-        # このスレッドを覚えておく。覚えていないと、メンションなしの返信（on_message）を拾えず、
+        # この会話を覚えておき、次の依頼も同じ担当へ渡せるようにする。
         # 研究全体から回した続きも、毎回どこに聞くかを選び直してしまう
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
         self.store.set_agent_session(req.channel, req.thread_ts, agent, "")
@@ -760,9 +629,9 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         hide に書いた頭で始まる行は、Slack に出さない（合図の行など。返す結果の本文には残す）。
         """
         assert ws.cwd is not None
-        saved = [*req.saved_files, *await download_files(req.files, ws.cwd, self.bot_token)]
+        saved = list(req.saved_files)
         # 上限や再起動のあとでやり直す回にも添付を渡せるよう、保存した場所を依頼の控えに残す
-        req = replace(req, files=[], saved_files=saved)
+        req = replace(req, saved_files=saved)
         prompt = req.text
         if saved:
             prompt += "\n\n添付ファイル（保存先）:\n" + "\n".join(f"- {p}" for p in saved)
@@ -770,15 +639,14 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
                           req.text + ("\n\n" + "\n".join(f"- 添付: `{p}`" for p in saved) if saved else ""))
 
         started = time.monotonic()
-        ui = self.thread_ui(req)
-        await ui.start()
+        self.emit("working", theme=req.channel_name)
         self.theme_runs.begin(req.channel_name, req.thread_ts)
         before = snapshot_outputs(ws.cwd)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
         # 途中で終了させられても、次の起動で拾ってやり直せるように控えておく
         in_flight = self.store.start_in_flight(req.to_payload())
         try:
-            result = await self._converse(req, ws, prompt, ui)
+            result = await self._converse(req, ws, prompt)
         except asyncio.CancelledError:
             # 終了処理などで止められた回。控えは残したまま（次の起動でやり直す）、
             # 走りっぱなしの記録だけ閉じる
@@ -792,14 +660,11 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             raise
         self.store.finish_deferred(in_flight)
         self.store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
-        if req.trigger in ("message", "voice"):
-            self.store.count_turn(req.channel, req.thread_ts)
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
 
         if result.limit_reset_at is not None:
             await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
                                        mention=self._unattended(req, started))
-            await ui.finish("")
             await self.mark_answered(req, failed=True)
             self.theme_runs.end(req.channel_name, req.thread_ts)
             return result
@@ -810,19 +675,14 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
         if awaiting:
             self.emit("awaiting", theme=req.channel_name)
-        await self._reply(req, ws, ui, result, awaiting, hide)
+        await self._reply(req, ws, result, hide)
         await self._attach_outputs(req, ws.cwd, before)
         await self.mark_answered(req, result.is_error)
         await self.handle_job_requests(ws.cwd)
         waiting_for_job = any(j.channel == req.channel and j.thread_ts == req.thread_ts
                               for j in self.store.active_jobs())
-        offer, title = self.should_offer_handoff(req, ws, result.text, busy=awaiting or waiting_for_job)
-        if offer and not result.is_error:
-            await self.offer_handoff(req, title)
         if awaiting or not waiting_for_job:
             await self._notify_end(req, started, awaiting, result.is_error)
-        if waiting_for_job:
-            await ui.keep_working()
         return result
 
     async def _notify_end(self, req: Request, started: float, awaiting: bool, failed: bool) -> None:
@@ -842,15 +702,16 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         return (req.trigger in UNATTENDED_TRIGGERS or req.retried
                 or time.monotonic() - started >= NOTIFY_AFTER_SECONDS)
 
-    async def _converse(self, req: Request, ws: Workspace | None, prompt: str, ui: ThreadUI | None,
+    async def _converse(self, req: Request, ws: Workspace | None, prompt: str,
                         actor: str | None = None) -> runner.RunResult:
-        """このスレッドの会話の続きとして担当の AI を動かす。会話が失われていたら、Slack の履歴から戻す。
+        """このスレッドの会話の続きとして担当の AI を動かす。会話が失われていたら、保存した会話から戻す。
 
         研究・自己改善は run_agent、モジュール（大学・仕事・知識など）はそのエージェントの `ask` に頼む。会話の続け方
         （session の版、履歴からの戻し、session が消えていたときのやり直し）はどの担当も同じ。
-        ui がなければ、経過を Slack に見せずに動かす（引き継ぎメモを書かせるときなど）。
+        経過はイベントとして知らせ、通知は Outbox に保存する。
         """
         # ジョブの依頼をこのスレッドのものとして確かめられるよう、先にスレッドを記録する
+        req.message_ts = self.remember_message(req.channel, req.thread_ts, "owner", req.text, req.message_ts)
         row = self.store.get_thread(req.channel, req.thread_ts)
         self.store.upsert_thread(req.channel, req.thread_ts, req.channel_name, None)
         actor = actor or (themes.actor_of(ws) if ws is not None else "")
@@ -862,14 +723,14 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         use_case, prompt = explicit_use_case(actor, prompt)
         request_text = prompt
         # 区切って立てたスレッドの最初の回には、前のスレッドの引き継ぎメモを渡す
-        prompt = self.handoff_memo_for(row) + prompt
+        prompt = handoff_memo_for(row) + prompt
         stalled = row["stalled_request"] if row else None
         if stalled or (row is not None and row["session_id"] and not session_id) or (
             prior_provider is not None and prior_provider != provider
         ):
-            # 止まった回は provider 側に記録が残らないことがあるので、resume せず Slack の履歴から文脈を戻す
+            # 止まった回は provider 側に記録が残らないことがあるので、resume せず保存した会話から文脈を戻す
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
-            prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts,
+            prompt = history_prompt(messages, prompt, req.message_ts,
                                     stalled if stalled and stalled != req.text else None, dropped=dropped)
             session_id = None
         elif session_id is None and req.message_ts and req.message_ts != req.thread_ts:
@@ -877,11 +738,12 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             # 「2番を詳しく」に答えられるよう、元の投稿を渡す（人が始めたスレッドは今までどおり）
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             parent = next((m for m in messages if m.get("ts") == req.thread_ts), None)
-            if parent is not None and (parent.get("user") == self.bot_user_id or parent.get("bot_id")):
-                prompt = history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped,
+            if parent is not None and parent.get("user") == "assistant":
+                prompt = history_prompt(messages, prompt, req.message_ts, dropped=dropped,
                                         reply_to_post=True)
 
-        on_activity = ui.activity if ui is not None else None
+        async def on_activity(_text: str) -> None:
+            self.emit("working", theme=req.channel_name)
         # 進み具合を聞かれただけの回は、読むだけで動かす（書く・コマンド・ジョブの投入ができないので、作業は始まらない）
         read_only = req.trigger in ("message", "voice") and is_status_inquiry(req.text)
 
@@ -900,7 +762,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if result.session_missing:
             messages, dropped = await self.thread_messages(req.channel, req.thread_ts)
             result = await attempt(
-                history_prompt(messages, self.bot_user_id, prompt, req.message_ts, dropped=dropped), None)
+                history_prompt(messages, prompt, req.message_ts, dropped=dropped), None)
         await self.tell_failure(actor, result)
         if not result.is_error:
             if result.session_id:
@@ -922,7 +784,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         spec = modules.known().get(actor)
         module_actor = actor in self.config.modules and spec is not None and spec.actor is not None
         if actor not in VOICE_USE_CASES and not module_actor:
-            return "研究、授業、仕事のどれを調べるか分からなかった。"
+            return "研究、仕事のどれを調べるか分からなかった。"
         if not question.strip():
             return "何を調べるか分からなかった。"
         prompt = today_line() + question.strip()
@@ -959,7 +821,7 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             return
         self.store.record_notice(key)
         how = result.errors[0] if result.errors else "ログインが切れている"
-        await self.notify_trouble(f"{agent_labels(self.config).get(actor, actor)}の担当の AI が動きません。{how}")
+        await self.notify_trouble(f"{settings.agent_labels(self.config).get(actor, actor)}の担当の AI が動きません。{how}")
 
     def default_question(self, actor: str) -> str:
         """メンションだけで本文が無いときに、担当に聞くこと。"""
@@ -972,13 +834,12 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         スレッドのロックと同時実行の上限は、呼び出し側（_dispatch）が持つ。
         """
         started = time.monotonic()
-        ui = self.thread_ui(req)
-        await ui.start()
+        self.emit("working", theme=req.channel_name)
         run_id = self.store.start_run(req.channel, req.thread_ts, req.channel_name, req.trigger)
         # 途中で終了させられても、次の起動で拾ってやり直せるように控えておく
         in_flight = self.store.start_in_flight(req.to_payload())
         try:
-            result = await self._converse(req, None, req.text or self.default_question(actor), ui, actor=actor)
+            result = await self._converse(req, None, req.text or self.default_question(actor), actor=actor)
         except asyncio.CancelledError:
             self.store.end_run(run_id, is_error=True, cost_usd=None)
             raise
@@ -988,41 +849,34 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
             raise
         self.store.finish_deferred(in_flight)
         self.store.end_run(run_id, result.is_error, result.cost_usd, **result.recipe_fields())
-        if req.trigger in ("message", "voice"):
-            self.store.count_turn(req.channel, req.thread_ts)
         self.store.set_stalled(req.channel, req.thread_ts, req.text if result.is_error else None)
         if result.limit_reset_at is not None:
             await self.defer_for_limit(req, result.limit_reset_at, result.provider or "",
                                        mention=self._unattended(req, started))
-            await ui.finish("")
             await self.mark_answered(req, failed=True)
             return result
         answer, _ = self.render_reply(result)
         # 返事待ちは ❓ の確認のときだけ。エラーで止まった回は ⚠️ を付けるだけにする
         awaiting = not result.is_error and AWAITING_MARKER in result.text
         self.store.set_awaiting(req.channel, req.thread_ts, awaiting)
-        streamed = await ui.finish(answer, awaiting and not result.is_error)
-        if not streamed:
-            for chunk in split_text(answer):
-                await self.post(req, chunk, markdown=True)
+        for chunk in split_text(answer):
+            await self.post(req, chunk, markdown=True)
         await self.mark_answered(req, result.is_error)
         await self._notify_end(req, started, awaiting, result.is_error)
         return result
 
-    async def _reply(self, req: Request, ws: Workspace, ui: ThreadUI, result: runner.RunResult,
-                     awaiting: bool, hide: tuple[str, ...] = ()) -> None:
-        """まとめをスレッドに返す。流して見せられなかったときだけ、まとめて投稿する。"""
+    async def _reply(self, req: Request, ws: Workspace, result: runner.RunResult,
+                     hide: tuple[str, ...] = ()) -> None:
+        """まとめを通知に残し、テーマの会話ログにも保存する。"""
         assert ws.cwd is not None
         shown, contract_failed = self.render_reply(result)
         # 合図の行（モジュールが hide で渡したもの。着手・取り込みなど）は、検出に使うだけで Slack には出さない
-        # （result.text は残す）。区切りの合図は、題をボタンに出すので本文からは消す
-        shown = strip_handoff(strip_lines(shown, hide))
-        streamed = await ui.finish(shown, awaiting and not result.is_error)
+        # （result.text は残す）
+        shown = strip_lines(shown, hide)
         if shown:
             append_thread_log(ws.cwd, req.channel_name, req.thread_ts, "Kei Agent", shown)
-            if not streamed:
-                for chunk in split_text(shown):
-                    await self.post(req, chunk, markdown=True)
+            for chunk in split_text(shown):
+                await self.post(req, chunk, markdown=True)
         if contract_failed:
             log.warning("Slack 出力契約に違反した応答を破棄しました: channel=%s thread=%s", req.channel, req.thread_ts)
 
@@ -1054,15 +908,3 @@ class Assistant(SettingsActions, Handoff, ThemeInvite, StartupChecks, ModuleBrid
         if skipped:
             names = "\n".join(f"• `{p.relative_to(cwd)}`" for p in skipped)
             await self.post(req, f"添付しなかったファイル（数か大きさの上限を超えたもの）:\n{names}")
-
-    # Slack の外からの依頼（声のレイヤなど。docs/architecture.md）
-
-
-
-
-
-
-
-
-
-

@@ -109,7 +109,7 @@ def test_only_project_channels_go_to_the_workspace():
 def test_only_a_head_ending_in_a_dash_can_be_a_pattern(tmp_path):
     folder = tmp_path / "bad"
     folder.mkdir()
-    (folder / "module.toml").write_text('api = 1\nname = "bad"\n[channels]\nx = ["wo*rk"]\n')
+    (folder / "module.toml").write_text('api = 2\nname = "bad"\n[channels]\nx = ["wo*rk"]\n')
     with pytest.raises(modules.ModuleError, match="work-\\*"):
         modules.load_spec(folder)
 

@@ -246,8 +246,15 @@ class CourseNotion:
 
     def taken(self) -> dict[str, dict]:
         """Moodle ID → すでにある「課題」の行。"""
-        return {uid: row for row in self._rows(self.assignments)
-                if (uid := plain(row["properties"].get("Moodle ID")))}
+        found = {}
+        for row in self._rows(self.assignments):
+            uid = plain(row["properties"].get("Moodle ID"))
+            if not uid:
+                continue
+            if uid in found or not row.get("id"):
+                raise SyncError("課題 DB の Moodle ID が重複、またはページ ID が欠落しています")
+            found[uid] = row
+        return found
 
     def ensure_assignment_template(self, page_id: str) -> bool:
         """本文がまだ空の課題ページにだけ、整理用の見出しを一度追加する。"""

@@ -3,7 +3,7 @@
 import pytest
 from fakes import make_assistant
 
-from kei_agent.conversation.outbox import Outbox, OutboxError
+from kei_agent.conversation.outbox import Outbox
 
 
 @pytest.fixture
@@ -37,12 +37,15 @@ async def test_blocks_and_files_keep_their_readable_text(outbox):
     assert texts[0] == "📚 課題の新着" and texts[1].startswith("📎 diff.txt") and "+ 足した行" in texts[1]
 
 
-async def test_channels_are_the_known_names_and_slack_only_things_do_nothing(outbox):
+async def test_channels_are_the_known_names(outbox):
     names = {c["name"] for c in (await outbox.conversations_list())["channels"]}
     assert {"overview", "kei-agent", "vlm", "course"} <= names and not any("*" in n for n in names)
-    assert (await outbox.reactions_add(channel="vlm", timestamp="1", name="eyes"))["ok"]
-    with pytest.raises(OutboxError):
-        await outbox.chat_startStream(channel="vlm", thread_ts="1")
+
+
+async def test_created_projects_are_available_to_local_requests(outbox):
+    (outbox.config.module_workspace("work") / "billing").mkdir(parents=True)
+    names = {c["name"] for c in (await outbox.conversations_list())["channels"]}
+    assert "work-billing" in names
 
 
 async def test_the_assistant_writes_its_troubles_to_the_outbox(config, store):
@@ -53,12 +56,6 @@ async def test_the_assistant_writes_its_troubles_to_the_outbox(config, store):
     assert any("ログインが切れました" in n["text"] for n in box.pending())
 
 
-def test_kei_agent_runs_without_slack_only_when_both_tokens_are_gone():
-    from kei_agent.operations.app import without_slack
-    assert without_slack({}) and without_slack({"SLACK_BOT_TOKEN": ""})
-    assert not without_slack({"SLACK_BOT_TOKEN": "xoxb-1", "SLACK_APP_TOKEN": "xapp-1"})
-    # 片方だけなら書き忘れ（Slack につなぐつもり）なので、起動のときに足りないと止める
-    assert not without_slack({"SLACK_BOT_TOKEN": "xoxb-1"})
 
 
 async def test_output_files_point_the_head_to_read_file(outbox):

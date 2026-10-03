@@ -21,14 +21,14 @@ def test_the_provider_comes_only_from_the_table(config):
 
     from kei_agent.configuration.config import AgentProfile
 
-    config = change(config, agent_profiles={**config.agent_profiles, "course": AgentProfile(provider="codex")})
-    assert settings.selected_provider(config, "course") == "codex"
+    config = change(config, agent_profiles={**config.agent_profiles, "research": AgentProfile(provider="codex")})
+    assert settings.selected_provider(config, "research") == "codex"
     assert settings.selected_provider(config, "work") == "claude"
     assert set(AgentProfile.__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account",
                                                       "claude_email", "engines"}
 
 
-def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
+def test_config_keeps_the_knowledge_channel_but_ignores_retired_reading_time(tmp_path):
     from kei_agent.configuration.config import load_config
 
     path = tmp_path / "config.toml"
@@ -37,8 +37,8 @@ def test_config_reads_the_knowledge_channel_and_reading_time(tmp_path):
     write_schedules(tmp_path, [{"name": "reading", "time": "06:30"}])
     config = load_config(path, env={})
     assert config.module_channels["knowledge"] == ("knowledge", "reading")
-    assert config.schedule.module_times["reading"] == "06:30"
-    assert config.schedule.module_times["literature"] == "07:00"          # 書かなければ module.toml の既定
+    assert "reading" not in config.schedule.module_times
+    assert "literature" not in config.schedule.module_times
     assert "research-strategy" not in config.overview_channels
 
 

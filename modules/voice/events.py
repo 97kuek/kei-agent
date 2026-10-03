@@ -15,7 +15,7 @@ from datetime import datetime
 
 # 表情は stackchan-atama が受け付ける6種だけ。`angry` は使わない（Kei Agent が怒る場面がない）
 NEUTRAL, HAPPY, SAD, DOUBT, SLEEPY = "neutral", "happy", "sad", "doubt", "sleepy"
-KINDS = ("schedule", "due", "working", "done", "failed", "limited", "awaiting", "listen")
+KINDS = ("schedule", "working", "done", "failed", "limited", "awaiting", "listen")
 
 
 @dataclass(frozen=True)
@@ -43,13 +43,6 @@ def _hhmm(value: str) -> str:
     return f"{at.hour}時" if at.minute == 0 else f"{at.hour}時{at.minute}分"
 
 
-def _due(event: dict) -> str:
-    title = str(event.get("title") or "課題").strip()
-    at = _hhmm(str(event.get("at") or ""))
-    when = f"明日の{at}" if at else "明日"
-    return f"{title}の締切、{when}までだよ。"
-
-
 def reaction(event: dict) -> Reaction | None:
     """出来事への反応。知らない kind は None（黙って何もしない）。"""
     kind = str(event.get("kind") or "")
@@ -63,15 +56,16 @@ def reaction(event: dict) -> Reaction | None:
     if kind == "listen":
         # マイクの開け閉め。喋らない（executor が session に渡す）
         return Reaction(face=NEUTRAL)
-    if kind == "due":
-        return Reaction(_due(event), NEUTRAL)
     if kind == "done":
-        return Reaction(f"{_theme(event)}、終わったよ。結果は Slack に出てる。", HAPPY)
+        return Reaction(f"{_theme(event)}、終わったよ。", HAPPY)
     if kind == "failed":
-        return Reaction(f"{_theme(event)}、うまくいかなかったみたい。Slack を見てみて。", SAD)
+        return Reaction(f"{_theme(event)}、うまくいかなかったみたい。状態を確認してね。", SAD)
     if kind == "limited":
         at = _hhmm(str(event.get("reset_at") or ""))
-        when = f"{at}ごろ" if at else "しばらくしたら"
-        return Reaction(f"Claude の上限に当たっちゃった。{when}に自動でやり直すね。", SLEEPY)
+        if event.get("auto_retry") is True:
+            retry = f"{at}ごろに自動でやり直すね。" if at else "しばらくしたら自動でやり直すね。"
+        else:
+            retry = f"{at}ごろにもう一度頼んでね。" if at else "上限が明けたらもう一度頼んでね。"
+        return Reaction(f"AI の利用上限に当たっちゃった。{retry}", SLEEPY)
     # awaiting
     return Reaction(f"{_theme(event)}、聞きたいことがあって止まってるよ。", DOUBT)

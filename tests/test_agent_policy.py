@@ -13,16 +13,6 @@ def test_every_actor_has_one_policy():
     assert all(policy_of(actor).name == actor for actor in model_actors())
 
 
-def test_course_reads_box_and_writes_notion_only_through_the_gateway():
-    """授業は自分のデータを読む実行役なので、作業場・コマンド・Web・通信をすべて持つ。Notion はゲートウェイだけ。"""
-    course = policy_of("course")
-    assert (course.files, course.shell, course.web, course.network) == ("write", True, True, True)
-    assert course.notion == "write" and course.notion_tools is None
-    assert [c.name for c in course.connectors] == ["box"]
-    assert all("upload" not in tool and "move" not in tool for tool in course.connectors[0].claude_tools)
-    # Codex の Box も、同じ読む道具だけ
-    assert [app.name for app in course.codex_apps] == ["Box"]
-    assert course.codex_apps[0].tools == tuple(f"box.{tool}" for tool in course.connectors[0].claude_tools)
 
 
 def test_work_has_no_notion_and_reads_outlook_teams_and_sharepoint():
@@ -51,7 +41,7 @@ def test_read_only_drops_writing_and_commands_but_keeps_reading():
 
 def test_routing_use_case_gets_no_tools_whatever_the_actor():
     assert policy_of("router").files == "read"
-    for actor in ("research", "course", "work"):
+    for actor in ("research", "work"):
         policy = policy_of(actor, UseCase.ROUTING)
         assert policy.name == "router"
         assert (policy.plugin, policy.shell, policy.web, policy.connectors) == (False, False, False, ())
@@ -61,3 +51,10 @@ def test_routing_use_case_gets_no_tools_whatever_the_actor():
 def test_unknown_actor_is_rejected():
     with pytest.raises(ValueError, match="未知"):
         policy_of("hobby")
+
+
+@pytest.mark.parametrize("actor", ["course", "knowledge"])
+def test_cloud_modules_have_no_execution_policy(actor):
+    assert actor not in model_actors()
+    with pytest.raises(ValueError, match="未知"):
+        policy_of(actor)

@@ -83,7 +83,7 @@ class SkillExecutor(AgentExecutor):
 
     @property
     def records(self) -> Records:
-        """このモジュールだけの記録（本体側の core.records と同じもの。App Home のオン・オフなども読める）。"""
+        """このモジュールだけの記録（本体側の core.records と同じもの。MCP で設定した値も読める）。"""
         return Records(self.store, self.agent)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:

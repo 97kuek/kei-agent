@@ -21,8 +21,6 @@ WORK = RESEARCH - {"mcp.allowlist"} | {"app.allowlist"}
     ("router", UseCase.ROUTING, "claude", "claude-haiku-4-5", "", "router.md", False, ROUTER),
     ("research", "research_execute", "codex", "gpt-6-sol", "high", "research.md", True, RESEARCH),
     ("research", "research_execute", "claude", "claude-sonnet-5", "high", "research.md", True, RESEARCH),
-    ("course", "course_explain", "codex", "gpt-6-luna", "medium", "course.md", True, COURSE),
-    ("course", "course_explain", "claude", "claude-sonnet-5", "medium", "course.md", True, COURSE),
     ("work", "work_single_source", "codex", "gpt-6-luna", "medium", "work.md", True, WORK),
     ("work", "work_single_source", "claude", "claude-sonnet-5", "medium", "work.md", True, WORK),
 ])
@@ -65,10 +63,10 @@ def test_an_actor_without_a_notion_home_gets_no_notion_tools(config):
     """agents.csv の notion の列にホームが無い担当には、届かない Notion の道具（ゲートウェイの MCP）を渡さない。"""
     from kei_agent.configuration.config import NotionConfig
 
-    request = runner.ExecutionRequest(themes.agent_workspace(config, "course"),
-                                      resolve("course", "claude", "course_explain"), None, "C1", "1.1")
+    request = runner.ExecutionRequest(themes.agent_workspace(config, "research"),
+                                      resolve("research", "claude", "research_extract"), None, "C1", "1.1")
     assert resolve_contract(config, request).policy.notion == "write"
-    contract = resolve_contract(replace(config, notion=NotionConfig(research_home="research-home")), request)
+    contract = resolve_contract(replace(config, notion=NotionConfig(course_home="course-home")), request)
     assert contract.policy.notion == "none" and "mcp.allowlist" not in contract.capabilities
     # 合言葉も渡さない（届かない合言葉を AI の環境に置かない）
     assert runner.GATEWAY_AUTH_ENV not in runner.build_env(
@@ -86,7 +84,7 @@ def test_a_skill_change_invalidates_the_session_version(config, tmp_path):
     skill.parent.mkdir(parents=True)
     skill.write_text("元の手順", encoding="utf-8")
     (folder / "lab.md").write_text("# 実験の担当\n", encoding="utf-8")
-    (folder / "module.toml").write_text('api = 1\nname = "lab"\n[actor]\nprompt = "lab.md"\nplugin = true\n'
+    (folder / "module.toml").write_text('api = 2\nname = "lab"\n[actor]\nprompt = "lab.md"\nplugin = true\n'
                                         '[use_cases.lab_run]\nclaude = { model = "claude-sonnet-5" }\n', encoding="utf-8")
     modules.register_user_modules(tmp_path / "modules")
     first = prompt_version(config, "lab")

@@ -38,16 +38,16 @@ class _Agent:
             "limit_reset_at": None, "cost_usd": None}))
 
 
-async def test_course_question_is_asked_read_only_and_finalized(assistant):
-    agent = _Agent("<<kei-agent-final>>\n今日は2コマだよ\n<<kei-agent-final-end>>")
-    assistant.agents["course"] = agent
+async def test_work_question_is_asked_read_only_and_finalized(assistant):
+    agent = _Agent("<<kei-agent-final>>\n今日は会議が2件だよ\n<<kei-agent-final-end>>")
+    assistant.agents["work"] = agent
 
-    answer = await assistant.answer_question("course", "今日の授業は？")
+    answer = await assistant.answer_question("work", "今日の会議は？")
 
     asked, = agent.asked
-    assert asked["read_only"] is True and asked["use_case"] == "course_explain"
-    assert asked["prompt"].endswith("今日の授業は？")
-    assert answer == "今日は2コマだよ"                           # marker は外し、Slack と同じ確認を通す
+    assert asked["read_only"] is True and asked["use_case"] == "work_execute"
+    assert asked["prompt"].endswith("今日の会議は？")
+    assert answer == "今日は会議が2件だよ"                           # marker は外し、Slack と同じ確認を通す
 
 
 async def test_research_question_runs_read_only_in_the_theme(assistant):
@@ -124,3 +124,10 @@ def test_config_reads_the_orchestrator_address(tmp_path):
     path.write_text('[a2a]\norchestrator = 8786\n')
     with pytest.raises(ConfigError, match="orchestrator"):
         load_config(path, env={})
+
+
+@pytest.mark.parametrize("actor", ["course", "knowledge"])
+async def test_cloud_question_does_not_call_a_mac_agent(assistant, actor):
+    agent = assistant.agents[actor] = _Agent("呼ばない")
+    assert "どれを調べるか" in await assistant.answer_question(actor, "教えて")
+    assert agent.asked == [] and assistant.claude.calls == []

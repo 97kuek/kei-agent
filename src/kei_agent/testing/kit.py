@@ -2,7 +2,7 @@
 
     kit = ModuleKit(tmp_path / "memo", tmp_path)    # モジュールのフォルダ（組み込みなら名前でもよい）
     kit.ai.answer("メモしたよ")                       # AI が次に返す答え
-    await kit.message("牛乳を買う")                   # このモジュールのチャンネルで、依頼者が @Kei Agent に頼む
+    await kit.message("牛乳を買う")                   # このモジュールの作業場に、依頼を渡す
     assert kit.texts()[-1] == "メモしたよ"
     kit.close()                                      # 差し替えを戻す（with ModuleKit(...) as kit: でもよい）
 
@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
+from kei_agent.api import Request, theme_name
 from kei_agent.configuration import agents_table
 from kei_agent.configuration.config import load_config, model_actors
 from kei_agent.conversation.assistant import Assistant
@@ -38,9 +39,8 @@ from kei_agent.testing.isolation import (
     stub_restarts,
 )
 
-# 依頼者（KEI_AGENT_ALLOWED_USER_ID）と、Kei Agent 自身の Slack の ID
+# 依頼者（KEI_AGENT_ALLOWED_USER_ID）のテスト用 ID
 OWNER = "UME"
-BOT = "UBOT"
 # 置き場所（テストの一時フォルダの下に作る）
 PLACES = ("agent_root", "state_dir")
 # 研究・大学・仕事のプロジェクトの置き場所（担当の表の folder 列に書く。既定の ~/research などに触れない）。
@@ -126,7 +126,7 @@ class ModuleKit:
         patch.setattr(runner, "run_model", self.ai)
         self.notion, self.hub, self.pueue = FakeNotion(), FakeHub(), FakePueue()
         self.assistant = Assistant(self.config, self.store, self.slack, JobManager(self.config, self.store, self.pueue),
-                                   "xoxb-test", BOT, notion=self.notion, team_url="https://example.slack.com/",
+                                   notion=self.notion,
                                    hub=self.hub)
         self.scheduler = Scheduler(self.config, self.store, self.assistant)
         # 担当プロセスは、本物の番地（手元で動いている Kei Agent かもしれない）に届かないよう、全部差し替える
@@ -265,52 +265,24 @@ class ModuleKit:
         await settle(self.assistant)
 
     async def message(self, text: str, channel: str | None = None, *, thread: str | None = None) -> str:
-        """依頼者が @Kei Agent に頼む（thread を渡すと、そのスレッドの中で）。仕事が終わるまで待ち、依頼の ts を返す。"""
+        """作業場に依頼を渡す（thread を渡すと、その会話で続ける）。終わるまで待ち、依頼の ts を返す。"""
         ts = self._next_ts()
-        event = {"channel": self.channel(channel), "user": OWNER, "ts": ts, "text": f"<@{BOT}> {text}"}
-        if thread:
-            event["thread_ts"] = thread
-        await self.assistant.on_mention(event)
+        channel_id = self.channel(channel)
+        thread = thread or ts
+        self.assistant.remember_message(channel_id, thread, "owner", text, ts)
+        await self.assistant.submit(Request(channel_id, theme_name(self.slack.channels[channel_id]), thread, ts, text))
         await self.settle()
         return ts
 
     async def reply(self, text: str, thread: str, channel: str | None = None) -> str:
-        """Kei Agent が動いているスレッドに、メンションなしで返信する。"""
-        ts = self._next_ts()
-        await self.assistant.on_message({"channel": self.channel(channel), "user": OWNER, "ts": ts,
-                                         "thread_ts": thread, "text": text})
-        await self.settle()
-        return ts
+        """同じ会話に続きの依頼を渡す。"""
+        return await self.message(text, channel, thread=thread)
 
-    async def invite(self, channel: str | None = None) -> None:
-        """Kei Agent をチャンネルに招く（モジュールの案内 welcome が出る）。"""
-        await self.assistant.on_member_joined({"user": BOT, "channel": self.channel(channel)})
-        await self.settle()
-
-    async def slash(self, command: str, text: str = "", channel: str | None = None) -> str:
-        """スラッシュコマンドを打つ（/ は付けない）。打った人にだけ見せる文を返す。"""
-        body = {"user_id": OWNER, "channel_id": self.channel(channel), "command": f"/{command}", "text": text,
-                "trigger_id": "trigger-1"}
-        answer = await self.assistant.module_slash(command, body)
+    async def head_action(self, action: str, params: dict | None = None) -> dict:
+        """MCP からモジュールの操作を頼む（class Module の head_action）。結果を返す。"""
+        answer = await self.assistant.module_head_action(action, params or {})
         await self.settle()
         return answer
-
-    async def action(self, name: str, value: str = "", *, channel: str | None = None, message_ts: str = "",
-                     **extra) -> None:
-        """このモジュールの投稿のボタンを押す（name は core.action_id に渡した名前）。"""
-        body = {"user": {"id": OWNER}, "trigger_id": "trigger-1",
-                "actions": [{"action_id": self.core.action_id(name), "value": value}],
-                "channel": {"id": self.channel(channel)}, "message": {"ts": message_ts}, **extra}
-        await self.assistant.module_action(body)
-        await self.settle()
-
-    async def view(self, name: str, values: dict, *, private_metadata: str = "") -> dict | None:
-        """このモジュールの入力の画面を送る（name は core.view_id に渡した名前）。欄の下に出す理由を返す。"""
-        body = {"user": {"id": OWNER}, "view": {"callback_id": self.core.view_id(name), "blocks": [],
-                                                 "state": {"values": values}, "private_metadata": private_metadata}}
-        errors = await self.assistant.module_view(body)
-        await self.settle()
-        return errors
 
     async def schedule(self, name: str, day: str | None = None) -> dict:
         """定期処理を1回動かす（day は YYYY-MM-DD。無ければ今日）。結果を返す。"""
@@ -328,12 +300,6 @@ class ModuleKit:
         self.assistant.emit(kind, **fields)
         await self.settle()
 
-    async def home(self) -> dict:
-        """依頼者の App Home を描いて、その画面を返す。"""
-        await self.assistant.publish_home(OWNER)
-        await self.settle()
-        return next(kw["view"] for name, kw in reversed(self.slack.calls) if name == "views_publish")
-
     async def skill(self, name: str, payload: dict | str | None = None, **params) -> Reply:
         """担当プロセス（agent.py）の仕事を直接頼む（本体の core.ask_agent と同じ形。provider は既定で claude）。"""
         if not isinstance(self.agent, LocalAgent):
@@ -345,11 +311,11 @@ class ModuleKit:
     # 見るもの
 
     def texts(self) -> list[str]:
-        """Slack に出した文（投稿と、流して見せた返事。順に）。"""
+        """通知と答えの文（順に）。"""
         return [message["text"] for message in self.slack.messages()]
 
     def thread(self, ts: str) -> list[str]:
-        """そのスレッドに返した文（投稿と、流して見せた返事。順に）。"""
+        """その会話に返した文（順に）。"""
         return [message["text"] for message in self.slack.messages() if message["thread_ts"] == ts]
 
     # 終わり

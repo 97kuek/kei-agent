@@ -1,5 +1,5 @@
 # 研究のモジュール（docs/architecture.md の「振り分けと A2A」）。ほかのどれにも当たらないチャンネルを研究テーマとして受け持つ
-api = 1
+api = 2
 name = "research"
 label = "研究"
 description = "研究テーマのチャンネルで、テーマの作業場（~/research/<テーマ>）を使って作業し、結果を返す。長い処理はジョブにする"

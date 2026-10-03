@@ -1,6 +1,6 @@
-"""テストで使う偽物（Slack・AI・Notion・ジョブ）。本物には届かない。
+"""テストで使う偽物（通知先・AI・Notion・ジョブ）。本物には届かない。
 
-どれも本体が使う相手と同じ呼び方を持つ（FakeSlack は Slack の WebClient、FakeAI は runner.run_model、FakeNotion は
+どれも本体が使う相手と同じ呼び方を持つ（FakeSlack は通知先、FakeAI は runner.run_model、FakeNotion は
 研究ホームの NotionStore、FakeHub は共通ホームの HubStore、FakeNotionAPI はゲートウェイの後ろの Notion、FakePueue は
 ジョブの pueue）。モジュールのテストでは ModuleKit がまとめて用意する。
 """
@@ -49,20 +49,13 @@ class FakePueue:
         return dict(self.task_status)
 
 
-def _stream_text(kw: dict) -> str:
-    """流して見せた返事の1回ぶんの文（markdown_text か、chunks の markdown_text）。"""
-    return (kw.get("markdown_text") or "") + "".join(c["text"] for c in kw.get("chunks") or []
-                                                     if c["type"] == "markdown_text")
-
-
 class FakeSlack:
+    """投稿と添付を記録する、テスト用の通知先。チャンネルの対応も持つ。"""
+
     def __init__(self, channels: dict[str, str]):
         self.channels = channels
         self.calls: list[tuple[str, dict]] = []
         self.replies: list[dict] = []
-        self.stream_modes: dict[str, str] = {}
-        # 流して見せた返事の ts（始めた順）
-        self.stream_ts: list[str] = []
         self._ts = 1000
 
     def _next_ts(self) -> str:
@@ -86,106 +79,17 @@ class FakeSlack:
         self.calls.append(("chat_update", kw))
         return {}
 
-    # AI アプリ向けの表示
-
-    async def agents_sessions_setStatus(self, **kw):
-        self.calls.append(("agents_sessions_setStatus", kw))
-        return {}
-
-    async def assistant_threads_setStatus(self, **kw):
-        self.calls.append(("assistant_threads_setStatus", kw))
-        return {}
-
-    async def chat_startStream(self, **kw):
-        self.calls.append(("chat_startStream", kw))
-        ts = self._next_ts()
-        self.stream_modes[ts] = "chunks" if kw.get("chunks") else "markdown_text"
-        self.stream_ts.append(ts)
-        return {"ts": ts}
-
-    async def chat_appendStream(self, **kw):
-        # 実物と同じく、始めたときと違う形（chunks と markdown_text）を混ぜると断る
-        mode = "chunks" if kw.get("chunks") else "markdown_text"
-        if self.stream_modes.get(kw["ts"], mode) != mode:
-            from slack_sdk.errors import SlackApiError
-            raise SlackApiError("streaming_mode_mismatch", {"ok": False, "error": "streaming_mode_mismatch"})
-        self.calls.append(("chat_appendStream", kw))
-        return {}
-
-    async def chat_stopStream(self, **kw):
-        self.calls.append(("chat_stopStream", kw))
-        return {}
-
-    def statuses(self) -> list[str]:
-        return [kw["status"] for name, kw in self.calls if name == "agents_sessions_setStatus"]
-
-    def thinking(self) -> list[str]:
-        """「〇〇が入力中」の欄に出した文言。"""
-        return [kw["status"] for name, kw in self.calls if name == "assistant_threads_setStatus"]
-
-    def tasks(self) -> list[dict]:
-        """流して見せた返事の中の、作業の手順（task_update）。"""
-        return [c for name, kw in self.calls if name in ("chat_startStream", "chat_appendStream", "chat_stopStream")
-                for c in kw.get("chunks") or [] if c["type"] == "task_update"]
-
     def messages(self) -> list[dict]:
-        """投稿した文と、流して見せた返事（順に）。どれも {"channel", "thread_ts", "text"}。"""
-        found: list[dict] = []
-        streams: dict[str, dict] = {}
-        started = iter(self.stream_ts)
-        for name, kw in self.calls:
-            if name == "chat_postMessage":
-                found.append({"channel": kw.get("channel"), "thread_ts": kw.get("thread_ts"),
-                              "text": kw.get("text") or kw.get("markdown_text") or ""})
-            elif name == "chat_startStream":
-                message = {"channel": kw.get("channel"), "thread_ts": kw.get("thread_ts"), "text": _stream_text(kw)}
-                streams[next(started)] = message
-                found.append(message)
-            elif name in ("chat_appendStream", "chat_stopStream") and kw.get("ts") in streams:
-                streams[kw["ts"]]["text"] += _stream_text(kw)
-        return found
-
-    def streamed(self) -> list[str]:
-        """流して見せた文章。start と append を順につないだもの。"""
-        texts = []
-        for name, kw in self.calls:
-            if name in ("chat_startStream", "chat_appendStream", "chat_stopStream"):
-                if kw.get("markdown_text"):
-                    texts.append(kw["markdown_text"])
-                texts += [c["text"] for c in kw.get("chunks") or [] if c["type"] == "markdown_text"]
-        return texts
-
-    async def reactions_add(self, **kw):
-        self.calls.append(("reactions_add", kw))
-
-    async def reactions_remove(self, **kw):
-        self.calls.append(("reactions_remove", kw))
-
-    async def views_publish(self, **kw):
-        self.calls.append(("views_publish", kw))
-        return {}
-
-    async def views_open(self, **kw):
-        self.calls.append(("views_open", kw))
-        return {}
-
-    async def views_update(self, **kw):
-        self.calls.append(("views_update", kw))
-        return {}
+        """通知と答え（順に）。どれも channel・thread_ts・text を持つ。"""
+        return [{"channel": kw.get("channel"), "thread_ts": kw.get("thread_ts"),
+                 "text": kw.get("text") or kw.get("markdown_text") or ""} for kw in self.posted()]
 
     async def files_upload_v2(self, **kw):
         self.calls.append(("files_upload_v2", kw))
 
-    async def conversations_replies(self, **kw):
-        return {"messages": self.replies}
-
     async def conversations_list(self, **kw):
         channels = [{"id": cid, "name": name, "is_member": True} for cid, name in self.channels.items()]
         return {"channels": channels, "response_metadata": {"next_cursor": ""}}
-
-    async def chat_getPermalink(self, channel, message_ts):
-        return {"permalink": f"https://example.slack.com/archives/{channel}/p{message_ts.replace('.', '')}"}
-
 
 class FakeAI:
     """AI の実行（runner.run_model）の代わり。Claude でも Codex でも同じ道を通る。
@@ -286,13 +190,6 @@ class FakeNotion:
                 return t
         return self.add_task(title, theme_name, slack_url=slack_url, body=body)
 
-    def cancel_night_task(self, slack_url):
-        self._check()
-        for t in self.tasks.values():
-            if t.slack_url == slack_url and t.status == "今夜やる":
-                t.status = "未着手"
-                return True
-        return False
 
     def tonight_tasks(self, limit):
         self._check()

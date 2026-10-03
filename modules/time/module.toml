@@ -1,29 +1,13 @@
-# 時間記録のモジュール（docs/extensibility.md）。Slack の /toggl と固定したカードで人の時間を測り、Toggl と共通ホームに送る
-api = 1
+# 時間記録のモジュール（docs/extensibility.md）。MCP の timer で人の時間を測り、Toggl と共通ホームに送る
+api = 2
 name = "time"
 label = "時間記録"
-description = "Slack の /toggl と時間記録カードで時間を測り、Toggl と共通ホームの「時間記録」に送る。Toggl で直接測った記録も取り込む"
-
-[depends]
-# あれば使う: 大学（科目を選んで測るときに、今学期の履修科目を聞く）
-optional = ["course"]
-
-# Slack のスラッシュコマンド（kei-agent manifest が Slack App の manifest に載せる）
-[slash_commands]
-toggl = { description = "時間記録を始める・止める", usage_hint = "[start|stop]" }
+description = "MCP の timer で時間を測り、Toggl と共通ホームの「時間記録」に送る。Toggl で直接測った記録も取り込む"
 
 # 定期処理（時刻とオンオフは schedules.csv で変えられる。default は書いていないときの時刻）
 [schedules.toggl_import]
 label = "Toggl の取り込み"
 default = "22:00"
-
-# 設定（config.toml の [time] で変えられる）
-[settings]
-# 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域）。領域は research（研究）・course（大学）・work（仕事）で、
-# 共通ホームの「時間記録」の領域と、Toggl のプロジェクト名の頭（研究 / テーマ名）になる
-prefixes = { "1-" = "research", "2-" = "course", "3-" = "work" }
-# 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
-pick_course = ["course"]
 
 # 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）。
 # 3つそろわなければ Toggl には送らず、時間は共通ホームの「時間記録」にだけ書く

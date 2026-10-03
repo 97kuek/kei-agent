@@ -1,5 +1,5 @@
 # 自己改善のモジュール（docs/extensibility.md）。Kei Agent のチャンネルで要望を聞き、Kei Agent 自身のコードを直して取り込む
-api = 1
+api = 2
 name = "improve"
 label = "自己改善"
 description = "Kei Agent のチャンネルで要望を聞いて直し方を相談し、Kei Agent 自身のコードを直して取り込む。要望は要約して公開の GitHub issue にする"

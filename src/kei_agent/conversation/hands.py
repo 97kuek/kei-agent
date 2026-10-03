@@ -1,22 +1,11 @@
-"""手の口（MCP）。頭（OpenAI Dots、今は Claude Code・Codex）から、Kei Agent の作業場で AI を動かしてもらう入口。
+"""MCP の作業実行。Dot・Claude Code・Codex から作業場の AI を呼び出す。
 
-Slack の受け口と並ぶ、もう1つの入口（GitHub issue #17）。AI を動かす道具は3つと、投稿の道具が1つ。
+workspaces で担当と実行設定を確認し、run で作業を受け付け、status で結果を取得する。
+待機・実行・完了は phase、受付からの経過は elapsed_seconds で返す。
+通知は Outbox に保存し、Dot が notices で取得して Slack に投稿する。
 
-- workspaces … 頼める作業場の一覧（研究テーマ・プロジェクト・担当）。それぞれの担当・使ってよい AI・重さ
-- run … 作業場・頼みごと・重さ（light / normal / deep）・AI（任意）・会話の番号（任意）で AI を動かす。
-  SHORT_SECONDS のうちに終われば答えを、終わらなければ受付番号を返して裏で続ける
-- status … 受付番号の作業の様子と結果
-- post … 研究全体のチャンネルに、Kei Agent の名前で投稿する（頭の予定で動かす Daily など）。ほかのチャンネルには出せない。
-  Slack につないでいないときは断る（頭が自分の名前で出す）
-- notices … Slack につないでいないとき、本体とモジュールが Slack に出すつもりだった知らせ（ジョブが終わった・
-  困りごと・課題の新着など。conversation/outbox.py）。頭が読んで、自分の名前で Slack に出す
-
-返すのは決まった項目（本文・状態・会話の番号・できたファイル）。状態は done（終わった）・needs_input（返事待ち。
-本文に確認が書いてある）・failed（失敗）・accepted（受け付けた。status で見る）・running（まだ動いている）。
-
-越えてはいけない線（秘密情報・アカウント・作業場の外・外へ送る）は、Slack から頼んだときと同じ実行の仕組みが守る。
-担当・アカウント・届く範囲は作業場から決まり、頭は選べない。選べるのは、表（agents.csv の engines）で許した AI と重さだけ。
-口は 127.0.0.1 で開き、合言葉（KEI_AGENT_HANDS_TOKEN）を確かめる。
+担当・アカウント・権限は作業場から決まる。既存の実行制限はすべて適用する。
+MCP サーバーは 127.0.0.1 で動き、KEI_AGENT_HANDS_TOKEN で認証する。
 """
 
 from __future__ import annotations
@@ -27,11 +16,11 @@ import re
 import secrets
 import time
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
-from kei_agent.conversation.auto_messages import today_line
-from kei_agent.conversation.response_output import OutputError, finalize_conversation
-from kei_agent.conversation.slack_text import AWAITING_MARKER, split_text
+from kei_agent.conversation.auto_messages import HANDOFF_MEMO_PROMPT, handoff_start_prompt, history_prompt, today_line
+from kei_agent.conversation.response_output import OutputError, finalize_conversation, safe_failure
+from kei_agent.conversation.slack_text import AWAITING_MARKER
 from kei_agent.execution.execution_contract import prompt_version
 from kei_agent.execution.runner import FAILURE_LABELS
 from kei_agent.framework import modules
@@ -44,6 +33,7 @@ from kei_agent.workspaces.theme_files import (
     free_name,
     safe_filename,
     snapshot_outputs,
+    thread_log_path,
 )
 from kei_agent.workspaces.themes import ChannelKind
 
@@ -90,7 +80,7 @@ class Hands:
     # 作業場
 
     def workspaces(self) -> list[dict]:
-        """頼める作業場。研究テーマ・プロジェクト（作業場のフォルダがあるもの）と、担当（大学・仕事・知識など）。"""
+        """頼める作業場。研究テーマ・プロジェクト（作業場のフォルダがあるもの）と、担当（仕事など）。"""
         found: dict[str, dict] = {}
         for name in themes.all_themes(self.config):
             found[name] = self._describe(name)
@@ -108,16 +98,7 @@ class Hands:
 
     def _projects(self) -> list[str]:
         """プロジェクトのチャンネルの名前（作業場のフォルダの下にあるものと、themes.toml の既存のフォルダ）。"""
-        from kei_agent.configuration.places import places
-
-        names = [name for name in places(self.config) if self._kind(name) is ChannelKind.PROJECT]
-        for spec in modules.enabled(self.config.modules):
-            for head in spec.prefixes:
-                root = self.config.module_workspace(spec.name)
-                if root.is_dir():
-                    names += [f"{head}{p.name}" for p in sorted(root.iterdir())
-                              if p.is_dir() and not p.name.startswith(".")]
-        return list(dict.fromkeys(names))
+        return list(themes.all_projects(self.config))
 
     def _kind(self, name: str) -> ChannelKind | None:
         try:
@@ -157,21 +138,60 @@ class Hands:
         if conversation and (not CONVERSATION.fullmatch(conversation) or ".." in conversation):
             raise HandsError("conversation は英数字と . _ - だけの64字までにしてください（Slack のスレッドの ts など）")
         conversation = conversation or f"c-{secrets.token_hex(6)}"
+        row = self.assistant.store.get_thread(CHANNEL, conversation)
+        if row is not None and row["channel_name"] != plan.ws.channel_name:
+            raise HandsError("conversation は別の作業場の会話です。新しい会話として頼んでください")
+        # 受付時に結び付ける。待機中の同じ番号を別の作業場で使わせない。
+        self.assistant.store.upsert_thread(CHANNEL, conversation, plan.ws.channel_name, None)
         ticket = f"t-{secrets.token_hex(6)}"
-        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "workspace": plan.ws.channel_name,
+        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "phase": "queued", "workspace": plan.ws.channel_name,
                                             "conversation": conversation, "started_at": time.time()},
                          keep_days=KEEP_DAYS)
         task = asyncio.create_task(self._work(ticket, plan, request, conversation))
         self._tasks[ticket] = task
         task.add_done_callback(lambda _: self._tasks.pop(ticket, None))
+        return await self._wait_ticket(ticket, task, conversation)
+
+    async def _wait_ticket(self, ticket: str, task: asyncio.Task, conversation: str) -> dict:
         done, _ = await asyncio.wait({task}, timeout=SHORT_SECONDS)
         if done:
-            return task.result()
+            task.result()
+            return self.status(ticket)
+        progress = self.status(ticket)
         return {"status": "accepted", "ticket": ticket, "conversation": conversation,
+                "phase": progress["phase"], "elapsed_seconds": progress["elapsed_seconds"],
                 "text": "受け付けました。終わったら status で結果を見てください"}
 
+    async def handoff(self, workspace: str, conversation: str) -> dict:
+        """既存の会話を読むだけでまとめ、新しい会話とメモを返す。中断時は手動で頼み直す。"""
+        if not CONVERSATION.fullmatch(conversation) or ".." in conversation:
+            raise HandsError("conversation は英数字と . _ - だけの64字までにしてください")
+        row = self.assistant.store.get_thread(CHANNEL, conversation)
+        if row is None:
+            raise HandsError("conversation の会話が見つかりません")
+        completed = self.records.get("handoff", conversation)
+        plan = self._plan(workspace, HANDOFF_MEMO_PROMPT, "light", "", read_only=True,
+                          allow_limited=completed is not None)
+        if row["channel_name"] != plan.ws.channel_name:
+            raise HandsError("conversation は別の作業場の会話です")
+        for ticket in self.records.items("ticket"):
+            if (ticket.get("operation") == "handoff" and ticket.get("source_conversation") == conversation
+                    and ticket["workspace"] == plan.ws.channel_name and ticket.get("status") == "running"
+                    and (task := self._tasks.get(ticket["ticket"])) is not None):
+                return await self._wait_ticket(ticket["ticket"], task, conversation)
+        ticket = f"t-{secrets.token_hex(6)}"
+        self.records.put("ticket", ticket, {
+            "ticket": ticket, "operation": "handoff", "status": "running", "phase": "queued",
+            "workspace": plan.ws.channel_name, "source_conversation": conversation, "conversation": conversation,
+            "started_at": time.time(),
+        }, keep_days=KEEP_DAYS)
+        task = asyncio.create_task(self._work(ticket, plan, HANDOFF_MEMO_PROMPT, conversation, handoff=True))
+        self._tasks[ticket] = task
+        task.add_done_callback(lambda _: self._tasks.pop(ticket, None))
+        return await self._wait_ticket(ticket, task, conversation)
+
     def _plan(self, workspace: str, request: str, weight: str, engine: str, use_case: str = "",
-              read_only: bool = False, minutes: int = 0) -> Plan:
+              read_only: bool = False, minutes: int = 0, *, allow_limited: bool = False) -> Plan:
         if not request.strip():
             raise HandsError("頼みごとが空です")
         if weight not in modules.WEIGHTS:
@@ -193,7 +213,7 @@ class Hands:
         if provider not in profile.allowed_engines:
             raise HandsError(f"{workspace} で使える AI は {' / '.join(profile.allowed_engines) or 'まだ選ばれていません'}です"
                              "（agents.csv の engine・engines）")
-        if (until := self.assistant.store.limit_until(provider)) > time.time():
+        if (until := self.assistant.store.limit_until(provider)) > time.time() and not allow_limited:
             raise HandsError(f"{provider} は利用上限で止まっています（{_clock(until)} ごろに明ける）。"
                              "ほかの AI が選べれば engine で選んでください")
         names = {u.name for u in spec.actor.use_cases}
@@ -204,51 +224,119 @@ class Hands:
             raise HandsError(f"minutes は 1〜{top} 分にしてください")
         return Plan(ws, provider, use_case or spec.actor.use_case_for(weight), bool(read_only), minutes or None)
 
-    async def _work(self, ticket: str, plan: Plan, request: str, conversation: str) -> dict:
+    async def _work(self, ticket: str, plan: Plan, request: str, conversation: str, *, handoff: bool = False) -> dict:
         """作業をして、結果を受付番号の記録に残す。どこで失敗しても、記録は failed にする（running のまま残さない）。"""
         try:
             # 同じ会話の続きは1つずつ（同時に動かすと、同じ会話が枝分かれして片方が消える）
-            async with self.assistant.thread_locks[(CHANNEL, conversation)]:
-                out = await self._run_once(plan, request, conversation)
+            async with self.assistant.thread_locks[(CHANNEL, conversation)], self.assistant.semaphore:
+                self.records.update("ticket", ticket, phase="running")
+                self.assistant.emit("working", theme=plan.ws.channel_name)
+                out = (await self._handoff_once(plan, conversation) if handoff
+                       else await self._run_once(plan, request, conversation))
+        except asyncio.CancelledError:
+            self.records.update("ticket", ticket, status="failed", phase="failed", finished_at=time.time(),
+                                text="作業が中断されました。もう一度頼んでください")
+            self.assistant.emit("failed", theme=plan.ws.channel_name)
+            raise
         except Exception:
-            log.exception("手の口の作業に失敗しました")
+            log.exception("MCP の作業に失敗しました")
             out = {"status": "failed", "text": "作業に失敗しました（くわしくは Kei Agent のログ）",
                    "conversation": conversation, "files": []}
-        self.records.update("ticket", ticket, **out)
+        self.records.update("ticket", ticket, **out, phase=out["status"], finished_at=time.time())
+        event = {"done": "done", "needs_input": "awaiting", "failed": "failed"}[out["status"]]
+        self.assistant.emit(event, theme=plan.ws.channel_name)
         return {**out, "ticket": ticket}
 
-    async def _run_once(self, plan: Plan, request: str, conversation: str) -> dict:
+    async def _handoff_once(self, plan: Plan, conversation: str) -> dict:
+        store = self.assistant.store
+        row = store.get_thread(CHANNEL, conversation)
+        if row is None or row["channel_name"] != plan.ws.channel_name:
+            raise HandsError("conversation の作業場が一致しません")
+        completed = self.records.get("handoff", conversation)
+        if completed is None:
+            if row["handed_off_to"]:
+                raise HandsError("引き継ぎの記録が揃っていません。会話の記録を確認してください")
+            # 受付時には空いていても、会話や同時実行枠を待つ間に上限へ達することがある。
+            if (until := store.limit_until(plan.provider)) > time.time():
+                return {"status": "failed", "text": f"{plan.provider} は利用上限で止まっています（{_clock(until)} ごろに明ける）",
+                        "conversation": conversation, "files": []}
+            messages, _ = await self.assistant.thread_messages(CHANNEL, conversation)
+            if not messages:
+                raise HandsError("引き継ぐ会話の記録がありません")
+            result = await self._run_once(plan, HANDOFF_MEMO_PROMPT, conversation, handoff=True)
+            if result["status"] != "done":
+                return result
+            completed = {**result, "memo": result["text"], "workspace": plan.ws.channel_name,
+                         "source_conversation": conversation, "conversation": f"c-{secrets.token_hex(6)}"}
+            # 完成したメモと新会話番号を1件として保存する。ここから先で起動が止まっても同じ番号へ復元できる。
+            self.records.put("handoff", conversation, completed)
+        if completed["workspace"] != plan.ws.channel_name:
+            raise HandsError("引き継ぎの作業場が一致しません")
+        new_conversation = completed["conversation"]
+        new_row = store.get_thread(CHANNEL, new_conversation)
+        if new_row is not None and new_row["channel_name"] != plan.ws.channel_name:
+            raise HandsError("新しい会話は別の作業場にあります")
+        store.upsert_thread(CHANNEL, new_conversation, plan.ws.channel_name, None)
+        previous_log = ""
+        if plan.ws.cwd is not None:
+            previous_log = str(thread_log_path(plan.ws.cwd, conversation).relative_to(plan.ws.cwd))
+        store.update_thread(CHANNEL, new_conversation,
+                            handoff_memo=handoff_start_prompt(completed["memo"], previous_log))
+        store.update_thread(CHANNEL, conversation, handed_off_to=new_conversation)
+        store.set_awaiting(CHANNEL, conversation, False)
+        if new_row is None and plan.ws.cwd is not None:
+            append_thread_log(plan.ws.cwd, plan.ws.channel_name, new_conversation, "Kei Agent（引き継ぎ）",
+                              completed["memo"])
+        return completed
+
+    async def _run_once(self, plan: Plan, request: str, conversation: str, *, handoff: bool = False) -> dict:
         assistant, store = self.assistant, self.assistant.store
         ws, provider = plan.ws, plan.provider
         actor = ws.module
         # 作業場ごとの指示書（テーマの AGENTS.md など）も版に入れる（変えたら古い会話を続けない）
         version = prompt_version(self.config, actor, ws if ws.kind in WORKSPACE_KINDS else None, for_head=True)
-        run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "mcp")
+        row = store.get_thread(CHANNEL, conversation)
+        run_id = store.start_run(CHANNEL, conversation, ws.channel_name, "handoff" if handoff else "mcp")
         # 会話を作業場に結び付けておく（AI が頼んだ研究のジョブを、この作業場のものとして受け付けるため）
         store.upsert_thread(CHANNEL, conversation, ws.channel_name, None)
         result = None
         before: dict = {}
         try:
             session_id = store.session_for(CHANNEL, conversation, actor, provider, version)
-            async with assistant.semaphore:
-                if ws.kind in WORKSPACE_KINDS:
-                    themes.ensure_workspace(ws)
-                    before = snapshot_outputs(ws.cwd) if ws.cwd is not None else {}
-                if ws.cwd is not None:
-                    # やり取りを作業場に残す（Slack の受け口と同じ置き場所。会話の番号ごとに1ファイル）
-                    append_thread_log(ws.cwd, ws.channel_name, conversation, "依頼者", request)
-                result = await self._attempt(replace(plan, ws=ws), today_line() + request, session_id, conversation)
-                if result.session_missing:
-                    result = await self._attempt(replace(plan, ws=ws), today_line() + request, None, conversation)
+            if ws.kind in WORKSPACE_KINDS:
+                themes.ensure_workspace(ws)
+                before = snapshot_outputs(ws.cwd) if ws.cwd is not None else {}
+            if ws.cwd is not None:
+                append_thread_log(ws.cwd, ws.channel_name, conversation, "依頼者", request)
+            request_ts = None if handoff else assistant.remember_message(CHANNEL, conversation, "owner", request)
+            messages, dropped = await assistant.thread_messages(CHANNEL, conversation)
+            premise = (row["handoff_memo"] or "") if row is not None else ""
+            next_request = (premise if session_id is None else "") + request
+            restored = history_prompt(messages, premise + request, request_ts, dropped=dropped)
+            has_history = any(m.get("ts") != request_ts for m in messages)
+            prompt = today_line() + (restored if session_id is None and has_history else next_request)
+            result = await self._attempt(plan, prompt, session_id, conversation)
+            if result.session_missing:
+                result = await self._attempt(plan, today_line() + restored, None, conversation)
         finally:
-            store.end_run(run_id, result is None or result.is_error, result.cost_usd if result else None,
+            store.end_run(run_id, result is None or _status(result) == "failed", result.cost_usd if result else None,
                           **(result.recipe_fields() if result else {}))
         if result.limit_reset_at is not None and result.provider:
             # 上限に当たった。明けるまで、その provider を頼まない（Slack・定期処理とも同じ記録）
             store.set_limit_until(result.provider, max(store.limit_until(result.provider),
                                                        assistant.limit_until(result.limit_reset_at)))
-        if not result.is_error and result.session_id:
+            assistant.emit("limited", reset_at=time.strftime("%Y-%m-%dT%H:%M", time.localtime(
+                store.limit_until(result.provider))))
+        if _status(result) != "failed" and result.session_id:
             store.set_session(CHANNEL, conversation, actor, provider, result.session_id, version)
+        if handoff and not result.is_error:
+            try:
+                finalize_conversation(result.text)
+            except OutputError:
+                return {"status": "failed", "text": "引き継ぎメモを利用者向けの形に整えられませんでした。もう一度頼んでください",
+                        "conversation": conversation, "files": []}
+        if shown := _text(result):
+            assistant.remember_message(CHANNEL, conversation, "assistant", shown)
         if ws.kind in WORKSPACE_KINDS and ws.cwd is not None and (shown := _text(result)):
             append_thread_log(ws.cwd, ws.channel_name, conversation, "Kei Agent", shown)
         files = []
@@ -294,16 +382,28 @@ class Hands:
 
     # 時間を測る（Slack の /toggl とカードの代わり。時間記録のモジュール）
 
-    async def timer(self, action: str, domain: str = "", label: str = "") -> dict:
+    async def timer(self, action: str, domain: str = "", label: str = "", entry_id: str = "",
+                    memo: str = "", resolution: str = "") -> dict:
         """計測を始める（前の計測は止める）・止める・今の様子。止めた記録は Toggl と共通ホームの「時間記録」へ送る。"""
-        if action not in ("start", "stop", "status"):
-            raise HandsError("action は start / stop / status のどれかにしてください")
+        if action not in ("start", "stop", "status", "memo", "resolve"):
+            raise HandsError("action は start / stop / status / memo / resolve のどれかにしてください")
         try:
-            return await self.assistant.module_head_action("timer", {"action": action, "domain": domain, "label": label})
+            return await self.assistant.module_head_action("timer", {"action": action, "domain": domain, "label": label,
+                                                                    "entry_id": entry_id, "memo": memo,
+                                                                    "resolution": resolution})
         except ValueError as e:
             raise HandsError(str(e)) from None
 
-    # 声（App Home の「知らせる」「聞く（マイク）」の代わり。声のモジュール）
+    # Moodle の提出・受験終了（大学のモジュール）
+
+    async def sync_submissions(self) -> dict:
+        """大学モジュールに、Moodle の提出・受験状態の機械的な同期を頼む。"""
+        try:
+            return await self.assistant.module_head_action("sync_submissions", {})
+        except ValueError as error:
+            raise HandsError(str(error)) from None
+
+    # Mac の音声通知とマイクの設定（声のモジュール）
 
     async def voice(self, notify: bool | None = None, listen: bool | None = None) -> dict:
         """声のスイッチを変える（渡さなかったほうは変えない）。今の2つのスイッチを返す。"""
@@ -311,6 +411,13 @@ class Hands:
             return await self.assistant.module_head_action("voice", {"notify": notify, "listen": listen})
         except ValueError as e:
             raise HandsError(str(e)) from None
+
+    async def save_reading(self, url: str, saved: bool = True) -> dict:
+        """Mac の旧配信分の読みものを保存・解除する互換窓口。"""
+        try:
+            return await self.assistant.module_head_action("save_reading", {"url": url, "saved": saved})
+        except ValueError as error:
+            raise HandsError(str(error)) from None
 
     # ファイル（Slack の添付の代わり。頭が渡したものは inputs/ に置き、作業でできた outputs/ のものを読む）
 
@@ -351,57 +458,15 @@ class Hands:
 
     # 様子
 
-    # 研究全体のチャンネルへの投稿（頭の予定で動かす Daily などを、Kei Agent の名前で出す）
-
-    async def post(self, text: str, details: str = "") -> dict:
-        """研究全体のチャンネルに text を出し、details があればそのスレッドに出す（どちらも Markdown）。
-        出せるのは研究全体のチャンネルだけ（頭はチャンネルを選べない）。"""
-        if not text.strip():
-            raise HandsError("投稿する本文が空です")
-        if self._outbox() is not None:
-            raise HandsError("Kei Agent は Slack につないでいません。Slack には自分の Slack 連携で出してください")
-        if not self.config.overview_channels:
-            raise HandsError("研究全体のチャンネルが決まっていません（agents.csv の overview の行）")
-        name = self.config.overview_channels[0]
-        channel = (await self.assistant.channel_ids()).get(name)
-        if not channel:
-            raise HandsError(f"研究全体のチャンネル（{name}）に Kei Agent が入っていません")
-        slack = self.assistant.slack
-        # 長すぎる本文は、頭の1つ目だけをチャンネルに、残りをスレッドに出す
-        head, *rest = split_text(text)
-        try:
-            posted = await slack.chat_postMessage(channel=channel, markdown_text=head, unfurl_links=False,
-                                                  unfurl_media=False)
-            ts = str(posted["ts"])
-            # 返信を拾えるように、スレッドを覚えておく
-            self.assistant.store.upsert_thread(channel, ts, name, None)
-            for chunk in [*rest, *(split_text(details) if details.strip() else ())]:
-                await slack.chat_postMessage(channel=channel, thread_ts=ts, markdown_text=chunk, unfurl_links=False,
-                                             unfurl_media=False)
-        except Exception as e:
-            log.warning("手の口から投稿できませんでした", exc_info=True)
-            raise HandsError(f"Slack に投稿できませんでした（{type(e).__name__}）") from None
-        log.info("手の口から研究全体のチャンネルに投稿しました（%s）", ts)
-        return {"channel": name, "ts": ts, "link": await self.assistant.permalink(channel, ts)}
-
-    # 知らせ（Slack につないでいないとき、本体とモジュールが Slack に出すつもりだったもの）
-
-    def _outbox(self):
-        from kei_agent.conversation.outbox import Outbox
-        return self.assistant.slack if isinstance(self.assistant.slack, Outbox) else None
+    # Dot が取得する通知
 
     def notices(self, done: list[str] | None = None) -> dict:
         """まだ出していない知らせ（古い順）。done に渡した id は「出した」にして、書き換えられない限り次からは返さない
-        （頭が Slack に出せたものだけを done で返す。途中で切れても知らせは消えない）。done を渡さなければ、返したものを
-        そのまま「出した」にする（done を知らない頭のため）。
-        Slack につないでいる間は、Kei Agent が自分で Slack に出しているので空。"""
-        outbox = self._outbox()
-        if outbox is None:
-            return {"notices": [], "slack": True}
+        （Dot が Slack に出せたものだけを done で返す。途中で切れても知らせは消えない）。読むだけでは確認済みにしない。
+        """
+        outbox = self.assistant.slack
         outbox.mark_delivered([str(i) for i in done or []])
         found = outbox.pending()
-        if done is None:
-            outbox.mark_delivered([item["id"] for item in found])
         return {"notices": [{k: item[k] for k in ("id", "channel", "thread_ts", "thread", "text")}
                             | {"at": time.strftime("%Y-%m-%d %H:%M", time.localtime(item["at"]))}
                             for item in found], "slack": False}
@@ -412,8 +477,13 @@ class Hands:
             raise HandsError(f"受付番号 {ticket} が見つかりません（{KEEP_DAYS}日より前のものは消えます）")
         if found.get("status") == "running" and ticket not in self._tasks:
             # 本体が起動し直して、作業が途中で止まった
-            found = {**found, "status": "failed", "text": "Kei Agent が起動し直したので、作業が途中で止まりました。もう一度頼んでください"}
-        return {**{k: v for k, v in found.items() if k != "started_at"}, "ticket": ticket}
+            self.records.update("ticket", ticket, status="failed", phase="failed", finished_at=time.time(),
+                                text="Kei Agent が起動し直したので、作業が途中で止まりました。もう一度頼んでください")
+            found = self.records.get("ticket", ticket)
+        finished = found.get("finished_at", time.time() if found["status"] == "running" else found["started_at"])
+        return {**{k: v for k, v in found.items() if k not in {"started_at", "finished_at"}}, "ticket": ticket,
+                "phase": found.get("phase", found["status"]),
+                "elapsed_seconds": max(0, int(finished - found["started_at"]))}
 
 
 def _clock(at: float) -> str:
@@ -423,9 +493,12 @@ def _clock(at: float) -> str:
 def _status(result) -> str:
     if result.is_error:
         return "failed"
+    try:
+        shown = finalize_conversation(result.text)
+    except OutputError:
+        return "failed"
     # 確認の合図は最後の行だけを見る（本文の途中に引用された合図では止めない）
-    last = next((line.strip() for line in reversed((result.text or "").splitlines())
-                 if line.strip() and not line.strip().startswith("<<kei-agent-final")), "")
+    last = next((line.strip() for line in reversed(shown.splitlines()) if line.strip()), "")
     return "needs_input" if last.startswith(AWAITING_MARKER) else "done"
 
 
@@ -441,5 +514,4 @@ def _text(result) -> str:
     try:
         return finalize_conversation(result.text)
     except OutputError:
-        # 決まった形でなくても、頭には中身をそのまま見せる（Slack に出すわけではない）
-        return (result.text or "").strip()
+        return safe_failure("conversation")

@@ -1,7 +1,7 @@
 """モジュールだけの記録（窓口の records）。本体側の kei_agent.api と、担当側の kei_agent_a2a.api の両方から使う。
 
 同じ SQLite（store.py の module_records）に、モジュールの名前ごとに分けて書く。担当プロセスと本体は同じ
-ファイルを開くので、本体側で書いたもの（App Home のオン・オフなど）を担当側で読める。
+ファイルを開くので、本体側で書いたもの（MCP で設定した音声通知など）を担当側で読める。
 """
 
 from __future__ import annotations

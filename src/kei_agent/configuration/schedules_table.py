@@ -8,7 +8,7 @@
 - 表に無い処理は、既定の時刻で動く（本体の既定と module.toml の default）
 
 config.toml には時刻（[schedule] の daily などと、[maintenance] の time・enabled）を書かない（書いてあれば、
-表に書くよう知らせて止める）。App Home では変えない。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
+表に書くよう知らせて止める）。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
 行わない）にして load_config に渡す。
 """
 
@@ -21,6 +21,8 @@ from kei_agent.framework import modules
 
 SCHEDULES_FILE = "schedules.csv"
 COLUMNS = ("name", "enabled", "time")
+# Dot が配信する予定。旧表の行は読めるが、Mac では実行しない。
+CLOUD_SCHEDULES = frozenset({"reading", "literature"})
 # 本体の処理と既定の時刻（保守は config.toml の [maintenance] の残りの項目と組む）
 CORE_TIMES = {"night": "00:00", "intake": "08:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
 def known_names() -> dict[str, str]:
@@ -38,6 +40,8 @@ def parse(text: str, name: str = SCHEDULES_FILE) -> dict[str, str]:
     for line, row in rows(text, name, COLUMNS):
         schedule = row["name"]
         where = f"{name} の {line} 行目（{schedule}）"
+        if schedule in CLOUD_SCHEDULES:
+            continue
         if schedule not in known:
             raise TableError(f"{where}: 知らない処理です（書けるもの: {', '.join(sorted(known))}）")
         if schedule in found:

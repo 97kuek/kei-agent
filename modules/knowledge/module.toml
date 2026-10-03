@@ -1,48 +1,11 @@
-# 知識のモジュール（docs/extensibility.md）。朝の読みものと、研究テーマの論文の新着、その質問
-api = 1
+# 新しい読みものの検索・要約・保存は Dot が行う。Mac の旧配信分だけを扱う互換窓口。
+api = 2
 name = "knowledge"
 label = "知識"
-description = "興味のある技術記事（朝の読みもの）と、研究テーマの論文の新着を集めて絞り、要約する。記事や論文の質問に答える"
+description = "Mac が配信した読みものの控えを読み、保存・解除を再試行する"
 
 [depends]
-# あれば使う: Notion（先行研究 DB・読みもの DB・「収集」ページ）、研究（テーマの検索キーワードと前提）
-optional = ["notion", "research"]
+optional = ["notion"]
 
-# AI の実行役（provider は agents.csv の engine）。外の記事を読むので、Notion・コマンド・手元のファイルは持たない
-[actor]
-prompt = "knowledge.md"
-notion = "none"
-timeout_minutes = 10
-# 自由な質問の用途（分類器は動かさない）
-default_use_case = "knowledge_answer"
-
-# 用途ごとのモデル（コアのモデルの一覧の中から）
-[use_cases.knowledge_pick]
-claude = { model = "claude-haiku-4-5" }
-codex = { model = "gpt-6-luna", effort = "low" }
-
-[use_cases.knowledge_summary]
-claude = { model = "claude-sonnet-5", effort = "medium" }
-codex = { model = "gpt-6-luna", effort = "medium" }
-
-[use_cases.knowledge_answer]
-claude = { model = "claude-sonnet-5", effort = "medium" }
-codex = { model = "gpt-6-luna", effort = "medium" }
-
-# 担当プロセス（A2A のサーバー）。127.0.0.1 のこの番地で待つ。秘密情報は kei-agent-knowledge.zsh（無くてよい）
-[process]
-port = 8792
-
-# チャンネル（番号を外した名前。agents.csv の knowledge の行の channels で変えられる）
 [channels]
 knowledge = ["knowledge"]
-
-# 定期処理（時刻とオンオフは schedules.csv で変えられる。default は書いていないときの時刻）。
-# 同じ時刻のときは、夜間の Task のあと、Daily の前に動く（朝の一覧に件数を載せるため）
-[schedules.literature]
-label = "先行研究の新着"
-default = "07:00"
-
-[schedules.reading]
-label = "読みもの"
-default = "07:00"

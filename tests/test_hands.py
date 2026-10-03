@@ -1,4 +1,4 @@
-"""手の口（MCP。conversation/hands.py）: 頭（Dots・Claude Code など）から、作業場で AI を動かしてもらう。
+"""MCP（conversation/hands.py）: 頭（Dots・Claude Code など）から、作業場で AI を動かしてもらう。
 
 返すのは決まった項目（状態・本文・会話の番号・できたファイル）。担当・アカウント・届く範囲は作業場から決まり、
 頭が選べるのは、表で許した AI と重さだけ。口は合言葉を確かめる。
@@ -34,7 +34,7 @@ def test_workspaces_list_themes_and_agents_with_what_the_head_may_choose(hands):
     h, _ = hands
     found = {item["name"]: item for item in h.workspaces()}
     assert found["vlm"]["kind"] == "研究テーマ" and found["vlm"]["engines"] == ["claude", "codex"]
-    assert found["course"]["kind"] == "担当" and found["course"]["engines"] == ["claude"]
+    assert "course" not in found and "knowledge" not in found
     assert found["vlm"]["weights"] == ["light", "normal", "deep"]
 
 
@@ -100,7 +100,8 @@ async def test_a_long_run_returns_a_ticket_and_status_shows_the_result(hands, mo
 @pytest.mark.parametrize(("args", "said"), [
     (("vlm", "直して", "heavy"), "重さは"),
     (("vlm", "   "), "空です"),
-    (("course", "質問", "normal", "codex"), "使える AI は claude"),
+    (("course", "質問", "normal", "codex"), "頼めません"),
+    (("knowledge", "検索して"), "頼めません"),
     (("0-kei-agent", "直して"), "頼めません"),
 ])
 async def test_what_the_head_cannot_choose_is_refused(hands, args, said):
@@ -148,8 +149,26 @@ async def test_the_tools_run_on_the_loop_that_owns_the_records(hands):
 async def test_only_the_tools_that_just_read_say_so(hands):
     h, _ = hands
     tools = {t.name: t.annotations for t in await build_mcp(h).list_tools()}
+    assert "post" not in tools
     assert tools["workspaces"].read_only_hint and tools["status"].read_only_hint
     assert tools["run"] is None or not tools["run"].read_only_hint
+
+
+async def test_submission_sync_tool_dispatches_fixed_operation_without_ai(hands, monkeypatch):
+    h, _ = hands
+    calls = []
+
+    async def action(name, params):
+        calls.append((name, params))
+        return {"ok": True, "enabled": True, "completed": ["小テスト"]}
+
+    monkeypatch.setattr(h.assistant, "module_head_action", action)
+    mcp = build_mcp(h)
+    result = await mcp.call_tool("sync_submissions", {})
+    assert result.structured_content["completed"] == ["小テスト"]
+    assert calls == [("sync_submissions", {})]
+    tools = {t.name: t.annotations for t in await mcp.list_tools()}
+    assert tools["sync_submissions"] is None or not tools["sync_submissions"].read_only_hint
 
 
 def test_the_tunnel_needs_the_door_and_a_tunnel_number(tmp_path):
@@ -203,12 +222,17 @@ async def test_a_failure_anywhere_marks_the_ticket_failed(hands, monkeypatch):
     assert out["status"] == "failed" and h.status(out["ticket"])["status"] == "failed"
 
 
-async def test_a_limit_is_recorded_and_later_runs_are_refused(hands):
+async def test_a_limit_is_recorded_and_later_runs_are_refused(hands, monkeypatch):
     h, claude = hands
+    from kei_agent_modules.voice.events import reaction
+    spoken = []
+    monkeypatch.setattr(h.assistant, "emit", lambda kind, **fields: spoken.append(reaction({"kind": kind, **fields}).text))
     # 明ける時刻の分からない上限（時刻を出さない。08:59 のような嘘の時刻にしない）
     claude.answer("Claude AI usage limit reached", is_error=True)
     out = await h.run("vlm", "まとめて")
     assert out["status"] == "failed" and "08:59" not in out["text"] and "利用上限" in out["text"]
+    assert not any("自動" in text for text in spoken)
+    assert h.assistant.store.pending_deferred("request") == []
     with pytest.raises(HandsError, match="利用上限"):
         await h.run("vlm", "まとめて")
 
@@ -224,31 +248,10 @@ async def test_the_password_scheme_ignores_case_and_spaces():
             assert (await client.post("/mcp", headers={"authorization": given})).status_code == code
 
 
-async def test_post_goes_to_the_overview_channel_as_kei_agent_with_details_in_the_thread(config, store):
-    assistant, slack = make_assistant(config, store, {"C9": "0-overview", "C1": "vlm"})
-    found = await Hands(assistant).post("**今日の予定**\n10:40 情報セキュリティB", "締切は2件")
-    first, second = slack.posted()
-    assert first["channel"] == "C9" and first["markdown_text"].startswith("**今日の予定**")
-    assert second["channel"] == "C9" and second["thread_ts"] == found["ts"] and second["markdown_text"] == "締切は2件"
-    assert found["channel"] == "overview" and found["link"].startswith("https://")
-    # 返信を拾えるように、スレッドを覚えておく
-    assert store.get_thread("C9", found["ts"]) is not None
 
 
-async def test_post_refuses_empty_text_and_a_missing_overview_channel(config, store):
-    assistant, slack = make_assistant(config, store, {"C1": "vlm"})
-    with pytest.raises(HandsError, match="空"):
-        await Hands(assistant).post("  ")
-    with pytest.raises(HandsError, match="overview"):
-        await Hands(assistant).post("今日の予定")
-    assert slack.posted() == []
 
 
-async def test_post_is_on_the_door_and_takes_no_channel(config, store):
-    assistant, _ = make_assistant(config, store, {"C9": "0-overview"})
-    tools = {t.name: t for t in await build_mcp(Hands(assistant)).list_tools()}
-    assert "channel" not in tools["post"].input_schema["properties"]
-    assert not (tools["post"].annotations and tools["post"].annotations.read_only_hint)
 
 
 async def test_notices_come_back_until_the_head_says_it_posted_them(config, store):
@@ -265,20 +268,13 @@ async def test_notices_come_back_until_the_head_says_it_posted_them(config, stor
     # done を知らない頭は、読んだら出したことになる（毎時くり返さない）
     await assistant.slack.chat_postMessage(channel="vlm", text="次の知らせ")
     assert [n["text"] for n in h.notices()["notices"]] == ["次の知らせ"]
-    assert h.notices()["notices"] == []
+    pending = h.notices()["notices"]
+    assert [n["text"] for n in pending] == ["次の知らせ"]
+    assert h.notices(done=[n["id"] for n in pending])["notices"] == []
 
 
-async def test_notices_are_empty_while_kei_agent_is_on_slack(hands):
-    h, _ = hands
-    assert h.notices() == {"notices": [], "slack": True}
 
 
-async def test_post_is_refused_without_slack(config, store):
-    from kei_agent.conversation.outbox import Outbox
-    assistant, _ = make_assistant(config, store)
-    assistant.slack = Outbox(config, store)
-    with pytest.raises(HandsError, match="Slack"):
-        await Hands(assistant).post("今日の予定")
 
 
 async def test_run_keeps_the_exchange_in_the_workspace_thread_log(hands, config):
@@ -356,19 +352,10 @@ async def test_put_file_keeps_the_earlier_file_and_cleans_names(hands, config):
     assert (config.research_root / "vlm" / "inputs" / "data.csv").read_text() == "1"
 
 
-async def test_post_turns_slack_errors_into_reasons(config, store):
-    assistant, slack = make_assistant(config, store, {"C9": "0-overview"})
-
-    async def broken(**kw):
-        raise RuntimeError("msg_too_long")
-
-    slack.chat_postMessage = broken
-    with pytest.raises(HandsError, match="投稿できませんでした"):
-        await Hands(assistant).post("長い Daily")
 
 
 async def test_jobs_started_from_the_head_tell_the_head_when_they_finish(config, store, monkeypatch):
-    """Slack につないでいないとき、手の口から投げたジョブの終わりは知らせになる（同じ会話で続きを頼めるように）。"""
+    """Slack につないでいないとき、MCPから投げたジョブの終わりは知らせになる（同じ会話で続きを頼めるように）。"""
     from fakes import FakePueue, write_request
 
     from kei_agent.conversation.outbox import Outbox
@@ -400,3 +387,224 @@ async def test_a_quoted_question_mark_in_the_middle_does_not_stop_the_run(hands)
     h, claude = hands
     claude.answer(final_answer("前の回の「❓ 確認: A と B」は A に決まった。\nA で直した"))
     assert (await h.run("vlm", "直して"))["status"] == "done"
+
+
+async def test_changing_engines_restores_saved_mcp_conversation(hands):
+    h, ai = hands
+    ai.answer(final_answer("回答の前提です"), session_id="old-claude")
+    first = await h.run("vlm", "以前の依頼です")
+    ai.answer(final_answer("続きました"))
+    await h.run("vlm", "続きの依頼です", engine="codex", conversation=first["conversation"])
+    prompt = ai.calls[-1]["prompt"]
+    assert ai.calls[-1]["session_id"] is None
+    assert "以前の依頼です" in prompt and "回答の前提です" in prompt
+    assert prompt.count("続きの依頼です") == 1
+
+
+async def test_missing_session_restores_saved_mcp_conversation(hands):
+    h, ai = hands
+    ai.answer(final_answer("回答の前提です"), session_id="lost-session")
+    first = await h.run("vlm", "以前の依頼です")
+    ai.answer("", is_error=True, errors=["No conversation found with session ID"])
+    ai.answer(final_answer("復元しました"))
+    result = await h.run("vlm", "再開の依頼です", conversation=first["conversation"])
+    assert result["status"] == "done"
+    assert ai.calls[-1]["session_id"] is None
+    assert "以前の依頼です" in ai.calls[-1]["prompt"] and "回答の前提です" in ai.calls[-1]["prompt"]
+
+
+async def test_conversation_cannot_move_between_workspaces(hands):
+    h, ai = hands
+    (h.config.research_root / "another").mkdir(parents=True)
+    ai.answer(final_answer("最初の回答"))
+    first = await h.run("vlm", "依頼")
+    count = len(ai.calls)
+    with pytest.raises(HandsError, match="別の作業場"):
+        await h.run("another", "違う場所", conversation=first["conversation"])
+    assert len(ai.calls) == count
+
+
+async def test_mcp_handoff_returns_a_memo_and_continues_in_a_fresh_conversation(hands):
+    """利用者向けメモと新しい会話を返し、続きの依頼へ要点を一度だけ渡す。"""
+    from kei_agent.conversation.outbox import Outbox
+
+    h, ai = hands
+    h.assistant.slack = Outbox(h.config, h.assistant.store)
+    ai.answer("条件Aを試しました", session_id="old-conversation")
+    original = await h.run("vlm", "条件Aを試して")
+    memo = "条件Bの実験\n**目的**\n- 条件Bで比べる"
+    ai.answer(memo)
+    mcp = build_mcp(h)
+    result = await mcp.call_tool("handoff", {"workspace": "vlm", "conversation": original["conversation"]})
+    assert not result.is_error
+    handed = result.structured_content
+    assert handed["status"] == "done" and handed["memo"] == memo
+    assert handed["conversation"] != original["conversation"]
+    assert handed["source_conversation"] == original["conversation"]
+    assert ai.calls[-1]["read_only"] and ai.calls[-1]["session_id"] == "old-conversation"
+    assert h.notices()["notices"] == []
+
+    ai.answer("条件Bで比べました", session_id="new-conversation")
+    await h.run("vlm", "実験して", conversation=handed["conversation"])
+    assert ai.calls[-1]["session_id"] is None
+    assert ai.calls[-1]["prompt"].count("条件Bで比べる") == 1
+    ai.answer("さらに試しました")
+    await h.run("vlm", "さらに", conversation=handed["conversation"])
+    assert ai.calls[-1]["session_id"] == "new-conversation"
+    assert "<handoff>" not in ai.calls[-1]["prompt"]
+
+
+async def test_concurrent_handoffs_share_the_ticket_and_completed_conversation(hands, monkeypatch):
+    """同時に頼んでもメモは1回だけ作り、起動し直したあとも同じ新会話を返す。"""
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    monkeypatch.setattr(hands_module, "SHORT_SECONDS", 0.01)
+    gate = asyncio.Event()
+    began = asyncio.Event()
+    run_model = runner.run_model
+
+    async def held(*args, **kwargs):
+        began.set()
+        await gate.wait()
+        return await run_model(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_model", held)
+    ai.answer("条件Bの実験\n- 条件Bで比べる")
+    first, second = await asyncio.gather(
+        h.handoff("vlm", original["conversation"]), h.handoff("vlm", original["conversation"]))
+    assert began.is_set()
+    assert first["status"] == second["status"] == "accepted"
+    assert first["ticket"] == second["ticket"] and first["phase"] == "running"
+    gate.set()
+    await h._tasks[first["ticket"]]
+    done = h.status(first["ticket"])
+    count = len(ai.calls)
+    again = await Hands(h.assistant).handoff("vlm", original["conversation"])
+    assert done["status"] == again["status"] == "done"
+    assert again["conversation"] == done["conversation"] and len(ai.calls) == count
+
+
+async def test_handoff_refuses_unknown_and_mismatched_conversations(hands):
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    await h.create_workspace("another")
+    count = len(ai.calls)
+    with pytest.raises(HandsError, match="別の作業場"):
+        await h.handoff("another", original["conversation"])
+    with pytest.raises(HandsError, match="見つかりません"):
+        await h.handoff("vlm", "unknown-conversation")
+    with pytest.raises(HandsError):
+        await h.handoff("vlm", "../bad")
+    with pytest.raises(HandsError):
+        await h.handoff("kei-agent", original["conversation"])
+    assert len(ai.calls) == count
+
+
+@pytest.mark.parametrize("answer", [
+    {"text": "メモ作成途中の内部説明", "raw": True},
+    {"text": "選んで\n❓ 確認: AとBどちら？"},
+    {"text": "Claude AI usage limit reached", "is_error": True},
+])
+async def test_unfinished_handoff_never_creates_a_completed_conversation(hands, answer):
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    ai.behaviors = [answer]
+    out = await h.handoff("vlm", original["conversation"])
+    assert out["status"] in ("failed", "needs_input") and not out.get("memo")
+    row = h.assistant.store.get_thread("mcp", original["conversation"])
+    assert row["handed_off_to"] is None
+    assert "メモ作成途中の内部説明" not in out["text"]
+    if answer.get("is_error"):
+        with pytest.raises(HandsError, match="利用上限"):
+            await h.handoff("vlm", original["conversation"])
+
+
+async def test_interrupted_handoff_fails_and_can_be_retried_manually(hands, monkeypatch):
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    monkeypatch.setattr(hands_module, "SHORT_SECONDS", 0.01)
+    gate = asyncio.Event()
+    run_model = runner.run_model
+
+    async def held(*args, **kwargs):
+        await gate.wait()
+        return await run_model(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_model", held)
+    pending = await h.handoff("vlm", original["conversation"])
+    task = h._tasks[pending["ticket"]]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert h.status(pending["ticket"])["status"] == "failed"
+    assert h.assistant.store.interrupted_requests() == []
+    assert h.assistant.store.get_thread("mcp", original["conversation"])["handed_off_to"] is None
+    gate.set()
+    ai.answer("条件Bの実験\n- 条件Bで比べる")
+    retry = await h.handoff("vlm", original["conversation"])
+    assert retry["status"] == "done" and retry["conversation"] != original["conversation"]
+
+
+async def test_missing_session_after_handoff_restores_the_inherited_memo(hands):
+    """新しい会話のprovider側sessionが失われても、元の会話の要点を復元する。"""
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    ai.answer("条件Bの実験\n- 条件Aの誤差は0.12だった")
+    handed = await h.handoff("vlm", original["conversation"])
+    ai.answer("次の実験を始めました", session_id="lost-session")
+    await h.run("vlm", "試して", conversation=handed["conversation"])
+    ai.answer("", is_error=True, errors=["No conversation found with session ID"])
+    ai.answer("復元しました")
+    await h.run("vlm", "続けて", conversation=handed["conversation"])
+    assert ai.calls[-1]["session_id"] is None
+    assert "条件Aの誤差は0.12だった" in ai.calls[-1]["prompt"]
+    assert ai.calls[-1]["prompt"].count("続けて") == 1
+
+
+async def test_a_queued_handoff_does_not_run_after_the_provider_hits_its_limit(hands, monkeypatch):
+    """待機している間に利用上限が分かったら、メモ生成を始めず失敗として返す。"""
+    import time
+
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    count = len(ai.calls)
+    monkeypatch.setattr(hands_module, "SHORT_SECONDS", 0.01)
+    async with h.assistant.thread_locks[("mcp", original["conversation"])]:
+        pending = await h.handoff("vlm", original["conversation"])
+        assert pending["phase"] == "queued"
+        task = h._tasks[pending["ticket"]]
+        h.assistant.store.set_limit_until("claude", time.time() + 3600)
+    await task
+    done = h.status(pending["ticket"])
+    assert done["status"] == "failed" and "利用上限" in done["text"]
+    assert len(ai.calls) == count
+
+
+async def test_completed_handoff_is_available_even_while_the_provider_is_limited(hands):
+    """完成済みの結果を読む再呼出しは、AIの上限に関係なく同じ会話を返す。"""
+    import time
+
+    h, ai = hands
+    original = await h.run("vlm", "条件Aを試して")
+    ai.answer("条件Bの実験\n- 条件Bで比べる")
+    handed = await h.handoff("vlm", original["conversation"])
+    h.assistant.store.set_limit_until("claude", time.time() + 3600)
+    count = len(ai.calls)
+    again = await h.handoff("vlm", original["conversation"])
+    assert again["status"] == "done" and again["conversation"] == handed["conversation"]
+    assert len(ai.calls) == count
+
+
+@pytest.mark.parametrize("text", [
+    "印なしの内部説明 /Users/someone/private/secret.txt ProviderRuntimeError: private-model",
+    "",
+    final_answer("一つめ") + "\n" + final_answer("二つめ /Users/someone/private/secret.txt"),
+])
+async def test_mcp_run_rejects_unmarked_empty_and_ambiguous_answers(hands, text):
+    """モデルの出力契約を守れない回は失敗にし、内部説明を外へ返さない。"""
+    h, ai = hands
+    ai.answer(text, raw=True)
+    out = await h.run("vlm", "まとめて")
+    assert out["status"] == "failed" and h.status(out["ticket"])["phase"] == "failed"
+    assert all(hidden not in out["text"] for hidden in ("/Users", "secret.txt", "ProviderRuntimeError", "private-model"))
+    assert "一つめ" not in out["text"] and "二つめ" not in out["text"]

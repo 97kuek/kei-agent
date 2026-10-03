@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kei_agent.configuration.config import Config, ConfigError, load_config
-from kei_agent.conversation import home
 from kei_agent.framework import modules, version
 from kei_agent.operations import deploy_check
+from kei_agent.storage import settings
 
 OK, WARN, ERROR = "ok", "warn", "error"
 MARKS = {OK: "✅", WARN: "⚠️", ERROR: "❌"}
@@ -33,7 +33,7 @@ _ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$")
 RECENT_LOG_SECONDS = 3600
 LOG_FILE = Path.home() / "Library" / "Logs" / "kei-agent" / "kei-agent.log"
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
-# 手の口のトンネル（deploy/run-tunnel.sh）。launchd の名前、鍵を置くトンネルだけのファイル、様子を見る口
+# MCP のトンネル（deploy/run-tunnel.sh）。launchd の名前、鍵を置くファイル、health check URL
 TUNNEL_LABEL = "com.kei-agent.tunnel"
 TUNNEL_SECRETS = "kei-agent-tunnel.zsh"
 TUNNEL_KEY = "CONTROL_PLANE_API_KEY"
@@ -126,14 +126,14 @@ def check_secrets(config: Config) -> list[Finding]:
 def chosen_providers(config: Config) -> dict[str, str]:
     """実行役ごとの provider（agents.csv の engine）。"""
     found = {}
-    for actor in home.agent_labels(config):
+    for actor in settings.agent_labels(config):
         profile = config.agent_profiles.get(actor)
         found[actor] = profile.provider if profile is not None else ""
     return found
 
 
 def check_ai(config: Config, which: Callable[[str], str | None] = shutil.which) -> list[Finding]:
-    labels = home.agent_labels(config)
+    labels = settings.agent_labels(config)
     providers = chosen_providers(config)
     findings = []
     unset = [labels[actor] for actor, provider in providers.items() if not provider]
@@ -226,7 +226,7 @@ async def check_versions(config: Config, fetch=None, disk: str | None = None) ->
     return findings
 
 
-# 手の口のトンネル
+# MCP のトンネル
 
 def tunnel_ready(url: str = TUNNEL_READY) -> bool:
     import urllib.request
@@ -264,8 +264,8 @@ def check_tunnel(config: Config, agents_dir: Path = LAUNCH_AGENTS,
         findings.append(Finding(ERROR, "トンネル", f"トンネルが動いていない（{running or '読めない'}）",
                                 "~/Library/Logs/kei-agent/tunnel-launchd.log を見る"))
     elif not ready():
-        findings.append(Finding(ERROR, "トンネル", "トンネルが OpenAI か手の口につながっていない",
-                                "~/Library/Logs/kei-agent/tunnel-launchd.log を見る（鍵・番号・手の口の合言葉）"))
+        findings.append(Finding(ERROR, "トンネル", "トンネルが OpenAI かMCP につながっていない",
+                                "~/Library/Logs/kei-agent/tunnel-launchd.log を見る（鍵・番号・MCP の合言葉）"))
     else:
         findings.append(Finding(OK, "トンネル", "トンネルが動いて、ChatGPT から届く"))
     return findings

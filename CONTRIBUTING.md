@@ -11,17 +11,17 @@ uv sync --all-groups
 uv run python -m pytest
 ```
 
-- Slack や Notion につないで動かすときは、[deploy/README.md](deploy/README.md) の秘密情報を用意する
+- Dot の Slack 接続と MCP の設定は [docs/dots.md](docs/dots.md)。Mac の常駐とローカルの秘密情報の配置は [deploy/README.md](deploy/README.md)
 
 ## 確かめること
 
 | 変えたもの | 確かめ方 |
 |---|---|
 | どれでも | `uv run python -m pytest` と `uvx ruff check .`（GitHub Actions も同じものを回す） |
-| Slack を通る動き | 手元で `uv run kei-agent` を起動し、テーマのチャンネルで実際に頼む |
-| 定期処理 | `uv run kei-agent-schedule <名前>` で1回動かす（`--record` なし） |
+| MCP・通知を通る動き | 偽物の AI と Outbox で `run`・`status` と変更した道具を確かめる。`notices` の取得だけでは配信済みにならず、配信できた ID を `done` で返すと未配信から外れることを見る。Dot の設定は [docs/dots.md](docs/dots.md) |
+| 定期処理 | 偽物の設定と状態で1回動かし、通知と記録を確かめる。`--record` なしでも通知や Notion は更新し得る |
 | sandbox や権限 | 作業場の外に書き込めないこと |
-| Notion の読み書き | 本物のホームで作って確かめ、確認用のページはゴミ箱に移す |
+| Notion の読み書き | `tests/fakes.py` の偽物を使い、本物のホームや状態に触れない |
 
 ## モジュールを足すとき
 
@@ -29,16 +29,17 @@ uv run python -m pytest
 - 手順と書き方は [docs/modules.md](docs/modules.md)
 
 1. `uv run kei-agent module new <名前> --builtin` でひな形を作る（AI は `--ai`、担当プロセスは `--process`）
-2. `module.toml`・`module.py`（と指示書・`agent.py`）を書く
-3. テストを `tests/` に書き、`uv run --group agents kei-agent module test <名前>` で通す
+2. `api = 2` の `module.toml`・`module.py`（と指示書・`agent.py`）を書く
+3. テストを `tests/` に書き、`ModuleKit.head_action` などで窓口を通して確かめる。`uv run --group agents kei-agent module test <名前>` で通す
 4. 要る秘密情報は `[secrets]` に名前と説明だけを書く
-5. `agents.example.csv` に行を足す。設定を持つなら `config.example.toml` に `[<名前>]` の例も書く
-6. スラッシュコマンドを足したら、`uv run kei-agent manifest > slack/manifest.yaml` で書き直す
+5. `agents.example.csv` に行を足す。設定の既定は `module.toml` の `[settings]` に書く。保護対象の `config.example.toml` の変更が必要なら人に頼む
+6. Dot からの操作は `async head_action(name, params)`、材料は `async head_materials(days)` に書く。操作は MCP の道具と [Dot の指示](docs/dots.md) を合わせる。扱わない操作名には `None` を返す
 7. README の「何ができるか」の表に1行足す（テストが `modules/` と照らし合わせる）
 
 ## 変えるときの決まり
 
-- 仕組みを変えたら、同じ変更で文書も直す（使い方は `docs/using.md`、担当は `docs/agents/`、仕組みは `docs/architecture.md`、入れ方は `deploy/README.md`）
+- モジュールの窓口や宣言の契約を変えたら枠の版を上げ、[docs/modules.md](docs/modules.md) と直し方を合わせる
+- 仕組みを変えたら、同じ変更で文書も直す（使い方は `docs/using.md`、担当は `docs/agents/`、仕組みは `docs/architecture.md`、Dot の接続と予定は `docs/dots.md`。保護対象の `deploy/` の変更が必要なら人に頼む）
 - 文書には、いまどうなっているかだけを書く。経緯は Git の履歴に残す
 - 文書は箇条書きと表を中心にし、同じことを2か所に書かない（片方からはリンクする）
 - 図は `docs/images/diagrams.py` を書き換えて `uv run python docs/images/diagrams.py` で作り直す

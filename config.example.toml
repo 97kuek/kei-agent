@@ -5,24 +5,21 @@
 
 # 研究テーマのフォルダを置く場所と、大学の作業場は、担当の表 agents.csv の folder 列に書く。
 # 既存のフォルダやリポジトリをテーマに使うときは、~/.config/kei-agent/themes.toml に「テーマの名前 = フォルダ」
-# （Slack でテーマのチャンネルに招いたときに「既存のフォルダを使う」を選ぶと、書き足される）
+# MCP の create_workspace で folder を指定すると、対応を保存する
 # macOS の保護フォルダ（書類・デスクトップ・ダウンロード）をテーマの置き場所に選べるようにする。
 # フルディスクアクセスの許可も要る（deploy/README.md の「4. 常駐（launchd）」）
 # allow_protected_folders = true
-# SQLite などBotの状態を置く場所
+# SQLite など Kei Agent の状態を置く場所
 state_dir = "~/.local/state/kei-agent"
 
-# claude -p を同時に動かす上限（違うスレッドどうし）
+# AI を同時に動かす上限（違う会話どうし）
 max_concurrent_runs = 2
-# claude -p 1回の上限時間。長い作業はジョブにする
+# AI の1回の上限時間。長い作業はジョブにする
 run_timeout_minutes = 30
 # ジョブの状態を確認する間隔
 job_poll_seconds = 60
 # pueue の kei-agent グループで同時に走らせるジョブ数
 job_parallel = 1
-# 依頼者の依頼がこの回数たまったスレッドでは、[新しいスレッドで続ける] ボタンを出す。0 なら回数では出さない
-# （作業がひと段落したときは、回数に関係なく Kei Agent が区切りを勧める）
-handoff_after_turns = 8
 
 # 使うモジュール・チャンネル・担当ごとの AI（engine・モデル・アカウント）・Notion のホームは、ここではなく担当の表 agents.csv に書く
 # （例は agents.example.csv。kei-agent setup が作る。書き方は deploy/README.md の「担当の表」）
@@ -48,15 +45,15 @@ session_retention_days = 90
 [a2a]
 # 相手を待つ時間（秒）。AI を動かす仕事には、これに AI の上限時間を足した時間まで待つ
 timeout_seconds = 300
-# 本体の A2A の口。声のレイヤは担当を直接呼ばず、ここに問い合わせる（担当を呼べるのは本体だけ）
+# 本体の A2A サーバー。声のモジュールは担当を直接呼ばず、ここに問い合わせる
 orchestrator = "http://127.0.0.1:8786"
 # 合言葉は環境変数 KEI_AGENT_A2A_TOKEN で渡す（この中には書かない）
 
 [hands]
-# 手の口（MCP）。頭（Claude Code・Codex、のちに OpenAI Dots）から作業場で AI を動かしてもらう（docs/architecture.md）。
+# MCP サーバー。Dot・Claude Code・Codex から Mac の作業場に依頼する（docs/architecture.md）。
 # 127.0.0.1 のポートだけ。合言葉は環境変数 KEI_AGENT_HANDS_TOKEN（kei-agent setup が作る）。書かなければ開かない
 # url = "http://127.0.0.1:8785"
-# ChatGPT（Dots）から届けるときの OpenAI の Secure MCP Tunnel の番号（deploy/run-tunnel.sh が使う。deploy/README.md）。
+# Dot から届けるときの OpenAI の Secure MCP Tunnel の番号（deploy/run-tunnel.sh が使う。deploy/README.md）。
 # 鍵は kei-agent-tunnel.zsh の CONTROL_PLANE_API_KEY
 # tunnel = "tunnel_..."
 
@@ -78,13 +75,6 @@ school = ""
 # "前期" = [4, 5, 6, 7, 8, 9]
 # "後期" = [10, 11, 12, 1, 2, 3]
 # "通年" = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]
-
-[time]
-# 時間記録のモジュールの設定（書けるものは modules/time/module.toml の [settings]）
-# 時間を測るチャンネル（Slack のチャンネル名の頭 → 領域。領域は research・course・work）
-# prefixes = { "1-" = "research", "2-" = "course", "3-" = "work" }
-# 始めるときに、今学期の科目を選ぶチャンネル（番号を外した名前。大学のモジュールに科目を聞く）
-# pick_course = ["course"]
 
 [sandbox]
 # 作業用ディレクトリ以外で、Bash が書き込んでよい場所（uv のキャッシュなど）

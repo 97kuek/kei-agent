@@ -6,12 +6,13 @@ from dataclasses import replace
 import pytest
 from fakes import FakeAI, FakeHub, FakeNotion, make_assistant
 
+from kei_agent.api import Request
 from kei_agent.execution import a2a, runner
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
 from kei_agent.testing.kit import settle
 
-MEMO_TOML = '''api = 1
+MEMO_TOML = '''api = 2
 name = "memo"
 label = "メモ"
 
@@ -34,9 +35,6 @@ class Module:
     def __init__(self, core: Core):
         self.core = core
 
-    def welcome(self) -> str:
-        return texts.WELCOME
-
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         if req.text == "こわして":
             raise RuntimeError("こわれた")
@@ -47,12 +45,16 @@ class Module:
     async def run_schedule(self, name: str, day: str) -> dict:
         return {"status": "done", "count": len(self.core.records.items("memo"))}
 
-    async def on_reaction(self, event: dict, added: bool) -> bool:
-        item = event.get("item") or {}
-        if event.get("reaction") != "pushpin" or self.core.records.get("memo", item.get("ts")) is None:
-            return False
-        self.core.records.update("memo", item["ts"], pinned=added)
-        return True
+    async def head_action(self, name: str, params: dict) -> dict | None:
+        if name != "memo_pin":
+            return None
+        key = str(params.get("id") or "")
+        if self.core.records.get("memo", key) is None:
+            raise ValueError("メモがありません")
+        pinned = params.get("pinned")
+        if not isinstance(pinned, bool):
+            raise ValueError("pinned は真偽値にしてください")
+        return self.core.records.update("memo", key, pinned=pinned)
 '''
 
 
@@ -69,14 +71,15 @@ def env(config, store, tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_model", FakeAI())
     channels = {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C50": "5-memo"}
     assistant, slack = make_assistant(config, store, channels,
-                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+                                      notion=FakeNotion(), hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack
 
 
 
 
 async def post_memo(assistant, text="牛乳を買う"):
-    await assistant.on_mention({"channel": "C50", "user": "UME", "ts": "50.1", "text": f"<@UBOT> {text}"})
+    assistant.remember_message("C50", "50.1", "owner", text, "50.1")
+    await assistant.submit(Request("C50", "memo", "50.1", "50.1", text))
     await settle(assistant)
 
 
@@ -92,47 +95,41 @@ class FakeAgent:
         return a2a.TaskResult(state=self.state, text=json.dumps(self.reply))
 
 
-async def test_a_user_module_answers_in_its_channel_and_is_introduced(env, config):
-    scheduler, assistant, slack = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C50"})
-    assert slack.texts() == ["Kei Agent です。このチャンネルの用事はメモエージェントに取り次ぎます。\n"
-                             "ここに書いたことをメモするよ。"]
-    assert not (config.research_root / "memo").exists()         # 研究テーマにはしない
-
+async def test_a_user_module_answers_in_its_workspace(env, config):
+    _, assistant, slack = env
     await post_memo(assistant)
-
-    pinned, answer = slack.posted()[1:]
+    pinned, answer = slack.posted()
     assert (pinned["channel"], pinned["text"], pinned["unfurl_links"]) == ("C50", "📌 牛乳を買う", False)
     assert (answer["thread_ts"], answer["text"]) == ("50.1", "メモしたよ")
-    # 依頼の 👀 は ✅ に変わる
-    reactions = [(name, kw["name"]) for name, kw in slack.calls if name.startswith("reactions_")]
-    assert reactions == [("reactions_add", "eyes"), ("reactions_remove", "eyes"), ("reactions_add", "white_check_mark")]
+    assert not (config.research_root / "memo").exists()
 
 
 async def test_a_broken_module_says_so_instead_of_staying_silent(env, store):
     scheduler, assistant, slack = env
     await post_memo(assistant, "こわして")
-    assert any(kw.get("name") == "warning" for name, kw in slack.calls if name == "reactions_add")
+    assert any(kw.get("thread_ts") == "50.1" and kw["text"] for kw in slack.posted())
     assert any("#memo の依頼の処理が落ちました" in text for text in slack.texts())
 
 
-async def test_a_user_module_runs_its_schedule_and_owns_its_reactions(env, store):
-    """利用者のモジュールの定期処理は決まった順に並び、自分の投稿へのリアクションは自分に届く。"""
+async def test_a_user_module_runs_its_schedule_and_handles_mcp_operations(env, store):
+    """利用者のモジュールの定期処理と MCP 操作が、コアを直さずに使える。"""
     scheduler, assistant, slack = env
     await post_memo(assistant)
 
-    assert task_names(assistant.config) == ("night", "literature", "reading", "toggl_import", "tidy", "daily",
+    assert task_names(assistant.config) == ("night", "toggl_import", "tidy", "daily",
                                            "review", "maintenance")
     assert await scheduler.run_task("tidy", "2026-09-27") == {"status": "done", "count": 1}
 
     memo_ts = next(row["key"] for row in store.module_records("memo", "memo"))
 
-    event = {"reaction": "pushpin", "user": "UME", "item_user": "UBOT",
-             "item": {"type": "message", "channel": "C50", "ts": memo_ts}}
-    await assistant.on_reaction_added(event)
-    assert assistant.modules["memo"].core.records.get("memo", memo_ts)["pinned"] is True
-    await assistant.on_reaction_removed(event)
-    assert assistant.modules["memo"].core.records.get("memo", memo_ts)["pinned"] is False
+    answer = await assistant.module_head_action("memo_pin", {"id": memo_ts, "pinned": True})
+    assert answer["pinned"] is True
+    await assistant.module_head_action("memo_pin", {"id": memo_ts, "pinned": False})
+    assert assistant.cores["memo"].records.get("memo", memo_ts)["pinned"] is False
+    for params in ({"id": "missing", "pinned": True}, {"id": memo_ts, "pinned": "yes"}):
+        with pytest.raises(ValueError):
+            await assistant.module_head_action("memo_pin", params)
+    assert assistant.cores["memo"].records.get("memo", memo_ts)["pinned"] is False
 
 
 async def test_a_module_without_an_ai_can_ask_its_process(env):
@@ -154,25 +151,23 @@ async def test_the_reason_an_agent_gave_reaches_the_trouble_channel(env):
     assert "export.arxiv.org" not in notice
 
 
-async def test_one_broken_reaction_hook_does_not_stop_the_others(env, monkeypatch):
-    """あるモジュールのリアクションの処理が落ちても、ほかのモジュールには届き、落ちたことは知らせる。"""
-    scheduler, assistant, slack = env
+async def test_a_failed_mcp_operation_leaves_other_operations_available(env, monkeypatch):
+    _, assistant, _ = env
+    await post_memo(assistant)
+    original = assistant.modules["memo"].head_action
 
-    async def broken(event, added):
-        raise RuntimeError("こわれた")
+    async def broken(name, params):
+        if name == "memo_broken":
+            raise RuntimeError("こわれた")
+        return await original(name, params)
 
-    monkeypatch.setattr(assistant.modules["knowledge"], "on_reaction", broken)
-    seen = []
-
-    async def memo(event, added):
-        seen.append(event["reaction"])
-        return True
-
-    monkeypatch.setattr(assistant.modules["memo"], "on_reaction", memo)
-    await assistant.on_reaction_added({"reaction": "pushpin", "user": "UME",
-                                       "item": {"type": "message", "channel": "C50", "ts": "1.1"}})
-    assert seen == ["pushpin"]
-    assert any("モジュール「knowledge」がリアクションを扱えませんでした" in text for text in slack.texts())
+    monkeypatch.setattr(assistant.modules["memo"], "head_action", broken)
+    with pytest.raises(RuntimeError, match="こわれた"):
+        await assistant.module_head_action("memo_broken", {})
+    key = assistant.cores["memo"].records.items("memo")[0]
+    memo_ts = next(row["key"] for row in assistant.store.module_records("memo", "memo"))
+    await assistant.module_head_action("memo_pin", {"id": memo_ts, "pinned": True})
+    assert key["text"] == "牛乳を買う" and assistant.cores["memo"].records.get("memo", memo_ts)["pinned"] is True
 
 
 async def test_notice_once_and_themes_through_the_core(env, config):

@@ -106,8 +106,13 @@ def parse(text: str, name: str = AGENTS_FILE) -> dict:
         engine, model, effort, folder = row["engine"], row["model"], row["effort"], row.get("folder", "")
         accounts = {key: row.get(key, "") for key in ("claude_account", "codex_account", "claude_email", "engines")
                     if row.get(key, "")}
+        # クラウドへ移した担当の旧 AI 設定は使わない。既存の表で機械同期の起動を妨げない。
+        cloud_only = module in {"course", "knowledge"}
+        if cloud_only:
+            engine = model = effort = ""
+            accounts = {}
         has_ai = module == ROUTER or (module in known and known[module].actor is not None)
-        if folder and (module in CORE_ROWS or not has_ai):
+        if folder and (module in CORE_ROWS or (not has_ai and not cloud_only)):
             raise TableError(f"{where}: folder を書けるのは、AI を使う担当の行だけです")
         if accounts and not has_ai:
             raise TableError(f"{where}: claude_account・codex_account・claude_email・engines を書けるのは、"

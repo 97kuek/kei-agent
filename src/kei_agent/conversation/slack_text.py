@@ -17,17 +17,8 @@ def escape(text: str) -> str:
     """
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-# 依頼のメッセージにつけるリアクション（受け取った、答えた、止まった、上限が明けるまで待たせた）と、夜間の Task にする印
-SEEN_REACTION = "eyes"
-DONE_REACTION = "white_check_mark"
-FAILED_REACTION = "warning"
-HOLD_REACTION = "hourglass_flowing_sand"
-NIGHT_REACTION = "crescent_moon"
-
-# Claude が依頼者の判断を待つときに、返答の最後の行をこれで始める（各担当の指示書と prompts/head.md）
+# AI が依頼者の判断を待つときに、返答の最後の行をこれで始める（各担当の指示書）
 AWAITING_MARKER = "❓ 確認:"
-# 作業がひと段落して、新しいスレッドで続けたほうがよいときに、返答の最後の行をこれで始める（handoff.py）
-HANDOFF_MARKER = "🧵 区切り:"
 
 SLACK_TEXT_LIMIT = 11000
 

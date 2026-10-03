@@ -1,14 +1,14 @@
 # 声のモジュール（docs/architecture.md の「声」）。本体やモジュールの出来事を喋って知らせ、マイクで会話する
-api = 1
+api = 2
 name = "voice"
 label = "声"
-description = "本体やモジュールの出来事（依頼が終わった、締切が近い、など）を喋って知らせる。App Home で「聞く」を入れると、マイクで会話する"
+description = "本体やモジュールの出来事をMacや机のロボットで喋って知らせる。通常の音声通話はDotを使い、Macのマイクで話す場合はMCPのvoiceで「聞く」を入れる"
 
-# 担当プロセス（A2A の受け口と、マイクの会話）。鍵は秘密情報の kei-agent-voice.zsh（OPENAI_API_KEY）。
+# 担当プロセス（A2A サーバーと、マイクの会話）。鍵は秘密情報の kei-agent-voice.zsh（OPENAI_API_KEY）。
 # 声の種類は KEI_AGENT_REALTIME_VOICE、マイクは KEI_AGENT_MIC、Stack-chan の住所は KEI_AGENT_STACKCHAN_URL
 [process]
 port = 8790
 
 # 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
 [secrets]
-OPENAI_API_KEY = { description = "OpenAI の API キー（マイクでの会話。App Home の「聞く」に使う。喋って知らせるだけなら要らない）", own_file = true }
+OPENAI_API_KEY = { description = "OpenAI の API キー（Mac での音声通知・マイクの会話に使う。Dot の通話だけなら要らない）", own_file = true }

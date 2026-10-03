@@ -290,19 +290,6 @@ def test_waseda_calendar_years_weekdays_and_periods():
     assert WASEDA.at(date(2026, 9, 21), 9) is None         # 無い時限
 
 
-def test_course_reads_box_and_fully_manages_the_course_notion_through_the_gateway(config):
-    """Box は読むだけ。Notion はゲートウェイ（授業ホームの中）で全部でき、アカウントの Notion 連携は使わない。"""
-    from kei_agent.execution import guard
-    from kei_agent.execution.agent_policy import policy_of
-    from kei_agent.workspaces import themes
-
-    ws = themes.agent_workspace(config, "course")
-    permissions = guard.claude_permissions(config, ws, policy_of("course"))
-    box = [n for n in permissions["allow"] if n.startswith("mcp__claude_ai_Box__")]
-    assert box and not [n for n in box if any(w in n for w in ("upload", "create", "update", "move", "copy", "set_"))]
-    # 「提出済みにして」も「このページを移して」も頼める（ゲートウェイの道具を全部）
-    assert "mcp__kei-notion" in permissions["allow"]
-    assert "mcp__claude_ai_Notion" in permissions["deny"]
 
 
 def test_course_notion_goes_through_the_gateway_as_course(monkeypatch):

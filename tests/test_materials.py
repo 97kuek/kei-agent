@@ -1,4 +1,4 @@
-"""頭に渡す材料（scheduling/materials.py）。手の口の読む道具（agenda・reading・recent・jobs）が返すもの。"""
+"""頭に渡す材料（scheduling/materials.py）。MCP の読む道具（agenda・reading・recent・jobs）が返すもの。"""
 
 import json
 import time
@@ -29,13 +29,18 @@ async def test_the_agenda_mixes_classes_meetings_and_deadlines_in_time_order(ass
             {"kind": "due", "title": "レポート", "course": "統計", "at": "2026-10-03T00:00"},
             {"kind": "due", "title": "遠い", "at": "2026-10-20T12:00"}],
             "work": [{"kind": "meeting", "subject": "定例", "start": "2026-10-02T10:00", "end": "2026-10-02T11:00",
-                      "location": "会議室"}]}, ["知識"]
+                      "location": "会議室", "url": "https://outlook.example/event/1",
+                      "join_url": "https://teams.microsoft.com/l/meetup-join/example", "passcode": "123456"}]}, ["知識"]
 
     monkeypatch.setattr(assistant, "module_agenda", agenda)
     found = await materials.agenda(assistant, 1, now=NOW)
     assert [(i["kind"], i["start"], i["title"]) for i in found["items"]] == [
         ("会議", "10:00", "定例"), ("授業", "13:00", "機械学習"), ("締切", "24:00", "レポート")]
     assert found["items"][0]["where"] == "会議室" and found["items"][2]["date"] == "2026-10-02"
+    meeting = found["items"][0]
+    assert meeting["url"] == "https://outlook.example/event/1"
+    assert meeting["join_url"] == "https://teams.microsoft.com/l/meetup-join/example"
+    assert meeting["passcode"] == "123456"
     assert found["unread"] == ["知識"] and (found["from"], found["to"]) == ("2026-10-02", "2026-10-02")
     # 長さは 1〜14 日に収める
     assert (await materials.agenda(assistant, 99, now=NOW))["to"] == "2026-10-15"

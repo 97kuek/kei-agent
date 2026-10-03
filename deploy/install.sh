@@ -7,10 +7,9 @@
 #         deploy/install.sh research      研究エージェント（A2A サーバー）を登録
 #         deploy/install.sh research remove 研究エージェントの登録を外す
 #         deploy/install.sh work          仕事エージェント（担当プロセスを持つモジュール）を登録
-#         deploy/install.sh knowledge     知識エージェント（担当プロセスを持つモジュール）を登録
 #         deploy/install.sh voice         声（A2A サーバー＋マイク）を登録
-#         deploy/install.sh notion        Notion のゲートウェイ（Notion に届く唯一の口）を登録
-#         deploy/install.sh tunnel        手の口のトンネル（ChatGPT から手の口に届ける。deploy/run-tunnel.sh）を登録
+#         deploy/install.sh notion        Mac の Notion ゲートウェイを登録
+#         deploy/install.sh tunnel        MCP のトンネル（Dot から MCP サーバーに届ける。deploy/run-tunnel.sh）を登録
 #         deploy/install.sh <名前> print  登録する plist を表示するだけ（登録はしない）
 set -eu
 

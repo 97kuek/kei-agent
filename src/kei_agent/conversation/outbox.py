@@ -1,15 +1,4 @@
-"""Slack につながないときの、Slack の代わり（知らせの置き場）。
-
-Slack の受け口は頭（OpenAI Dots）が受け持ち、Kei Agent は Slack にいない（GitHub issue #17）。それでも本体と
-モジュールは、ジョブが終わった・困りごと・課題の新着などを、これまでどおり「Slack に投稿する」つもりで書く。
-その投稿を Slack に送らず、知らせとしてためる。頭は手の口の notices で読み、自分の名前で Slack に出す。
-
-- chat_postMessage … 知らせを1件ためる（どのチャンネル・どのスレッドへのつもりだったかも残す）
-- chat_update … ためた知らせの本文を書き換える（困りごとの知らせは、同じ1件を書き足していく）
-- files_upload_v2 … 添付の中身を知らせに付ける
-- チャンネルの一覧 … 研究テーマと、本体・モジュールのチャンネルの名前を、そのまま ID として返す
-- リアクション・作業中の表示・App Home・入力の画面 … 何もしない（Slack にいないので見せる先がない）
-"""
+"""Dot に渡す通知を保存する。MCP notices の取得後、配信成功の確認応答で配信済みにする。"""
 
 from __future__ import annotations
 
@@ -25,10 +14,6 @@ KEEP_DAYS = 7
 FILE_CHARS = 20000
 RECORDS = "outbox"
 KIND = "notice"
-
-
-class OutboxError(RuntimeError):
-    """Slack にいないので、できない操作（流して見せる返事など）。呼び出し側は今までどおりの形に戻る。"""
 
 
 class Outbox:
@@ -89,7 +74,8 @@ class Outbox:
     def channel_names(self) -> list[str]:
         config = self.config
         names = [*config.overview_channels, *config.improve_channels,
-                 *(name for names in config.module_channels.values() for name in names), *themes.all_themes(config)]
+                 *(name for names in config.module_channels.values() for name in names),
+                 *themes.all_themes(config), *themes.all_projects(config)]
         return [name for name in dict.fromkeys(names) if "*" not in name]
 
     async def conversations_list(self, **_) -> dict:
@@ -99,46 +85,6 @@ class Outbox:
     async def conversations_info(self, channel: str, **_) -> dict:
         return {"ok": True, "channel": {"id": channel, "name": channel}}
 
-    async def conversations_replies(self, **_) -> dict:
-        return {"ok": True, "messages": []}
-
-    async def chat_getPermalink(self, channel: str = "", message_ts: str = "", **_) -> dict:
-        return {"ok": True, "permalink": ""}
-
-    async def auth_test(self) -> dict:
-        return {"ok": True, "user_id": "", "url": "", "team_id": ""}
-
-    # Slack にいないので、何もしないもの
-
-    async def reactions_add(self, **_) -> dict:
-        return {"ok": True}
-
-    async def reactions_remove(self, **_) -> dict:
-        return {"ok": True}
-
-    async def views_publish(self, **_) -> dict:
-        return {"ok": True}
-
-    async def views_open(self, **_) -> dict:
-        return {"ok": True}
-
-    async def views_update(self, **_) -> dict:
-        return {"ok": True}
-
-    async def assistant_threads_setStatus(self, **_) -> dict:
-        raise OutboxError("Slack にいません")
-
-    async def agents_sessions_setStatus(self, **_) -> dict:
-        raise OutboxError("Slack にいません")
-
-    async def chat_startStream(self, **_) -> dict:
-        raise OutboxError("Slack にいません")
-
-    async def chat_appendStream(self, **_) -> dict:
-        raise OutboxError("Slack にいません")
-
-    async def chat_stopStream(self, **_) -> dict:
-        raise OutboxError("Slack にいません")
 
 
 def _blocks_text(blocks: list | None) -> str:

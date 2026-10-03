@@ -1,4 +1,4 @@
-"""1回分の依頼。Slack のメッセージ、ジョブの完了、声、夜間の Task のどれからも作る。"""
+"""1回分の依頼。MCP、ローカルの依頼、ジョブの完了、声、夜間の Task のどれからも作る。"""
 
 from __future__ import annotations
 
@@ -10,12 +10,11 @@ class Request:
     channel: str
     channel_name: str
     thread_ts: str
-    # リアクションをつける元のメッセージ。ジョブ完了で再開するときは None
+    # 依頼元の投稿番号。自動処理では None
     message_ts: str | None
     text: str
     # message（依頼者の投稿） / job / voice / night / handoff
     trigger: str = "message"
-    files: list[dict] = field(default_factory=list)
     # これ以降に更新された outputs/ のファイルも添付する（ジョブが作ったファイル用）
     outputs_since: float | None = None
     # 終わったあと、依頼者の返事待ちとして扱う（失敗したジョブのあとなど）

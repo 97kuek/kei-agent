@@ -1,6 +1,6 @@
 """声のレイヤからの問い合わせを受ける、本体の A2A の口（docs/architecture.md の「声」）。
 
-担当のエージェント（研究・大学・仕事）を呼べるのは本体だけ。声からの「研究・授業・仕事の中身を教えて」は
+担当のエージェント（研究・仕事）を呼べるのは本体だけ。声からの「研究・仕事の中身を教えて」は
 ここで受けて、読むだけで担当に頼み、Slack に出すときと同じ出力の確認を通した文だけを返す
 （Assistant.answer_question）。住所は `config.toml` の `[a2a] orchestrator`。
 """
@@ -20,22 +20,22 @@ from kei_agent_a2a.server import build_app
 
 log = logging.getLogger(__name__)
 
-NO_QUESTION = '依頼は JSON（{"actor": "research|course|work", "question": "…", "theme": "…"}）で渡してください'
+NO_QUESTION = '依頼は JSON（{"actor": "research|work", "question": "…", "theme": "…"}）で渡してください'
 
 
 def build_card(base_url: str) -> AgentCard:
     return agent_card(
         "Kei Agent（本体）",
-        "声のレイヤからの問い合わせを受け、研究・大学・仕事の担当に読むだけで聞いて、確かめた答えを返す",
+        "声のレイヤからの問い合わせを受け、研究・仕事の担当に読むだけで聞いて、確かめた答えを返す",
         base_url,
         input_modes=("application/json",),
         skills=[AgentSkill(
             id=ASK,
             name="担当に聞く",
-            description="JSON（actor: research|course|work、question、研究なら theme）を受け取り、"
+            description="JSON（actor: research|work、question、研究なら theme）を受け取り、"
                         "その担当に読むだけで聞いて、Slack に出すときと同じ確認を通した答えを返す",
             tags=["voice"],
-            examples=['{"actor": "course", "question": "今日の授業は？"}'],
+            examples=['{"actor": "work", "question": "今日の会議は？"}'],
         )],
     )
 

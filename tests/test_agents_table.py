@@ -46,7 +46,7 @@ def test_the_table_decides_modules_channels_and_engines(tmp_path):
     assert config.overview_channels == ("overview", "research-overview")
     assert config.improve_channels == ("kei-agent",)
     assert config.agent_profiles["research"].provider == "codex"
-    assert config.agent_profiles["course"].model == "claude-sonnet-5"
+    assert "course" not in config.agent_profiles
     # 表に無い担当は未選択
     assert config.agent_profiles["daily"].provider == ""
 
@@ -62,7 +62,7 @@ def test_a_pinned_model_applies_to_every_use_case_except_manual_ones(tmp_path):
     # 表と違う provider（頭が engines のほかの AI を選んだとき）は、用途ごとの選び分け
     assert resolve("research", "codex", "research_extract").model == "gpt-6-luna"
     # 空欄の担当は用途ごとの選び分けのまま
-    assert resolve("course", "claude", "course_degree_plan").model == "claude-opus-5"
+    assert resolve("work", "claude", "work_decide").model == "claude-opus-5"
 
 
 @pytest.mark.parametrize(("rows", "said"), [
@@ -131,17 +131,22 @@ def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
     assert "enabled = false" in capsys.readouterr().out
 
 
-def test_app_home_shows_the_engine_and_the_account_from_the_table(tmp_path):
-    from kei_agent.conversation.home import build_home
+def test_workspaces_and_profiles_use_the_engine_and_account_from_the_table(tmp_path):
+    from fakes import make_assistant
 
-    home = _home(tmp_path, HEADER + "knowledge,true,,codex,,\n")
+    from kei_agent.conversation.hands import Hands
+
+    home = _home(tmp_path, HEADER + "work,true,,codex,,\n")
     config = _load(home)
-    config = replace(config, agent_profiles={**config.agent_profiles, "knowledge": replace(
-        config.agent_profiles["knowledge"], codex_account="~/.codex-work")})
-    text = str(build_home(config, Store(config.db_path), True))
-    assert "知識  Codex（~/.codex-work）" in text
-    # 選べる欄は無い（変えるのは agents.csv だけ）
-    assert "static_select" not in text and "kei_agent_home_provider" not in text
+    account = str(tmp_path / "codex-work")
+    config = replace(config, agent_profiles={**config.agent_profiles, "work": replace(
+        config.agent_profiles["work"], codex_account=account)})
+    assistant, _ = make_assistant(config, Store(tmp_path / "test.sqlite3"))
+    workspace, = Hands(assistant).workspaces()
+    assert (workspace["name"], workspace["agent"], workspace["kind"]) == ("work", "仕事", "担当")
+    assert "codex" in workspace["engines"]
+    profile = assistant.config.agent_profiles["work"]
+    assert profile.provider == "codex" and profile.codex_account == account
 
 
 def test_the_folder_column_decides_where_agents_work(tmp_path):
@@ -193,7 +198,7 @@ def test_an_agent_runs_with_the_account_written_in_its_row(tmp_path):
     assert work["CLAUDE_CONFIG_DIR"] == str((tmp_path / "claude-work").resolve())
     assert work["CODEX_HOME"] == str((tmp_path / "codex-work").resolve())
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in work           # 共通の鍵が残ると、アカウントのフォルダより先に使われる
-    course = runner.build_env(config, base, "C1", "1.1", policy_of("course"))
+    course = runner.build_env(config, base, "C1", "1.1", policy_of("research"))
     assert course["CLAUDE_CONFIG_DIR"] == "/default" and "CODEX_HOME" not in course
     with pytest.raises(ConfigError, match="AI を使う担当の行だけ"):
         _load(_home(tmp_path / "x", header + "notion,true,,,,,~/a,\n") if (tmp_path / "x").mkdir() is None else None)

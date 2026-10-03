@@ -22,8 +22,8 @@ def request(config, *, actor="research", provider="claude", use_case="research_e
             session_id=None, read_only=False):
     if actor == "router":
         ws = router.workspace(config)
-    elif actor == "course":
-        ws = themes.agent_workspace(config, "course")
+    elif actor == "work":
+        ws = themes.agent_workspace(config, "work")
     else:
         ws = themes.resolve(config, "vlm")
     return runner.ExecutionRequest(ws, resolve(actor, provider, use_case), session_id, "C1", "1.1", read_only)
@@ -126,8 +126,8 @@ def test_research_claude_command_loads_only_its_plugin_and_the_scoped_notion_mcp
 
 
 def test_agent_plugin_dir_refuses_an_unknown_agent(config):
-    # 大学はモジュール。skill とフックは modules/course/plugin
-    assert config.agent_plugin_dir("course") == config.repo_root / "modules" / "course" / "plugin"
+    # 仕事はモジュール。skill とフックは modules/work/plugin
+    assert config.agent_plugin_dir("work") == config.repo_root / "modules" / "work" / "plugin"
     with pytest.raises(ValueError, match="未知のagent"):
         config.agent_plugin_dir("voice")
 
@@ -175,7 +175,7 @@ def test_resolved_recipe_sends_claude_effort_only_when_enabled(config):
 
 def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skills(config, tmp_path):
     research = resolve_contract(config, request(config, provider="codex"))
-    course = resolve_contract(config, request(config, actor="course", provider="codex", use_case="course_explain"))
+    work = resolve_contract(config, request(config, actor="work", provider="codex", use_case="work_single_source"))
     router_contract = resolve_contract(config, request(
         config, actor="router", provider="codex", use_case=UseCase.ROUTING, read_only=True))
     target = tmp_path / ".agents" / "skills"
@@ -188,12 +188,12 @@ def test_codex_skills_are_scoped_to_the_current_agent_without_removing_user_skil
     assert wandb.is_symlink()
     assert wandb.resolve() == config.agent_plugin_dir("research") / "skills" / "managing-wandb"
     assert not (target / "managing-academic-record").exists()
-    runner.install_agent_skills(course, tmp_path)
+    runner.install_agent_skills(work, tmp_path)
 
     assert user_skill.is_dir()
     assert {path.name for path in target.iterdir() if path.is_symlink()} == {
-        path.name for path in course.skill_dir.iterdir() if (path / "SKILL.md").is_file()
-    } | {"keeping-notion-format"}                         # 大学は Notion を使うので、共通の skill も渡す
+        path.name for path in work.skill_dir.iterdir() if (path / "SKILL.md").is_file()
+    }                         # 仕事は Notion の skill を持たない
     # 振り分けに切り替えると、前に入れた担当の skill を外す
     runner.install_agent_skills(router_contract, tmp_path)
     assert not [path for path in target.iterdir() if path.is_symlink()]
@@ -255,16 +255,16 @@ def test_codex_router_command_is_untrusted_directory_safe_and_has_no_connectors(
 
 def test_codex_shows_only_the_read_tools_of_the_apps_in_the_table(config):
     """Codex App は、表に書いた App の読む道具だけ。アップロードや共有の道具はモデルに見せない。"""
-    box = next(app for app in policy_of("course").codex_apps if app.name == "Box")
-    execution = request(config, actor="course", provider="codex", use_case="course_explain")
-    configs = codex_configs(runner.build_command(config, execution, apps={"Box": "asdk_app_1"}))
+    box = next(app for app in policy_of("work").codex_apps if app.name == "Microsoft Outlook Email")
+    execution = request(config, actor="work", provider="codex", use_case="work_single_source")
+    configs = codex_configs(runner.build_command(config, execution, apps={"Microsoft Outlook Email": "asdk_app_1"}))
 
     assert "apps._default.enabled=false" in configs
     assert "apps.asdk_app_1.default_tools_enabled=false" in configs
     assert 'apps.asdk_app_1.default_tools_approval_mode="approve"' in configs
     tools = tomllib.loads("tools=" + next(item.split("=", 1)[1] for item in configs
                                           if item.startswith("apps.asdk_app_1.tools=")))["tools"]
-    assert set(tools) == set(box.tools) and "box.upload_file" not in tools
+    assert set(tools) == set(box.tools) and "microsoft_outlook_email.send_message" not in tools
     assert all(value == {"enabled": True} for value in tools.values())
 
 
@@ -274,9 +274,9 @@ def test_codex_turns_off_only_plugin_suggestions(config):
         return {command[i + 1] for i, arg in enumerate(command) if arg == "--disable"}
 
     research = runner.build_command(config, request(config, provider="codex"))
-    course = runner.build_command(config, request(config, actor="course", provider="codex", use_case="course_explain"))
+    work = runner.build_command(config, request(config, actor="work", provider="codex", use_case="work_single_source"))
 
-    assert disabled(research) == disabled(course) == {"tool_suggest"}
+    assert disabled(research) == disabled(work) == {"tool_suggest"}
 
 
 def test_apply_codex_events_maps_thread_message_and_activities():
@@ -359,7 +359,7 @@ def test_env_strips_kei_agent_tokens_and_every_notion_key():
     assert env == {"KEI_AGENT_CONFIG": "/tmp/config.toml"}
 
 
-@pytest.mark.parametrize("agent", ["research", "course", "work", "router", "improve", None])
+@pytest.mark.parametrize("agent", ["research", "work", "work", "router", "improve", None])
 def test_notion_agents_carry_only_their_home_token_never_the_master(config, agent):
     """子が持つのは自分のホームにしか届かない合言葉だけ。親の合言葉があれば全部のホームに届いてしまう。
     Notion を使わない担当には、合言葉を何も渡さない。"""
@@ -374,7 +374,7 @@ def test_notion_agents_carry_only_their_home_token_never_the_master(config, agen
     assert "NOTION_TOKEN" not in env and "NOTION_COURSE_TOKEN" not in env
     assert "KEI_AGENT_NOTION_GATEWAY_TOKEN" not in env
     assert not any("master" in value for value in env.values())
-    if agent in ("research", "course"):
+    if agent == "research":
         assert env["KEI_AGENT_NOTION_GATEWAY_AUTH"] == f"Bearer {gateway_client_token('master', agent)}"
     else:
         assert "KEI_AGENT_NOTION_GATEWAY_AUTH" not in env
