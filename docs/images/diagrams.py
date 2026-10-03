@@ -1,4 +1,4 @@
-"""文書の4図を、ローカルのアイコン・正式名・接続方式で作る。
+"""文書の6図を、ローカルのアイコン・正式名・接続方式で作る。
 
 `uv run python docs/images/diagrams.py` で SVG を作り直す。
 アイコンを埋め込むので、GitHub でも単独で表示できる。
@@ -98,39 +98,42 @@ class Drawing:
 
 
 def overview() -> Drawing:
-    d = Drawing("overview", 800, 500, "Kei Agent の全体像",
-                "Kei Agent は、クラウドの Dot と Mac の実行サービスを合わせたアシスタント。")
-    d.frame(193, 65, 589, 418, "Kei Agent")
-    d.frame(210, 106, 252, 359, "クラウド", CLOUD)
-    d.frame(551, 106, 214, 359, "ローカル", MAC)
-    d.node(80, 108, "user", "あなた", size=40)
-    d.node(80, 241, "slack", "Slack")
-    d.node(80, 400, "phone", "通話", "依頼・結果は Slack へ")
-    d.arrow([(80, 171), (80, 211)], "入力", label_at=(107, 193))
-    d.arrow([(50, 108), (25, 108), (25, 400), (50, 400)], "音声", label_at=(25, 313))
-    d.node(337, 241, "chatgpt", "Dot", "対話・大学・知識・Outlook", size=48)
-    d.arrow([(111, 241), (303, 241)], "Slack 接続", both=True)
-    d.arrow([(111, 400), (175, 400), (175, 276), (303, 276)], "音声 API", both=True,
-            label_at=(229, 268))
-    d.node(658, 241, "mac", "Mac", "担当を動かす", size=48)
-    d.arrow([(371, 241), (624, 241)], "MCP", both=True)
-    d.node(273, 395, "code", "プラグイン", "外部サービス")
-    d.node(410, 395, "calendar", "定期処理", "Daily・振り返り")
-    d.arrow([(320, 307), (273, 342), (273, 365)], "API", label_at=(283, 333))
-    d.arrow([(356, 307), (410, 342), (410, 365)], "予定", label_at=(398, 333))
-    d.frame(569, 331, 178, 113, "Mac の担当")
-    d.text(658, 381, "AI: 研究・仕事", size=12, weight="bold")
-    d.text(658, 405, "機械同期: Moodle", size=12, weight="bold")
-    d.text(658, 427, "秘密情報と作業場は Mac", size=10, color=LINE)
-    d.arrow([(658, 307), (658, 331)], "A2A", label_at=(694, 320))
+    d = Drawing("overview", 880, 570, "Kei Agent — 担当と実行場所",
+                "Dot は任意の窓口。研究・仕事は Mac の AI、大学・知識の対話は Dot の役割。")
+    d.frame(160, 72, 700, 156, "クラウド / 任意のオーケストレーション", CLOUD)
+    d.frame(160, 255, 700, 289, "Mac", MAC)
+    d.node(76, 145, "slack", "Slack / 通話", "依頼・結果", size=42, label_size=13)
+    d.node(258, 145, "chatgpt", "Dot", "対話・担当への依頼", size=46)
+    d.arrow([(107, 145), (225, 145)], "会話", both=True)
+    d.node(500, 145, "moodle", "course / 大学", "予定・課題の相談", size=40, label_size=13)
+    d.node(733, 145, "document", "knowledge / 知識", "資料を読み、整理する", size=40, label_size=13)
+    d.arrow([(291, 137), (467, 137)], "Dot が担当")
+    d.arrow([(285, 113), (285, 103), (733, 103), (733, 116)], "Dot が担当",
+            label_at=(612, 104))
+    d.node(258, 325, "server", "Kei Agent MCP", "run・status・notices", size=42, label_size=13)
+    d.arrow([(258, 215), (258, 294)], "MCP", both=True, label_at=(289, 248))
+    d.node(494, 325, "research", "研究エージェント", "research / ローカル AI", size=42, label_size=13)
+    d.node(730, 325, "work", "work / 仕事", "会社の AI", size=42, label_size=13)
+    d.arrow([(289, 325), (462, 325)], "A2A")
+    d.arrow([(284, 295), (284, 285), (730, 285), (730, 295)], "A2A",
+            label_at=(612, 285))
+    d.node(258, 456, "moodle", "course / Moodle 同期", "機械同期 / ICS・API", size=40, label_size=12)
+    d.node(494, 456, "code", "Claude Code / Codex CLI", "テーマの作業場で実行", size=40, label_size=12)
+    d.node(730, 456, "claude", "Claude Code", "会社の作業場・資料", size=40, label_size=12)
+    d.arrow([(258, 398), (258, 428)], "A2A", label_at=(309, 418))
+    d.arrow([(494, 398), (494, 428)], "CLI", label_at=(520, 418))
+    d.arrow([(730, 398), (730, 428)], "CLI", label_at=(756, 418))
+    d.text(76, 312, "Dot を使わず", size=11, color=LINE)
+    d.text(76, 332, "MCP / CLI から", size=11, color=LINE)
+    d.text(76, 352, "直接使うことも可能", size=10, color=LINE)
     return d
 
 
 def architecture() -> Drawing:
     d = Drawing("architecture", 800, 610, "Mac の実行構造",
-                "Dot の依頼は MCP、担当への依頼は A2A。Notion はローカルの Gateway を通す。")
+                "MCP クライアントから担当へ A2A。Notion はローカルの Gateway を通す。")
     d.frame(152, 66, 516, 525, "Mac", MAC)
-    d.node(62, 147, "chatgpt", "Dot", size=48)
+    d.node(62, 147, "chatgpt", "Dot など", "任意の窓口", size=48)
     d.node(233, 147, "server", ("Secure MCP", "Tunnel"), "OpenAI", label_size=13)
     d.node(413, 147, "server", "Kei Agent MCP", "本体・通知・状態", label_size=13)
     d.node(591, 147, "server", ("Notion", "Gateway"), "ローカル API / MCP", label_size=13)
@@ -148,12 +151,12 @@ def architecture() -> Drawing:
         d.arrow([(x, 252), (x, 303)], "A2A", label_at=(x + 23, 278))
         d.node(x, 334, icon, label, caption, label_size=12)
     d.line([(224, 407), (224, 425), (354, 425)])
-    d.frame(176, 478, 237, 95, "研究", CLOUD)
+    d.frame(176, 478, 237, 95, "研究", NEUTRAL)
     d.node(238, 520, "claude", "Claude Code", size=40, label_size=12)
-    d.node(354, 520, "chatgpt", "Codex", size=40, label_size=12)
+    d.node(354, 520, "chatgpt", "Codex CLI", size=40, label_size=12)
     d.arrow([(238, 425), (238, 494)], "CLI", label_at=(257, 455))
     d.arrow([(354, 425), (354, 494)], "CLI", label_at=(373, 455))
-    d.frame(447, 478, 202, 95, "会社", CLOUD)
+    d.frame(447, 478, 202, 95, "会社", NEUTRAL)
     d.node(550, 520, "claude", "Claude Code", size=40, label_size=12)
     d.arrow([(413, 407), (413, 455), (550, 455), (550, 494)], "CLI", label_at=(490, 447))
     d.text(62, 231, "大学・知識は", size=11, color=LINE)
@@ -172,9 +175,9 @@ def architecture() -> Drawing:
 
 
 def dots_plan() -> Drawing:
-    d = Drawing("dots-plan", 800, 600, "Dot と Mac の役割",
-                "会話・プラグイン・予定はクラウド。秘密情報が必要な取り込みは Mac。")
-    d.frame(168, 65, 416, 518, "クラウド（Dot）", CLOUD)
+    d = Drawing("dots-plan", 800, 620, "Dot を使う構成 — 外部サービスとの接続",
+                "Dot のプラグイン・予定は利用者が設定する。Mac は MCP 経由で実行を受け持つ。")
+    d.frame(168, 65, 416, 518, "クラウド（任意の Dot）", CLOUD)
     d.frame(184, 104, 384, 214, "接続するプラグイン")
     plugins = ((235, 158, "notion", "Notion"), (327, 158, "box", "Box"),
                (419, 158, "outlook", ("Microsoft", "Outlook")),
@@ -186,15 +189,18 @@ def dots_plan() -> Drawing:
     d.node(376, 392, "chatgpt", "Dot", "大学・知識の質問も直接担当", size=48)
     d.arrow([(376, 362), (376, 318)], "プラグイン API", label_at=(434, 345))
     d.node(72, 392, "slack", "Slack")
-    d.node(72, 529, "phone", "通話", "依頼・結果は Slack へ")
+    d.node(72, 529, "phone", "通話", "許可した依頼・結果だけ")
+    d.text(72, 604, "Slack へ", size=11, color=LINE)
     d.arrow([(102, 392), (342, 392)], "Slack 接続", both=True)
-    d.arrow([(102, 529), (148, 529), (148, 428), (342, 428)], "音声 API", both=True,
+    d.arrow([(102, 529), (148, 529), (148, 428), (342, 428)], "Dot の通話", both=True,
             label_at=(235, 420))
     d.node(456, 521, "calendar", "定期処理", "Daily・振り返り・締切", size=40)
     d.arrow([(411, 461), (456, 493)], "予定", label_at=(445, 473))
-    d.frame(610, 316, 174, 267, "ローカル（Mac）", MAC)
-    d.node(697, 392, "mac", "Mac", "MCP・秘密情報", size=48)
+    d.frame(610, 316, 174, 153, "ローカル（Mac）", MAC)
+    d.node(697, 392, "mac", "Mac", "MCP・機械同期", size=48)
     d.arrow([(410, 392), (662, 392)], "MCP", both=True)
+    d.frame(610, 498, 174, 107)
+    d.text(697, 592, "外部サービス", size=12, color=LINE, weight="bold")
     d.node(656, 521, "moodle", "Moodle", size=40, label_size=12)
     d.node(742, 521, "toggl-track", "Toggl Track", size=40, label_size=12)
     d.arrow([(675, 461), (656, 491)], "ICS / API", label_at=(650, 480))
@@ -203,8 +209,8 @@ def dots_plan() -> Drawing:
 
 
 def schedule() -> Drawing:
-    d = Drawing("schedule", 800, 705, "1日の定期処理",
-                "Dot が知らせを届け、Mac が取り込みと実行を受け持つ（時刻は日本時間）。")
+    d = Drawing("schedule", 800, 705, "Dot を使う構成 — 1日の定期処理",
+                "Dot の予定を設定した場合の流れ。Mac の代替スケジュールとは重複させない（日本時間）。")
     d.frame(113, 67, 341, 570, "クラウド", CLOUD)
     d.frame(472, 67, 308, 570, "ローカル", MAC)
     d.node(284, 114, "chatgpt", "Dot", size=40)
@@ -235,22 +241,89 @@ def schedule() -> Drawing:
     d.text(662, 492, "時間記録を取り込む", size=13, weight="bold")
     d.text(662, 513, "API / 保守・バックアップ", size=11, color=LINE)
     d.node(160, 568, "document", "夜の Task", size=40, label_size=12)
-    d.text(302, 565, "今夜の作業を依頼", size=13, weight="bold")
+    d.text(302, 565, "Task を run で依頼", size=13, weight="bold")
     d.text(302, 586, "結果は元のスレッドへ", size=12, color=LINE)
     d.arrow([(417, 568), (493, 568)], "MCP")
     d.node(525, 568, "server", "Kei Agent MCP", size=40, label_size=11)
     d.text(667, 565, "担当が CLI を実行", size=13, weight="bold")
-    d.text(667, 586, "A2A → Claude Code / Codex", size=10, color=LINE)
+    d.text(667, 586, "A2A → Claude Code / Codex CLI", size=10, color=LINE)
     d.text(113, 658, "Dot: 毎時 notices → 元のチャンネル / 07:40 Outlook・Google Calendar の予定同期（API）",
            size=11, anchor="start", color=LINE)
     d.text(113, 678, "Mac: 起動・復帰と30分ごとに Moodle ICS、API 設定時は10分ごとに提出・受験終了を同期。",
            size=11, anchor="start", color=LINE)
-    d.text(113, 698, "Mac の処理は、Mac が開いている間に動く。", size=11, anchor="start", color=LINE)
+    d.text(113, 698, "Mac の処理は起動中に動く。代替の夜間処理は night モジュールを有効にした場合だけ。", size=11, anchor="start", color=LINE)
+    return d
+
+
+def research_execution() -> Drawing:
+    d = Drawing("research-execution", 880, 650, "研究 — 会話からローカル実行へ",
+                "AI の短い作業と、pueue で管理する長いジョブは、ともに Mac の作業場で動く。")
+    d.frame(18, 70, 280, 153, "クラウド / 任意の窓口", CLOUD)
+    d.frame(322, 70, 540, 444, "Mac / 研究の実行サービス", MAC)
+    d.node(80, 137, "slack", "Slack / 通話", size=38, label_size=12)
+    d.node(232, 137, "chatgpt", "Dot", size=42)
+    d.arrow([(109, 137), (202, 137)], "依頼")
+    d.node(395, 137, "server", "Kei Agent MCP", size=40, label_size=12)
+    d.node(600, 137, "research", "研究エージェント", "1つの担当で複数テーマを実行", size=42)
+    d.arrow([(263, 137), (366, 137)], "MCP run")
+    d.arrow([(425, 137), (569, 137)], "A2A")
+    d.node(600, 287, "code", "Claude Code / Codex CLI", "調査・実装・テスト", size=42, label_size=13)
+    d.arrow([(600, 207), (600, 256)], "CLI", label_at=(625, 239))
+    d.node(395, 427, "document", "成果物・ログ", size=42, label_size=12)
+    d.node(600, 427, "database", "テーマ別の作業場", "#1-vlm → ~/research/vlm", size=42, label_size=13)
+    d.text(600, 502, "#1-amr → ~/research/amr", size=11, color=LINE)
+    d.node(784, 287, "server", "pueue", "担当が検証・投入・監視", size=42, label_size=13)
+    d.arrow([(600, 357), (600, 396)], "読む・書く", label_at=(650, 378))
+    d.arrow([(630, 303), (754, 303)], "依頼ファイル", label_at=(693, 294))
+    d.arrow([(784, 358), (784, 427), (631, 427)], "作業場で実行", label_at=(750, 411))
+    d.arrow([(569, 427), (426, 427)], "保存")
+    d.arrow([(395, 397), (395, 209)], "状態・完了", label_at=(395, 316))
+    d.arrow([(366, 195), (310, 195), (310, 247), (232, 247), (232, 208)],
+            "status / notices", label_at=(253, 247))
+    d.node(80, 348, "slack", "元のスレッド", "結果・進捗の通知", size=40, label_size=13)
+    d.arrow([(209, 198), (180, 198), (180, 348), (110, 348)], "返信", label_at=(181, 296))
+    d.frame(18, 537, 844, 95, "拡張案 / 標準機能には含まれない")
+    d.node(796, 572, "server", "研究室サーバー", size=34, label_size=11)
+    d.parts.append('<path d="M600,514 L600,571 L748,571" fill="none" '
+                   'stroke="#8996a5" stroke-width="1.8" stroke-dasharray="6 5"/>')
+    d.text(387, 585, "SSH 連携 未実装", size=14, weight="bold")
+    d.text(387, 611, "転送・遠隔ジョブ管理のアダプターが必要", size=12, color=LINE)
+    return d
+
+
+def codex_execution() -> Drawing:
+    d = Drawing("codex-execution", 880, 560, "Codex — クラウドとローカル CLI の実行経路",
+                "このリポジトリの実行器はローカル CLI。Codex クラウドは別途設定する外部の作業経路。")
+    d.frame(18, 70, 410, 462, "クラウド / 外部ワークフロー", CLOUD)
+    d.frame(452, 70, 410, 462, "Mac / Kei Agent の実装", MAC)
+    d.node(112, 149, "chatgpt", "Dot / 利用者", "指示・環境を別途設定", size=42, label_size=13)
+    d.node(327, 149, "github", "GitHub", "リポジトリ", size=42)
+    d.node(220, 300, "chatgpt", "Codex クラウド", "クラウドの作業環境", size=46)
+    d.arrow([(112, 220), (112, 265), (190, 285)], "外部から依頼", label_at=(115, 255))
+    d.arrow([(327, 219), (327, 267), (251, 285)], "コードを取得", label_at=(327, 254))
+    d.node(220, 449, "github", "差分 / Pull Request", "レビューして反映", size=40, label_size=13)
+    d.arrow([(220, 373), (220, 418)], "変更を提出", label_at=(268, 398))
+    d.node(539, 149, "server", "Kei Agent MCP", "Dot などから run", size=42, label_size=12)
+    d.node(764, 149, "research", "研究エージェント", "research / 担当プロセス", size=42)
+    d.arrow([(570, 149), (732, 149)], "A2A")
+    d.node(764, 300, "chatgpt", "Codex CLI", "ローカル subprocess", size=46)
+    d.arrow([(764, 219), (764, 269)], "CLI", label_at=(789, 249))
+    d.node(552, 300, "database", "ローカル作業場", "編集・テスト・差分", size=42, label_size=13)
+    d.arrow([(731, 300), (583, 300)], "読み書き", both=True)
+    d.node(552, 449, "document", "結果・状態", "MCP へ返す", size=40, label_size=13)
+    d.arrow([(552, 373), (552, 418)], "保存", label_at=(580, 398))
+    d.text(744, 422, "push / PR は", size=13, weight="bold")
+    d.text(744, 444, "自動では行わない", size=12, color=LINE)
+    d.text(744, 482, "会社の仕事は現在 Claude", size=11, color=LINE)
+    d.text(744, 503, "通信を制限して実行", size=11, color=LINE)
+    d.text(20, 552, "クラウドへのジョブ投入 API は未実装。左の経路は、利用者が Codex 側の接続・権限を用意した場合。",
+           size=12, anchor="start", color=LINE)
     return d
 
 
 def main() -> None:
-    for drawing in (overview(), architecture(), dots_plan(), schedule()):
+    for drawing in (overview(), architecture(), dots_plan(), schedule(),
+                    research_execution(), codex_execution()):
         path = HERE / f"{drawing.name}.svg"
         path.write_text(drawing.svg(), encoding="utf-8")
         print(f"書いた: {path.relative_to(HERE.parent.parent)}")

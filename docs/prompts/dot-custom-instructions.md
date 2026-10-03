@@ -25,7 +25,7 @@
 - #3-work: 仕事。Outlook の予定・メールはプラグインで直接読む。会社の Claude アカウントが必要な Teams・SharePoint は run（workspace は work）。work-<名前> は Mac 上のプロジェクトの作業場。Teams・SharePoint が必要なら run の engine="claude" を使う
 - #4-knowledge: 共通ホームの知識・興味を Notion で読み、Zenn・Qiita・arXiv などを Web で検索して答える。保存・更新も Notion に直接行う。knowledge を run に渡さない
 - 毎朝の読みものは #4-knowledge に1記事1親投稿で出す。3記事なら3つの新規メッセージにする。各投稿にその記事の題・URL・要約・選んだ理由を入れ、それぞれのスレッドで質問や保存を受ける。複数記事を1通やまとめ投稿のスレッドにせず、#0-overview に記事・一覧・要約を出さない
-- #0-kei-agent: Kei Agent 自身の困りごとと直し。直すのは Codex（クラウド）で、依頼者が指定した Kei Agent のリポジトリに PR を出す。Mac の Kei Agent には頼まない
+- #0-kei-agent: Kei Agent 自身の困りごとと直し。接続・権限と外部ワークフローが設定されていれば Codex（クラウド）に依頼し、指定された Kei Agent のリポジトリに PR を出す。未設定なら不足を伝える。Mac の MCP run はローカル実行で、クラウドタスクや PR の自動作成ではない
 - 頼める作業場の一覧は workspaces で見る。一覧に無い名前で run しない
 
 守ること:

@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="800" height="705" viewBox="0 0 800 705" font-family="&#x27;Hiragino Sans&#x27;, &#x27;Hiragino Kaku Gothic ProN&#x27;, &#x27;Noto Sans JP&#x27;, &#x27;Yu Gothic&#x27;, sans-serif" role="img" aria-labelledby="title">
-<title id="title">1日の定期処理</title>
+<title id="title">Dot を使う構成 — 1日の定期処理</title>
 <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#61758b"/></marker></defs>
 <rect width="800" height="705" fill="#ffffff"/>
-<text x="20" y="25" font-size="18" fill="#233044" text-anchor="start" font-weight="bold">1日の定期処理</text>
-<text x="20" y="47" font-size="12" fill="#61758b" text-anchor="start" font-weight="normal">Dot が知らせを届け、Mac が取り込みと実行を受け持つ（時刻は日本時間）。</text>
+<text x="20" y="25" font-size="18" fill="#233044" text-anchor="start" font-weight="bold">Dot を使う構成 — 1日の定期処理</text>
+<text x="20" y="47" font-size="12" fill="#61758b" text-anchor="start" font-weight="normal">Dot の予定を設定した場合の流れ。Mac の代替スケジュールとは重複させない（日本時間）。</text>
 <rect x="113" y="67" width="341" height="570" rx="12" fill="#fff8f0" stroke="#e5c7a8" stroke-width="1.2"/>
 <text x="128" y="92" font-size="14" fill="#233044" text-anchor="start" font-weight="bold">クラウド</text>
 <rect x="472" y="67" width="308" height="570" rx="12" fill="#f1f6fc" stroke="#b5c9df" stroke-width="1.2"/>
@@ -58,7 +58,7 @@
 <text x="662" y="513" font-size="11" fill="#61758b" text-anchor="middle" font-weight="normal">API / 保守・バックアップ</text>
 <image x="140.0" y="548.0" width="40" height="40" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAACXBIWXMAAAsTAAALEwEAmpwYAAACtklEQVR4nO2dS24TQRRFjxgQwgoCowCbAAagsCM+i2DMRzFZBoOIfFgGkBWABCjhF2BWUUlmEqmNYndV3er7jvSm9r117O6oYpchCIIgCIIgCIJgHLaAHeAD8AtIleYj8BRYw5RbwNuKC54GZtdRwl3gq8DiJ0cJm8BngUVP5+YNcAUDDgUWO7lKeCCwyMn5crQzUPoP8BDYKPz8yV3C0UDhvPg1SO4Sfg6ULf3K/4f9PWGoaOvnTy4SVAXsulyOVAVcBl47vBNUBeAiQVmAhQR1AZOX0IOASUvoRcBkJfQkYJISehMwOQk9CpiUhF4FTEZCzwImIaF3Ad1LaC3gx0jb4d1KaC3gaOD5Hy3xWGs97qK2FvBqwb9Es4RrU5fQWsDWfxar1MhIaC0gc9BIQv4YZHMUBGw2+mDYJwRQEJC5A3xpIKE5SsFuAPshoH2w+8AMeL/gYzMhoDNke8oGc+kpG8ylp2wwl56ywVx6ygZz6SkbzKWnbDCXnrLBXHrKBnPpuWqwq8BL4NuCxxp7ToAXwHrFnsVYNdis4sKfn1nFnsVYJdgl4HdDAafzDKV7FiUENKbnS9B2xZ7FWDXYOvB8fmOstfDHwLO4CfeFbE/ZYC49ZYO59JQN5tJTNphLT9lgLj1lg7n0lA3m0lNxN/Rkid3O0j2LobwVMRPqWQzlzbjTC2y2lexZlBDQGOVL0LZQz2Io7oYeL7HbWbpnMWSDufSUDebSUzaYS0/ZYC49ZYO59JQN5tJTNphLT9lgLj1lg7n0HOu8HmWuD3T8jgBjntejypOBjvmL4M0Z+7weJXL2x8DfCpt93Z3XkwTmHiLUPiAjCUw+P04G1R9yS4Um/2LgTcRodV5Pqjz5hXYbUVqc15Mqzt783S5PzfN6UsHJ2d/N/9qRueEGQRAEQRAEQUDXnAEUEs/4a0hNRwAAAABJRU5ErkJggg=="/>
 <text x="160" y="607.0" font-size="12" fill="#233044" text-anchor="middle" font-weight="bold">夜の Task</text>
-<text x="302" y="565" font-size="13" fill="#233044" text-anchor="middle" font-weight="bold">今夜の作業を依頼</text>
+<text x="302" y="565" font-size="13" fill="#233044" text-anchor="middle" font-weight="bold">Task を run で依頼</text>
 <text x="302" y="586" font-size="12" fill="#61758b" text-anchor="middle" font-weight="normal">結果は元のスレッドへ</text>
 <polyline points="417,568 493,568" fill="none" stroke="#61758b" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#head)"/>
 <rect x="439.5" y="547.0" width="31" height="17" rx="3" fill="#ffffff"/>
@@ -66,8 +66,8 @@
 <image x="505.0" y="548.0" width="40" height="40" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAACXBIWXMAAAsTAAALEwEAmpwYAAABCklEQVR4nO2aQQrCMBBF/0Jw5UlceA3bVS7gwvOIGy/gPXqZgiWKC88wIkaQkkBrJonW/2CWmc/rtCGEAuOYA9gBuAGQRHUFcASwQCJmAJqEAv1qXKY6exdgAayQjqWbyiProN18k3ES0qutpsiloIjVFHk1zY1o51IkEqHIiIYGwFn5ozYDcqPwNbQZdijJIaIdkiODImOgyLc9rWITaRPsWi1FBjLpV0so4ociY5j0ROxUDo1GWabYMT4HQpEAFIlEKBKAIlMRqQF0rqqMueoNu7e1pw/WC0WUG1ZO4FHrXxaJRSgS4O9Fam6/TygSgttvJEKRABSJRCgSIMVlXJF/UUwhGd+lnZc7kh8hEVzD9AwAAAAASUVORK5CYII="/>
 <text x="525" y="607.0" font-size="11" fill="#233044" text-anchor="middle" font-weight="bold">Kei Agent MCP</text>
 <text x="667" y="565" font-size="13" fill="#233044" text-anchor="middle" font-weight="bold">担当が CLI を実行</text>
-<text x="667" y="586" font-size="10" fill="#61758b" text-anchor="middle" font-weight="normal">A2A → Claude Code / Codex</text>
+<text x="667" y="586" font-size="10" fill="#61758b" text-anchor="middle" font-weight="normal">A2A → Claude Code / Codex CLI</text>
 <text x="113" y="658" font-size="11" fill="#61758b" text-anchor="start" font-weight="normal">Dot: 毎時 notices → 元のチャンネル / 07:40 Outlook・Google Calendar の予定同期（API）</text>
 <text x="113" y="678" font-size="11" fill="#61758b" text-anchor="start" font-weight="normal">Mac: 起動・復帰と30分ごとに Moodle ICS、API 設定時は10分ごとに提出・受験終了を同期。</text>
-<text x="113" y="698" font-size="11" fill="#61758b" text-anchor="start" font-weight="normal">Mac の処理は、Mac が開いている間に動く。</text>
+<text x="113" y="698" font-size="11" fill="#61758b" text-anchor="start" font-weight="normal">Mac の処理は起動中に動く。代替の夜間処理は night モジュールを有効にした場合だけ。</text>
 </svg>
