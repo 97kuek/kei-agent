@@ -131,20 +131,26 @@ def test_module_add_and_remove_rewrite_the_enabled_column(tmp_path, capsys):
     assert "enabled = false" in capsys.readouterr().out
 
 
-def test_workspaces_and_profiles_use_the_engine_and_account_from_the_table(tmp_path):
+@pytest.mark.parametrize("has_project", [False, True])
+def test_workspaces_and_profiles_use_the_engine_and_account_from_the_table(tmp_path, has_project):
     from fakes import make_assistant
 
     from kei_agent.conversation.hands import Hands
 
-    home = _home(tmp_path, HEADER + "work,true,,codex,,\n")
+    work_root = tmp_path / "work"
+    if has_project:
+        (work_root / "example").mkdir(parents=True)
+    header = "module,enabled,channels,folder,engine,model,effort\n"
+    home = _home(tmp_path, header + f"work,true,,{work_root},codex,,\n")
     config = _load(home)
     account = str(tmp_path / "codex-work")
     config = replace(config, agent_profiles={**config.agent_profiles, "work": replace(
         config.agent_profiles["work"], codex_account=account)})
     assistant, _ = make_assistant(config, Store(tmp_path / "test.sqlite3"))
-    workspace, = Hands(assistant).workspaces()
+    workspaces = Hands(assistant).workspaces()
+    workspace = next(item for item in workspaces if item["name"] == "work")
     assert (workspace["name"], workspace["agent"], workspace["kind"]) == ("work", "仕事", "担当")
-    assert "codex" in workspace["engines"]
+    assert all("codex" in item["engines"] for item in workspaces)
     profile = assistant.config.agent_profiles["work"]
     assert profile.provider == "codex" and profile.codex_account == account
 
