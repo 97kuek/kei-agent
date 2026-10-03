@@ -1,7 +1,7 @@
 # 開発の手順
 
 - Kei Agent は設定とモジュールで用途を変えられるアシスタント。個人の前提を共通コードに埋め込まない
-- アイデアは ueki.keitaro@gmail.com まで
+- 要望・不具合はこのリポジトリの Issue へ
 
 ## 準備
 
@@ -39,7 +39,7 @@ uv run python -m pytest
 ## 変えるときの決まり
 
 - モジュールの窓口や宣言の契約を変えたら枠の版を上げ、[docs/modules.md](docs/modules.md) と直し方を合わせる
-- 仕組みを変えたら、同じ変更で文書も直す（使い方は `docs/using.md`、担当は `docs/agents/`、仕組みは `docs/architecture.md`、Dot の接続と予定は `docs/dots.md`。保護対象の `deploy/` の変更が必要なら人に頼む）
+- 仕組みを変えたら、同じ変更で文書も直す（依頼・声は `docs/using.md`、用途別の動作は `docs/agents/`、共通の実行契約は `docs/architecture.md`、接続・定期実行は `docs/dots.md`、貼り付ける指示は `docs/prompts/`。保護対象の `deploy/` の変更が必要なら人に頼む）
 - 文書には、いまどうなっているかだけを書く。経緯は Git の履歴に残す
 - 文書は箇条書きと表を中心にし、同じことを2か所に書かない（片方からはリンクする）
 - 図は `docs/images/diagrams.py` を書き換えて `uv run python docs/images/diagrams.py` で作り直す

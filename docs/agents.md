@@ -1,9 +1,6 @@
-# 担当（エージェント）
+# 用途別ガイドと担当の契約
 
-- ローカル AI の担当は研究と仕事。大学は AI を持たない Moodle 同期、知識は Dot のクラウド処理
-- Mac の担当は本体から A2A で頼まれ、答えを返す。担当は Slack に投稿しない（Slack に出すのは Dot）
-- Dot からは、MCP の `run` に作業場の名前を渡すと、その作業場を受け持つ担当に届く
-- 声も自分のプロセスを持つが、AI の実行役は持たない（[architecture.md](architecture.md#声)）
+研究・大学・仕事・知識は利用上の4つの役割。Mac のローカル AI は研究・仕事だけで、大学は機械同期、知識は Dot のクラウド処理となる。
 
 ## 一覧
 
@@ -13,10 +10,6 @@
 | 大学 | 質問は Dot。Moodle の機械同期は Mac・8787 | `#2-course` | [course-agent.md](agents/course-agent.md) |
 | 仕事 | Mac の会社 Claude・8789。Outlook は Dot | `#3-work`・`#work-<名前>` | [work-agent.md](agents/work-agent.md) |
 | 知識 | Dot（Mac のプロセスなし） | `#4-knowledge` | [knowledge-agent.md](agents/knowledge-agent.md) |
-
-- 大学の Notion・Box の質問は Dot が接続を直接使う。Mac は起動・復帰時と30分ごとに Moodle の ICS、API 設定時は10分ごとに提出・受験終了を Notion へ同期する
-- 知識の検索・記事要約・Notion 保存・毎朝の選定は Dot が行う。Mac の `knowledge` は古い記事の `save_reading` 互換だけを残す
-- 通話で受けた依頼と結果も、Dot が対応する Slack チャンネルに記録する
 
 ## 触れる範囲（制限の表）
 
