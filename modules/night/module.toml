@@ -1,0 +1,5 @@
+api = 3
+name = "night"
+label = "夜間の Task"
+description = "Notion の 🌙 Task を研究テーマの担当に渡し、結果と確認待ちを記録する"
+core_schedules = ["night"]

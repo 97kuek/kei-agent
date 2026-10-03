@@ -1,4 +1,4 @@
-"""モジュールがコアとやり取りする API（版2）。
+"""モジュールがコアとやり取りする API（版3、版2互換）。
 
 module.py は kei_agent.api のみを読み込む。class Module は必要な差し込み口を書く。
 MCP の操作は async head_action(name, params)、材料は async head_materials(days) で扱う。
@@ -30,7 +30,7 @@ from kei_agent.conversation.response_output import (
     validate_sections,
     validate_structured_response,
 )
-from kei_agent.conversation.slack_text import FAILED_PREFIX, escape, split_text
+from kei_agent.conversation.slack_text import AWAITING_MARKER, FAILED_PREFIX, clean_text, escape, split_text
 from kei_agent.conversation.slack_text import is_status_inquiry as _is_status_inquiry
 from kei_agent.execution import agents, guard, one_shot
 from kei_agent.execution.agents import Reply
@@ -44,6 +44,7 @@ from kei_agent.scheduling.calendar_sync import JST, CalendarItem, CalendarSnapsh
 from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
+from kei_agent.storage.notion_store import parse_slack_permalink, summarize
 from kei_agent.storage.records import Records
 from kei_agent.storage.store import schedule_detail
 from kei_agent.workspaces import themes
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Core", "Morning", "NotionError",
-           "Records", "Reply", "Request",
+           "Records", "Reply", "Request", "DispatchResult", "clean_text", "parse_slack_permalink", "summarize",
            "Theme", "Toggl", "TogglAmbiguousWrite", "TogglError", "Update", "checked_sections", "checked_text",
            "contains_secret",
            "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "json_list", "json_object",
@@ -156,6 +157,14 @@ class Theme:
     premises: str
 
 
+@dataclass(frozen=True)
+class DispatchResult:
+    """チャンネルの担当が返した表示用の答えと、失敗・確認待ちの状態。"""
+    text: str
+    failed: bool = False
+    awaiting: bool = False
+
+
 class Core:
     """1つのモジュールのための窓口。Slack・担当・記録・定期処理の記録・研究テーマに、決めた形でだけ触れる。"""
 
@@ -193,6 +202,32 @@ class Core:
     def notion(self):
         """研究ホーム（kei_agent.storage.notion_store.NotionStore）。"""
         return self._assistant.notion
+
+    @property
+    def night_max_tasks(self) -> int:
+        """夜間モジュール用の既存設定（config.toml の schedule.night_max_tasks）。"""
+        return self._assistant.config.schedule.night_max_tasks
+
+    @property
+    def workspace_provider(self) -> str:
+        """研究テーマ（*）の担当の provider。担当か選択が無ければ空文字。"""
+        config = self._assistant.config
+        owner = themes.catch_all_module(config)
+        return settings.selected_provider(config, owner) if owner else ""
+
+    async def fetch_message(self, channel: str, ts: str) -> dict | None:
+        """端末に記録済みのメッセージを1件読む。外部の履歴は取得しない。"""
+        return await self._assistant.fetch_message(channel, ts)
+
+    async def dispatch(self, req: Request) -> DispatchResult:
+        """依頼をチャンネルの担当へ渡し、通知・実行記録・上限の記録と表示用の答えを得る。"""
+        result = await self._assistant.process(req)
+        if result is None or result.is_error:
+            return DispatchResult("", failed=True)
+        shown, contract_failed = self._assistant.render_reply(result)
+        if contract_failed:
+            return DispatchResult("返答を利用者向けの形に整えられませんでした", awaiting=True)
+        return DispatchResult(shown, awaiting=AWAITING_MARKER in result.text)
 
     # Slack
 

@@ -78,7 +78,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     _module(home_dir / "modules", "weather", WEATHER, SCHEDULE_ONLY)
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert "weather" in modules.known() and not modules.known()["weather"].builtin
-    assert config.modules == ("course", "daily", "improve", "knowledge", "notion", "research", "time", "voice",
+    assert config.modules == ("course", "daily", "improve", "knowledge", "night", "notion", "research", "time", "voice",
                               "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
     _module(home_dir / "modules", "knowledge", 'api = 2\nname = "knowledge"\n')
@@ -94,7 +94,7 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
     assert config.module_channels == {"knowledge": ("knowledge",)}
     assert "knowledge" not in config.a2a.agents       # 書かなければ module.toml の番地
     # Daily と振り返りは、受け持つモジュール（daily）をオンにしたときだけ
-    assert task_names(config) == ("night", "weather", "intake", "maintenance")
+    assert task_names(config) == ("weather", "intake", "maintenance")
     assert settings.schedule_time(config, "weather") == "06:30"
     assert settings.schedule_label(config, "weather") == "天気と電車"
     assert {s.name: s.label for s in modules.enabled(config.modules) if s.actor} == {}
@@ -103,7 +103,7 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
 def test_turning_a_module_off_removes_what_it_brings(tmp_path):
     config = load_config(env={"KEI_AGENT_HOME": str(make_home(tmp_path, agents=[]))})
     assert config.modules == () and config.module_channels == {} and "knowledge" not in config.a2a.agents
-    assert task_names(config) == ("night", "intake", "maintenance")
+    assert task_names(config) == ("intake", "maintenance")
     assert modules.enabled(config.modules) == []
 
 
@@ -353,3 +353,28 @@ def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch, capsys):
         launch.main(["weather", "nothing"])                 # 無いコマンド
     with pytest.raises(SystemExit):
         launch.main(["weather"])                            # 担当プロセスを持たない（コマンドだけのモジュール）
+
+
+@pytest.mark.parametrize("api_version", [2, 3])
+def test_module_api_accepts_current_and_compatible_previous_version(tmp_path, api_version):
+    spec = modules.load_spec(_module(tmp_path, "weather", WEATHER.replace("api = 2", f"api = {api_version}"), SCHEDULE_ONLY))
+    assert spec.name == "weather"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_night_module_respects_existing_schedule_table(tmp_path, enabled):
+    from fakes import write_schedules
+
+    home = make_home(tmp_path, agents=["night", "research"])
+    write_schedules(home, [{"name": "night", "enabled": enabled, "time": "02:35"}])
+    config = load_config(env={"KEI_AGENT_HOME": str(home)})
+    assert "night" in task_names(config)
+    assert settings.schedule_time(config, "night") == ("02:35" if enabled else "")
+
+
+@pytest.mark.parametrize("declaration", ["async def schedule_provider(self, name):", "def schedule_provider(self):"])
+def test_schedule_provider_requires_a_synchronous_named_schedule(tmp_path, declaration):
+    code = SCHEDULE_ONLY + f"\n    {declaration}\n        return None\n"
+    spec = modules.load_spec(_module(tmp_path, "weather", WEATHER.replace("api = 2", "api = 3"), code))
+    with pytest.raises(modules.ModuleError, match="schedule_provider"):
+        modules.load_code(spec)

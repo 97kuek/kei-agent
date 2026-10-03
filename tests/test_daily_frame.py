@@ -98,7 +98,7 @@ def env(config, store, tmp_path, monkeypatch):
 # 本体の定期処理を受け持つ
 
 def test_core_schedules_are_checked(tmp_path):
-    folder = _brief(tmp_path, BRIEF_TOML.replace('core_schedules = ["daily", "review"]', 'core_schedules = ["night"]'))
+    folder = _brief(tmp_path, BRIEF_TOML.replace('core_schedules = ["daily", "review"]', 'core_schedules = ["maintenance"]'))
     with pytest.raises(modules.ModuleError, match="受け持てない本体の定期処理"):
         modules.load_spec(folder)
     folder = _brief(tmp_path / "b", code="class Module:\n    def __init__(self, core):\n        pass\n")

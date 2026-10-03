@@ -34,7 +34,7 @@ def channel_prefix(name: str) -> str:
 CORE_CHANNELS = ("improve",)
 # 本体の定期処理のうち、モジュールが受け持てるもの（core_schedules に書く）。時刻は schedules.csv、
 # 順番も今のまま（夜間の Task → モジュールの定期処理 → Daily → 振り返り → 保守）
-CORE_SCHEDULES = ("daily", "review")
+CORE_SCHEDULES = ("night", "daily", "review")
 
 
 @dataclass(frozen=True)
@@ -59,8 +59,9 @@ CORE_SECRETS = (
     SecretSpec("KEI_AGENT_A2A_TOKEN", "プロセスどうしの合言葉", required=True, generate=True),
     SecretSpec("KEI_AGENT_HANDS_TOKEN", "MCP サーバーの合言葉。頭（Claude Code・Dots など）が呼ぶときに渡す", generate=True),
 )
-# この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
-API_VERSION = 2
+# 現行の枠の版。版3は追加だけなので版2も読み込める。枠や窓口を変えるときに上げる
+API_VERSION = 3
+SUPPORTED_API_VERSIONS = (2, 3)
 SPEC_FILE = "module.toml"
 CODE_FILE = "module.py"
 AGENT_FILE = "agent.py"
@@ -373,9 +374,9 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
     if "slash_commands" in data:
         raise ModuleError(f"{where}: [slash_commands] は使えません。MCP の head_action(self, name, params) に移行してください")
     _check_keys(data, _TOP_KEYS, where)
-    if data.get("api") != API_VERSION:
+    if data.get("api") not in SUPPORTED_API_VERSIONS:
         raise ModuleError(f"{where}: 枠の版が合いません（このモジュールは api = {data.get('api')!r}、"
-                          f"この Kei Agent は api = {API_VERSION}）。MCP の head_action / head_materials に移行し、docs/modules.md を見てください")
+                          f"この Kei Agent は api = 2 / {API_VERSION}）。MCP の head_action / head_materials に移行し、docs/modules.md を見てください")
     name = str(data.get("name") or "")
     if not _NAME.match(name) or name != directory.name:
         raise ModuleError(f"{where}: name は英小文字・数字・- で、フォルダの名前（{directory.name}）と同じにしてください")
@@ -567,6 +568,7 @@ def load_code(spec: ModuleSpec) -> type | None:
         if hasattr(cls, hook):
             raise ModuleError(f"{where}: {hook} は使えません。MCP の head_action / head_materials に移行してください")
     for hook, args, shape, asynchronous in (
+        ("schedule_provider", (None, ""), "schedule_provider(self, name)", False),
         ("on_event", (None, "", {}), "on_event(self, kind, data)", False),
         ("material", (None, 0.0), "material(self, now)", False),
         ("on_start", (None,), "on_start(self)", False),
@@ -579,6 +581,8 @@ def load_code(spec: ModuleSpec) -> type | None:
         try:
             inspect.signature(found).bind(*args)
             valid = not asynchronous or inspect.iscoroutinefunction(found)
+            if hook == "schedule_provider":
+                valid = not inspect.iscoroutinefunction(found)
         except (TypeError, ValueError):
             valid = False
         if not valid:

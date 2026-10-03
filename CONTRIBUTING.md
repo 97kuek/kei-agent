@@ -29,7 +29,7 @@ uv run python -m pytest
 - 手順と書き方は [docs/modules.md](docs/modules.md)
 
 1. `uv run kei-agent module new <名前> --builtin` でひな形を作る（AI は `--ai`、担当プロセスは `--process`）
-2. `api = 2` の `module.toml`・`module.py`（と指示書・`agent.py`）を書く
+2. `api = 3` の `module.toml`・`module.py`（と指示書・`agent.py`）を書く
 3. テストを `tests/` に書き、`ModuleKit.head_action` などで窓口を通して確かめる。`uv run --group agents kei-agent module test <名前>` で通す
 4. 要る秘密情報は `[secrets]` に名前と説明だけを書く
 5. `agents.example.csv` に行を足す。設定の既定は `module.toml` の `[settings]` に書く。保護対象の `config.example.toml` の変更が必要なら人に頼む

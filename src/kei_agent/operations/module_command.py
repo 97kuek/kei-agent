@@ -18,6 +18,7 @@ from kei_agent.configuration import agents_table
 from kei_agent.configuration.config import REPO_ROOT, Config, ConfigError, config_home, config_path, load_config
 from kei_agent.framework import modules
 from kei_agent.operations import module_scaffold
+from kei_agent.storage.settings import CORE_SCHEDULES
 
 
 def check_text(path: Path, text: str, env: dict[str, str], home: Path, *, table: Path | None = None) -> Config:
@@ -60,8 +61,7 @@ def describe(spec: modules.ModuleSpec, config: Config | None) -> str:
                                           for n in names))
     if spec.core_channels:
         parts.append("Kei Agent のチャンネル")
-    schedules = [s.label for s in spec.schedules] + [{"daily": "Daily", "review": "振り返り"}[n]
-                                                      for n in spec.core_schedules]
+    schedules = [s.label for s in spec.schedules] + [CORE_SCHEDULES[n] for n in spec.core_schedules]
     if schedules:
         parts.append("定期処理 " + "・".join(schedules))
     return "、".join(parts) or "—"

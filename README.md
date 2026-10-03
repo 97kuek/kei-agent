@@ -20,10 +20,13 @@ Kei Agent は、対話からローカルの作業実行までをつなぐ、モ�
 | 仕事 | `work` | 会社の Claude Code で Teams・SharePoint を読んで答える。プロジェクトの作業場でコードを書いてテストを動かす。Outlook は Dot が直接扱う |
 | 知識 | `knowledge` | Mac に残るのは保存済みの古い記事を `save_reading` で保存・解除する互換処理。検索・記事要約・Notion への保存・毎朝の選定は Dot が直接行う |
 | Daily・振り返り | `daily` | 朝に今日の予定と Daily、夜に振り返りを出す（Dot の予定を使う構成では、このモジュールの定期処理を止める） |
+| 夜間の Task | `night` | Notion の 🌙 Task を研究担当に渡し、結果と確認待ちを記録する（必要な構成だけでオンにする） |
 | 時間記録 | `time` | 時間を測り、Toggl と Notion に送る。Dot からは MCP の `timer` で測る。Toggl の直接の記録も取り込む |
 | 自己改善 | `improve` | Mac の作業場で修正案を相談し、確認後にコードを直す。Dot からの修正依頼は Codex のクラウドで PR を出す |
 | 声 | `voice` | Mac で出来事を読み上げる。音声対話は Dot の通話を使い、Mac のマイクも任意で使える |
 | Notion | `notion` | ローカルの Notion ゲートウェイ。使う側ごとに届くホームを絞る |
+
+- 夜間の Task は `agents.csv` で `night` をオンにしたときだけ動く。使い方と既存設定は [モジュールの説明](docs/modules.md#夜間の-task) を参照する。Dot に夜間処理を任せる構成ではオフにする。
 
 ## はじめる
 

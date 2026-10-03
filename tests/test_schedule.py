@@ -196,7 +196,7 @@ async def test_night_runs_slack_task_in_its_thread(env, config):
     assistant.remember_message("C1", "1789636700.000100", "owner", "条件Cも回して", "1789636798.229039")
     claude.behaviors = [{"text": "## 結果\n条件Cは 71% でした"}]
 
-    detail = await scheduler.run_night("2026-09-18")
+    detail = await scheduler.run_task("night", "2026-09-18")
 
     call, = claude.calls
     assert call["thread_ts"] == "1789636700.000100" and call["cwd"] == config.research_root / "vlm"
@@ -212,9 +212,10 @@ async def test_night_runs_other_tasks_in_a_new_theme_thread(env, config, slack_u
     make_theme(config)
     task = assistant.notion.add_task("先行研究を追加で探す", "vlm", body="2024年以降に絞る", slack_url=slack_url)
 
-    await scheduler.run_night("2026-09-18")
+    await scheduler.run_task("night", "2026-09-18")
 
-    assert slack.posted()[0] == {"channel": "C1", "text": "🌙 Task: 先行研究を追加で探す"}
+    assert slack.posted()[0]["channel"] == "C1"
+    assert slack.posted()[0]["text"] == "🌙 Task: 先行研究を追加で探す"
     assert claude.calls[0]["thread_ts"] == "1001.000" and claude.calls[0]["cwd"] == config.research_root / "vlm"
     assert task.status == "完了"
     assert task.slack_url == slack_url
@@ -227,7 +228,7 @@ async def test_night_marks_awaiting(env, config):
     asks = assistant.notion.add_task("判断が要る", "vlm")
     claude.behaviors = [{"text": "途中まで\n❓ 確認: 条件Bも含めますか？"}]
 
-    await scheduler.run_night("2026-09-18")
+    await scheduler.run_task("night", "2026-09-18")
 
     assert no_theme.status == "確認待ち" and assistant.notion.results[no_theme.id] == "テーマを設定してください"
     assert asks.status == "確認待ち" and len(claude.calls) == 1
@@ -236,7 +237,7 @@ async def test_night_marks_awaiting(env, config):
 async def test_night_skips_when_notion_is_down(env, config):
     scheduler, assistant, slack, claude = env
     assistant.notion.fail = True
-    detail = await scheduler.run_night("2026-09-18")
+    detail = await scheduler.run_task("night", "2026-09-18")
     assert detail["status"] == "error" and claude.calls == []
     assert slack.posted()[-1]["channel"] == "C9" and "確認が必要な問題" in slack.posted()[-1]["text"]
 
@@ -246,7 +247,7 @@ async def test_night_respects_limit(env, config):
     make_theme(config)
     for i in range(7):
         assistant.notion.add_task(f"task {i}", "vlm")
-    detail = await scheduler.run_night("2026-09-18")
+    detail = await scheduler.run_task("night", "2026-09-18")
     assert len(claude.calls) == 5 and detail["remaining"] == 2
 
 
@@ -315,7 +316,7 @@ async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatc
         raise RuntimeError("slack is down")
 
     monkeypatch.setattr(slack, "chat_postMessage", broken_post)
-    detail = await scheduler.run_night("2026-09-18")
+    detail = await scheduler.run_task("night", "2026-09-18")
 
     assert task.status == "確認待ち" and "slack is down" in assistant.notion.results[task.id]
     assert detail["tasks"][0]["status"] == "error"
@@ -735,3 +736,72 @@ def test_intake_runs_at_the_daily_time():
     from kei_agent.configuration import schedules_table
     from kei_agent.storage import settings
     assert schedules_table.CORE_TIMES["intake"] == "08:00" and settings.CORE_SCHEDULES["intake"] == "朝の取り込み"
+
+
+async def test_night_module_disabled_cancels_deferred_and_never_reads_notion(env):
+    scheduler, assistant, slack, ai = env
+    task = assistant.notion.add_task("実行しない", "vlm")
+    scheduler.config = replace(scheduler.config, modules=tuple(n for n in scheduler.config.modules if n != "night"))
+    scheduler.store.defer_run("schedule", {"name": "night", "day": "2026-09-18"}, 1)
+
+    await scheduler.catch_up_deferred(2)
+    assert "night" not in schedule_module.task_names(scheduler.config)
+    assert not scheduler.store.schedule_ran("night", "2026-09-18")
+    assert scheduler.store.pending_deferred("schedule") == []
+    assert await scheduler.run_task("night", "2026-09-18", record=False) == {"status": "disabled"}
+    assert task.status == "今夜やる" and ai.calls == [] and slack.posted() == []
+
+
+async def test_night_module_uses_workspace_provider_to_defer_real_dispatch(env, config):
+    scheduler, assistant, slack, ai = env
+    make_theme(config)
+    task = assistant.notion.add_task("明けてから実行", "vlm")
+    scheduler.store.set_limit_until("claude", 100)
+    assert scheduler.task_provider("night") == "claude"
+    assert not await scheduler.run_or_defer("night", "2026-09-18", 90)
+    assert ai.calls == [] and task.status == "今夜やる"
+
+    await scheduler.catch_up_deferred(101)
+    assert len(ai.calls) == 1 and task.status == "完了"
+    detail = assistant.cores["night"].schedule_detail("night", "2026-09-18")
+    assert detail["tasks"][0]["status"] == "完了"
+
+
+async def test_night_module_keeps_custom_max_tasks(env, config):
+    scheduler, assistant, slack, ai = env
+    make_theme(config)
+    assistant.config = replace(config, schedule=replace(config.schedule, night_max_tasks=1))
+    for i in range(2):
+        assistant.notion.add_task(f"一件ずつ {i}", "vlm")
+    detail = await scheduler.run_task("night", "2026-09-18")
+    assert len(ai.calls) == 1 and detail["remaining"] == 1
+
+
+@pytest.mark.parametrize("behavior, summary", [
+    ({"text": "印のない答え", "raw": True}, "返答を利用者向けの形に整えられませんでした"),
+    ({"is_error": True, "errors": ["failed"]}, "エラーで止まりました"),
+])
+async def test_night_failed_answer_never_completes_the_task(env, config, behavior, summary):
+    scheduler, assistant, slack, ai = env
+    make_theme(config)
+    task = assistant.notion.add_task("答えを確認する", "vlm")
+    ai.behaviors = [behavior]
+    detail = await scheduler.run_task("night", "2026-09-18")
+    assert task.status == detail["tasks"][0]["status"] == "確認待ち"
+    assert assistant.notion.results[task.id] == summary
+
+
+@pytest.mark.parametrize("broken", [False, True])
+async def test_schedule_provider_failure_is_recorded_without_stopping_other_tasks(env, monkeypatch, broken):
+    scheduler, assistant, slack, ai = env
+
+    def choose(name):
+        if broken:
+            raise RuntimeError("選択できない")
+        return "invalid"
+
+    monkeypatch.setattr(assistant.modules["night"], "schedule_provider", choose)
+    assert not await scheduler.run_or_defer("night", "2026-09-18", 100)
+    assert assistant.cores["night"].schedule_detail("night", "2026-09-18")["status"] == "error"
+    assert scheduler.store.pending_deferred("schedule") == []
+    assert await scheduler.run_task("daily", "2026-09-18", record=False)
