@@ -41,7 +41,10 @@ def _line(event: dict, with_day: bool = True) -> str:
     # リンクの中に `|` が入ると、そこから先が表示名になってしまう
     url = str(event.get("url") or "").split("|")[0]
     link = f" <{url}|Outlook>" if url else ""
-    return f"• {head}{span} {escape(event.get('subject', ''))}{where}{link}"
+    join_url = str(event.get("join_url") or "").split("|")[0]
+    join = f" <{join_url}|参加>" if join_url else ""
+    passcode = f" パスコード: {escape(event['passcode'])}" if event.get("passcode") else ""
+    return f"• {head}{span} {escape(event.get('subject', ''))}{where}{link}{join}{passcode}"
 
 
 def events_of(data: dict) -> list[dict]:
@@ -92,8 +95,6 @@ class Module:
     def __init__(self, core: Core):
         self.core = core
 
-    def welcome(self) -> str:
-        return CAN_DO
 
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         """仕事の依頼。プロジェクトのチャンネルなら作業場で答える。研究全体のチャンネルから回ってきたときは、

@@ -16,14 +16,13 @@ from kei_agent.execution.model_policy import resolve
 from kei_agent.execution.provider_permissions import CapabilityUnavailable, preflight
 from kei_agent.workspaces import themes
 
-ACTORS = {"research": "research_execute", "course": "course_explain", "work": "work_single_source",
-          "knowledge": "knowledge_answer"}
+ACTORS = {"research": "research_execute", "work": "work_single_source"}
 
 
 def _accounts(config, tmp_path):
     """仕事は会社、大学は個人のアカウント。仕事のプロジェクトの作業場は ~/work のつもりの場所。"""
     profiles = dict(config.agent_profiles)
-    for name, folder in (("work", "claude-work"), ("course", "claude-personal")):
+    for name, folder in (("work", "claude-work"), ("research", "claude-personal")):
         profiles[name] = replace(profiles[name], claude_account=str(tmp_path / folder))
     return replace(config, agent_profiles=profiles, module_folders={"work": tmp_path / "work"})
 
@@ -68,7 +67,7 @@ def test_claude_and_codex_write_only_where_the_actor_may(config, tmp_path, actor
 
 def test_no_actor_brings_in_the_account_user_settings(config):
     """アカウントのユーザー設定（許可ルール・フック・MCP）は、連携を使う担当にも読ませない。"""
-    for actor in ("work", "course", "research"):
+    for actor in ("work", "research"):
         cmd = runner.build_command(config, _request(config, actor, "claude"))
         assert cmd[cmd.index("--setting-sources") + 1] == ""
 
@@ -109,7 +108,7 @@ def test_module_efforts_must_be_ones_the_provider_knows(tmp_path):
     folder = tmp_path / "loud"
     folder.mkdir()
     (folder / "loud.md").write_text("# 担当\n")
-    (folder / "module.toml").write_text('api = 1\nname = "loud"\n[actor]\nprompt = "loud.md"\n'
+    (folder / "module.toml").write_text('api = 2\nname = "loud"\n[actor]\nprompt = "loud.md"\n'
                                         '[use_cases.loud_answer]\nclaude = { model = "claude-sonnet-5", effort = "minimal" }\n')
     with pytest.raises(ModelCatalogError, match="effort minimal は使えません"):
         check_module_recipes(modules.load_spec(folder))

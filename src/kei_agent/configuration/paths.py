@@ -1,7 +1,7 @@
 """起動スクリプト（deploy/_common.sh）が、Python の本体を起動する前に知りたい場所を出す。
 
 使い方: python -m kei_agent.configuration.paths secrets   秘密情報の置き場所（config.toml の [paths] secrets）
-        python -m kei_agent.configuration.paths hands     手の口の住所とトンネルの番号（[hands] の url と tunnel。1行ずつ）
+        python -m kei_agent.configuration.paths hands     MCP の住所とトンネルの番号（[hands] の url と tunnel。1行ずつ）
 """
 
 from __future__ import annotations

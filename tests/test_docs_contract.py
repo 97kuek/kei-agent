@@ -4,8 +4,9 @@ from pathlib import Path
 
 from kei_agent.framework import modules
 
-DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/architecture.md", "docs/modules.md",
-        "docs/extensibility.md", "docs/agents.md", *(str(p) for p in sorted(Path("docs/agents").glob("*.md"))))
+DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/dots.md", "docs/architecture.md", "docs/modules.md",
+        "docs/extensibility.md", "docs/agents.md", *(str(p) for p in sorted(Path("docs/agents").glob("*.md"))),
+        *(str(p) for p in sorted(Path("docs/prompts").glob("*.md"))))
 
 
 def test_architecture_documents_actor_scoped_read_only_execution_without_legacy_voice_codex():
@@ -18,7 +19,7 @@ def test_architecture_documents_actor_scoped_read_only_execution_without_legacy_
 
 
 def test_every_user_facing_agent_prompt_requires_only_a_final_region():
-    for path in ("prompts/system.md", "modules/course/course.md", "modules/work/work.md", "modules/improve/improve.md",
+    for path in ("modules/research/research.md", "modules/work/work.md", "modules/improve/improve.md",
                  "modules/daily/daily.md"):
         text = Path(path).read_text(encoding="utf-8")
         assert "<<kei-agent-final>>" in text
@@ -61,5 +62,6 @@ def test_links_to_headings_point_to_existing_headings():
             linked = (path.parent / target) if target else path
             if linked.suffix != ".md":
                 continue
-            names = {_slug(h) for h in heading.findall(linked.read_text(encoding="utf-8"))}
+            text = linked.read_text(encoding="utf-8")
+            names = {_slug(h) for h in heading.findall(text)} | set(re.findall(r'<a id="([^"]+)"', text))
             assert fragment in names, f"{doc}: {target}#{fragment} の見出しがない"

@@ -259,7 +259,7 @@ class NotionStore:
         page = self._create_page("themes", {
             "名前": {"title": rich_text(name)},
             "状態": {"select": {"name": "進行中"}},
-            "Slack": {"url": slack_url},
+            "Slack": {"url": slack_url or None},
             "ディレクトリ": {"rich_text": rich_text(directory)},
         })
         if "papers" in self.state.get("databases", {}):
@@ -349,7 +349,7 @@ class NotionStore:
         return self._task(rows[0]) if rows else None
 
     def create_night_task(self, title: str, theme_name: str, slack_url: str, body: str) -> Task:
-        """Slack の 🌙 から Task を作る。同じメッセージの Task があれば「今夜やる」に戻す。"""
+        """依頼元の URL をキーに夜間 Task を作る。既存なら「今夜やる」に戻す。"""
         existing = self.task_by_slack_url(slack_url)
         if existing:
             self.update_task(existing.id, status="今夜やる")
@@ -365,14 +365,6 @@ class NotionStore:
         if theme_id:
             properties["テーマ"] = {"relation": [{"id": theme_id}]}
         return self._task(self._create_page("tasks", properties, body))
-
-    def cancel_night_task(self, slack_url: str) -> bool:
-        """🌙 を外したら、まだ実行していない Task を「未着手」に戻す。"""
-        task = self.task_by_slack_url(slack_url)
-        if task is None or task.status != "今夜やる":
-            return False
-        self.update_task(task.id, status="未着手")
-        return True
 
     def update_task(self, page_id: str, status: str | None = None, result: str | None = None,
                     slack_url: str | None = None) -> None:

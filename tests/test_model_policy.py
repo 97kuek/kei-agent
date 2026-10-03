@@ -22,8 +22,8 @@ def test_each_use_case_resolves_its_fixed_recipe(actor, provider, use_case, mode
     ("research", "", "research_execute", False, "provider"),
     ("unknown", "codex", "research_execute", False, "actor"),
     ("router", "codex", "research_execute", True, None),          # 担当の外の用途
-    ("work", "codex", "course_requirements", True, None),
-    ("course", "codex", "manual_astra", True, None),
+    ("work", "codex", "research_extract", True, None),
+    ("work", "codex", "manual_astra", True, None),
     ("research", "codex", "manual_fable", True, None),            # fable は研究の Claude だけ
 ])
 def test_resolve_rejects_what_the_policy_does_not_allow(actor, provider, use_case, manual, match):
@@ -71,7 +71,7 @@ def test_config_without_a_table_leaves_every_provider_unselected(tmp_path):
 
 
 # 大学と仕事のモジュールの用途（module.toml の [use_cases]）
-COURSE = frozenset({"course_explain", "course_requirements", "course_compare", "course_degree_plan"})
+WORK_CASES = frozenset({"work_single_source", "work_cross_source", "work_design", "work_decide"})
 WORK = frozenset({"work_single_source", "work_cross_source", "work_decide"})
 RESEARCH = frozenset({"research_extract", "research_design"})
 
@@ -80,8 +80,8 @@ RESEARCH = frozenset({"research_extract", "research_design"})
     ('{"use_case":"research_extract","confidence":0.9}', RESEARCH, "research_extract"),
     ('{"use_case":"research_design","confidence":0.7}', RESEARCH, None),      # 自信が低い
     ('{"use_case":"unknown","confidence":1}', RESEARCH, None),
-    ('{"use_case":"course_requirements","confidence":0.9}', COURSE, "course_requirements"),
-    ('{"use_case":"work_decide","confidence":0.9}', COURSE, None),            # ほかの担当の用途
+    ('{"use_case":"work_cross_source","confidence":0.9}', WORK_CASES, "work_cross_source"),
+    ('{"use_case":"research_extract","confidence":0.9}', WORK_CASES, None),            # ほかの担当の用途
     ('{"use_case":"work_decide","confidence":0.9}', WORK, "work_decide"),
 ])
 def test_lightweight_classifier_takes_only_confident_answers_for_the_actor(answer, allowed, expected):
@@ -107,7 +107,7 @@ async def test_classifier_stops_on_a_provider_usage_limit(config, store, monkeyp
 
 
 async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypatch):
-    """research と course の分類が同時に走っても、skill の置き場を取り合わない。"""
+    """research と work の分類が同時に走っても、skill の置き場を取り合わない。"""
     from kei_agent.conversation import router
     from kei_agent.execution import model_classifier, runner
 
@@ -118,13 +118,13 @@ async def test_each_classifier_runs_in_its_own_directory(config, store, monkeypa
         return runner.RunResult(text='{"use_case":"research_extract","confidence":0.9}')
 
     monkeypatch.setattr(runner, "run_model", record)
-    for actor in ("research", "course"):
+    for actor in ("research", "work"):
         use_engine(config, actor, "codex")
     # conftest が差し替えた classify_module ではなく、本物の _classify を通す
     await model_classifier._classify(config, store, "research", "ログを見て", frozenset({"research_extract"}),
                                      "research_execute", "", "")
-    await model_classifier._classify(config, store, "course", "課題の要件", frozenset({"course_explain"}),
-                                     "course_explain", "", "")
+    await model_classifier._classify(config, store, "work", "課題の要件", frozenset({"work_single_source"}),
+                                     "work_single_source", "", "")
 
     assert len(set(seen + [router.workspace(config).cwd])) == 3
 

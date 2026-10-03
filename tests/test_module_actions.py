@@ -1,6 +1,4 @@
-"""モジュールの枠の広がり（段階3の時間記録の①）。スラッシュコマンド、投稿のボタンと入力の画面、ほかのモジュールへの
-頼みごと、Daily と振り返りの材料。時間記録を載せ替える前に、利用者のモジュールで確かめる。
-"""
+"""モジュールの MCP 操作・ほかのモジュールへの依頼・Daily の材料。"""
 
 import json
 from dataclasses import replace
@@ -8,20 +6,16 @@ from dataclasses import replace
 import pytest
 from fakes import FakeAI, make_assistant
 
-from kei_agent.configuration.config import ConfigError, load_config
 from kei_agent.execution import a2a, runner
 from kei_agent.framework import modules
 from kei_agent.scheduling.digest import DigestBuilder
 
-STAMP_TOML = '''api = 1
+STAMP_TOML = '''api = 2
 name = "stamp"
 label = "スタンプ"
 
 [depends]
 optional = ["course"]
-
-[slash_commands]
-stamp = "スタンプを押す"
 '''
 
 STAMP_CODE = '''from kei_agent.api import Core
@@ -32,23 +26,18 @@ class Module:
         self.core = core
         self.pressed = []
 
-    async def on_slash_command(self, name, body):
-        ts = await self.core.post(body["channel_id"], "スタンプ", blocks=[{"type": "actions", "elements": [
-            {"type": "button", "action_id": self.core.action_id("press"), "value": "1",
-             "text": {"type": "plain_text", "text": "押す"}}]}])
-        self.core.records.put("card", body["channel_id"], {"ts": ts})
-        return f"/{name} を受け付けたよ（{await self.core.channel_name(body['channel_id'])}）"
-
-    async def on_action(self, name, body):
-        self.pressed.append(name)
-        card = self.core.records.get("card", body["channel"]["id"])
-        await self.core.update(body["channel"]["id"], card["ts"], "押された")
-        await self.core.open_view(body["trigger_id"], {"type": "modal", "callback_id": self.core.view_id("memo"),
-                                                       "blocks": [{"type": "input", "block_id": "memo"}]})
-
-    async def on_view(self, name, body):
-        memo = body["view"]["state"]["values"]["memo"]["text"]["value"]
-        return {"memo": "空です"} if not memo else None
+    async def head_action(self, name, params):
+        channel = params.get("channel", "C1")
+        if name == "stamp":
+            ts = await self.core.post(channel, "スタンプ")
+            self.core.records.put("card", channel, {"ts": ts})
+            return {"text": "スタンプを押したよ", "channel": await self.core.channel_name(channel)}
+        if name == "press_stamp":
+            self.pressed.append(name)
+            card = self.core.records.get("card", channel)
+            await self.core.update(channel, card["ts"], "押された")
+            return {"pressed": True}
+        return None
 
     async def material(self, now):
         return ["", "## スタンプ", "- 今週 3 回"]
@@ -73,35 +62,20 @@ def env(config, store, tmp_path, monkeypatch):
     return assistant, slack
 
 
-async def test_a_module_answers_its_slash_command_and_its_buttons(env):
+async def test_a_module_answers_mcp_operations(env):
     assistant, slack = env
-    reply = await assistant.module_slash("stamp", {"user_id": "UME", "channel_id": "C1"})
-    assert reply == "/stamp を受け付けたよ（1-vlm）"
-    button = slack.posted()[-1]["blocks"][0]["elements"][0]
-    assert button["action_id"] == "kei_agent_module:stamp:press"
-
-    await assistant.module_action({"user": {"id": "UME"}, "trigger_id": "t", "channel": {"id": "C1"},
-                                   "actions": [button]})
-    assert assistant.modules["stamp"].pressed == ["press"]
+    reply = await assistant.module_head_action("stamp", {"channel": "C1"})
+    assert reply == {"text": "スタンプを押したよ", "channel": "1-vlm"}
+    assert slack.posted()[-1]["text"] == "スタンプ"
+    assert await assistant.module_head_action("press_stamp", {"channel": "C1"}) == {"pressed": True}
+    assert assistant.modules["stamp"].pressed == ["press_stamp"]
     assert any(name == "chat_update" and kw["text"] == "押された" for name, kw in slack.calls)
-    (_, opened), = [(n, kw) for n, kw in slack.calls if n == "views_open"]
-    assert opened["view"]["callback_id"] == "kei_agent_module:stamp:memo"
-
-    def sent(memo, user="UME"):
-        return {"user": {"id": user}, "view": {"callback_id": "kei_agent_module:stamp:memo",
-                                               "blocks": [{"block_id": "memo"}],
-                                               "state": {"values": {"memo": {"text": {"value": memo}}}}}}
-
-    assert await assistant.module_view(sent("")) == {"memo": "空です"}
-    assert await assistant.module_view(sent("書いた")) is None
-    assert await assistant.module_view(sent("書いた", user="USOMEONE")) == {"memo": "依頼者だけが使えます"}
 
 
-async def test_only_the_owner_uses_module_commands_and_buttons(env):
+async def test_unknown_mcp_operations_are_refused(env):
     assistant, slack = env
-    assert await assistant.module_slash("stamp", {"user_id": "USOMEONE", "channel_id": "C1"}) == "この操作は利用できません"
-    await assistant.module_action({"user": {"id": "USOMEONE"}, "trigger_id": "t", "channel": {"id": "C1"},
-                                   "actions": [{"action_id": "kei_agent_module:stamp:press"}]})
+    with pytest.raises(ValueError, match="受け持つモジュールがありません"):
+        await assistant.module_head_action("unknown_stamp", {})
     assert assistant.modules["stamp"].pressed == []
 
 
@@ -131,23 +105,60 @@ async def test_a_module_may_ask_only_the_modules_it_depends_on(env):
         await core.ask_module("work", "list-events", {})
 
 
-@pytest.mark.parametrize(("toml", "code", "message"), [
-    (STAMP_TOML.replace('stamp = "', '"/stamp" = "'), STAMP_CODE, "/ は付けない"),
-    (STAMP_TOML, None, "module.py"),
-    (STAMP_TOML, "class Module:\n    def __init__(self, core):\n        pass\n", "on_slash_command"),
+@pytest.mark.parametrize("declaration", [
+    '[slash_commands]\nstamp = "スタンプを押す"\n',
+    '[slash_commands]\n',
+    'slash_commands = "stamp"\n',
 ])
-def test_a_broken_slash_command_is_refused(tmp_path, toml, code, message):
-    with pytest.raises(modules.ModuleError, match=message):
-        folder = _stamp(tmp_path, toml, code)
+def test_legacy_slash_declarations_explain_mcp_migration(tmp_path, declaration):
+    folder = _stamp(tmp_path, 'api = 2\nname = "stamp"\n' + declaration)
+    with pytest.raises(modules.ModuleError, match=r"slash_commands.*MCP.*head_action.*移行"):
+        modules.load_spec(folder)
+
+
+@pytest.mark.parametrize("hook", ["home", "welcome", "on_home_action", "on_slash_command", "on_action", "on_view", "on_reaction"])
+def test_legacy_ui_hooks_explain_mcp_migration(tmp_path, hook):
+    code = f"class Module:\n    async def {hook}(self, *args):\n        pass\n"
+    folder = _stamp(tmp_path, code=code)
+    with pytest.raises(modules.ModuleError, match=rf"{hook}.*MCP.*head_action / head_materials.*移行"):
         modules.load_code(modules.load_spec(folder))
 
 
-def test_two_modules_cannot_share_a_slash_command(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.toml").write_text("", encoding="utf-8")
-    _stamp(home / "modules")
-    other = _stamp(home / "modules2", STAMP_TOML.replace('name = "stamp"', 'name = "stamp2"'))
-    (home / "modules" / "stamp2").symlink_to(other)
-    with pytest.raises(ConfigError, match="スラッシュコマンド「/stamp」"):
-        load_config(env={"KEI_AGENT_HOME": str(home)})
+@pytest.mark.parametrize(("hook", "declaration"), [
+    ("head_action", "def head_action(self, name, params):"),
+    ("head_action", "async def head_action(self, name):"),
+    ("head_action", "async def head_action(self, name, params, required):"),
+    ("head_action", "async def head_action(self, *, name, params):"),
+    ("head_materials", "def head_materials(self, days):"),
+    ("head_materials", "async def head_materials(self):"),
+    ("head_materials", "async def head_materials(self, days, required):"),
+    ("head_materials", "async def head_materials(self, *, days):"),
+])
+def test_mcp_hooks_require_the_async_call_shape(tmp_path, hook, declaration):
+    folder = _stamp(tmp_path, code=f"class Module:\n    {declaration}\n        return {{}}\n")
+    with pytest.raises(modules.ModuleError, match=rf"{hook}.*async def {hook}"):
+        modules.load_code(modules.load_spec(folder))
+
+
+@pytest.mark.parametrize("hook", ["head_action", "head_materials"])
+def test_mcp_hooks_must_be_functions(tmp_path, hook):
+    folder = _stamp(tmp_path, code=f"class Module:\n    {hook} = 42\n")
+    with pytest.raises(modules.ModuleError, match=rf"{hook}.*async def {hook}"):
+        modules.load_code(modules.load_spec(folder))
+
+
+def test_valid_mcp_hooks_load_without_ui_declarations(tmp_path):
+    code = """class Module:
+    async def head_action(self, name, params):
+        return None
+
+    async def head_materials(self, days):
+        return {"stamps": []}
+"""
+    assert modules.load_code(modules.load_spec(_stamp(tmp_path, code=code))) is not None
+
+
+def test_the_old_api_version_explains_mcp_migration(tmp_path):
+    folder = _stamp(tmp_path, STAMP_TOML.replace("api = 2", "api = 1"))
+    with pytest.raises(modules.ModuleError, match=r"枠の版.*api = 2.*MCP.*head_action / head_materials"):
+        modules.load_spec(folder)

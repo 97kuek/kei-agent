@@ -12,11 +12,11 @@ def _stamp(home, requires=""):
     folder.mkdir(parents=True)
     depends = f"[depends]\nrequires = [{requires}]\n" if requires else ""
     (folder / "module.toml").write_text(
-        f'api = 1\nname = "stamp"\nlabel = "スタンプ"\n{depends}[channels]\nstamp = ["stamp"]\n'
-        '[slash_commands]\nstamp = "スタンプを押す"\n[settings]\ncolor = "red"\n', encoding="utf-8")
+        f'api = 2\nname = "stamp"\nlabel = "スタンプ"\n{depends}[channels]\nstamp = ["stamp"]\n'
+        '[settings]\ncolor = "red"\n', encoding="utf-8")
     (folder / "module.py").write_text("class Module:\n    def __init__(self, core):\n        pass\n\n"
                                       "    async def on_message(self, req, skill='', params=None):\n        pass\n\n"
-                                      "    async def on_slash_command(self, name, body):\n        return ''\n",
+                                      "    async def head_action(self, name, params):\n        return None\n",
                                       encoding="utf-8")
 
 
@@ -43,7 +43,8 @@ def test_adding_writes_a_checked_table_and_keeps_a_backup(tmp_path, capsys):
     assert _on(home) == ["research", "stamp"]
     assert (home / "agents.csv.bak").read_text(encoding="utf-8") == before
     assert calls == []                                  # 常駐を持たないモジュールは launchd に触らない
-    assert "#stamp" in out and "kei-agent manifest" in out and "[stamp]）: color" in out
+    assert "#stamp" in out and "Dot を招く" in out and "[stamp]）: color" in out
+    assert "kei-agent manifest" not in out
     assert not list(home.glob(".agents.csv.*"))         # 確かめるための一時ファイルは残さない
 
 
@@ -100,7 +101,7 @@ def test_the_list_shows_what_each_module_brings(tmp_path, capsys):
     assert module_command.list_modules(env={"KEI_AGENT_HOME": str(home)}) == 0
     out = capsys.readouterr().out
     assert "✅ research" in out and "・ stamp" in out and "スタンプ（あなたのモジュール）" in out
-    assert "コマンド /toggl" in out and "常駐 8788" in out
+    assert "常駐 8788" in out and "コマンド /toggl" not in out
 
 
 def test_the_command_dispatches(monkeypatch):

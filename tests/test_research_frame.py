@@ -10,13 +10,14 @@ import pytest
 from fakes import FakeAI, make_assistant, make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
+from kei_agent.conversation.request import Request
 from kei_agent.execution import model_classifier, model_policy, runner
 from kei_agent.execution.model_policy import ModelPolicyError
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
 
-LAB_TOML = '''api = 1
+LAB_TOML = '''api = 2
 name = "lab"
 label = "実験"
 
@@ -45,9 +46,6 @@ LAB_CODE = '''from kei_agent.api import Core, Request
 class Module:
     def __init__(self, core: Core):
         self.core = core
-
-    def welcome(self):
-        return "実験のことを書いてね。"
 
     async def on_message(self, req: Request, skill: str = "", params=None) -> None:
         await self.core.work(req)
@@ -136,7 +134,7 @@ def test_only_one_module_may_take_every_unclaimed_channel(tmp_path):
     _lab(home / "modules")
     other = home / "modules" / "lab2"
     other.mkdir()
-    (other / "module.toml").write_text('api = 1\nname = "lab2"\n[channels]\nnotes = ["*"]\n', encoding="utf-8")
+    (other / "module.toml").write_text('api = 2\nname = "lab2"\n[channels]\nnotes = ["*"]\n', encoding="utf-8")
     (other / "module.py").write_text("class Module:\n    def __init__(self, core):\n        pass\n\n"
                                      "    async def on_message(self, req, skill='', params=None):\n        pass\n",
                                      encoding="utf-8")
@@ -169,33 +167,23 @@ def lab(config, store, tmp_path, monkeypatch):
     return assistant, slack, claude
 
 
-
-
-async def test_a_module_answers_in_the_channel_workspace_like_research(lab, config):
+async def test_a_module_answers_in_the_channel_workspace_like_research(lab, config, monkeypatch):
     """テーマを受け持つモジュールの担当が、テーマのフォルダで会話して答える（続きは同じスレッドで）。"""
     assistant, slack, claude = lab
-    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> [[lab-deep]] 深く調べて"})
+    events = []
+    monkeypatch.setattr(assistant, "emit", lambda kind, **data: events.append((kind, data)))
+    await assistant.submit(Request('C1', await assistant.channel_name('C1'), '10.1', '10.1', '[[lab-deep]] 深く調べて'))
     await settle(assistant)
     call, = claude.calls
     assert (call["actor"], call["use_case"], call["manual"]) == ("lab", "lab_deep", True)
     assert call["cwd"] == config.research_root / "vlm" and "深く調べて" in call["prompt"]
     assert "[[lab-deep]]" not in call["prompt"]
-    assert slack.streamed() == ["結果です"]
-    assert ("reactions_add", {"channel": "C1", "timestamp": "10.1", "name": "white_check_mark"}) in slack.calls
+    assert slack.texts() == ["結果です"]
+    assert events[-1] == ("done", {"theme": "vlm"})
 
-    await assistant.on_message({"channel": "C1", "user": "UME", "ts": "10.2", "thread_ts": "10.1", "text": "続けて"})
+    await assistant.submit(Request('C1', await assistant.channel_name('C1'), '10.1', '10.2', '続けて'))
     await settle(assistant)
     assert claude.calls[-1]["session_id"] == "sess-1" and claude.calls[-1]["use_case"] == "lab_run"
-
-
-async def test_joining_a_theme_channel_shows_the_modules_welcome(lab, config):
-    assistant, slack, claude = lab
-    # フォルダがあるテーマ（無ければ、先に置き場所を聞く。test_theme_places.py）
-    (config.research_root / "vlm").mkdir(parents=True)
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
-    text, = slack.texts()
-    assert str(config.research_root / "vlm") in text and text.endswith("実験のことを書いてね。")
-    assert (config.research_root / "vlm").is_dir()
 
 
 # 研究のモジュール（modules/research/）
@@ -216,6 +204,6 @@ async def test_without_a_module_for_themes_the_channel_is_told_so(config, store,
     monkeypatch.setattr(runner, "run_model", claude)
     config = replace(config, modules=tuple(name for name in config.modules if name != "research"))
     assistant, slack = make_assistant(config, store, {"C1": "vlm"})
-    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
+    await assistant.submit(Request('C1', await assistant.channel_name('C1'), '10.1', '10.1', '図を作って'))
     await settle(assistant)
     assert claude.calls == [] and "受け持つモジュールがない" in slack.texts()[-1]

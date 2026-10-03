@@ -42,11 +42,11 @@ def test_codex_profile_carves_out_secret_reads_and_scopes_writes(config):
     assert "write" not in preflight(config, _contract(config, read_only=True), "codex_cli").filesystem.values()
 
 
-@pytest.mark.parametrize("agent,case,network", [("course", "course_explain", True),
+@pytest.mark.parametrize("agent,case,network", [("research", "research_extract", True),
                                                  ("work", "work_single_source", False)])
 def test_connector_agents_write_their_workspace_and_reach_out_only_with_own_data(config, agent, case, network):
     """連携を使う担当も、作業場に書けて、秘密情報の置き場所は読めない。コマンドの通信は、自分のデータを読む
-    担当（course）はどこへでも、会社のデータを読む担当（work）はどこへも出さない。"""
+    担当（research）はどこへでも、会社のデータを読む担当（work）はどこへも出さない。"""
     workspace = themes.agent_workspace(config, agent)
     contract = resolve_contract(config, runner.ExecutionRequest(workspace, resolve(agent, "codex", case),
                                                                 None, "C1", "1.1"))

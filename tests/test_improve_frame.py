@@ -21,7 +21,7 @@ from kei_agent.testing.kit import settle
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind
 
-FIXER_TOML = '''api = 1
+FIXER_TOML = '''api = 2
 name = "fixer"
 label = "直し係"
 core_channels = ["improve"]
@@ -50,9 +50,6 @@ class Module:
         self.core = core
         self.answers = []
         self.started = []
-
-    def welcome(self):
-        return "直したいことを書いてね。"
 
     async def on_message(self, req: Request, skill: str = "", params=None) -> None:
         folder = self.core.state_dir / "talk" / req.thread_ts
@@ -95,8 +92,6 @@ def env(config, store, tmp_path, monkeypatch):
     return assistant, slack, claude
 
 
-
-
 def req(text="直して", ts="20.1"):
     return Request("C9", "kei-agent", ts, ts, text)
 
@@ -136,7 +131,7 @@ def test_only_one_module_may_take_a_core_channel(tmp_path):
 async def test_the_module_answers_in_its_own_folder_and_hides_its_marks(env, config):
     assistant, slack, claude = env
     claude.behaviors = [{"text": "こう直すね\n🛠 着手"}]
-    await assistant.on_mention({"channel": "C9", "user": "UME", "ts": "20.1", "text": "<@UBOT> ログを細かく"})
+    await assistant.submit(Request('C9', await assistant.channel_name('C9'), '20.1', '20.1', 'ログを細かく'))
     await settle(assistant)
 
     module = assistant.modules["fixer"]
@@ -144,14 +139,7 @@ async def test_the_module_answers_in_its_own_folder_and_hides_its_marks(env, con
     assert (call["actor"], call["use_case"], call["kind"]) == ("fixer", "fixer_talk", ChannelKind.IMPROVE)
     assert call["cwd"] == config.module_state("fixer") / "talk" / "20.1"
     assert module.answers == ["こう直すね\n🛠 着手"]                   # 合図の行はモジュールが受け取る
-    assert slack.streamed() == ["こう直すね"]                          # Slack には出さない
-
-
-async def test_joining_the_kei_agent_channel_shows_the_modules_welcome(env):
-    assistant, slack, claude = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C9"})
-    text, = slack.texts()
-    assert "確認が必要なこと" in text and text.endswith("直したいことを書いてね。")
+    assert slack.texts() == ["こう直すね"]                          # Slack には出さない
 
 
 async def test_the_folder_must_be_inside_the_modules_own_folder(env, config, tmp_path):
@@ -170,8 +158,10 @@ async def test_the_folder_must_be_inside_the_modules_own_folder(env, config, tmp
 
 # 1回だけ動かす AI
 
-async def test_run_ai_reads_only_unless_given_a_folder(env, config):
+async def test_run_ai_reads_only_unless_given_a_folder(env, config, monkeypatch):
     assistant, slack, claude = env
+    events = []
+    monkeypatch.setattr(assistant, "emit", lambda kind, **data: events.append((kind, data)))
     core = assistant.cores["fixer"]
     claude.behaviors = [{"text": '{"title": "要約"}', "raw": True}]
     assert await core.run_ai("fixer_summary", "まとめて") == '{"title": "要約"}'
@@ -184,7 +174,8 @@ async def test_run_ai_reads_only_unless_given_a_folder(env, config):
     call = claude.calls[-1]
     assert api.final_answer(text) == "直したよ" and (folder / "a.py").exists()
     assert (call["kind"], call["read_only"], call["cwd"]) == (ChannelKind.FOLDER, False, folder.resolve())
-    assert "改善中…" in slack.thinking() and slack.streamed()[-1] == "直したよ"
+    assert events[0][0] == "working" and events[-1][0] == "awaiting"
+    assert slack.texts()[-1] == "直したよ"
 
 
 async def test_run_ai_raises_when_the_ai_fails(env):
@@ -248,11 +239,11 @@ async def test_a_failing_on_start_is_reported_and_does_not_stop_the_others(env, 
 
 # スレッドの履歴・添付・経過・Markdown の投稿
 
-async def test_thread_helpers(env):
+async def test_thread_helpers(env, monkeypatch):
     assistant, slack, claude = env
     core = assistant.cores["fixer"]
-    slack.replies = [{"ts": "20.1", "user": "UME", "text": "ログを細かく"},
-                     {"ts": "20.2", "user": "UBOT", "text": "こう直すね"}]
+    assistant.remember_message("C9", "20.1", "owner", "ログを細かく", "20.1")
+    assistant.remember_message("C9", "20.1", "assistant", "こう直すね", "20.2")
     assert [m["ts"] for m in await core.thread_messages("C9", "20.1")] == ["20.1", "20.2"]
     history = await core.thread_history("C9", "20.1")
     assert "ログを細かく" in history and "こう直すね" in history
@@ -264,8 +255,10 @@ async def test_thread_helpers(env):
     await core.post("C9", "*変えたファイル*", thread_ts="20.1", markdown=True)
     assert slack.posted()[-1]["markdown_text"] == "*変えたファイル*" and "text" not in slack.posted()[-1]
 
+    events = []
+    monkeypatch.setattr(assistant, "emit", lambda kind, **data: events.append((kind, data)))
     async with core.progress(req(), "取り込み中…"):
-        assert "取り込み中…" in slack.thinking()
+        assert events == [("working", {"theme": "kei-agent"})]
 
 
 # 本体の柵（guard.check_change）

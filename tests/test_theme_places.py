@@ -4,16 +4,13 @@
 明示したときだけ、招いたときに置き場所を聞く。
 """
 
-import asyncio
-import json
 import os
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, FakeNotion, make_assistant
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.execution import guard, runner
+from kei_agent.execution import guard
 from kei_agent.workspaces import themes
 from kei_agent.workspaces.themes import ChannelKind, PlaceError
 
@@ -135,76 +132,3 @@ def test_jobs_may_run_in_an_existing_theme_folder(home, tmp_path):
     assert executor._job_dir(str(folder)) == folder.resolve()
     with pytest.raises(ValueError, match="ジョブを動かしてよい場所ではありません"):
         executor._job_dir(str(tmp_path / "src"))
-
-
-# 招いたときに置き場所を聞く
-
-@pytest.fixture
-def env(home, store, monkeypatch):
-    claude = FakeAI()
-    monkeypatch.setattr(runner, "run_model", claude)
-    assistant, slack = make_assistant(home, store, {"C1": "amr"},
-                                      notion=FakeNotion(), team_url="https://example.slack.com/")
-    return assistant, slack, claude
-
-
-def _buttons(slack):
-    choice, = [kw for kw in slack.posted() if kw.get("blocks")]
-    return {el["action_id"]: el for b in choice["blocks"] if b["type"] == "actions" for el in b["elements"]}
-
-
-def _press(el, user="UME"):
-    return {"user": {"id": user}, "trigger_id": "trig", "actions": [el],
-            "container": {"channel_id": "C1", "message_ts": "5.5"}}
-
-
-def _submit(folder, user="UME"):
-    return {"user": {"id": user}, "view": {"private_metadata": json.dumps({"channel": "C1", "message_ts": "5.5"}),
-                                           "state": {"values": {"folder": {"folder": {"value": str(folder)}}}}}}
-
-
-async def test_joining_a_new_theme_asks_where_its_folder_is(env, home, tmp_path):
-    assistant, slack, claude = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
-    buttons = _buttons(slack)
-    assert set(buttons) == {"kei_agent_theme_place_default", "kei_agent_theme_place_existing"}
-    assert not (home.research_root / "amr").exists() and assistant.notion.themes == {}
-
-    await assistant.on_theme_place_action(_press(buttons["kei_agent_theme_place_existing"]))
-    (name, view), = [(n, kw["view"]) for n, kw in slack.calls if n == "views_open"]
-    assert view["callback_id"] == "kei_agent_theme_place_submit"
-
-    # 使えない場所は、欄の下に理由を出す（画面は閉じない）
-    assert "フォルダがありません" in (await assistant.on_theme_place_submit(_submit(tmp_path / "nowhere")))["folder"]
-    folder = _repo(tmp_path, claude_md="# 前からある前提\n")
-    assert await assistant.on_theme_place_submit(_submit(folder)) is None
-    assert themes.places(home) == {"amr": folder.resolve()}
-    assert assistant.notion.themes == {"amr": "https://example.slack.com/archives/C1"}
-    text = slack.texts()[-1]
-    assert str(folder.resolve()) in text and "Git には入れない" in text and "毎晩の保存はしない" in text
-    assert "前からある `CLAUDE.md`" in text
-    assert ("chat_update", {"channel": "C1", "ts": "5.5", "text": text.split("\n前からある")[0], "blocks": []}) in slack.calls
-
-    # 依頼は、そのフォルダで動く
-    await assistant.on_mention({"channel": "C1", "user": "UME", "ts": "10.1", "text": "<@UBOT> 図を作って"})
-    while assistant.tasks:
-        await asyncio.gather(*list(assistant.tasks), return_exceptions=True)
-        await asyncio.sleep(0)
-    assert claude.calls[-1]["cwd"] == folder.resolve()
-
-
-async def test_choosing_the_default_place_creates_it(env, home):
-    assistant, slack, claude = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
-    await assistant.on_theme_place_action(_press(_buttons(slack)["kei_agent_theme_place_default"]))
-    assert (home.research_root / "amr" / "CLAUDE.md").exists() and themes.places(home) == {}
-    assert "既定の場所" in slack.texts()[-1]
-
-
-async def test_only_the_owner_chooses_the_place(env, home, tmp_path):
-    assistant, slack, claude = env
-    await assistant.on_member_joined({"user": "UBOT", "channel": "C1"})
-    await assistant.on_theme_place_action(_press(_buttons(slack)["kei_agent_theme_place_default"], user="USOMEONE"))
-    assert not (home.research_root / "amr").exists()
-    assert (await assistant.on_theme_place_submit(_submit(_repo(tmp_path), user="USOMEONE")))["folder"]
-    assert themes.places(home) == {}

@@ -73,7 +73,7 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "agent": {"type": "string", "enum": ["research", "course", "work"],
+                "agent": {"type": "string", "enum": ["research", "work"],
                           "description": "調べる担当"},
                 "question": {"type": "string", "description": "調べてほしいことを、一文で"},
                 "theme": {"type": "string", "description": "研究ならテーマ名（例 amr-query）"},
@@ -89,8 +89,8 @@ DEFINITIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "theme": {"type": "string", "description": "テーマ名（Slack のチャンネル名。例 amr-query）"},
-                "text": {"type": "string", "description": "依頼の文。そのまま Slack のスレッドに載る"},
+                "theme": {"type": "string", "description": "作業場の名前（例 amr-query）"},
+                "text": {"type": "string", "description": "依頼の文。作業場の会話記録に残る"},
             },
             "required": ["theme", "text"],
         },
@@ -163,7 +163,7 @@ class Tools:
     def get_status(self, now: datetime | None = None) -> str:
         current(self.held, now)
         if self.held.get("limited"):
-            return "いま Claude の上限に当たっていて、止まっている。"
+            return "いま AI の利用上限に当たっていて、止まっている。"
         running = int(self.held.get("running") or 0)
         done = int(self.held.get("done") or 0)
         failed = int(self.held.get("failed") or 0)

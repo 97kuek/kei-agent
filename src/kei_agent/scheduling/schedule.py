@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import socket
 import time
 from contextlib import suppress
@@ -36,13 +35,15 @@ log = logging.getLogger(__name__)
 
 # 実行する順番。夜間の Task の結果を Daily に載せるため、night を先にする
 def task_names(config: Config) -> tuple[str, ...]:
-    """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ Daily → 振り返り → 保守。
+    """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ 朝の取り込み → Daily → 振り返り → 保守。
 
     夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。Daily と振り返りは、受け持つモジュール
-    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。
+    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。朝の取り込みは、Daily が動かないときだけ
+    （Daily が動くなら、Daily が取り込む）。
     """
     taken = tuple(name for name in modules.CORE_SCHEDULES if modules.core_schedule_owner(config.modules, name))
-    return ("night", *(s.name for s in settings.module_schedules(config)), *taken, "maintenance")
+    intake = () if "daily" in taken and settings.schedule_time(config, "daily") else ("intake",)
+    return ("night", *(s.name for s in settings.module_schedules(config)), *intake, *taken, "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
@@ -159,8 +160,8 @@ class Scheduler:
         return detail
 
     def task_provider(self, name: str) -> str | None:
-        """定期処理が使う明示 provider。保守はモデルを使わない。"""
-        if name == "maintenance":
+        """定期処理が使う明示 provider。保守と朝の取り込みはモデルを使わない（取り込みの AI は担当のプロセスが動かす）。"""
+        if name in ("maintenance", "intake"):
             return None
         owner = (modules.core_schedule_owner(self.config.modules, name)
                  or modules.schedule_owner(self.config.modules, name))
@@ -195,10 +196,24 @@ class Scheduler:
 
     async def catch_up_deferred(self, now: float) -> None:
         """上限で止まった決まった時刻の処理を、明けてからやり直す（猶予の時間を過ぎていても動かす）。"""
+        current = set(task_names(self.config))
         for deferred_id, payload in self.store.due_deferred("schedule", now):
             self.store.finish_deferred(deferred_id)
-            if not self.store.schedule_ran(payload["name"], payload["day"]):
-                await self.run_or_defer(payload["name"], payload["day"], now)
+            name = payload["name"]
+            # 待っている間に止めた処理や担当を外した処理は、予約も取り消す。
+            if name not in current or not settings.schedule_time(self.config, name):
+                continue
+            if not self.store.schedule_ran(name, payload["day"]):
+                await self.run_or_defer(name, payload["day"], now)
+
+    # 朝の取り込み
+
+    async def run_intake(self, day: str) -> dict:
+        """朝の一覧と同じ取り込み（モジュールの取り込み直し・声に1週間の予定）を、投稿せずに行う。
+        Daily を頭（Dots）の予定に移して止めたときのため（Daily が動く間は task_names に入らない）。
+        会議を予定カレンダーへ写すのは Dot の予定なので、ここでは写さない（docs/dots.md）。"""
+        found = await briefing.build(self.assistant, datetime.now(), write_meetings=False)
+        return {"status": "done", **found.detail}
 
     # 夜間の Task
 
@@ -266,7 +281,7 @@ class Scheduler:
         )
         if message:
             text += f"\n## 元の Slack のメッセージ\n\n{clean_text(message.get('text', ''))}\n"
-        req = Request(channel, channel_name, thread_ts, None, text, trigger="night", files=message.get("files") or [])
+        req = Request(channel, channel_name, thread_ts, None, text, trigger="night")
         result = await self.assistant.process(req)
 
         if result is None or result.is_error:
@@ -277,15 +292,7 @@ class Scheduler:
             status = "確認待ち" if contract_failed or AWAITING_MARKER in result.text else "完了"
             summary = "返答を利用者向けの形に整えられませんでした" if contract_failed else summarize(shown)
         await asyncio.to_thread(notion.update_task, task.id, status, summary)
-        if status == "完了" and message_ts:
-            await self.assistant.react_done(channel, message_ts)
         return {**info, "status": status, "summary": summary}
-
-    # Daily と振り返り
-
-    async def sync_meetings(self, events: list[dict], now: datetime, source: str) -> dict | str:
-        """朝に読んだ会議を、共通ホームの予定カレンダーに足す（briefing.py）。"""
-        return await briefing.sync_meetings(self.assistant, events, now, source)
 
     # 保守
 
@@ -362,23 +369,14 @@ class Scheduler:
 
 
 async def _run_once(name: str, record: bool) -> None:
-    from slack_sdk.web.async_client import AsyncWebClient
-
     from kei_agent.configuration.config import load_config
-    from kei_agent.execution.jobs import JobManager
-    from kei_agent.storage.notion_hub import load_hub
-    from kei_agent.storage.notion_store import load_notion
+    from kei_agent.conversation.service import create_assistant
 
     config = load_config()
     store = Store(config.db_path)
-    slack = AsyncWebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    auth = await slack.auth_test()
     pueue = jobs.queue(config)
-    await pueue.ensure_group()  # 夜間の Task がジョブを投入することがある
-    assistant = Assistant(config, store, slack, JobManager(config, store, pueue),
-                          os.environ["SLACK_BOT_TOKEN"], auth["user_id"],
-                          notion=load_notion(config), team_url=auth.get("url", ""),
-                          team_id=auth.get("team_id", ""), hub=load_hub(config))
+    await pueue.ensure_group()
+    assistant = create_assistant(config, store, pueue)
     scheduler = Scheduler(config, store, assistant)
     day = date.today().isoformat()
     detail = await scheduler.run_task(name, day, record=record)

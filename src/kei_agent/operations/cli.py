@@ -1,9 +1,8 @@
 """`kei-agent` のコマンド。何も付けなければ Kei Agent を動かす（launchd からの起動と同じ）。
 
-- `kei-agent` … Kei Agent（Slack の受け口と定期処理）を動かす
+- `kei-agent` … Kei Agent（MCP サーバーと定期処理）を動かす
 - `kei-agent setup` … はじめの設定（対話。設定・プロフィール・秘密情報のファイルを作る）
 - `kei-agent doctor` … 今の設定と動きを点検する（読むだけ）
-- `kei-agent manifest` … オンにしたモジュールに合わせた Slack App の manifest を出す
 - `kei-agent module list / add / remove / new / test` … モジュールを一覧にする・足す・外す・作る・テストする
 """
 
@@ -16,7 +15,6 @@ USAGE = """使い方: kei-agent [コマンド]
   （何も付けない）  Kei Agent を動かす（ふだんは launchd が起動する）
   setup             はじめの設定（対話。設定・プロフィール・秘密情報のファイルを作る。もうあるものは書き換えない）
   doctor            今の設定と動きを点検する（読むだけ。--all でうまくいっているものも並べる）
-  manifest          オンにしたモジュールに合わせた Slack App の manifest を出す（Slack の App Manifest に貼る）
   module            モジュールを一覧にする（list）・足す（add <名前>）・外す（remove <名前>）・
                     ひな形を作る（new <名前> [--ai] [--process]）・テストする（test <名前>）
 """
@@ -38,10 +36,6 @@ def main(argv: list[str] | None = None) -> None:
         from kei_agent.operations import doctor
 
         raise SystemExit(doctor.main(rest))
-    if command == "manifest":
-        from kei_agent.operations import slack_manifest
-
-        raise SystemExit(slack_manifest.main(rest))
     if command == "module":
         from kei_agent.operations import module_command
 

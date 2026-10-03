@@ -1,4 +1,4 @@
-"""モジュールの担当プロセスがコアとやり取りする窓口（枠の版 1。書き方は docs/modules.md の「agent.py」）。
+"""モジュールの担当プロセスがコアとやり取りする窓口（枠の版 2。書き方は docs/modules.md の「agent.py」）。
 
 担当プロセスのコード（modules/<名前>/agent.py と、そこから読む同じフォルダのファイル）が読み込んでよい
 Kei Agent の部品は、この kei_agent_a2a.api だけ。本体側（module.py）の窓口は kei_agent.api。
@@ -17,8 +17,7 @@ agent.py には次を置く。起動は共通のコマンド（`kei-agent-module
 - `DESCRIPTION`（任意）… 名刺の説明。無ければ module.toml の description
 
 手で動かすコマンド（setup など）は commands.py に `COMMANDS = {"名前": main(argv)}` を置く（`kei-agent-module
-<名前> <コマンド>`）。コマンドからモジュールの記録を読み書きするのは `records(config, 名前)`、本体の代わりにボタンつきの
-投稿を置くなら、ボタンの名前は `action_id(名前, ボタン)`（押されると本体側の on_action）。
+<名前> <コマンド>`）。コマンドからモジュールの記録を読み書きするのは `records(config, 名前)`、操作は本体側の `head_action` で MCP に公開する。
 Notion はゲートウェイ経由（gateway_notion の名前で届くホームが決まる）、Toggl は load_toggl。
 モジュールの設定（module.toml の [settings] と、config.toml の [<名前>]）は `settings(config, 名前)` で読む。
 本体の問い合わせ口に研究・大学・仕事の中身を聞くのは `ask_orchestrator`、Slack の外から依頼を置くのは `put_request`。
@@ -70,7 +69,7 @@ API_VERSION = modules.API_VERSION
 __all__ = ["API_VERSION", "ASK", "CANCEL_JOB", "FORGET_JOB", "GATEWAY_TOKEN_ENV", "LIST_JOBS", "MAIN_CLIENT",
            "NO_JSON", "RUNNING_VERSION", "SUBMIT_JOB", "WEEKDAYS", "AIError", "AgentSkill", "Config", "Notion", "NotionConfig",
            "NotionError", "OrchestratorError", "Pueue", "Records", "Setup", "SkillExecutor", "TaskUpdater", "Toggl",
-           "TogglError", "Workspace", "action_id", "ai_runs_shell", "ai_writes_notion", "append_blocks", "ask_orchestrator", "asked_days",
+           "TogglError", "Workspace", "ai_runs_shell", "ai_writes_notion", "append_blocks", "ask_orchestrator", "asked_days",
            "body_json", "channel_workspace", "day_label", "gateway_client_token", "gateway_notion", "json_list", "json_object",
            "load_config", "load_toggl", "markdown_to_blocks", "notion_id", "parse_time", "plain_text", "progress",
            "provider_of", "put_request", "records", "requested_days", "rich_text", "run_ai", "safe_to_resend", "settings",
@@ -105,7 +104,7 @@ async def ask_orchestrator(config: Config, actor: str, question: str, theme: str
     """本体の問い合わせ口（config.toml の [a2a] orchestrator）に、研究・大学・仕事の中身を聞く。
 
     担当を呼べるのは本体だけ。本体が選択済みの provider で、読むだけで担当に聞き、Slack に出すときと同じ出力の
-    確認を通した答えを返す。actor は research / course / work（研究なら theme も）。聞けなければ OrchestratorError。
+    確認を通した答えを返す。actor は research / work（研究なら theme も）。聞けなければ OrchestratorError。
     """
     url = config.a2a.orchestrator
     if not url:
@@ -148,14 +147,6 @@ def settings(config: Config, module: str) -> dict:
 def records(config: Config, module: str) -> Records:
     """そのモジュールだけの記録（本体側の core.records と同じもの）。担当プロセスの外（手で動かすコマンド）から使う。"""
     return Records(Store(config.db_path), module)
-
-
-def action_id(module: str, name: str) -> str:
-    """モジュールの投稿に置くボタンの action_id（本体側の core.action_id と同じ。押されると本体側の on_action）。
-
-    手で動かすコマンドが、本体の代わりにボタンつきの投稿を置くときに使う（時間記録のカードなど）。
-    """
-    return modules.action_id(module, name)
 
 
 def theme_folders(config: Config) -> dict[str, Path]:

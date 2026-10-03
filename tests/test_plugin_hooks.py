@@ -17,9 +17,9 @@ from kei_agent.configuration.config import REPO_ROOT
 from kei_agent.execution.agent_policy import NOTION_READ_TOOLS, policy_of
 
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
-PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin", "course": REPO_ROOT / "modules" / "course" / "plugin",
+PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin",
            "work": REPO_ROOT / "modules" / "work" / "plugin"}
-AGENTS = ("research", "course", "work")
+AGENTS = ("research", "work")
 ALLOW, DENY = 0, 2
 
 
@@ -43,14 +43,6 @@ def test_each_plugin_ships_its_hook(agent):
 
 @pytest.mark.parametrize(("agent", "tool", "allowed"), [
     # 大学: Box は読むだけ、Notion はゲートウェイ（授業ホームの中）なら全部
-    ("course", "mcp__claude_ai_Box__get_file_content", True),
-    ("course", "mcp__claude_ai_Box__search_files_keyword", True),
-    ("course", "mcp__claude_ai_Box__upload_file", False),
-    ("course", "mcp__claude_ai_Box__create_folder", False),
-    ("course", "mcp__kei-notion__move", True),
-    ("course", "mcp__kei-notion__create_database", True),
-    ("course", "mcp__claude_ai_Notion__notion-move-pages", False),
-    ("course", "mcp__claude_ai_Notion__notion-search", False),
     # 仕事: 読むだけ
     ("work", "mcp__claude_ai_Microsoft_365__outlook_email_search", True),
     ("work", "mcp__claude_ai_Microsoft_365__read_resource", True),
@@ -78,24 +70,12 @@ def test_each_plugin_ships_its_hook(agent):
     ("research", "mcp__kei-notion-evil__search", False),
     ("research", "mcp__research-notion__search", False),
     # 担当外の連携は、読むだけでも使わない
-    ("course", "mcp__claude_ai_Slack__slack_send_message", False),
-    ("course", "mcp__claude_ai_Microsoft_365__outlook_create_draft", False),
-    ("course", "mcp__claude_ai_Slack__slack_read_channel", False),
     ("work", "mcp__claude_ai_Notion__notion-update-page", False),
     ("work", "mcp__claude_ai_Notion__notion-search", False),
     ("work", "mcp__claude_ai_Box__upload_file", False),
     ("work", "mcp__claude_ai_Slack__slack_search_public", False),
     # Codex の名前。MCP の server の `-` は `_` になり、App の道具はフックに mcp__codex_apps__<App>__<道具> で届く
     # （モデルには mcp__codex_apps__<App>_<道具> で見える。どちらでも同じに判定する）
-    ("course", "mcp__kei_notion__search", True),
-    ("course", "mcp__kei_notion__move", True),
-    ("course", "mcp__codex_apps__box__get_file_content", True),
-    ("course", "mcp__codex_apps__box_get_file_content", True),
-    ("course", "mcp__codex_apps__box__upload_file", False),
-    ("course", "mcp__codex_apps__box_upload_file", False),
-    ("course", "mcp__codex_apps__box__create_collaboration", False),
-    ("course", "mcp__codex_apps__notion__notion-search", False),
-    ("course", "mcp__codex_apps__github__create_issue", False),
     ("work", "mcp__codex_apps__microsoft_outlook_email__search_messages", True),
     ("work", "mcp__codex_apps__microsoft_outlook_calendar__get_schedule", True),
     ("work", "mcp__codex_apps__microsoft_outlook_email__send_email", False),
@@ -166,8 +146,6 @@ def test_unreadable_input_is_refused(agent):
 
 @pytest.mark.parametrize(("agent", "tool", "expected"), [
     # 道具の名前が読めても中身が壊れているとき。書き込み系は断り、読み取り系は allowlist に任せる
-    ("course", "mcp__claude_ai_Box__upload_file", DENY),
-    ("course", "mcp__claude_ai_Box__get_file_content", ALLOW),
     ("work", "mcp__claude_ai_Microsoft_365__outlook_send_mail", DENY),
     ("work", "mcp__claude_ai_Microsoft_365__outlook_email_search", ALLOW),
 ])

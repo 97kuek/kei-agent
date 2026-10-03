@@ -14,9 +14,9 @@ from kei_agent.configuration.config import REPO_ROOT
 
 PLUGIN = REPO_ROOT / "plugin"
 # 担当ごとの skill とフックの置き場所。本体の担当は plugin/<名前>、モジュールの担当はそのフォルダの plugin/
-PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin", "course": REPO_ROOT / "modules" / "course" / "plugin",
+PLUGINS = {"research": REPO_ROOT / "modules" / "research" / "plugin",
            "work": REPO_ROOT / "modules" / "work" / "plugin"}
-AGENTS = ("research", "course", "work")
+AGENTS = ("research", "work")
 # SKILL.md の本文の長さの上限（語数）。長いものは references/ に分ける
 MAX_WORDS = 500
 
@@ -43,8 +43,6 @@ def skill_metadata(plugin_dir: Path) -> dict[str, dict[str, str]]:
 
 @pytest.mark.parametrize(("agent", "skills", "boundary"), [
     ("research", {"running-jobs", "researching-literature"}, "Notion"),
-    ("course", {"finding-course-materials", "managing-assignments", "managing-course-notion",
-                "managing-academic-record"}, "Box"),
     ("work", {"researching-work-context", "preparing-meetings", "drafting-work-actions"}, "送"),
 ])
 def test_each_agent_has_its_own_plugin_with_scoped_skills(agent, skills, boundary):
@@ -67,10 +65,3 @@ def test_each_agent_has_its_own_plugin_with_scoped_skills(agent, skills, boundar
 
 def test_the_old_shared_plugin_folder_is_gone():
     assert not (PLUGIN / "skills").exists() and not (PLUGIN / ".claude-plugin").exists()
-
-
-def test_course_skills_name_the_canonical_databases():
-    text = (PLUGINS["course"] / "skills" / "managing-academic-record" / "SKILL.md").read_text(encoding="utf-8")
-    course_schema = (PLUGINS["course"] / "skills" / "managing-course-notion" / "SKILL.md").read_text(encoding="utf-8")
-    for name in ("授業", "課題", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"):
-        assert name in text or name in course_schema

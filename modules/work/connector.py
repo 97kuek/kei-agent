@@ -6,7 +6,7 @@ Outlook を読める。この連携はアカウント側にあり、Python か�
 
 - 使える道具は module.toml の [[actor.connectors]] が決める。送信・作成・削除はできない
 - `list-events` が返すのは件名・時間・場所・主催者・リンクまで。朝のまとめで1行ずつ並べる形なので、
-  本文を入れても読めない（秘密のためではない。自由な質問では本文を出してよい。work.md）
+  会議の全文は入れず、参加リンクとパスコードは別の項目で保持する（work.md）
 """
 
 from __future__ import annotations
@@ -30,12 +30,13 @@ PROMPT = """Outlook の予定を検索する道具を使って、{since} から 
 
 [{{"subject": "件名", "start": "2026-09-24T18:00", "end": "2026-09-24T19:00",
    "id": "Outlook の予定 ID", "location": "場所", "organizer": "主催者のメールアドレス",
-   "all_day": false, "url": "Outlook の予定ページのリンク"}}]
+   "all_day": false, "url": "Outlook の予定ページのリンク",
+   "join_url": "Teams などの参加リンク", "passcode": "会議のパスコード"}}]
 
 - 時刻は Tokyo Standard Time の壁時計の時刻をそのまま使い、分までにしてください
 - 取り消された予定は除いてください
 - 予定が無ければ [] とだけ答えてください
-- 本文（会議の詳細、Teams の参加リンク、パスコード）は入れないでください"""
+- 参加リンクとパスコードは join_url と passcode に入れてください。会議の本文全体は入れないでください"""
 
 
 class WorkCalendarError(RuntimeError):
@@ -79,4 +80,6 @@ def _event(item: dict) -> dict:
         "organizer": str(item.get("organizer") or ""),
         "free": False,
         "url": str(item.get("url") or ""),
+        "join_url": str(item.get("join_url") or ""),
+        "passcode": str(item.get("passcode") or ""),
     }

@@ -124,7 +124,7 @@ def test_a_module_with_a_home_gets_its_own_client(tmp_path, api, world, gw_confi
                                                    '[use_cases.diary_answer]\nclaude = { model = "claude-sonnet-5" }\n')):
         folder = tmp_path / "modules" / name
         folder.mkdir(parents=True)
-        (folder / "module.toml").write_text(f'api = 1\nname = "{name}"\n{actor}', encoding="utf-8")
+        (folder / "module.toml").write_text(f'api = 2\nname = "{name}"\n{actor}', encoding="utf-8")
         (folder / f"{name}.md").write_text("#\n", encoding="utf-8")
     modules.register_user_modules(tmp_path / "modules")
     weather = api.add_page(None, "天気")
@@ -555,7 +555,8 @@ def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
     assert refused.value.status == 403 and "course can't reach" in str(refused.value)
 
 
-def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_path):
+@pytest.mark.parametrize("slack_url", ["https://slack.example/c", ""])
+def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_path, slack_url):
     """--apply を付けないときは読むだけで、作るもの・足すものを並べる。作ったあとは何も出ない。"""
     from kei_agent.storage.notion import Setup, safe_to_resend
     from kei_agent.storage.notion_store import NotionStore
@@ -572,7 +573,9 @@ def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_p
             if not line.startswith("ノートのテンプレート")] == []
 
     store = NotionStore(kei, state)
-    assert store.ensure_theme("vlm", "https://slack.example/c", "~/research/vlm")
+    assert store.ensure_theme("vlm", slack_url, "~/research/vlm")
+    page = kei.request("GET", f"/pages/{store.theme_page_id('vlm')}")
+    assert page["properties"]["Slack"]["url"] == (slack_url or None)
     task = store.create_night_task("試す", "vlm", "https://slack.example/p1", "本文")
     assert [found.id for found in store.tonight_tasks(5)] == [task.id]
     assert task.theme_names == ["vlm"]

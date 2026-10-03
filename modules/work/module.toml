@@ -1,6 +1,6 @@
 # 仕事のモジュール（docs/agents/work-agent.md）。会社のアカウントで、Microsoft 365 を読んで予定と会社のことに答え、
 # 仕事のプロジェクトのチャンネルでは作業場のコードを書いて動かす
-api = 1
+api = 2
 name = "work"
 label = "仕事"
 description = "会社のアカウントで、Outlook・Teams・SharePoint を読んで予定と会社のことに答え（読むだけ）、プロジェクトのチャンネル（#work-<名前>）では作業場（~/work/<名前>）のコードを書いてテストを動かす"

@@ -1,11 +1,11 @@
 """大学の担当プロセス（A2A のサーバー）。起動は共通のコマンド `kei-agent-module course`。
 
-Moodle の課題、Notion の授業と課題（ゲートウェイの course として授業ホームだけに届く）、Toggl の実績、
-Box の学部要項と過去問を扱う。自由な質問には、選択済み provider が Box と Notion を読んで答える（どの担当とも同じ ask）。
+Moodle の課題、Notion の授業と課題（ゲートウェイの course として授業ホームだけに届く）、Toggl の実績の
+機械的な同期・一覧取得を扱う。相談と資料の読み書きは Dot が行う。
 
 metadata の `skill`（なければ本文の1行目）で、どの仕事かを決める。細かい指定（`days`・`weekday`）は、本体（module.py）
 が本文の JSON で渡す。返事は全担当で共通の封筒。締切の一覧は `data.items` に入れ、見せ方は本体が決める
-（朝の一覧、24時間前の知らせ、スレッドへの返事で形が違う）。時限の時刻と学期は、学校の設定（school.py）で決まる。
+。時限の時刻と学期は、学校の設定（school.py）で決まる。
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date
+from dataclasses import asdict
+from datetime import date, datetime
 
 from kei_agent_a2a.api import (
-    ASK,
     WEEKDAYS,
     AgentSkill,
     NotionError,
@@ -27,7 +27,7 @@ from kei_agent_a2a.api import (
     weekday,
 )
 
-from . import moodle, notion_sync, toggl_report
+from . import moodle, moodle_api, notion_sync, submissions, toggl_report
 from .ics import Event
 from .school import SchoolError, from_config, next_weekday
 from .skills import (
@@ -36,13 +36,13 @@ from .skills import (
     LIST_CURRENT_COURSES,
     LIST_DUE,
     SYNC_ASSIGNMENTS,
+    SYNC_SUBMISSIONS,
     TIME_REPORT,
 )
 
 log = logging.getLogger(__name__)
 
-DESCRIPTION = ("Moodle の課題、Notion の授業と課題、Toggl の実績、Box の学部要項と過去問を扱う。"
-               "自由な質問には、自分の AI が Box と Notion を読んで答える")
+DESCRIPTION = "Moodle の課題と提出・受験状態を同期し、授業・課題と Toggl の実績を機械的に返す"
 SKILLS = [
     AgentSkill(
         id=SYNC_ASSIGNMENTS,
@@ -51,6 +51,14 @@ SKILLS = [
                     "新しく増えた課題と、締切が変わった課題を返す",
         tags=["moodle", "notion"],
         examples=["課題を取り込んで", "Moodle を見てきて"],
+    ),
+    AgentSkill(
+        id=SYNC_SUBMISSIONS,
+        name="提出・受験状態を同期する",
+        description="認証付き Moodle API で課題の提出・小テストの受験終了を確認し、"
+                    "Notion の対応する課題を提出済みにする。未提出・取得失敗では状態を戻さない",
+        tags=["moodle", "notion"],
+        examples=["提出状態を確認して", "小テストの受験終了を反映して"],
     ),
     AgentSkill(
         id=LIST_DUE,
@@ -83,14 +91,6 @@ SKILLS = [
         description="今学期に履修中の科目だけを JSON で返す（items: id/subject/weekday/period）",
         tags=["notion", "course"],
         examples=["履修中の授業", "今学期の科目"],
-    ),
-    AgentSkill(
-        id=ASK,
-        name="授業のことに答える",
-        description="定型に当てはまらない質問に、選択済み provider が答える。Box の学部要項・過去問と、"
-                    "Notion の授業・課題を読んで、根拠（ファイル名と URL）を付けて返す",
-        tags=["box", "notion"],
-        examples=["情報セキュリティBの過去問ある？", "卒業に必要な単位数は？", "この課題の出し方どうだった？"],
     ),
     AgentSkill(
         id=TIME_REPORT,
@@ -129,17 +129,37 @@ def asked_weekday(text: str) -> str:
     return value if isinstance(value, str) and len(value) == 1 and value in WEEKDAYS else ""
 
 
-def due_data(events: list[Event], days: int) -> dict:
-    """締切の中身（見せ方はオーケストレーターが決める）。"""
+def due_data(items: list[dict], days: int, *, now: datetime | None = None) -> dict:
+    """Notion の状態を使い、提出済みと期限切れを締切一覧から除く。"""
+    now = now or datetime.now().astimezone()
+    pending = []
+    for item in items:
+        if item.get("status") == "提出済み":
+            continue
+        at = datetime.fromisoformat(item["due"])
+        if len(item["due"]) == 10:
+            # 日付だけの手入力はその日全体の締切。朝から期限切れにしない。
+            at = at.replace(hour=23, minute=59, second=59, tzinfo=now.tzinfo)
+        at = at.astimezone(now.tzinfo)
+        if at < now:
+            continue
+        pending.append((at, item))
+    pending.sort(key=lambda pair: (pair[0], pair[1]["id"]))
     return {
         "days": days,
-        "more": max(0, len(events) - MAX_DUE),
-        "items": [{"id": e.uid, "at": e.starts_at.astimezone().isoformat(), "course": e.course_name,
-                   "title": e.summary, "url": e.url} for e in events[:MAX_DUE]],
+        "more": max(0, len(pending) - MAX_DUE),
+        "items": [{"id": item.get("moodle_id") or item["id"], "at": at.isoformat(),
+                   "course": item.get("course", ""), "title": item["title"], "url": item.get("url", "")}
+                  for at, item in pending[:MAX_DUE]],
     }
 
 
 class Executor(SkillExecutor):
+    def __init__(self, config=None, store=None):
+        super().__init__(config, store)
+        # 定期チェックと手動同期が同時に来ても、同じ課題を二度更新しない。
+        self._sync_lock = asyncio.Lock()
+
     async def handle(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
         skill = asked_skill(text, metadata)
         if not skill:
@@ -147,10 +167,11 @@ class Executor(SkillExecutor):
                                       "metadata の skill か、本文の1行目に書いてください")
             return
         log.info("頼まれた仕事: %s", skill)
-        handlers = {SYNC_ASSIGNMENTS: self._sync_assignments, LIST_DUE: self._list_due,
+        handlers = {SYNC_ASSIGNMENTS: self._sync_assignments, SYNC_SUBMISSIONS: self._sync_submissions,
+                    LIST_DUE: self._list_due,
                     LIST_CALENDAR_ASSIGNMENTS: self._list_calendar_assignments,
                     LIST_CLASSES: self._list_classes, LIST_CURRENT_COURSES: self._list_current_courses,
-                    TIME_REPORT: self._time_report, ASK: self._ask}
+                    TIME_REPORT: self._time_report}
         await handlers[skill](updater, metadata, text)
 
     async def _due_events(self, updater: TaskUpdater, days: int) -> list[Event] | None:
@@ -166,6 +187,25 @@ class Executor(SkillExecutor):
             return None
 
     async def _sync_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
+        async with self._sync_lock:
+            await self._import_assignments(updater, metadata, text)
+
+    async def _submission_result(self) -> submissions.Result:
+        cursor = (self.records.get("submissions", "cursor") or {}).get("after", "")
+        result = await asyncio.to_thread(submissions.sync, after=cursor)
+        submissions.record_result(result, self.records)
+        return result
+
+    async def _sync_submissions(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
+        async with self._sync_lock:
+            try:
+                result = await self._submission_result()
+            except (moodle_api.APIError, notion_sync.SyncError, NotionError) as error:
+                await self.fail(updater, str(error))
+                return
+            await self.done(updater, result.summary(), asdict(result))
+
+    async def _import_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """Moodle の締切を Notion の「課題」に反映する。"""
         events = await self._due_events(updater, requested_days(text, moodle.WINDOW_DAYS))
         if events is None:
@@ -175,17 +215,27 @@ class Executor(SkillExecutor):
         except (notion_sync.SyncError, NotionError) as e:
             await self.fail(updater, str(e))
             return
-        await self.done(updater, result.summary(), {
+        try:
+            status = await self._submission_result()
+        except (moodle_api.APIError, notion_sync.SyncError, NotionError) as error:
+            status = submissions.Result(errors=[str(error)])
+        summary = result.summary() + ("\n" + status.summary() if status.enabled else "")
+        await self.done(updater, summary, {
             "added": result.added, "updated": result.updated, "unchanged": result.unchanged,
-            "other_courses": result.other_courses})
+            "other_courses": result.other_courses, "completed": status.completed, "errors": status.errors,
+            "submissions_enabled": status.enabled})
 
     async def _list_due(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
         """締切の近い課題を、近い順に JSON で返す。"""
         days = requested_days(text, DUE_DAYS)
-        events = await self._due_events(updater, days)
-        if events is None:
+        try:
+            snapshot = await asyncio.to_thread(notion_sync.list_calendar_assignments, days, date.today())
+            if snapshot.get("complete") is not True:
+                raise notion_sync.SyncError("課題 DB を全部読めませんでした")
+            data = due_data(snapshot["items"], days)
+        except (notion_sync.SyncError, NotionError, ValueError, KeyError, TypeError) as error:
+            await self.fail(updater, str(error))
             return
-        data = due_data(events, days)
         await self.done(updater, f"これから {days} 日で締切の課題は {len(data['items'])} 件", data)
 
     async def _list_calendar_assignments(self, updater: TaskUpdater, metadata: dict, text: str = "") -> None:
@@ -246,7 +296,3 @@ class Executor(SkillExecutor):
             await self.fail(updater, str(e))
             return
         await self.done(updater, text + note)
-
-    async def _ask(self, updater: TaskUpdater, metadata: dict, text: str) -> None:
-        """定型に当てはまらない質問。Box と、ゲートウェイ経由の授業ホームを読んで答える（どの担当とも同じ ask）。"""
-        await self.answer(updater, text)

@@ -16,16 +16,12 @@ from kei_agent.conversation.auto_messages import (
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import (
     FAILED_PREFIX,
-    HOLD_REACTION,
     format_duration,
     is_status_inquiry,
 )
 from kei_agent.execution import agents
 from kei_agent.storage import settings
 from kei_agent.workspaces import themes
-from kei_agent.workspaces.theme_files import (
-    download_files,
-)
 
 log = logging.getLogger(__name__)
 
@@ -34,8 +30,7 @@ class LimitDeferral:
     async def hold_until_limit_ends(self, req: Request) -> bool:
         """上限で止まってやり直し待ちのスレッドに書かれたら、いまは動かさず、明けてからこの続きとしてやる（True）。
 
-        すぐ動かすと、同じ上限にまた当たって知らせが重なる。やり直しの予約をこの依頼に置き換え、依頼に ⏳ を付ける
-        （投稿はしない）。進み具合を聞かれただけなら、止まっている理由をその場で答える。そのスレッドの担当の AI が
+        すぐ動かすと、同じ上限にまた当たって知らせが重なる。やり直しの予約をこの依頼に置き換える。進み具合を聞かれただけなら、止まっている理由をその場で答える。そのスレッドの担当の AI が
         もう上限でなければ（明けた・別の provider に切り替えた）、何もしない（False。予約を取り消して動かす）。
         """
         pending = self.store.pending_deferred_for(req.channel, req.thread_ts)
@@ -56,18 +51,12 @@ class LimitDeferral:
             await self.mark_answered(req, failed=False)
             return True
         # 添付は、控えに残せる形（保存した場所）にしてから待たせる。止まった依頼の添付も引き継ぐ
-        saved = await download_files(req.files, ws.cwd, self.bot_token) if req.files and ws.cwd is not None else []
         earlier = [path for _, payload in pending for path in payload.get("saved_files") or []]
-        req = replace(req, files=[], saved_files=list(dict.fromkeys([*earlier, *req.saved_files, *saved])))
-        # 待たせた依頼の ⏳ は、やり直すときに外す（前に待たせたものも覚えておく）
-        held = [ts for _, payload in pending for ts in payload.get("held") or []]
+        req = replace(req, saved_files=list(dict.fromkeys([*earlier, *req.saved_files])))
         for deferred_id, _ in pending:
             self.store.finish_deferred(deferred_id)
-        payload = {**req.to_payload(), "provider": provider,
-                   "held": held + ([req.message_ts] if req.message_ts else [])}
+        payload = {**req.to_payload(), "provider": provider}
         self.store.defer_run("request", payload, until)
-        if req.message_ts:
-            await self._react(self.slack.reactions_add, req.channel, req.message_ts, HOLD_REACTION)
         return True
 
     async def drop_deferred_for(self, req: Request) -> None:
@@ -152,7 +141,7 @@ class LimitDeferral:
         when = datetime.fromtimestamp(until).strftime("%H:%M")
         text = f"{FAILED_PREFIX} {provider} の利用上限に達したみたい。{when} ごろに自動でやり直すね。"
         await self.post(req, f"<@{self.config.allowed_user_id}> {text}" if mention else text)
-        self.emit("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"))
+        self.emit("limited", reset_at=datetime.fromtimestamp(until).isoformat(timespec="minutes"), auto_retry=True)
 
     # 再起動で途中で止まった依頼
 
@@ -160,29 +149,29 @@ class LimitDeferral:
         """前回の終了時に動いていた依頼を、スレッドに一言添えてやり直す。"""
         interrupted = self.store.interrupted_requests()
         self.store.end_open_runs()
+        resumed = 0
         for deferred_id, payload in interrupted:
             self.store.finish_deferred(deferred_id)
             req = Request.from_payload(payload)
             if not req.text.strip():
                 continue
             if req.trigger == "handoff":
-                # 引き継ぎは、普通の依頼として投げ直すと会話が続くだけになる。もう一度区切らせる
+                # 旧 Slack UI の引き継ぎは再実行しない。MCP からの再依頼を待つ。
                 try:
-                    await self.post(req, "🧵 入れ替えで引き継ぎが途中で止まったので、もう一度まとめるね。")
+                    await self.post(req, "🧵 会話の引き継ぎが途中で止まっていたよ。引き継ぎをもう一度頼んでね。")
                 except Exception:
                     log.warning("中断を知らせられません", exc_info=True)
-                self.spawn(self.hand_off(req))
                 continue
             try:
                 await self.post(req, f"{FAILED_PREFIX} さっきの作業は Kei Agent の入れ替えで途中で止まっちゃった。"
                                      "いまの状態を確かめて、続きからやり直すね。")
             except Exception:
                 log.warning("中断を知らせられません", exc_info=True)
-            # 元のメッセージの 👀 は残したまま。やり直しが終われば ✅ か ⚠️ に変わる
             await self.submit(replace(req, text=interrupted_prompt(req.text), retried=True))
-        if interrupted:
-            log.info("再起動で止まっていた依頼を %d 件やり直します", len(interrupted))
-        return len(interrupted)
+            resumed += 1
+        if resumed:
+            log.info("再起動で止まっていた依頼を %d 件やり直します", resumed)
+        return resumed
 
     async def retry_deferred(self, now: float | None = None) -> None:
         """上限で止まった依頼を、明けたらやり直す。"""
@@ -199,8 +188,6 @@ class LimitDeferral:
 
     async def _retry_one(self, payload: dict) -> None:
         req = replace(Request.from_payload(payload), retried=True)
-        for ts in payload.get("held") or []:
-            await self._react(self.slack.reactions_remove, req.channel, ts, HOLD_REACTION)
         original_provider = payload.get("provider")
         if original_provider:
             actor = self.actor_for(req, themes.resolve(self.config, req.channel_name))
@@ -210,4 +197,3 @@ class LimitDeferral:
         await self.submit(req)
 
     # ジョブ
-

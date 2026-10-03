@@ -4,12 +4,11 @@ import pytest
 from fakes import make_home
 
 from kei_agent.configuration.config import ConfigError, load_config
-from kei_agent.conversation import home
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import task_names
 from kei_agent.storage import settings
 
-WEATHER = '''api = 1
+WEATHER = '''api = 2
 name = "weather"
 label = "天気"
 [schedules.weather]
@@ -36,28 +35,25 @@ def _module(root, name, text, code=None):
 
 def test_the_knowledge_module_is_described_by_its_definition():
     spec = modules.builtin()["knowledge"]
-    assert (spec.label, spec.port, spec.channels) == ("知識", 8792, {"knowledge": ("knowledge",)})
-    assert [s.name for s in spec.schedules] == ["literature", "reading"]
-    names = {u.name for u in spec.actor.use_cases}
-    assert {"knowledge_pick", "knowledge_summary"} <= names and spec.actor.default_use_case == "knowledge_answer"
-    assert spec.actor.data == "own"
+    assert (spec.label, spec.port, spec.channels) == ("知識", None, {"knowledge": ("knowledge",)})
+    assert not spec.schedules and spec.actor is None
 
 
 @pytest.mark.parametrize(("text", "message"), [
-    ('api = 2\nname = "x"\n', "枠の版が合いません"),
-    ('api = 1\nname = "y"\n', "フォルダの名前"),
-    ('api = 1\nname = "x"\ncolor = "red"\n', "知らないキー"),
-    ('api = 1\nname = "x"\n[use_cases.a]\nclaude = { model = "m" }\n', "[actor]"),
-    ('api = 1\nname = "x"\n[process]\nport = 80\n', "1024"),
-    ('api = 1\nname = "x"\n[schedules.a]\ndefault = "7:00"\n', "HH:MM"),
-    ('api = 1\nname = "x"\n[actor]\nprompt = "x.md"\n[use_cases.a]\nclaude = { effort = "low" }\n', "model"),
-    ('api = 1\nname = "x"\n[settings]\nPlace = "東京"\n', "設定の名前"),
-    ('api = 1\nname = "x"\n[settings]\nsince = 2026-09-27\n', "既定の値"),
-    ('api = 1\nname = "x"\n[secrets]\nApiKey = { description = "鍵" }\n', "環境変数の名前"),
-    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { required = true }\n', "description"),
-    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", required = "yes" }\n', "true か false"),
-    ('api = 1\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", own_file = true }\n', "[process]"),
-    ('api = 1\nname = "x"\n[secrets]\nSLACK_BOT_TOKEN = { description = "鍵" }\n', "本体の秘密情報"),
+    ('api = 1\nname = "x"\n', "枠の版が合いません"),
+    ('api = 2\nname = "y"\n', "フォルダの名前"),
+    ('api = 2\nname = "x"\ncolor = "red"\n', "知らないキー"),
+    ('api = 2\nname = "x"\n[use_cases.a]\nclaude = { model = "m" }\n', "[actor]"),
+    ('api = 2\nname = "x"\n[process]\nport = 80\n', "1024"),
+    ('api = 2\nname = "x"\n[schedules.a]\ndefault = "7:00"\n', "HH:MM"),
+    ('api = 2\nname = "x"\n[actor]\nprompt = "x.md"\n[use_cases.a]\nclaude = { effort = "low" }\n', "model"),
+    ('api = 2\nname = "x"\n[settings]\nPlace = "東京"\n', "設定の名前"),
+    ('api = 2\nname = "x"\n[settings]\nsince = 2026-09-27\n', "既定の値"),
+    ('api = 2\nname = "x"\n[secrets]\nApiKey = { description = "鍵" }\n', "環境変数の名前"),
+    ('api = 2\nname = "x"\n[secrets]\nAPI_KEY = { required = true }\n', "description"),
+    ('api = 2\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", required = "yes" }\n', "true か false"),
+    ('api = 2\nname = "x"\n[secrets]\nAPI_KEY = { description = "鍵", own_file = true }\n', "[process]"),
+    ('api = 2\nname = "x"\n[secrets]\nKEI_AGENT_ALLOWED_USER_ID = { description = "鍵" }\n', "本体の秘密情報"),
 ])
 def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
     with pytest.raises(modules.ModuleError, match=message.replace("[", r"\[").replace("]", r"\]")):
@@ -67,9 +63,8 @@ def test_a_broken_definition_says_what_is_wrong(tmp_path, text, message):
 def test_secrets_come_from_the_core_and_the_modules_that_are_on():
     """要る秘密情報は、本体のものと、オンのモジュールの [secrets]（kei-agent setup が聞き、doctor が確かめる）。"""
     names = [(owner.name if owner else "", secret.name) for owner, secret in modules.secrets(["voice", "time"])]
-    assert names[:5] == [("", "SLACK_BOT_TOKEN"), ("", "SLACK_APP_TOKEN"), ("", "KEI_AGENT_ALLOWED_USER_ID"),
-                         ("", "KEI_AGENT_A2A_TOKEN"), ("", "KEI_AGENT_HANDS_TOKEN")]
-    assert names[5:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
+    assert names[:3] == [("", "KEI_AGENT_ALLOWED_USER_ID"), ("", "KEI_AGENT_A2A_TOKEN"), ("", "KEI_AGENT_HANDS_TOKEN")]
+    assert names[3:] == [("voice", "OPENAI_API_KEY"), ("time", "TOGGL_API_TOKEN"), ("time", "TOGGL_ORGANIZATION_ID"),
                          ("time", "TOGGL_WORKSPACE_ID")]
     openai = modules.builtin()["voice"].secrets[0]
     # 声の鍵はマイクでの会話にだけ使う（喋って知らせるだけなら要らない）ので任意
@@ -86,7 +81,7 @@ def test_own_modules_come_from_the_user_folder_and_must_not_collide(tmp_path):
     assert config.modules == ("course", "daily", "improve", "knowledge", "notion", "research", "time", "voice",
                               "work")   # 知っていても、設定に書くまではオンにしない（組み込みだけ）
 
-    _module(home_dir / "modules", "knowledge", 'api = 1\nname = "knowledge"\n')
+    _module(home_dir / "modules", "knowledge", 'api = 2\nname = "knowledge"\n')
     with pytest.raises(ConfigError, match="組み込みのモジュール「knowledge」と同じ名前"):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
 
@@ -97,25 +92,25 @@ def test_enabled_modules_bring_their_channels_schedules_actors_and_address(tmp_p
     config = load_config(env={"KEI_AGENT_HOME": str(home_dir)})
     assert config.modules == ("knowledge", "weather")
     assert config.module_channels == {"knowledge": ("knowledge",)}
-    assert config.a2a.agents["knowledge"] == "http://127.0.0.1:8792"       # 書かなければ module.toml の番地
+    assert "knowledge" not in config.a2a.agents       # 書かなければ module.toml の番地
     # Daily と振り返りは、受け持つモジュール（daily）をオンにしたときだけ
-    assert task_names(config) == ("night", "literature", "reading", "weather", "maintenance")
+    assert task_names(config) == ("night", "weather", "intake", "maintenance")
     assert settings.schedule_time(config, "weather") == "06:30"
     assert settings.schedule_label(config, "weather") == "天気と電車"
-    assert home.agent_labels(config)["knowledge"] == "知識" and "weather" not in home.agent_labels(config)
+    assert {s.name: s.label for s in modules.enabled(config.modules) if s.actor} == {}
 
 
 def test_turning_a_module_off_removes_what_it_brings(tmp_path):
     config = load_config(env={"KEI_AGENT_HOME": str(make_home(tmp_path, agents=[]))})
     assert config.modules == () and config.module_channels == {} and "knowledge" not in config.a2a.agents
-    assert task_names(config) == ("night", "maintenance")
-    assert "knowledge" not in home.agent_labels(config)
+    assert task_names(config) == ("night", "intake", "maintenance")
+    assert modules.enabled(config.modules) == []
 
 
 @pytest.mark.parametrize(("agents", "name", "toml", "message"), [
     (["nothing"], None, None, "知らないモジュール"),
     (["digest"], "digest", '[depends]\nrequires = ["knowledge"]\n', "knowledge が要ります"),
-    (None, "news", '[schedules.reading]\ndefault = "07:00"\n', "定期処理「reading」がぶつかっています"),
+    (None, "news", '[schedules.toggl_import]\ndefault = "07:00"\n', "定期処理「toggl_import」がぶつかっています"),
     (None, "paths", '[settings]\nroot = "~"\n', "本体の設定"),
     # モデルは本体の一覧からしか選べない
     (["cheap"], "cheap", '[actor]\nprompt = "cheap.md"\n'
@@ -124,7 +119,7 @@ def test_turning_a_module_off_removes_what_it_brings(tmp_path):
 def test_a_config_whose_modules_do_not_fit_is_refused(tmp_path, agents, name, toml, message):
     home_dir = make_home(tmp_path, agents=agents)
     if name:
-        folder = _module(home_dir / "modules", name, f'api = 1\nname = "{name}"\n{toml}',
+        folder = _module(home_dir / "modules", name, f'api = 2\nname = "{name}"\n{toml}',
                          SCHEDULE_ONLY if "[schedules" in toml else None)
         (folder / f"{name}.md").write_text("#\n", encoding="utf-8")
     with pytest.raises(ConfigError, match=message):
@@ -183,16 +178,16 @@ def test_a_module_without_code_cannot_have_channels_or_schedules(tmp_path):
     with pytest.raises(modules.ModuleError, match="module.py"):
         modules.load_spec(_module(tmp_path, "weather", WEATHER))
     with pytest.raises(modules.ModuleError, match="module.py"):
-        modules.load_spec(_module(tmp_path, "memo", 'api = 1\nname = "memo"\n[channels]\nmemo = ["memo"]\n'))
+        modules.load_spec(_module(tmp_path, "memo", 'api = 2\nname = "memo"\n[channels]\nmemo = ["memo"]\n'))
     # 実行役だけのモジュール（ほかのモジュールから使うもの）は、module.py が無くてよい
-    spec = modules.load_spec(_module(tmp_path, "helper", 'api = 1\nname = "helper"\n'))
+    spec = modules.load_spec(_module(tmp_path, "helper", 'api = 2\nname = "helper"\n'))
     assert modules.load_code(spec) is None
 
 
 @pytest.mark.parametrize(("text", "code", "message"), [
     (WEATHER, "VALUE = 1\n", "class Module がありません"),
     (WEATHER, "class Module:\n    pass\n", "run_schedule"),
-    ('api = 1\nname = "weather"\n[channels]\nweather = ["weather"]\n', "class Module:\n    pass\n", "on_message"),
+    ('api = 2\nname = "weather"\n[channels]\nweather = ["weather"]\n', "class Module:\n    pass\n", "on_message"),
 ])
 def test_code_without_the_hooks_it_needs_is_refused_at_startup(tmp_path, text, code, message):
     spec = modules.load_spec(_module(tmp_path, "weather", text, code))
@@ -241,7 +236,7 @@ class Executor(SkillExecutor):
 
 
 def _agent_module(root, code=AGENT_CODE):
-    folder = _module(root, "weather", 'api = 1\nname = "weather"\nlabel = "天気"\ndescription = "天気を調べる"\n'
+    folder = _module(root, "weather", 'api = 2\nname = "weather"\nlabel = "天気"\ndescription = "天気を調べる"\n'
                                       '[process]\nport = 8800\n')
     if code is not None:
         (folder / "agent.py").write_text(code, encoding="utf-8")
@@ -251,7 +246,7 @@ def _agent_module(root, code=AGENT_CODE):
 def test_a_process_needs_its_agent_code_and_an_actor_needs_its_prompt(tmp_path):
     with pytest.raises(modules.ModuleError, match="agent.py"):
         modules.load_spec(_agent_module(tmp_path / "a", code=None))
-    folder = _module(tmp_path / "b", "helper", 'api = 1\nname = "helper"\n[actor]\nprompt = "helper.md"\n'
+    folder = _module(tmp_path / "b", "helper", 'api = 2\nname = "helper"\n[actor]\nprompt = "helper.md"\n'
                                               '[use_cases.helper_answer]\nclaude = { model = "claude-sonnet-5" }\n')
     with pytest.raises(modules.ModuleError, match="helper.md"):
         modules.load_spec(folder)
@@ -286,8 +281,8 @@ def test_one_command_starts_any_module_process(tmp_path, monkeypatch):
     _, build_executor = launch.parts(modules.known()["weather"])
     assert build_executor().agent == "weather"            # 制限の表とモデルの一覧を引く名前はモジュールの名前
     # 知らないもの、担当プロセスを持たないもの、設定の modules に無い（オフの）ものは起動しない
-    _module(home_dir / "modules", "quiet", 'api = 1\nname = "quiet"\n')
-    radar = _module(home_dir / "modules", "radar", 'api = 1\nname = "radar"\n[process]\nport = 8801\n')
+    _module(home_dir / "modules", "quiet", 'api = 2\nname = "quiet"\n')
+    radar = _module(home_dir / "modules", "radar", 'api = 2\nname = "radar"\n[process]\nport = 8801\n')
     (radar / "agent.py").write_text(AGENT_CODE, encoding="utf-8")
     for name in ("nothing", "quiet", "radar"):
         with pytest.raises(SystemExit):
@@ -304,7 +299,7 @@ def test_a_module_process_can_be_a_service_instead_of_an_agent(tmp_path, monkeyp
     from kei_agent_a2a import launch
 
     home_dir = make_home(tmp_path, agents=["knowledge", "bridge"])
-    text = 'api = 1\nname = "bridge"\n[process]\nport = 8803\nkind = "service"\n'
+    text = 'api = 2\nname = "bridge"\n[process]\nport = 8803\nkind = "service"\n'
     folder = _module(home_dir / "modules", "bridge", text)
     with pytest.raises(ConfigError, match="service.py"):
         load_config(env={"KEI_AGENT_HOME": str(home_dir)})
@@ -323,7 +318,7 @@ def test_a_module_process_can_be_a_service_instead_of_an_agent(tmp_path, monkeyp
     ('[process]\nport = 8803\nkind = "service"\n', "def serve():\n    return 0\n", "serve\\(config, port\\)"),
 ])
 def test_a_broken_service_is_refused(tmp_path, text, code, message):
-    folder = _module(tmp_path, "bridge", 'api = 1\nname = "bridge"\n' + text)
+    folder = _module(tmp_path, "bridge", 'api = 2\nname = "bridge"\n' + text)
     if code is None:
         with pytest.raises(modules.ModuleError, match=message):
             modules.load_spec(folder)
@@ -340,7 +335,7 @@ def test_a_module_can_ship_its_own_commands(tmp_path, monkeypatch, capsys):
     from kei_agent_a2a import launch
 
     home_dir = make_home(tmp_path)
-    folder = _module(home_dir / "modules", "weather", 'api = 1\nname = "weather"\n')
+    folder = _module(home_dir / "modules", "weather", 'api = 2\nname = "weather"\n')
     (folder / "commands.py").write_text(
         "import argparse\n\nRAN = []\n\n\ndef setup(argv):\n    RAN.append(argv)\n\n\n"
         "def forecast(argv):\n    argparse.ArgumentParser(prog='forecast', description='明日の天気')"

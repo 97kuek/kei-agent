@@ -1,4 +1,4 @@
-"""モジュールを作る人のためのテストの道具（kei_agent.testing。段階5の①）。"""
+"""モジュールを作る人のためのテストの道具（kei_agent.testing）。"""
 
 import os
 
@@ -8,15 +8,12 @@ from kei_agent.framework import modules
 from kei_agent.testing import FakeAgent, LocalAgent, ModuleKit
 from kei_agent.testing.kit import toml_value
 
-MEMO_TOML = '''api = 1
+MEMO_TOML = '''api = 2
 name = "memo"
 label = "メモ"
 
 [channels]
 memo = ["memo"]
-
-[slash_commands]
-memo = "メモの数を見る"
 
 [schedules.tidy]
 label = "メモの整理"
@@ -33,28 +30,24 @@ class Module:
     def __init__(self, core: Core):
         self.core = core
 
-    def welcome(self) -> str:
-        return "ここに書いたことをメモするよ。"
-
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         if req.text.startswith("まとめて"):
             # req を渡すと、経過と答えをスレッドに出す
             await self.core.run_ai("memo_sum", req.text, req=req)
             return
-        ts = await self.core.post(req.channel, self.core.settings["mark"] + " " + req.text,
-                                  blocks=[{"type": "actions", "elements": [
-                                      {"type": "button", "text": {"type": "plain_text", "text": "消す"},
-                                       "action_id": self.core.action_id("forget"), "value": req.text}]}])
+        ts = await self.core.post(req.channel, self.core.settings["mark"] + " " + req.text)
         self.core.records.put("memo", ts, {"ts": ts, "text": req.text})
         await self.core.reply(req, "メモしたよ")
 
-    async def on_slash_command(self, name: str, body: dict) -> str:
-        return f"メモは {len(self.core.records.items('memo'))} 件"
-
-    async def on_action(self, name: str, body: dict) -> None:
-        for row in self.core.records.items("memo"):
-            if row["text"] == body["actions"][0]["value"]:
-                self.core.records.delete("memo", row["ts"])
+    async def head_action(self, name: str, params: dict) -> dict | None:
+        if name == "memo_count":
+            return {"count": len(self.core.records.items("memo"))}
+        if name == "memo_forget":
+            for row in self.core.records.items("memo"):
+                if row["text"] == params["text"]:
+                    self.core.records.delete("memo", row["ts"])
+            return {"count": len(self.core.records.items("memo"))}
+        return None
 
     async def run_schedule(self, name: str, day: str) -> dict:
         return {"status": "done", "count": len(self.core.records.items("memo"))}
@@ -70,7 +63,7 @@ claude = { model = "claude-haiku-4-5" }
 codex = { model = "gpt-6-luna", effort = "low" }
 '''
 
-ECHO_TOML = '''api = 1
+ECHO_TOML = '''api = 2
 name = "echo"
 label = "こだま"
 
@@ -128,17 +121,16 @@ def _echo(tmp_path):
                                                "agent.py": ECHO_AGENT})
 
 
-async def test_a_module_answers_its_channel_its_command_its_button_and_its_schedule(tmp_path, module_kit):
+async def test_a_module_answers_its_channel_mcp_operations_and_schedule(tmp_path, module_kit):
     kit = module_kit(_memo(tmp_path))
-    await kit.invite()
-    assert kit.texts()[-1].endswith("ここに書いたことをメモするよ。")
-
     ts = await kit.message("牛乳を買う")
     assert kit.thread(ts) == ["メモしたよ"] and "📌 牛乳を買う" in kit.texts()
-    assert await kit.slash("memo") == "メモは 1 件"
+    assert await kit.head_action("memo_count") == {"count": 1}
     assert await kit.schedule("tidy", "2026-09-27") == {"status": "done", "count": 1}
-    await kit.action("forget", "牛乳を買う")
+    assert await kit.head_action("memo_forget", {"text": "牛乳を買う"}) == {"count": 0}
     assert kit.records.items("memo") == []
+    with pytest.raises(ValueError, match="受け持つモジュールがありません"):
+        await kit.head_action("unknown_memo")
 
     # 設定は本番と同じ読み方（config.toml の [memo]）で変えられる
     other = module_kit(tmp_path / "mine" / "memo", settings={"mark": "✏️"})
@@ -159,6 +151,20 @@ async def test_the_ai_answers_what_was_queued_and_remembers_how_it_was_asked(tmp
     run = kit.store.conn.execute("SELECT actor, use_case, provider, model, effort FROM runs").fetchone()
     assert tuple(run) == ("memo", "memo_sum", "claude", "claude-haiku-4-5", None)
     assert kit.ai.prompts() == [call["prompt"]] and "まとめて" in call["prompt"]
+
+
+async def test_a_reply_continues_the_conversation_and_retains_both_speakers(tmp_path, module_kit):
+    kit = module_kit(_memo(tmp_path))
+    first = await kit.message("牛乳を買う")
+    second = await kit.reply("卵も買う", first)
+    messages, dropped = await kit.assistant.thread_messages(kit.channel(), first)
+    assert [(item["user"], item["text"]) for item in messages] == [
+        ("owner", "牛乳を買う"), ("assistant", "メモしたよ"),
+        ("owner", "卵も買う"), ("assistant", "メモしたよ"),
+    ]
+    assert messages[0]["ts"] == first and messages[2]["ts"] == second and dropped == 0
+    assert kit.thread(first) == ["メモしたよ", "メモしたよ"]
+    assert len(kit.records.items("memo")) == 2
 
 
 async def test_a_module_process_runs_in_the_same_process(tmp_path, module_kit):
@@ -189,14 +195,15 @@ async def test_a_fake_process_answers_what_was_queued(tmp_path, module_kit):
 
 async def test_a_builtin_module_can_be_named_and_brings_what_it_requires(module_kit):
     pytest.importorskip("a2a", reason="a2a-sdk は agents のグループに入っている（uv run --group agents）")
-    kit = module_kit("knowledge")
-    assert kit.config.modules == ("knowledge",) and isinstance(kit.agent, LocalAgent)
+    kit = module_kit("work")
+    assert kit.config.modules == ("work",) and isinstance(kit.agent, LocalAgent)
+    kit.ai.answer('{"use_case":"work_execute","confidence":1}', raw=True)
     kit.ai.answer("要点は3つ")
     ts = await kit.message("この記事の要点は？")
-    assert kit.thread(ts)[-1] == "要点は3つ" and kit.ai.calls[0]["actor"] == "knowledge"
+    assert kit.thread(ts)[-1] == "要点は3つ" and kit.ai.calls[-1]["actor"] == "work"
     # 担当のプロセスで決まった用途とモデルも、封筒で本体に戻って記録に残る
     run = kit.store.conn.execute("SELECT actor, use_case, provider, model, effort FROM runs").fetchone()
-    assert tuple(run) == ("knowledge", "knowledge_answer", "claude", "claude-sonnet-5", "medium")
+    assert tuple(run) == ("work", "work_execute", "claude", "claude-sonnet-5", "high")
 
 
 def test_the_kit_keeps_real_things_away_while_it_runs(tmp_path, monkeypatch):

@@ -12,7 +12,6 @@ from kei_agent.execution import runner
 from kei_agent.execution.agents import FIELDS
 from kei_agent.execution.model_classifier import UsageLimited
 from kei_agent_a2a import envelope, run
-from kei_agent_modules.course.agent import Executor as CourseExecutor
 from kei_agent_modules.research.agent import Executor as ResearchExecutor
 from kei_agent_modules.work.agent import Executor as WorkExecutor
 
@@ -47,10 +46,7 @@ def _executor(kind, config, store):
         executor = WorkExecutor(config, store)
         executor.agent = "work"
         return executor
-    # 大学もモジュールの担当。名前は共通の起動コマンドが入れる（kei_agent_a2a.launch）
-    executor = CourseExecutor(config, store)
-    executor.agent = "course"
-    return executor
+    raise ValueError(kind)
 
 
 @pytest.fixture
@@ -68,7 +64,7 @@ def ran(monkeypatch):
 
 
 @pytest.mark.parametrize(("kind", "use_case"), [
-    ("research", "research_extract"), ("course", "course_explain"), ("work", "work_decide")])
+    ("research", "research_extract"), ("work", "work_decide")])
 async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, store, ran):
     """研究はテーマの作業場で、大学と仕事はいつも同じ自分の作業場で動く。"""
     ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2",
@@ -82,8 +78,7 @@ async def test_every_agent_answers_ask_the_same_way(kind, use_case, config, stor
     assert prompt == "調べて"                                    # 指示書は system prompt で渡し、依頼の文に混ぜない
     assert (request.recipe.actor, request.recipe.use_case, request.session_id) == (kind, use_case, "s-0")
     assert (request.channel, request.thread_ts) == ("C1", "1.2")
-    assert request.workspace.cwd == {"research": config.research_root / "vlm", "course": config.course_root,
-                                     "work": config.state_dir / "agents" / "work"}[kind]
+    assert request.workspace.cwd == {"research": config.research_root / "vlm", "work": config.state_dir / "agents" / "work"}[kind]
     reply = updater.envelope()
     assert reply["ok"] and reply["data"]["session_id"] == "s-1"
     assert set(reply["data"]) <= set(FIELDS)
@@ -114,14 +109,14 @@ async def test_ask_without_a_use_case_is_classified_by_the_agents_classifier(con
 
     async def classify(_config, _store, actor, prompt, *, provider=None):
         asked.append((actor, prompt, provider))
-        return "course_degree_plan"
+        return "work_decide"
 
     monkeypatch.setattr(run, "classify", classify)
-    await _executor("course", config, store).handle(
+    await _executor("work", config, store).handle(
         _Updater(), {"skill": "ask"}, json.dumps({"prompt": "卒業まで何単位？", "provider": "claude"}))
 
-    assert asked == [("course", "卒業まで何単位？", "claude")]
-    assert ran[0][0].recipe.use_case == "course_degree_plan"
+    assert asked == [("work", "卒業まで何単位？", "claude")]
+    assert ran[0][0].recipe.use_case == "work_decide"
 
 
 async def test_classifier_limit_comes_back_as_a_limited_failure(config, store, ran, monkeypatch):
@@ -144,7 +139,7 @@ async def test_classifier_limit_comes_back_as_a_limited_failure(config, store, r
 @pytest.mark.parametrize("text", ["過去問ある？", "{}", '{"prompt": ""}'])
 async def test_ask_needs_a_json_request_with_a_prompt(text, config, store, ran):
     updater = _Updater()
-    await _executor("course", config, store).handle(updater, {"skill": "ask"}, text)
+    await _executor("work", config, store).handle(updater, {"skill": "ask"}, text)
 
     assert updater.state == "failed" and run.NO_PROMPT in updater.envelope()["text"]
     assert ran == []
@@ -176,10 +171,10 @@ async def test_the_recipe_comes_back_in_the_envelope(config, store, monkeypatch)
                                 text="<<kei-agent-final>>答え<<kei-agent-final-end>>")
 
     monkeypatch.setattr(runner, "_run_model", inner)
-    ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2", "use_case": "course_explain",
-           "provider": "claude", "channel_name": "course"}
+    ask = {"prompt": "調べて", "session_id": "s-0", "channel": "C1", "thread_ts": "1.2", "use_case": "work_single_source",
+           "provider": "claude", "channel_name": "work"}
     updater = _Updater()
-    await _executor("course", config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
+    await _executor("work", config, store).handle(updater, {"skill": "ask"}, json.dumps(ask))
     result = agents.to_result(updater.envelope()["data"])
-    assert result.recipe_fields() == {"actor": "course", "use_case": "course_explain", "provider": "claude",
+    assert result.recipe_fields() == {"actor": "work", "use_case": "work_single_source", "provider": "claude",
                                       "model": "claude-sonnet-5", "effort": "medium"}

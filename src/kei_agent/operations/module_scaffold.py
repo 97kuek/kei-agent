@@ -21,7 +21,7 @@ from kei_agent.framework import modules
 FIRST_PORT = 8800
 
 MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/modules.md の「module.toml」）
-api = 1
+api = 2
 name = "${name}"
 label = "${label}"
 description = "${description}"
@@ -38,9 +38,6 @@ ${name} = ["${name}"]
 # [schedules.${ident}_daily]
 # label = "${label}の見回り"
 # default = "07:30"
-# Slack のスラッシュコマンド（kei-agent manifest が Slack App に載せる）
-# [slash_commands]
-# ${name} = "${label}に頼む"
 # 設定（config.toml の [${name}] で変えられる）
 # [settings]
 # place = "東京"
@@ -80,10 +77,6 @@ ${imports}
 class Module:
     def __init__(self, core: Core):
         self.core = core
-
-    def welcome(self) -> str:
-        """チャンネルに招かれたときの案内。"""
-        return "${label}のチャンネルです。ここで頼まれたことに答えます。"
 
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
         """このモジュールのチャンネルで頼まれた。"""
@@ -149,12 +142,6 @@ module_kit が、このモジュールを偽物の Slack・AI・担当と一緒�
 from pathlib import Path
 ${pytest_import}
 MODULE = Path(__file__).resolve().parents[1]
-
-
-async def test_it_introduces_itself_when_invited(module_kit):
-    kit = module_kit(MODULE)
-    await kit.invite()
-    assert kit.texts()[-1].endswith("${label}のチャンネルです。ここで頼まれたことに答えます。")
 
 
 async def test_it_answers_in_its_channel(module_kit):

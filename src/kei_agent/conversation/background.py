@@ -23,7 +23,7 @@ from kei_agent.execution.jobs import missing_outputs
 from kei_agent.workspaces import themes
 
 log = logging.getLogger(__name__)
-# 手の口の会話を記録するチャンネルの名前（hands.CHANNEL）
+# MCP の会話を記録するチャンネルの名前（hands.CHANNEL）
 HANDS_CHANNEL = "mcp"
 
 
@@ -93,9 +93,9 @@ class BackgroundLoops:
     async def handle_job_requests(self, cwd: Path) -> None:
         for o in await self.jobs.process_requests(cwd):
             if o.channel == HANDS_CHANNEL:
-                # 手の口から頼まれたジョブは Slack に出さない（頭が jobs の道具で様子と結果を見る）
+                # MCPから頼まれたジョブは Slack に出さない（頭が jobs の道具で様子と結果を見る）
                 if o.error:
-                    log.warning("手の口のジョブの依頼を投入できませんでした: %s", o.error)
+                    log.warning("MCP のジョブの依頼を投入できませんでした: %s", o.error)
                 continue
             # 依頼のチャンネルとスレッドは Claude が書いたものなので、知っているスレッドのときだけ投稿する
             known = bool(o.channel and o.thread_ts and self.store.get_thread(o.channel, o.thread_ts))
@@ -121,7 +121,10 @@ class BackgroundLoops:
         for job in await self.jobs.refresh():
             self.jobs.mark_reported(job)
             row = self.store.get_thread(job.channel, job.thread_ts)
-            if row is None or job.channel == HANDS_CHANNEL:
+            if row is None:
+                continue
+            if job.channel == HANDS_CHANNEL:
+                await self.tell_head_job_done(job, row["channel_name"])
                 continue
             req = Request(job.channel, row["channel_name"], job.thread_ts, None, "")
             missing = missing_outputs(job)
@@ -138,6 +141,20 @@ class BackgroundLoops:
                 log.exception("ジョブの終わりを知らせられませんでした")
                 await self.notify_trouble(f"ジョブ {job.id}「{job.name}」（#{row['channel_name']}）は終わりましたが、"
                                           f"スレッドに知らせられませんでした（{job_status_label(job.status)}）")
+
+    async def tell_head_job_done(self, job, workspace: str) -> None:
+        """MCPから投げたジョブが終わった。Slack につないでいないときは、頭への知らせにする（頭が同じ会話で続きを頼む）。
+        Slack につないでいるときは、頭が jobs の道具で見る。"""
+        from kei_agent.conversation.outbox import Outbox
+
+        if not isinstance(self.slack, Outbox):
+            return
+        missing = missing_outputs(job)
+        note = f"。ただ {'、'.join(missing)} ができていない" if missing else ""
+        await self.slack.chat_postMessage(
+            channel=workspace,
+            text=f"🧪 ジョブ {job.id}「{job.name}」が終わったよ（{job_status_label(job.status)}{note}）。"
+                 f"続きは run（workspace={workspace}, conversation={job.thread_ts}）に「ジョブの結果を読んでまとめて」と頼んでね")
 
     async def job_loop(self) -> None:
         failing = False

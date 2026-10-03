@@ -15,9 +15,9 @@ from kei_agent.configuration.config import REPO_ROOT
 DEPLOY = REPO_ROOT / "deploy"
 # 同じ形の担当。どれも deploy/run-agent.sh <名前> で起動する。常駐のプロセスを持つモジュールで、
 # 共通の kei-agent-module <名前> で動く（研究もモジュール）
-AGENTS = ("course", "knowledge", "notion", "research", "voice", "work")
+AGENTS = ("course", "notion", "research", "voice", "work")
 # install.sh で登録できるもの（名前なしは本体）
-# 本体（""）・担当・手の口のトンネル
+# 本体（""）・担当・MCP のトンネル
 INSTALLABLE = ("", *AGENTS, "tunnel")
 ZSH = shutil.which("zsh")
 needs_zsh = pytest.mark.skipif(ZSH is None, reason="起動スクリプトは macOS の zsh で動く")

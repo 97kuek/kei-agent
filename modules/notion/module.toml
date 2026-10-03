@@ -1,10 +1,10 @@
-# Notion のモジュール（docs/architecture.md の「Notion」）。Notion に届く唯一の口
-api = 1
+# Mac の Notion ゲートウェイ（docs/architecture.md の「Notion」）。
+api = 2
 name = "notion"
 label = "Notion"
-description = "Notion に届く唯一の口（ゲートウェイ）。使う側ごとに、agents.csv の notion の列に書いたホームの下だけを通す"
+description = "Mac の Notion ゲートウェイ。使う側ごとに、agents.csv の notion の列に書いたホームの下だけを通す"
 
-# 常駐のプロセス（A2A ではない。MCP と /notion/v1 の口）。Notion の鍵（NOTION_TOKEN）を持てるのは、このプロセスだけ。
+# 常駐のプロセス（A2A ではない。MCP サーバーと /notion/v1 API）。Mac の Notion の鍵（NOTION_TOKEN）を持てるのは、このプロセスだけ。
 # ホームのページ ID は agents.csv の notion の列（本体が読んで、ゲートウェイに渡す）
 [process]
 port = 8791

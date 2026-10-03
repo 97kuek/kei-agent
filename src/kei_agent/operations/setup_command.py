@@ -7,7 +7,7 @@
 2. 使うモジュール（できることを並べて選ぶ）と AI（claude / codex）→ agents.csv。
    研究テーマの置き場所、Notion のホームのページ → config.toml
 3. AI（claude / codex があるか）
-4. Slack App（kei-agent manifest の出力を貼る手順と、作るチャンネル）
+4. Dot と Slack（Dot の接続と、作るチャンネル）
 5. 秘密情報（画面に出さずに聞き、本人だけが読めるファイルに書く。合言葉は作る。要るものは本体と module.toml の [secrets]）
 6. 常駐（聞いてから deploy/install.sh で launchd に登録する）
 7. 点検（kei-agent doctor と同じ）と、このあとやること
@@ -51,7 +51,7 @@ DEFAULT_TONE = "一人称は「私」。です・ます調で、短く"
 # プロフィールの「依頼者について」に聞くこと（名前と例）
 ABOUT = (("所属", "例: ○○大学 ○○学部の学生"), ("研究", "例: 音声の区間検索"), ("興味", "例: AI・LLM・エージェント"))
 # 本体の秘密情報の値の頭（取り違えやすいので確かめる）
-PREFIXES = {"SLACK_BOT_TOKEN": ("xoxb-",), "SLACK_APP_TOKEN": ("xapp-",), "KEI_AGENT_ALLOWED_USER_ID": ("U", "W")}
+PREFIXES = {"KEI_AGENT_ALLOWED_USER_ID": ("U", "W")}
 # 実行役ができること（module.toml の [actor] の files・notion）の言い方
 NOTION_WORDS = {"read": "Notion を読む", "write": "Notion に書く"}
 INTRO = """Kei Agent のはじめの設定。質問に答えると、{home} に次のものを作る:
@@ -316,19 +316,16 @@ def channel_lines(config: Config) -> list[str]:
 
 
 def step_slack(config: Config) -> None:
-    print("\n4. Slack App（手でやること）")
-    todo = ["https://api.slack.com/apps → Create New App → From a manifest で、uv run kei-agent manifest の出力を貼る"
-            "（uv run kei-agent manifest | pbcopy でクリップボードに写せる）",
-            "Install App で入れ、Bot User OAuth Token（xoxb-）を控える",
-            "Basic Information → App-Level Tokens で、scope が connections:write のトークン（xapp-）を作って控える",
-            "Agents の Agent experience をオンにして入れ直す（入力欄の下の経過表示に使う）",
+    print("\n4. Dot と Slack（手でやること）")
+    todo = ["Dot のプロフィールで名前を Kei Agent にし、Slack を連絡方法として接続する",
             "Slack のプロフィールの ︙ から、自分のメンバー ID（U…）を控える",
-            "チャンネルを作る（頭に 0- などの番号を付けてよい。番号は外して照合する）:"]
+            "Dot に docs/dots.md の Slack とプラグインの指示を設定する",
+            "チャンネルを作り、Dot を追加する（番号は外して照合する）:"]
     for number, line in enumerate(todo, 1):
         print(f"  {number}) {line}")
     for line in channel_lines(config):
         print(f"     - {line}")
-    print("  控えたトークンと ID は、次の段で聞く")
+    print("  控えたメンバー ID は、次の段で聞く")
 
 
 # 5. 秘密情報
@@ -415,7 +412,7 @@ def _doctor(env: dict[str, str]) -> list[doctor.Finding]:
 
 
 def next_steps(config: Config) -> list[str]:
-    steps = ["Slack で、作ったチャンネルに Kei Agent を招く"]
+    steps = ["Slack で、作ったチャンネルに Dot（Kei Agent）を追加する"]
     if any(not p.provider for p in config.agent_profiles.values()):
         steps.append("agents.csv の engine 列に、担当ごとの AI（claude か codex）を書く")
     if "notion" in config.modules:

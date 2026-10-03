@@ -1,4 +1,4 @@
-"""Kei Agent から Claude に渡す自動メッセージ。依頼者の言葉ではなく、会話を再開・復元するときに使う。"""
+"""Kei Agent から AI に渡す自動メッセージ。依頼者の言葉ではなく、会話を再開・復元するときに使う。"""
 
 from __future__ import annotations
 
@@ -60,26 +60,26 @@ def job_resume_prompt(job: Job) -> str:
     )
 
 
-def thread_history(messages: list[dict], bot_user_id: str, exclude_ts: str | None = None) -> str:
+def thread_history(messages: list[dict], exclude_ts: str | None = None) -> str:
     """スレッドのやり取りを「誰: 何」の形に並べる。作業中や完了の印だけの投稿は省く。"""
     lines = []
     for m in messages:
         text = message_text(m)
         if m.get("ts") == exclude_ts or text.startswith((PROGRESS_PREFIX, DONE_PREFIX, FAILED_PREFIX)):
             continue
-        who = "Kei Agent" if m.get("user") == bot_user_id or m.get("bot_id") else "依頼者"
+        who = "Kei Agent" if m.get("user") == "assistant" else "依頼者"
         lines.append(f"{who}: {clean_text(text)}")
     return "\n\n".join(lines)
 
 
-def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclude_ts: str | None,
+def history_prompt(messages: list[dict], new_text: str, exclude_ts: str | None,
                    stalled: str | None = None, dropped: int = 0, *, reply_to_post: bool = False) -> str:
     """セッションが失われたときや、直前の依頼がエラーで止まったときに、スレッドの履歴から文脈を復元するためのプロンプト。
 
-    dropped は、長すぎて載せられなかった古い投稿の数。黙って切ると、Claude は全部を見たつもりで答えてしまう。
+    dropped は、長すぎて載せられなかった古い投稿の数。黙って切ると、AI は全部を見たつもりで答えてしまう。
     reply_to_post は、Kei Agent の投稿（朝の読みもの、論文の新着など）への最初の返信のとき。
     """
-    history = thread_history(messages, bot_user_id, exclude_ts)
+    history = thread_history(messages, exclude_ts)
     if dropped:
         history = (f"（古い投稿 {dropped} 件は長すぎるので省いた。ここに書かれていない経緯があるかもしれない。"
                    "必要なら、テーマのディレクトリの `.kei-agent/threads/` にある記録を読む）\n\n" + history)
@@ -90,8 +90,8 @@ def history_prompt(messages: list[dict], bot_user_id: str, new_text: str, exclud
         why = "以前の会話セッションが見つからないため"
         note = ""
     lead = ("このスレッドは Kei Agent の投稿から始まっていて、これはその投稿への最初の依頼です。"
-            "Slack のスレッドの履歴を渡します。" if reply_to_post else
-            f"このスレッドの{why}、Slack のスレッドの履歴から文脈を復元します。")
+            "保存した会話の履歴を渡します。" if reply_to_post else
+            f"このスレッドの{why}、保存した会話の履歴から文脈を復元します。")
     return (
         f"{HEADER} {lead}\n\n"
         f"<thread_history>\n{history}\n</thread_history>\n\n{note}"
@@ -105,8 +105,8 @@ HANDOFF_MEMO_PROMPT = (
     "- 1行目は、新しいスレッドで話すことの題だけを、30字以内で書く（記号や「題:」は付けない）\n"
     "- 2行目からは、`**目的**` `**決まったこと**` `**分かったこと**` `**次にやること**` の順に、それぞれ箇条書きで3行まで。"
     "結果のファイルがあれば、ファイル名を添える\n"
-    "- 専門用語は、そのまま使わずに短く言い換える\n"
-    "- `❓ 確認:` や `🧵 区切り:` などの合図の行は書かない"
+    "- MCP・API などの専門用語は正式な名称で書き、必要なら短い説明を添える\n"
+    "- `❓ 確認:` などの合図の行は書かない"
 )
 
 
@@ -117,6 +117,13 @@ def handoff_start_prompt(memo: str, previous_log: str) -> str:
         f"<handoff>\n{memo.strip()}\n</handoff>\n\n"
         f"細かい経緯が要るときは `{previous_log}` を読んでください。\n\n---\n\n"
     )
+
+
+def handoff_memo_for(row) -> str:
+    """保存済みのローカル会話メモを、最初の実行セッションに渡す。"""
+    if row is None or row["session_id"]:
+        return ""
+    return row["handoff_memo"] or ""
 
 
 def interrupted_prompt(text: str) -> str:

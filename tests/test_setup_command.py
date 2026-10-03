@@ -9,8 +9,6 @@ from kei_agent.configuration.config import EXAMPLE_CONFIG, load_config
 from kei_agent.operations import cli, doctor, setup_command
 from kei_agent.operations.setup_command import Asker
 
-BOT = "xoxb-1-" + "secretbot"
-APP = "xapp-1-" + "secretapp"
 PAGE = "0123456789abcdef0123456789abcdef"
 
 
@@ -58,7 +56,7 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
         answers=[("話し方", "一人称は「僕」。短く"), ("呼び方", "山田さん"), ("所属", "○○大学"),
                  ("外すモジュール", "voice work"), ("研究テーマ", "~/study"), ("共通ホーム", f"https://www.notion.so/Home-{PAGE}?pvs=4"),
                  ("登録して起動しますか", "y")],
-        secrets={"SLACK_BOT_TOKEN": BOT, "SLACK_APP_TOKEN": APP, "KEI_AGENT_ALLOWED_USER_ID": "U123",
+        secrets={"KEI_AGENT_ALLOWED_USER_ID": "U123",
                  "NOTION_TOKEN": "ntn_1", "MOODLE_ICS_URL": "https://moodle.example/ics"})
     code, home, calls = _run(tmp_path, script)
     out = capsys.readouterr().out
@@ -81,15 +79,17 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
     common = home / "secrets" / "kei-agent.zsh"
     assert stat.S_IMODE(common.stat().st_mode) == 0o600 and stat.S_IMODE(common.parent.stat().st_mode) == 0o700
     written = common.read_text(encoding="utf-8")
-    assert f"export SLACK_BOT_TOKEN='{BOT}'" in written and "# export TOGGL_API_TOKEN=''" in written
+    assert "export KEI_AGENT_ALLOWED_USER_ID='U123'" in written and "# export TOGGL_API_TOKEN=''" in written
+    assert "SLACK_BOT_TOKEN" not in written and "SLACK_APP_TOKEN" not in written
+    assert not any("SLACK_BOT_TOKEN" in q or "SLACK_APP_TOKEN" in q for q in script.asked)
     assert doctor.assigned(common)["KEI_AGENT_A2A_TOKEN"] and doctor.assigned(common)["KEI_AGENT_NOTION_GATEWAY_TOKEN"]
     # プロセスだけの鍵は、そのファイルに。何も入れなかったもの（研究の S2_API_KEY）はファイルを作らない
     assert "MOODLE_ICS_URL=" in (home / "secrets" / "kei-agent-course.zsh").read_text(encoding="utf-8")
     assert not (home / "secrets" / "kei-agent-research.zsh").exists()
 
     # 常駐は、ゲートウェイ → 担当 → 本体の順
-    assert calls == [("notion", False), ("course", False), ("knowledge", False), ("research", False), ("", False)]
-    assert BOT not in out and APP not in out and "ntn_1" not in out    # 秘密情報の値は画面に出さない
+    assert calls == [("notion", False), ("course", False), ("research", False), ("", False)]
+    assert "ntn_1" not in out    # 秘密情報の値は画面に出さない
     assert "点検した" in out and "agents.csv" in out and "#course: 大学" in out
     assert "engine 列に、担当ごと" not in out    # AI は選んであるので、このあとやることには出さない
 
@@ -97,10 +97,10 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
 def test_files_that_exist_are_left_alone(tmp_path, capsys):
     home = tmp_path / "home"
     (home / "secrets").mkdir(parents=True)
-    (home / "config.toml").write_text("handoff_after_turns = 5\n", encoding="utf-8")
+    (home / "config.toml").write_text("run_timeout_minutes = 5\n", encoding="utf-8")
     (home / "agents.csv").write_text("module,enabled,channels,engine,model,effort\nresearch,true,,claude,,\n", encoding="utf-8")
     (home / "profile.md").write_text("# わたしのプロフィール\n", encoding="utf-8")
-    (home / "secrets" / "kei-agent.zsh").write_text("export SLACK_BOT_TOKEN='x'\n", encoding="utf-8")
+    (home / "secrets" / "kei-agent.zsh").write_text("export KEI_AGENT_A2A_TOKEN='x'\n", encoding="utf-8")
     before = {path: path.read_text(encoding="utf-8") for path in home.rglob("*") if path.is_file()}
     script = Script(answers=[("登録して起動しますか", "y")])
     code, _, calls = _run(tmp_path, script)
@@ -114,21 +114,21 @@ def test_files_that_exist_are_left_alone(tmp_path, capsys):
 def test_answers_are_checked_before_anything_is_written(tmp_path, capsys):
     script = Script(
         answers=[("外すモジュール", "weather"), ("外すモジュール", "voice"), ("共通ホーム", "ホーム"), ("登録して起動しますか", "n")],
-        secrets={"SLACK_BOT_TOKEN": [APP, "xoxb-it's", BOT], "SLACK_APP_TOKEN": APP, "KEI_AGENT_ALLOWED_USER_ID": "U1",
+        secrets={"KEI_AGENT_ALLOWED_USER_ID": ["bad", "Uit's", "U1"],
                  "NOTION_TOKEN": "ntn_1"})
     code, home, calls = _run(tmp_path, script, found=())
     out = capsys.readouterr().out
     assert code == 0 and calls == []
     assert "知らないモジュール: weather" in out
-    assert "ページの URL か、32文字の ID" in out and "xoxb- で始まっていない" in out and "' は使えない" in out
+    assert "ページの URL か、32文字の ID" in out and "U か W で始まっていない" in out and "' は使えない" in out
     assert "claude も codex も見つからない" in out and "登録しなかった" in out
-    assert f"export SLACK_BOT_TOKEN='{BOT}'" in (home / "secrets" / "kei-agent.zsh").read_text(encoding="utf-8")
+    assert "export KEI_AGENT_ALLOWED_USER_ID='U1'" in (home / "secrets" / "kei-agent.zsh").read_text(encoding="utf-8")
 
 
 def test_a_module_that_needs_another_cannot_be_kept_without_it(tmp_path, capsys):
     folder = tmp_path / "home" / "modules" / "stamp"
     folder.mkdir(parents=True)
-    (folder / "module.toml").write_text('api = 1\nname = "stamp"\nlabel = "スタンプ"\n[depends]\nrequires = ["notion"]\n',
+    (folder / "module.toml").write_text('api = 2\nname = "stamp"\nlabel = "スタンプ"\n[depends]\nrequires = ["notion"]\n',
                                         encoding="utf-8")
     script = Script(answers=[("外すモジュール", "notion"), ("外すモジュール", "notion stamp")])
     code, home, _ = _run(tmp_path, script)

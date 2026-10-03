@@ -19,7 +19,7 @@ from kei_agent_modules.voice import events
 
 @pytest.mark.parametrize(("event", "speaks", "face", "words"), [
     # 終わったことは、気づいてほしいので喋る
-    ({"kind": "done", "theme": "amr-query"}, True, events.HAPPY, ["amr-query に頼んだ作業", "Slack"]),
+    ({"kind": "done", "theme": "amr-query"}, True, events.HAPPY, ["amr-query に頼んだ作業", "終わった"]),
     # 依頼を受けただけでは喋らない（依頼のたびに喋るとうるさい）
     ({"kind": "working", "theme": "amr-query"}, False, None, []),
     # 朝のまとめは手元に置くだけ（速い道で使う）
@@ -28,7 +28,7 @@ from kei_agent_modules.voice import events
     ({"kind": "awaiting", "theme": "amr-query"}, True, events.DOUBT, []),
     ({"kind": "limited", "reset_at": "2026-09-21T23:30"}, None, events.SLEEPY, ["23時30分ごろ"]),
     # 時刻が読めなくても、黙らない
-    ({"kind": "limited"}, None, None, ["しばらくしたら"]),
+    ({"kind": "limited"}, None, None, ["利用上限"]),
 ])
 def test_each_event_has_its_way_of_speaking(event, speaks, face, words):
     r = events.reaction(event)
@@ -39,17 +39,30 @@ def test_each_event_has_its_way_of_speaking(event, speaks, face, words):
     assert all(w in r.text for w in words)
 
 
-def test_a_deadline_is_read_in_words_and_unknown_events_are_ignored():
-    """声では「あと23時間で締切」ではなく、時刻で言う。知らない出来事には反応しない。"""
-    r = events.reaction({"kind": "due", "title": "第3回レポート", "at": "2026-09-22T17:00"})
-    assert r.text == "第3回レポートの締切、明日の17時までだよ。"
+def test_retired_deadline_notifications_and_unknown_events_are_ignored():
+    """締切通知は Dot が担当するので、旧イベントから重ねて通知しない。"""
+    assert events.reaction({"kind": "due", "title": "第3回レポート", "at": "2026-09-22T17:00"}) is None
     assert events.reaction({"kind": "とつぜんの何か"}) is None
     assert events.reaction({}) is None
 
 
-@pytest.mark.parametrize("saved", [True, None])
-async def test_voice_restores_listening_setting_on_start(config, store, monkeypatch, saved):
-    """マイクを開けるかは、App Home で保存したもの（声のモジュールの記録）で始める。既定は切。"""
+@pytest.mark.parametrize("auto_retry", [None, False, "false", True])
+def test_limits_only_announce_an_automatic_retry_when_it_was_scheduled(auto_retry):
+    event = {"kind": "limited", "reset_at": "2026-09-21T23:30", "auto_retry": auto_retry}
+    spoken = events.reaction(event).text
+    assert ("自動" in spoken) is (auto_retry is True)
+    assert "Claude" not in spoken
+
+
+@pytest.mark.parametrize("kind", ["done", "failed"])
+def test_work_events_do_not_claim_a_slack_message_has_been_delivered(kind):
+    # 通知を受け取った時点では、Dot がまだ notices を取得していないことがある。
+    assert "Slack" not in events.reaction({"kind": kind}).text
+
+
+@pytest.mark.parametrize(("saved", "listening"), [(True, True), (False, False), (None, False), ("false", False)])
+async def test_voice_restores_listening_setting_on_start(config, store, monkeypatch, saved, listening):
+    """MCP で保存した通知設定を復元する。不正な値や未設定ではマイクを開けない。"""
     from kei_agent_modules.voice import agent
 
     executor = agent.Executor(config, store)
@@ -72,7 +85,7 @@ async def test_voice_restores_listening_setting_on_start(config, store, monkeypa
     monkeypatch.setattr(agent, "VoiceSession", FakeSession)
     task = asyncio.create_task(agent.background(executor))
     await asyncio.sleep(0)
-    assert seen == [bool(saved)] and executor.session is not None
+    assert seen == [listening] and executor.session is not None
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -88,6 +101,45 @@ def test_the_event_can_come_in_the_body_or_the_metadata():
     assert event_of("", {"skill": "notify", "kind": "failed"}) == {"kind": "failed"}
     # 壊れた JSON でも落ちない
     assert event_of("{こわれてる", {"kind": "done"}) == {"kind": "done"}
+
+
+@pytest.mark.parametrize(("on", "ready", "succeeds"), [
+    (True, False, False), (False, False, False), ("false", True, False),
+    (True, True, True), (False, True, True),
+])
+async def test_microphone_change_requires_valid_setting_and_ready_session(config, store, on, ready, succeeds):
+    """担当は、マイクを切り替えられる状態で受け取ったときだけ成功を返す。"""
+    from a2a.server.events import EventQueue
+    from a2a.server.tasks import TaskUpdater
+    from a2a.types import TaskState
+
+    from kei_agent_modules.voice.agent import Executor
+
+    class Responses(EventQueue):
+        def __init__(self):
+            self.items = []
+
+        async def enqueue_event(self, event):
+            self.items.append(event)
+
+    class Session:
+        def __init__(self):
+            self.listening = False
+
+        def set_listening(self, value):
+            self.listening = value
+
+        def announce(self, text, face):
+            pass
+
+    executor = Executor(config, store)
+    session = Session()
+    executor.session = session if ready else None
+    responses = Responses()
+    await executor.handle(TaskUpdater(responses, "t1", "c1"), {}, json.dumps({"kind": "listen", "on": on}))
+    result = responses.items[-1]
+    assert result.status.state == (TaskState.TASK_STATE_COMPLETED if succeeds else TaskState.TASK_STATE_FAILED)
+    assert session.listening is (on if succeeds else False)
 
 
 # 音の出し入れ（audio.py）。GPT-Live は音をそのままやりとりする
@@ -142,11 +194,10 @@ def test_stopping_reports_how_much_was_actually_heard(monkeypatch):
 
     # 書いた長さより、経った時間の方が短いので、鳴ったのは経った時間ぶんだけ
     assert speaker.played_ms < 1000
-    assert speaker.speaking is True
 
     # 書いた長さを越えて時間が経ったら、鳴り終わっている
     speaker._started -= 2
-    assert speaker.played_ms == 1000 and speaker.speaking is False
+    assert speaker.played_ms == 1000
     assert speaker.stop() == 1000
 
     # 返事ごとに、その返事の始まりから測る（2つめで割り込まれたとき、1つめの長さまで足して伝えていた）
@@ -762,13 +813,13 @@ async def test_voice_questions_go_only_to_the_orchestrator(config, monkeypatch):
 
     async def ask(agent, skill, params=None, on_progress=None, text=""):
         asked.append((agent.base_url, skill, json.loads(text)))
-        return agents.Reply(text="今日は2コマだよ")
+        return agents.Reply(text="今日は会議が2件だよ")
 
     monkeypatch.setattr(agents, "ask", ask)
     tools = Tools({}, config)
     assert isinstance(tools.handoff, Handoff)
-    assert await tools.ask_agent("course", "今日の授業は？") == "今日は2コマだよ"
-    assert asked == [(config.a2a.orchestrator, "ask", {"actor": "course", "question": "今日の授業は？", "theme": ""})]
+    assert await tools.ask_agent("work", "今日の会議は？") == "今日は会議が2件だよ"
+    assert asked == [(config.a2a.orchestrator, "ask", {"actor": "work", "question": "今日の会議は？", "theme": ""})]
 
     # 本体の宛先が無ければ、黙らずにそう言う
     local = replace(config, a2a=replace(config.a2a, orchestrator=""))

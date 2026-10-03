@@ -1,53 +1,10 @@
-# 大学のモジュール（docs/extensibility.md）。Moodle の課題、Notion の授業と課題、Toggl の実績、Box の学部要項と過去問
-api = 1
+# 大学のモジュール（docs/extensibility.md）。Moodle の課題、Notion の授業と課題、Toggl の実績
+api = 2
 name = "course"
 label = "大学"
-description = "Moodle の課題を授業ホームに取り込み、締切を知らせる。授業と課題、Toggl の実績、Box の学部要項と過去問を読んで答える"
+description = "Moodle の課題と提出・受験状態を授業ホームに同期し、授業・課題・実績の機械的な読み取りを提供する"
 
-# AI の実行役（provider は agents.csv の engine）。個人のアカウントは agents.csv の course の行の claude_account / codex_account。
-# Notion はゲートウェイの course として、授業ホームの中だけに届く。手元のファイル・コマンド・Web は使わない
-[actor]
-prompt = "course.md"
-plugin = true
-notion = "write"
-timeout_minutes = 5
-# 作業場（前提のメモの AGENTS.md を置く）。agents.csv の course の行の folder で変えられる
-workspace = "~/course"
-default_use_case = "course_explain"
-# 頭（Dots など）が伝える重さ → 用途
-weights = { light = "course_explain", normal = "course_requirements", deep = "course_degree_plan" }
-classify = "1資料の説明は course_explain、課題要件・評価基準の整理は course_requirements、複数資料や試験範囲の比較は course_compare、履修・卒業計画の選択肢提案は course_degree_plan。"
-
-# Box: 探す・中身を読む・ページを画像で見る（手書きやスキャンの過去問）。道具の名前は Claude と Codex で同じ
-[[actor.connectors]]
-name = "box"
-claude_server = "claude_ai_Box"
-claude_tools = ["search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
-                "get_file_details", "get_file_content", "get_file_preview", "get_preview_page"]
-
-[[actor.connectors.codex_apps]]
-name = "Box"
-namespace = "box"
-tools = ["search_files_keyword", "search_folders_by_name", "list_folder_content_by_folder_id",
-         "get_file_details", "get_file_content", "get_file_preview", "get_preview_page"]
-
-[use_cases.course_explain]
-claude = { model = "claude-sonnet-5", effort = "medium" }
-codex = { model = "gpt-6-luna", effort = "medium" }
-
-[use_cases.course_requirements]
-claude = { model = "claude-sonnet-5", effort = "high" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-
-[use_cases.course_compare]
-claude = { model = "claude-sonnet-5", effort = "high" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-
-[use_cases.course_degree_plan]
-claude = { model = "claude-opus-5", effort = "high" }
-codex = { model = "gpt-6-sol", effort = "xhigh" }
-
-# 担当プロセス（A2A のサーバー）。秘密情報は kei-agent-course.zsh（MOODLE_ICS_URL）
+# 担当プロセス（A2A のサーバー）。秘密情報は kei-agent-course.zsh（Moodle の ICS と任意の API）
 [process]
 port = 8787
 
@@ -68,3 +25,5 @@ terms = {}
 # 秘密情報（値はここに書かない。kei-agent setup が聞き、kei-agent doctor が有無を確かめる）
 [secrets]
 MOODLE_ICS_URL = { description = "Moodle のカレンダーの書き出し URL（課題の締切を取り込む）", own_file = true }
+MOODLE_API_URL = { description = "HTTPS の Moodle ルート URL（提出・受験終了を確認する任意の連携）", own_file = true, group = "Moodle API" }
+MOODLE_API_TOKEN = { description = "本人の Moodle API トークン（提出・受験状態を読む関数が利用可能なもの）", own_file = true, group = "Moodle API" }

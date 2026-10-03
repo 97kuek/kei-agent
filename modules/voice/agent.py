@@ -1,13 +1,13 @@
-"""声の担当プロセス（A2A の受け口と、マイクの会話）。起動は共通のコマンド `kei-agent-module voice`。
+"""声の担当プロセス（A2A サーバーと、マイクの会話）。起動は共通のコマンド `kei-agent-module voice`。
 
 本体から来た出来事を受け取って喋る。渡ってくるのは「何が起きたか」だけで、言い方と顔は `events.py` が決め、
 **喋るのは Realtime のセッション**（`session.py` → `live.py`）に頼む。
 
 本体は返事を待たない（投げっぱなし。docs/architecture.md の「声」）ので、ここは**すぐ返す**。
-喋り終わるまで返さないと、Slack の処理が机の上のロボットの再生時間に引きずられる。
+喋り終わるまで返さないと、MCP の処理が机の上のロボットの再生時間に引きずられる。
 
-口（A2A）と耳（マイク）を同じプロセスで持つ（background）。**マイクは既定では開けない**。開け閉めは
-App Home の「聞く（マイク）」から、本体側（module.py）が出来事 listen として押してくる。
+A2A サーバーとマイクを同じプロセスで持つ（background）。**マイクは既定では開けない**。開け閉めは
+MCP の「聞く（Mac のマイク）」の通知設定から、本体側（module.py）が出来事 listen として押してくる。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from .skills import LISTEN_KEY, NOTIFY, SWITCH
 
 log = logging.getLogger(__name__)
 
-DESCRIPTION = ("机の上で喋る口。本体から出来事を受け取り、言い方と顔は自分で決める。"
+DESCRIPTION = ("Mac の音声サービス。本体から出来事を受け取り、言い方と表情を決める。"
                "Stack-chan がいればそちらで、いなければ Mac のスピーカーで鳴らす")
 SKILLS = [
     AgentSkill(
@@ -33,7 +33,7 @@ SKILLS = [
         name="知らせる",
         description="出来事を受け取って、喋る・顔を変える。渡すのは何が起きたかだけ（kind と、その中身）。"
                     "文と顔と首は声のレイヤが組み立てる。kind: schedule（朝のまとめ。喋らず手元に置く）、"
-                    "due（締切）、working（依頼を受けた。顔だけ）、done（終わった）、failed（止まった）、"
+                    "working（依頼を受けた。顔だけ）、done（終わった）、failed（止まった）、"
                     "limited（契約の上限）、awaiting（返事待ち）、listen（マイクを開ける・閉じる）",
         tags=["voice"],
         examples=['{"kind": "done", "theme": "amr-query"}'],
@@ -68,6 +68,13 @@ class Executor(SkillExecutor):
             await self.fail(updater, f"できるのは {NOTIFY} だけです")
             return
         event = event_of(text, metadata)
+        if event.get("kind") == "listen":
+            if not isinstance(event.get("on"), bool):
+                await self.fail(updater, "マイクの設定 on は true / false を指定してください")
+                return
+            if self.session is None:
+                await self.fail(updater, "マイクを切り替える準備ができていません。起動後にやり直してください")
+                return
         found = events.reaction(event)
         if found is None:
             await self.fail(updater, f"知らない出来事です: {event.get('kind')!r}")
@@ -93,8 +100,8 @@ class Executor(SkillExecutor):
             self.held["limited"] = True
             self.held["limited_until"] = str(event.get("reset_at") or "")
         elif kind == "listen" and self.session is not None:
-            # 常に録らない。Slack から入れたときだけ開ける（docs/architecture.md の「声」）
-            self.session.set_listening(bool(event.get("on")))
+            # 常に録らない。MCP で入れたときだけ開ける（docs/architecture.md の「声」）
+            self.session.set_listening(event["on"])
 
     def _react(self, found: events.Reaction) -> None:
         if self.session is None:
@@ -107,13 +114,13 @@ class Executor(SkillExecutor):
 
 
 async def background(executor: Executor) -> None:
-    """A2A の口と同じプロセスで、声でも話す。鍵が無い機械でも落とさない（`VoiceSession._talk` が握りつぶす）。
+    """A2A サーバーと同じプロセスで、声でも話す。鍵が無い機械でも落とさない（`VoiceSession._talk` が握りつぶす）。
 
-    マイクを開けるかは、App Home の「聞く（マイク）」で保存したもので始める（既定は切）。
+    マイクを開けるかは、MCP の「聞く（Mac のマイク）」で保存したもので始める（既定は切）。
     """
     session = VoiceSession(executor.held, config=executor.config)
     executor.session = session
-    listening = bool((executor.records.get(SWITCH, LISTEN_KEY) or {}).get("on"))
+    listening = (executor.records.get(SWITCH, LISTEN_KEY) or {}).get("on") is True
     try:
         await session.run(listening=listening)
     finally:

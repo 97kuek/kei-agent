@@ -103,10 +103,10 @@ def test_items_outside_the_window_are_dropped_unless_the_window_is_long(caplog, 
     assert ("範囲外の予定 1 件" in caplog.text) is (days is None)
 
 
-def test_outlook_items_skip_unreadable_meetings_and_drop_join_links():
+def test_outlook_items_skip_unreadable_meetings_and_keep_join_links():
     events = [
         {"id": "event-1", "subject": "定例", "start": "2026-09-25T11:00", "end": "2026-09-25T12:00",
-         "url": "https://teams.microsoft.com/l/meetup-join/x", "location": "https://zoom.us/j/1"},
+         "url": "https://teams.microsoft.com/l/meetup-join/x", "location": "https://zoom.us/j/1 パスコード: 123456"},
         {"id": "event-2", "subject": "時刻が読めない", "start": "来週"},
         {"id": "event-3", "subject": "", "start": "2026-09-25T13:00"},
         {"id": "event-1", "subject": "重なった ID", "start": "2026-09-25T14:00"},
@@ -117,7 +117,8 @@ def test_outlook_items_skip_unreadable_meetings_and_drop_join_links():
     first, second = outlook_items(events), outlook_items(events)
 
     assert [i.title for i in first] == ["定例", "ID なし"]
-    assert first[0].url == "" and first[0].location == ""          # 参加リンクは載せない
+    assert first[0].url == events[0]["url"] and first[0].location == events[0]["location"]
+    assert sync_calendar(FakeCalendarHub(), outlook(first[0]), CHECKED).created == 1
     assert first[1].source_id.startswith("fallback:") and first == second   # ID が無くても毎回同じ
 
 
@@ -136,6 +137,21 @@ def test_complete_read_flags_missing_rows_in_its_window_only():
     assert {r["id"]: r["同期状態"] for r in hub.rows[1:]} == {"row-1": "要確認", "past": "確認済み", "no-date": "確認済み"}
     start, end = hub.windows[-1]
     assert start.isoformat() < "2026-09-24" and end.isoformat() > "2026-10-23"
+
+
+def test_separate_meeting_credentials_survive_calendar_sync(monkeypatch):
+    join_url = "https://teams.microsoft.com/l/meetup-join/" + "x" * 300
+    meeting = {"id": "event-1", "subject": "定例", "start": "2026-09-25T11:00",
+               "url": "https://outlook.example/event/1", "location": "会議室",
+               "join_url": join_url, "passcode": "123456"}
+    hub = FakeCalendarHub()
+    written = []
+    monkeypatch.setattr(hub, "calendar_upsert", lambda source, item, checked_at, existing_id: written.append(item))
+
+    sync_calendar(hub, outlook(*outlook_items([meeting])), CHECKED)
+
+    assert written[0].url == meeting["url"]
+    assert join_url in written[0].location and "パスコード: 123456" in written[0].location
 
 
 @pytest.mark.parametrize("existing, snapshot, problem", [

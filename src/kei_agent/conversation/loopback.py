@@ -1,6 +1,6 @@
-"""本体のプロセスの中で、127.0.0.1 だけの口（HTTP）を開く。本体の A2A の口（questions.py）と手の口（hands_server.py）。
+"""本体のプロセスで、127.0.0.1 だけに HTTP サーバーを開く。A2A（questions.py）と MCP（hands_server.py）。
 
-開けなくても本体（Slack の受け口）は止めず、#0-kei-agent に知らせる。
+開けなくても実行サービスは止めず、Outbox に問題を記録する。
 """
 
 from __future__ import annotations

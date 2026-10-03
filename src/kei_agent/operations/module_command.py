@@ -3,7 +3,7 @@
 - `list` … 知っているモジュール（組み込みと、利用者のフォルダの modules/）と、オンかどうか、持っているもの
 - `add <名前>` / `remove <名前>` … 担当の表（agents.csv）のその行の enabled を書き換える（ほかの行は残す。書く前に、
   新しい設定を読めるか確かめる。前の表は agents.csv.bak に残す。表が無ければ、組み込み全部がオンの表から作る）、常駐を持つモジュールなら launchd に登録する・外す。
-  そのあとにやること（起動し直す、manifest の貼り直し、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ
+  そのあとにやること（起動し直す、MCP の設定、チャンネル、設定できる項目）を並べる。`--dry-run` で見るだけ
 """
 
 from __future__ import annotations
@@ -64,8 +64,6 @@ def describe(spec: modules.ModuleSpec, config: Config | None) -> str:
                                                       for n in spec.core_schedules]
     if schedules:
         parts.append("定期処理 " + "・".join(schedules))
-    if spec.slash_commands:
-        parts.append("コマンド " + "・".join(f"/{c}" for c in spec.slash_commands))
     return "、".join(parts) or "—"
 
 
@@ -87,16 +85,13 @@ def list_modules(env: dict[str, str] | None = None) -> int:
 def next_steps(spec: modules.ModuleSpec, config: Config, added: bool) -> list[str]:
     """オン・オフを変えたあとに、利用者がやること。"""
     steps = ["Kei Agent を起動し直す（deploy/restart-all.sh）"]
-    if spec.slash_commands:
-        steps.append("Slack App の manifest を貼り直す（kei-agent manifest の出力を App Manifest の画面に貼り、"
-                     "Install App で入れ直す）")
     if not added:
         return steps
     channels = [name for kind in spec.channels for name in config.module_channels.get(kind, ())
                 if name != modules.ALL_CHANNELS]
     if channels:
         shown = [f"#{modules.channel_prefix(name)}<名前>" if modules.channel_prefix(name) else f"#{name}" for name in channels]
-        steps.append("チャンネルを作って Kei Agent を招く: " + "、".join(shown))
+        steps.append("チャンネルを作って Dot を招く: " + "、".join(shown))
     if spec.settings:
         steps.append(f"設定できる項目（config.toml の [{spec.name}]）: " + "、".join(spec.settings))
     if spec.port is not None:

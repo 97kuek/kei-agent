@@ -11,6 +11,7 @@ import pytest
 from fakes import FakeAI, FakeHub, FakeNotion, make_assistant
 
 from kei_agent.conversation import router
+from kei_agent.conversation.request import Request
 from kei_agent.execution import a2a, model_classifier, model_policy, runner
 from kei_agent.execution.agent_policy import policy_of
 from kei_agent.framework import modules
@@ -25,7 +26,7 @@ async def _morning(scheduler, now):
     return found.text, found.detail, list(found.notices)
 
 
-CALENDAR_TOML = '''api = 1
+CALENDAR_TOML = '''api = 2
 name = "calendar"
 label = "予定"
 
@@ -148,12 +149,10 @@ def env(config, store, tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_model", claude)
     channels = {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent", "C60": "6-calendar"}
     assistant, slack = make_assistant(config, store, channels,
-                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+                                      notion=FakeNotion(), hub=FakeHub())
     agent = FakeCalendarAgent()
     assistant.agents["calendar"] = agent
     return Scheduler(config, store, assistant), assistant, slack, claude, agent
-
-
 
 
 # module.toml
@@ -184,7 +183,7 @@ def test_a_broken_actor_is_refused(tmp_path, extra, message):
     folder.mkdir()
     (folder / "broken.md").write_text("#\n", encoding="utf-8")
     (folder / "module.toml").write_text(
-        'api = 1\nname = "broken"\n[actor]\nprompt = "broken.md"\n' + extra
+        'api = 2\nname = "broken"\n[actor]\nprompt = "broken.md"\n' + extra
         + '[use_cases.broken_answer]\nclaude = { model = "claude-sonnet-5" }\n', encoding="utf-8")
     with pytest.raises(modules.ModuleError, match=message):
         modules.load_spec(folder)
@@ -215,13 +214,15 @@ async def test_a_module_can_choose_its_use_case_with_the_light_classifier(env, f
 
 async def test_the_module_picks_its_own_skill_in_its_channel(env, monkeypatch):
     scheduler, assistant, slack, claude, agent = env
+    events = []
+    monkeypatch.setattr(assistant, "emit", lambda kind, **data: events.append((kind, data)))
 
     async def fake_pick(config, skills, text, *, store=None):
         assert [s["id"] for s in skills] == ["list-events", "ask"]
         return router.Choice(skill="list-events", params={"days": 2})
 
     monkeypatch.setattr(router, "pick", fake_pick)
-    await assistant.on_mention({"channel": "C60", "user": "UME", "ts": "60.1", "text": "<@UBOT> 明日の予定は？"})
+    await assistant.submit(Request('C60', await assistant.channel_name('C60'), '60.1', '60.1', '明日の予定は？'))
     await settle(assistant)
 
     assert assistant.modules["calendar"].routed == [("list-events", {"days": 2})]
@@ -229,12 +230,12 @@ async def test_the_module_picks_its_own_skill_in_its_channel(env, monkeypatch):
     assert (skill, payload, params) == ("list-events", {"days": 2}, {"provider": "claude"})
     assert slack.texts()[-1] == "1 件"
 
-    # 担当が失敗したら、依頼に ⚠️ を付けて知らせる
+    # 担当が失敗したら、通知と失敗のイベントを残す
     agent.broken = True
-    await assistant.on_mention({"channel": "C60", "user": "UME", "ts": "60.2", "text": "<@UBOT> 予定は？"})
+    await assistant.submit(Request('C60', await assistant.channel_name('C60'), '60.2', '60.2', '予定は？'))
     await settle(assistant)
     assert "接続に失敗" in slack.texts()[-1]
-    assert ("reactions_add", {"channel": "C60", "timestamp": "60.2", "name": "warning"}) in slack.calls
+    assert events[-1] == ("failed", {"theme": "calendar"})
 
 
 async def test_a_choice_from_the_overview_router_reaches_the_module(env, monkeypatch):
@@ -250,7 +251,7 @@ async def test_a_choice_from_the_overview_router_reaches_the_module(env, monkeyp
 
     monkeypatch.setattr(router, "pick_across", fake_pick_across)
     monkeypatch.setattr(router, "pick", no_pick)
-    await assistant.on_mention({"channel": "C5", "user": "UME", "ts": "5.1", "text": "<@UBOT> 今週の予定は？"})
+    await assistant.submit(Request('C5', await assistant.channel_name('C5'), '5.1', '5.1', '今週の予定は？'))
     await settle(assistant)
 
     assert assistant.modules["calendar"].routed == [("list-events", {"days": 7})]
@@ -413,7 +414,7 @@ async def test_module_agenda_goes_into_the_review_material(env, monkeypatch):
 def test_an_agenda_without_kinds_is_refused_at_startup(tmp_path):
     folder = tmp_path / "old"
     folder.mkdir()
-    (folder / "module.toml").write_text('api = 1\nname = "old"\n', encoding="utf-8")
+    (folder / "module.toml").write_text('api = 2\nname = "old"\n', encoding="utf-8")
     (folder / "module.py").write_text("class Module:\n    async def agenda(self, days):\n        return []\n",
                                       encoding="utf-8")
     with pytest.raises(modules.ModuleError, match="agenda"):

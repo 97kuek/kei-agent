@@ -13,6 +13,7 @@ from kei_agent.storage.store import Store, schedule_detail
 
 # 本体の定期処理（名前 → 見出し）。モジュールのものは module.toml の [schedules] から足す
 CORE_SCHEDULES = {
+    "intake": "朝の取り込み",
     "daily": "Daily",
     "review": "Retro & Planning",
     "night": "🌙 をつけた Task",
@@ -90,3 +91,10 @@ def selected_provider(config: Config, actor: str) -> str:
     if actor not in model_actors():
         raise ValueError(f"未知のagentです: {actor}")
     return config.agent_profiles[actor].provider
+
+
+def agent_labels(config: Config) -> dict[str, str]:
+    """AI を使う担当と表示名（使うモジュール、横断の係の順）。"""
+    labels = {spec.name: spec.label for spec in modules.enabled(config.modules) if spec.actor}
+    labels["router"] = "振り分け"
+    return labels

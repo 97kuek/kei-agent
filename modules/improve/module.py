@@ -79,9 +79,6 @@ class Module:
     def talks(self) -> Path:
         return self.core.state_dir / "talk"
 
-    def welcome(self) -> str:
-        return ("このチャンネルでメンションされた要望は、要約して公開の GitHub issue にします（Slack の文はそのまま"
-                "載せません）。直し方を相談して、よければ Kei Agent 自身を直して取り込みます。")
 
     async def _post(self, req: Request, text: str) -> None:
         await self.core.post(req.channel, text, thread_ts=req.thread_ts)

@@ -4,6 +4,7 @@
 """
 
 SYNC_ASSIGNMENTS = "sync-assignments"
+SYNC_SUBMISSIONS = "sync-submissions"
 LIST_DUE = "list-due"
 LIST_CALENDAR_ASSIGNMENTS = "list-calendar-assignments"
 LIST_CLASSES = "list-classes"

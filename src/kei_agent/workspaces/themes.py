@@ -106,7 +106,7 @@ class Workspace:
     # claude -p を動かすディレクトリ。IMPROVE では None
     cwd: Path | None
     # ここから下は、エージェントが自分の claude を動かすときの上乗せ（docs/architecture.md の「振り分けと A2A」）
-    # そのエージェントの指示書（prompts/<agent>.md）。既定は prompts/system.md
+    # そのエージェントの指示書（prompts/<agent>.md）。既定は受け持つモジュールの指示書
     system_prompt: Path | None = None
     # claude 1回の上限時間（分）。既定は config.run_timeout_minutes
     timeout_minutes: int | None = None
@@ -222,6 +222,26 @@ def all_themes(config: Config) -> dict[str, Path]:
     for name, path in sorted(places(config).items()):
         # themes.toml には、プロジェクトのチャンネルの既存のフォルダも入る（テーマではない）
         if path.is_dir() and _is_theme(config, name):
+            found[name] = path
+    return found
+
+
+def all_projects(config: Config) -> dict[str, Path]:
+    """既定の場所と themes.toml にある、利用可能なプロジェクトの作業場。"""
+    candidates = dict(places(config))
+    for spec in modules.enabled(config.modules):
+        root = config.module_workspace(spec.name)
+        for head in spec.prefixes:
+            for path in sorted(root.iterdir()) if root.is_dir() else ():
+                if path.is_dir() and not path.name.startswith("."):
+                    candidates.setdefault(f"{head}{path.name}", path)
+    found = {}
+    for name, path in candidates.items():
+        try:
+            ws = resolve(config, name)
+        except ValueError:
+            continue
+        if ws.kind is ChannelKind.PROJECT and path.is_dir():
             found[name] = path
     return found
 

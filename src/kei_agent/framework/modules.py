@@ -54,17 +54,13 @@ class SecretSpec:
 
 # 本体が要る秘密情報（どのプロセスも読む共通のファイル kei-agent.zsh に置く）。モジュールのものは module.toml の [secrets]
 CORE_SECRETS = (
-    SecretSpec("SLACK_BOT_TOKEN", "Slack の Bot User OAuth Token（xoxb- で始まる。Slack App の Install App の画面）",
-               required=True),
-    SecretSpec("SLACK_APP_TOKEN", "Slack の App-Level Token（xapp- で始まる。Basic Information → App-Level Tokens。"
-               "scope は connections:write）", required=True),
     SecretSpec("KEI_AGENT_ALLOWED_USER_ID", "あなたの Slack のメンバー ID（U で始まる。プロフィールの ︙ → メンバー ID を"
                "コピー）。この人の依頼だけを受ける", required=True),
     SecretSpec("KEI_AGENT_A2A_TOKEN", "プロセスどうしの合言葉", required=True, generate=True),
-    SecretSpec("KEI_AGENT_HANDS_TOKEN", "手の口（MCP）の合言葉。頭（Claude Code・Dots など）が呼ぶときに渡す", generate=True),
+    SecretSpec("KEI_AGENT_HANDS_TOKEN", "MCP サーバーの合言葉。頭（Claude Code・Dots など）が呼ぶときに渡す", generate=True),
 )
 # この Kei Agent が読める枠の版。枠（module.toml の形と core の窓口）を変えるときに上げる
-API_VERSION = 1
+API_VERSION = 2
 SPEC_FILE = "module.toml"
 CODE_FILE = "module.py"
 AGENT_FILE = "agent.py"
@@ -72,8 +68,6 @@ AGENT_FILE = "agent.py"
 SERVICE_FILE = "service.py"
 # 手で動かすコマンド（setup など）。COMMANDS = {"名前": main(argv)} を置く
 COMMANDS_FILE = "commands.py"
-# モジュールの投稿のボタンと入力の画面の名前の頭（本体が、どのモジュールのものかを見分ける）
-ACTION_PREFIX = "kei_agent_module:"
 # モジュールのフォルダを、この名前の下のパッケージとして読み込む（module.py から同じフォルダのファイルを読めるように）
 PACKAGE = "kei_agent_modules"
 BUILTIN_DIR = Path(__file__).resolve().parents[3] / "modules"
@@ -85,7 +79,7 @@ _USE_CASE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 _TOP_KEYS = {"api", "name", "label", "description", "depends", "actor", "use_cases", "process", "channels",
-             "core_channels", "core_schedules", "schedules", "settings", "slash_commands", "secrets"}
+             "core_channels", "core_schedules", "schedules", "settings", "secrets"}
 _SECRET = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_KEYS = {"description", "required", "generate", "own_file", "group"}
 _DEPENDS_KEYS = {"requires", "optional"}
@@ -108,8 +102,6 @@ _PROCESS_KEYS = {"port", "kind"}
 # 常駐のプロセスの種類。a2a は担当（agent.py の SKILLS と Executor）、service はそれ以外の口（service.py の serve）
 PROCESS_KINDS = ("a2a", "service")
 _SCHEDULE_KEYS = {"label", "default"}
-# Slack のスラッシュコマンドの名前（/ は付けない）
-_SLASH = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 # 設定（[settings]）の既定の値に使える形。利用者の設定（config.toml の [<名前>]）は、既定と同じ形にする
 SETTING_TYPES = (str, int, float, bool, list, dict)
 
@@ -194,10 +186,6 @@ class ModuleSpec:
     schedules: tuple[ScheduleSpec, ...] = ()
     # 設定の名前 → 既定の値（config.toml の [<名前>] で変えられる）
     settings: dict[str, object] = field(default_factory=dict)
-    # Slack のスラッシュコマンド（/ を付けない名前 → 説明）。Slack の App にも同じ名前で足す（kei-agent manifest）
-    slash_commands: dict[str, str] = field(default_factory=dict)
-    # そのうち、打ち方の例（usage_hint。manifest に載せる）があるもの
-    slash_hints: dict[str, str] = field(default_factory=dict)
     # 会話を受け持つ本体のチャンネル（CORE_CHANNELS の中から）
     core_channels: tuple[str, ...] = ()
     # 受け持つ本体の定期処理（CORE_SCHEDULES の中から）
@@ -382,10 +370,12 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise ModuleError(f"{where} を読めません: {e}") from None
+    if "slash_commands" in data:
+        raise ModuleError(f"{where}: [slash_commands] は使えません。MCP の head_action(self, name, params) に移行してください")
     _check_keys(data, _TOP_KEYS, where)
     if data.get("api") != API_VERSION:
         raise ModuleError(f"{where}: 枠の版が合いません（このモジュールは api = {data.get('api')!r}、"
-                          f"この Kei Agent は api = {API_VERSION}）。CHANGELOG の直し方を見てください")
+                          f"この Kei Agent は api = {API_VERSION}）。MCP の head_action / head_materials に移行し、docs/modules.md を見てください")
     name = str(data.get("name") or "")
     if not _NAME.match(name) or name != directory.name:
         raise ModuleError(f"{where}: name は英小文字・数字・- で、フォルダの名前（{directory.name}）と同じにしてください")
@@ -428,23 +418,8 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         raise ModuleError(f"{where} の core_schedules に、受け持てない本体の定期処理があります: {', '.join(unknown)}"
                           f"（受け持てるもの: {', '.join(CORE_SCHEDULES)}）")
     schedules = _schedules(_table(data, "schedules", where), where)
-    slash: dict[str, str] = {}
-    hints: dict[str, str] = {}
-    for command, value in _table(data, "slash_commands", where).items():
-        # 説明の文字だけか、{ description = "…", usage_hint = "[start|stop]" } の表
-        if isinstance(value, dict):
-            _check_keys(value, {"description", "usage_hint"}, f"{where} の [slash_commands] {command}")
-            text, hint = value.get("description"), value.get("usage_hint", "")
-        else:
-            text, hint = value, ""
-        if not _SLASH.match(command) or not isinstance(text, str) or not text or not isinstance(hint, str):
-            raise ModuleError(f"{where} の [slash_commands] {command}: 名前は英小文字・数字・_・-（/ は付けない）で、"
-                              "値は説明の文字か、{ description = \"…\", usage_hint = \"…\" } にしてください")
-        slash[command] = text
-        if hint:
-            hints[command] = hint
-    if (channels or core_channels or core_schedules or schedules or slash) and not (directory / CODE_FILE).is_file():
-        raise ModuleError(f"{where}: [channels]・core_channels・core_schedules・[schedules]・[slash_commands] を動かす "
+    if (channels or core_channels or core_schedules or schedules) and not (directory / CODE_FILE).is_file():
+        raise ModuleError(f"{where}: [channels]・core_channels・core_schedules・[schedules] を動かす "
                           f"{CODE_FILE}（class Module）が、同じフォルダにありません")
     return ModuleSpec(
         name=name, label=str(data.get("label") or name), description=str(data.get("description") or ""),
@@ -452,7 +427,7 @@ def load_spec(directory: Path, builtin: bool = False) -> ModuleSpec:
         requires=_names(depends.get("requires", []), f"{where} の requires"),
         optional=_names(depends.get("optional", []), f"{where} の optional"),
         actor=actor, port=port, service=bool(process) and kind == "service", channels=channels, schedules=schedules,
-        settings=_settings(_table(data, "settings", where), where), slash_commands=slash, slash_hints=hints,
+        settings=_settings(_table(data, "settings", where), where),
         core_channels=core_channels, core_schedules=core_schedules,
         secrets=_secrets(_table(data, "secrets", where), where, bool(process)))
 
@@ -501,7 +476,6 @@ def _check_collisions(specs: dict[str, ModuleSpec]) -> None:
         keys = [f"用途「{u.name}」" for u in (spec.actor.use_cases if spec.actor else ())]
         keys += [f"定期処理「{s.name}」" for s in spec.schedules]
         keys += [f"チャンネルの種類「{kind}」" for kind in spec.channels]
-        keys += [f"スラッシュコマンド「/{name}」" for name in spec.slash_commands]
         keys += [f"番地「{spec.port}」"] if spec.port else []
         for key in keys:
             if key in seen and seen[key] != spec.name:
@@ -526,11 +500,6 @@ def secrets(names) -> list[tuple[ModuleSpec | None, SecretSpec]]:
                 seen.add(secret.name)
                 found.append((spec, secret))
     return found
-
-
-def action_id(module: str, name: str) -> str:
-    """モジュールの投稿のボタンや入力の画面の名前（本体が、押されたらそのモジュールの on_action / on_view に渡す）。"""
-    return f"{ACTION_PREFIX}{module}:{name}"
 
 
 def schedule_owner(names, schedule: str) -> ModuleSpec | None:
@@ -594,23 +563,26 @@ def load_code(spec: ModuleSpec) -> type | None:
             inspect.signature(agenda).bind(None, 7, None)
         except TypeError:
             raise ModuleError(f"{where}: agenda は agenda(self, days, kinds=None) の形にしてください") from None
-    if spec.slash_commands and not callable(getattr(cls, "on_slash_command", None)):
-        raise ModuleError(f"{where}: [slash_commands] があるので、class Module に on_slash_command(name, body) を書いてください")
-    for hook, args, shape in (("on_event", (None, "", {}), "on_event(self, kind, data)"),
-                              ("home", (None,), "home(self)"),
-                              ("on_home_action", (None, "", {}), "on_home_action(self, name, action)"),
-                              ("on_slash_command", (None, "", {}), "on_slash_command(self, name, body)"),
-                              ("on_action", (None, "", {}), "on_action(self, name, body)"),
-                              ("on_view", (None, "", {}), "on_view(self, name, body)"),
-                              ("material", (None, 0.0), "material(self, now)"),
-                              ("on_start", (None,), "on_start(self)")):
+    for hook in ("home", "welcome", "on_home_action", "on_slash_command", "on_action", "on_view", "on_reaction"):
+        if hasattr(cls, hook):
+            raise ModuleError(f"{where}: {hook} は使えません。MCP の head_action / head_materials に移行してください")
+    for hook, args, shape, asynchronous in (
+        ("on_event", (None, "", {}), "on_event(self, kind, data)", False),
+        ("material", (None, 0.0), "material(self, now)", False),
+        ("on_start", (None,), "on_start(self)", False),
+        ("head_action", (None, "", {}), "async def head_action(self, name, params)", True),
+        ("head_materials", (None, 7), "async def head_materials(self, days)", True),
+    ):
         found = getattr(cls, hook, None)
         if found is None:
             continue
         try:
             inspect.signature(found).bind(*args)
+            valid = not asynchronous or inspect.iscoroutinefunction(found)
         except (TypeError, ValueError):
-            raise ModuleError(f"{where}: {hook} は {shape} の形にしてください") from None
+            valid = False
+        if not valid:
+            raise ModuleError(f"{where}: {hook} は {shape} の形にしてください")
     on_message = getattr(cls, "on_message", None)
     if (spec.channels or spec.core_channels) and not callable(on_message):
         raise ModuleError(f"{where}: [channels] か core_channels があるので、class Module に on_message(req, skill, params)"

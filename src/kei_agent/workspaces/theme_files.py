@@ -1,21 +1,14 @@
-"""テーマのディレクトリの読み書き: Slack の添付の保存、outputs/ の変化、スレッドのログ。"""
+"""テーマのディレクトリの読み書き: inputs/ と outputs/ の変化、スレッドのログ。"""
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import datetime
 from pathlib import Path
 
-import aiohttp
-
-log = logging.getLogger(__name__)
-
 # スレッドに添付する outputs/ のファイルの数と大きさの上限
 MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-# Slack から受け取って inputs/ に保存する1ファイルの上限
-MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024
 
 _UNSAFE_FILENAME = re.compile(r"[^\w.\-]+")
 
@@ -55,44 +48,26 @@ def append_thread_log(cwd: Path, channel_name: str, thread_ts: str, who: str, te
     path = thread_log_path(cwd, thread_ts)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        started = datetime.fromtimestamp(float(thread_ts)).strftime("%Y-%m-%d %H:%M")
+        try:
+            started = datetime.fromtimestamp(float(thread_ts)).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, OverflowError, OSError):
+            # MCP の会話の番号（Slack のスレッドではない）。始まりは今
+            started = datetime.now().strftime("%Y-%m-%d %H:%M")
         path.write_text(f"# #{channel_name} のスレッド（{started} 開始）\n", encoding="utf-8")
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     with path.open("a", encoding="utf-8") as f:
         f.write(f"\n## {who}（{stamp}）\n\n{text.strip()}\n")
 
 
-def _free_name(inputs: Path, name: str) -> Path:
+def safe_filename(name: str) -> str:
+    """添付のファイル名（使えない文字は _ に。先頭の . は外す）。"""
+    return _UNSAFE_FILENAME.sub("_", name).lstrip(".") or "file"
+
+
+def free_name(inputs: Path, name: str) -> Path:
     dest = inputs / name
     stem, suffix, n = dest.stem, dest.suffix, 1
     while dest.exists():
         dest = inputs / f"{stem}-{n}{suffix}"
         n += 1
     return dest
-
-
-async def download_files(files: list[dict], cwd: Path, bot_token: str) -> list[str]:
-    """Slack の添付を inputs/ に保存し、cwd からの相対パスを返す。同じ名前があれば番号を足す。"""
-    saved: list[str] = []
-    if not files:
-        return saved
-    inputs = cwd / "inputs"
-    inputs.mkdir(exist_ok=True)
-    async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {bot_token}"}) as http:
-        for f in files:
-            url = f.get("url_private_download") or f.get("url_private")
-            if not url:
-                continue
-            if int(f.get("size") or 0) > MAX_DOWNLOAD_BYTES:
-                log.warning("大きすぎる添付は保存しません: %s", f.get("name"))
-                continue
-            name = _UNSAFE_FILENAME.sub("_", f.get("name") or f.get("id") or "file").lstrip(".") or "file"
-            dest = _free_name(inputs, name)
-            async with http.get(url) as resp:
-                resp.raise_for_status()
-                # 全部をメモリに載せない
-                with dest.open("wb") as out:
-                    async for chunk in resp.content.iter_chunked(1024 * 1024):
-                        out.write(chunk)
-            saved.append(str(dest.relative_to(cwd)))
-    return saved

@@ -30,14 +30,14 @@ def make_assistant(config, store, channels: dict[str, str] | None = None, *, pue
     """偽の Slack とジョブの列（pueue の偽物）で Assistant を作り、(assistant, slack) を返す。
 
     `channels` は FakeSlack に渡すチャンネル ID と名前。ジョブの偽物をテストで見るときは `pueue` に渡す。
-    残りの引数（notion・hub・team_url など）は Assistant にそのまま渡す。
+    残りの引数（notion・hub など）は Assistant にそのまま渡す。
     """
     from kei_agent.conversation.assistant import Assistant
     from kei_agent.execution.jobs import JobManager
 
     slack = FakeSlack(channels or {})
     jobs = JobManager(config, store, pueue if pueue is not None else FakePueue())
-    return Assistant(config, store, slack, jobs, "xoxb-test", "UBOT", **kwargs), slack
+    return Assistant(config, store, slack, jobs, **kwargs), slack
 
 
 def free_port() -> int:
@@ -81,11 +81,6 @@ def make_home(tmp_path: Path, text: str = "", *, agents: str | Iterable[str | di
     if schedules is not None:
         write_schedules(home, schedules)
     return home
-
-
-def home_action(action_id: str, user: str = "UME", **extra) -> dict:
-    """App Home のボタンや選択肢を押したときに Slack から届く中身。extra は action にそのまま入る。"""
-    return {"user": {"id": user}, "trigger_id": "trig", "actions": [{"action_id": action_id, **extra}]}
 
 
 def final_answer(text: str) -> str:

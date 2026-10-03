@@ -1,8 +1,8 @@
-"""頭（手の口の読む道具）に渡す材料。Daily・締切の知らせ・振り返りを頭が組み立てるときに読む。
+"""頭（MCP の読む道具）に渡す材料。Daily・締切の知らせ・振り返りを頭が組み立てるときに読む。
 
 - agenda … これから days 日の授業・会議・締切（各担当の予定。朝の一覧と同じ材料）。時刻の早い順
 - reading … モジュールが出す読みもの（知識の担当が朝に出した記事と、👍 したか）
-- recent … この hours 時間の動き（やり取りのあったスレッド、担当ごとの実行と失敗、手の口の頼みごと、終わったジョブ）
+- recent … この hours 時間の動き（やり取りのあったスレッド、担当ごとの実行と失敗、MCP の頼みごと、終わったジョブ）
 - jobs … 研究のジョブ（動いているものと、最近終わったもの）
 
 どれも読むだけで、Slack の書式（エスケープ・絵文字）は付けない。スレッドの本文の抜き出しは、研究テーマと研究全体の
@@ -89,7 +89,9 @@ async def agenda(assistant: Assistant, days: int, now: datetime | None = None) -
             items.append({"kind": "授業" if kind == "class" else "会議", "date": f"{start:%Y-%m-%d}",
                           "start": f"{start:%H:%M}", "end": f"{end:%H:%M}" if end else "",
                           "title": str(item.get("subject") or item.get("title") or ""),
-                          "where": str(item.get("location") or ""), "agent": agent, "_at": start})
+                          "where": str(item.get("location") or ""), "url": str(item.get("url") or ""),
+                          "join_url": str(item.get("join_url") or ""), "passcode": str(item.get("passcode") or ""),
+                          "agent": agent, "_at": start})
     items.sort(key=lambda item: item.pop("_at"))
     return {"from": f"{first:%Y-%m-%d}", "to": f"{last:%Y-%m-%d}", "items": items, "unread": unread}
 
@@ -129,7 +131,7 @@ def recent(assistant: Assistant, hours: int, now: float | None = None) -> dict:
         except ValueError:
             continue
         item = {"workspace": row["channel_name"], "updated": _stamp(row["updated_at"]),
-                "started": _stamp(_float(row["thread_ts"])), "from": "手の口" if row["channel"] == "mcp" else "Slack"}
+                "started": _stamp(_float(row["thread_ts"])), "from": "MCP" if row["channel"] == "mcp" else "Slack"}
         if ws.kind in EXCERPT_KINDS and ws.cwd is not None:
             item |= _excerpt(thread_log_path(ws.cwd, row["thread_ts"]))
         threads.append(item)
@@ -153,6 +155,8 @@ def recent(assistant: Assistant, hours: int, now: float | None = None) -> dict:
 
 def _job(job) -> dict:
     return {"id": job.id, "name": job.name, "workspace": Path(job.cwd).name, "status": job.status,
+            # MCPから投げたジョブなら、その会話の番号（同じ会話で続きを頼める）
+            "conversation": job.thread_ts if job.channel == "mcp" else "",
             "detail": job.detail or "", "submitted": _stamp(job.submitted_at), "started": _stamp(job.started_at),
             "finished": _stamp(job.finished_at)}
 

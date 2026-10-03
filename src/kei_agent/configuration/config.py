@@ -104,6 +104,8 @@ class ScheduleConfig:
     enabled: bool = True
     # "HH:MM"（ローカル時刻）。空文字にするとその処理を行わない
     daily: str = "08:00"
+    # 朝の取り込み（Daily を止めたときだけ動く。Daily が動くなら、Daily が取り込む）
+    intake: str = "08:00"
     review: str = "21:00"
     night: str = "00:00"
     # Mac のスリープなどで逃した処理を、何時間後まで実行するか
@@ -211,8 +213,6 @@ class Config:
     job_poll_seconds: int = 60
     job_parallel: int = 1
     agent_profiles: dict[str, AgentProfile] = field(default_factory=_default_agent_profiles)
-    # 依頼者の依頼がこの回数たまったスレッドでは、新しいスレッドに区切るボタンを出す。0 なら出さない
-    handoff_after_turns: int = 8
     allow_write: tuple[Path, ...] = ()
     # config.toml の [sandbox] deny_read（書かなければ None）。実際に読ませない場所は柵が決める（guard.denied_reads）
     deny_read: tuple[Path, ...] | None = None
@@ -225,11 +225,11 @@ class Config:
     notion: NotionConfig = field(default_factory=lambda: NotionConfig())
     # エージェント同士の合言葉（環境変数 KEI_AGENT_A2A_TOKEN）
     a2a_token: str = ""
-    # 手の口（MCP。conversation/hands.py）の住所（config.toml の [hands] url。空なら開かない）と合言葉
+    # MCP サーバー（conversation/hands.py）の住所（config.toml の [hands] url。空なら開かない）と合言葉
     # （環境変数 KEI_AGENT_HANDS_TOKEN）
     hands_url: str = ""
     hands_token: str = ""
-    # 手の口を ChatGPT に届ける OpenAI の Secure MCP Tunnel の番号（[hands] tunnel。空ならトンネルを使わない）。
+    # MCP を ChatGPT に届ける OpenAI の Secure MCP Tunnel の番号（[hands] tunnel。空ならトンネルを使わない）。
     # 動かすのは deploy/run-tunnel.sh。鍵（CONTROL_PLANE_API_KEY）はトンネルだけのファイル kei-agent-tunnel.zsh
     hands_tunnel: str = ""
     # 利用者のフォルダ（~/.config/kei-agent/）。None なら、プロフィールも指示書の差し替えも使わない（テスト）
@@ -324,13 +324,13 @@ class Config:
 
     @property
     def notion_gateway_url(self) -> str:
-        """Notion ゲートウェイの MCP の口（Notion のモジュール modules/notion/ の常駐のプロセス）。"""
+        """Notion ゲートウェイの MCP URL（modules/notion/ の常駐プロセス）。"""
         spec = modules.known().get("notion")
         return f"http://127.0.0.1:{spec.port if spec is not None and spec.port else 8791}/mcp"
 
     @property
     def notion_gateway_api(self) -> str:
-        """同じゲートウェイの、決まった処理用の Notion API の口（`/notion/v1`）。"""
+        """同じゲートウェイの、決まった処理用の Notion API URL（`/notion/v1`）。"""
         return gateway_endpoint(self.notion_gateway_url, "notion/v1")
 
     @property
@@ -344,7 +344,7 @@ class Config:
 
 
 def gateway_endpoint(mcp_url: str, path: str) -> str:
-    """Notion gateway の MCP の URL（…/mcp）から、同じサーバーの別の口を作る。"""
+    """Notion gateway の MCP URL（…/mcp）から、同じサーバーの別の API URL を作る。"""
     return f"{mcp_url.rstrip('/').removesuffix('/mcp')}/{path.lstrip('/')}"
 
 
@@ -355,7 +355,7 @@ class ConfigError(ValueError):
 # 書き間違いが黙って無視されないよう、使えるキーをすべて書き出しておく
 TOP_LEVEL_KEYS = {
     "agent_root", "state_dir", "max_concurrent_runs", "run_timeout_minutes",
-    "job_poll_seconds", "job_parallel", "handoff_after_turns", "sandbox",
+    "job_poll_seconds", "job_parallel", "sandbox",
     "schedule", "maintenance", "a2a", "notion", "paths", "allow_protected_folders", "hands",
 }
 PATHS_KEYS = {"secrets"}
@@ -367,7 +367,7 @@ DEFAULT_PATHS = {"research_root": "~/research", "agent_root": "~/kei-agent", "co
 # 本体が持つチャンネルの種類（モジュールの種類は module.toml の [channels] から足す）
 CHANNELS_KEYS = {"overview", "improve"}
 # [schedule] のうち、時刻（HH:MM）を書くキー（モジュールの定期処理は module.toml の [schedules] から足す）
-SCHEDULE_TIME_KEYS = ("daily", "review", "night")
+SCHEDULE_TIME_KEYS = ("intake", "daily", "review", "night")
 SANDBOX_KEYS = {"allow_write", "deny_read"}
 
 
@@ -493,11 +493,13 @@ def _module_settings(data: dict) -> dict[str, dict]:
             continue
         if name not in data:
             continue
-        if not spec.settings:
-            raise ConfigError(f"config.toml の [{name}]: モジュール「{name}」には設定がありません")
         values = data[name]
         if not isinstance(values, dict):
             raise ConfigError(f"config.toml の [{name}] はテーブルにしてください")
+        if not values:
+            continue
+        if not spec.settings:
+            raise ConfigError(f"config.toml の [{name}]: モジュール「{name}」には設定がありません")
         _check_keys(values, set(spec.settings), f"[{name}]")
         for key, value in values.items():
             default = spec.settings[key]
@@ -559,7 +561,7 @@ def config_home(env: dict[str, str] | None = None) -> Path:
 
 
 def _hands(data: dict) -> tuple[str, str]:
-    """[hands] の url（手の口の住所。127.0.0.1 か localhost のポートだけ）と tunnel（トンネルの番号）。"""
+    """[hands] の url（MCP の住所。127.0.0.1 か localhost のポートだけ）と tunnel（トンネルの番号）。"""
     _check_keys(data, {"url", "tunnel"}, "[hands]")
     url = str(data.get("url", ""))
     if url and not re.match(r"^http://(127\.0\.0\.1|localhost):\d+/?$", url):
@@ -568,7 +570,7 @@ def _hands(data: dict) -> tuple[str, str]:
     if tunnel and not re.match(r"^tunnel_[0-9a-f]+$", tunnel):
         raise ConfigError(f"config.toml の [hands] tunnel は OpenAI Platform のトンネルの番号（tunnel_...）にしてください: {tunnel}")
     if tunnel and not url:
-        raise ConfigError("config.toml の [hands] tunnel を使うなら、url（手の口の住所）も書いてください")
+        raise ConfigError("config.toml の [hands] tunnel を使うなら、url（MCP の住所）も書いてください")
     return url, tunnel
 
 
@@ -666,7 +668,7 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
     module_settings = _module_settings(data)
     # modules・channels・agents は担当の表から来たもの（config.toml に書いたものは _with_table が断った）
     _check_keys(data, TOP_LEVEL_KEYS | {"modules", "channels", "agents", "folders"}
-                | {name for name, spec in modules.known().items() if spec.settings}, "一番外側")
+                | set(modules.known()), "一番外側")
     # オフのモジュールのチャンネルの名前は、書いたまま残してよい（モジュールの設定の表と同じ。使うのはオンのものだけ）
     _check_keys(channels, CHANNELS_KEYS | {kind for spec in modules.known().values() for kind in spec.channels},
                 "[channels]")
@@ -699,7 +701,6 @@ def load_config(path: Path | None = None, env: dict[str, str] | None = None, *,
         job_poll_seconds=int(data.get("job_poll_seconds", 60)),
         job_parallel=int(data.get("job_parallel", 1)),
         agent_profiles=_agent_profiles(data.get("agents", {}), where),
-        handoff_after_turns=int(data.get("handoff_after_turns", 8)),
         allow_write=tuple(_expand(p) for p in sandbox.get("allow_write", ())),
         deny_read=tuple(_expand(p) for p in sandbox["deny_read"]) if "deny_read" in sandbox else None,
         claude_bin=env.get("KEI_AGENT_CLAUDE_BIN", "claude"),

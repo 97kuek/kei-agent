@@ -1,22 +1,19 @@
-"""モジュールの枠の広がり（段階3の声の①）。出来事の受け口、App Home の項目、担当プロセス側の窓口。
-
-声の担当を載せ替える前に、利用者のモジュールで確かめる。
-"""
+"""モジュールの出来事・MCP の状態操作・担当プロセス側の窓口。"""
 
 import asyncio
 import json
 from dataclasses import replace
 
 import pytest
-from fakes import FakeAI, home_action, make_assistant
+from fakes import FakeAI, make_assistant
 
 from kei_agent.execution import runner
 from kei_agent.framework import modules
 from kei_agent.testing.kit import settle
 
-LAMP_TOML = 'api = 1\nname = "lamp"\nlabel = "ランプ"\n'
+LAMP_TOML = 'api = 2\nname = "lamp"\nlabel = "ランプ"\n'
 
-LAMP_CODE = '''from kei_agent.api import Core, selected_values
+LAMP_CODE = '''from kei_agent.api import Core
 
 
 class Module:
@@ -29,13 +26,16 @@ class Module:
         if kind == "boom":
             raise RuntimeError("壊れた")
 
-    def home(self):
-        on = (self.core.records.get("switch", "light") or {}).get("on", False)
-        return [{"type": "actions", "elements": [
-            self.core.home_checkboxes("light", {"on": "点ける"}, {"on"} if on else set())]}]
+    async def head_action(self, name, params):
+        if name != "lamp":
+            return None
+        if "on" in params:
+            self.core.records.put("switch", "light", {"on": params["on"]})
+        return self.core.records.get("switch", "light") or {"on": False}
 
-    async def on_home_action(self, name, action):
-        self.core.records.put("switch", name, {"on": "on" in selected_values(action)})
+    async def head_materials(self, days):
+        state = self.core.records.get("switch", "light") or {"on": False}
+        return {"lamps": [{"on": state["on"], "days": days}]}
 '''
 
 
@@ -74,51 +74,23 @@ async def test_events_reach_every_module_that_listens(env, caplog):
     assert "出来事（boom）を受け取れませんでした" in caplog.text
 
 
-# App Home（home → on_home_action）
-
-def _published(slack):
-    return [kw for name, kw in slack.calls if name == "views_publish"][-1]["view"]
-
-
-async def test_a_module_puts_its_own_items_on_app_home_and_handles_them(env, store):
-    """モジュールの項目は、表示名の見出しの下に並ぶ。押されたらそのモジュールが扱い、App Home を作り直す。"""
+async def test_a_module_exposes_state_and_changes_it_through_mcp(env):
     assistant, slack = env
-    await assistant.publish_home("UME")
-    blocks = _published(slack)["blocks"]
-    title = next(n for n, block in enumerate(blocks) if (block.get("text") or {}).get("text") == "*ランプ*")
-    light, = blocks[title + 1]["elements"]
-    assert light["action_id"] == "kei_agent_home_module:lamp:light" and "initial_options" not in light
-
-    await assistant.on_home_action(home_action(light["action_id"], selected_options=[{"value": "on"}]))
+    assert await assistant.module_head_action("lamp", {}) == {"on": False}
+    assert await assistant.module_head_action("lamp", {"on": True}) == {"on": True}
     assert assistant.cores["lamp"].records.get("switch", "light") == {"on": True}
-    light, = [e for b in _published(slack)["blocks"] for e in b.get("elements", [])
-              if e.get("action_id") == "kei_agent_home_module:lamp:light"]
-    assert [option["value"] for option in light["initial_options"]] == ["on"]
+    assert await assistant.module_head_action("lamp", {"on": False}) == {"on": False}
 
 
-async def test_module_items_are_for_the_owner_and_a_broken_one_is_left_out(env, monkeypatch):
-    """ほかの人には見せず、押されても扱わない。1つのモジュールの項目が作れなくても、App Home は出す。"""
+async def test_mcp_materials_read_a_modules_current_state(env):
     assistant, slack = env
-    await assistant.on_home_action(home_action("kei_agent_home_module:lamp:light", user="USOMEONE",
-                                           selected_options=[{"value": "on"}]))
-    assert assistant.cores["lamp"].records.get("switch", "light") is None
-    await assistant.publish_home("USOMEONE")
-    assert "ランプ" not in json.dumps(_published(slack), ensure_ascii=False)
-
-    monkeypatch.setattr(assistant.modules["lamp"], "home", lambda: 1 / 0)
-    await assistant.publish_home("UME")
-    shown = json.dumps(_published(slack), ensure_ascii=False)
-    assert "ランプ" not in shown and "動いているもの" in shown
+    await assistant.module_head_action("lamp", {"on": True})
+    assert (await assistant.module_head_materials(3))["lamps"] == [{"on": True, "days": 3}]
 
 
-@pytest.mark.parametrize(("hook", "message"), [
-    ("    async def on_event(self):\n        pass\n", "on_event(self, kind, data)"),
-    ("    def home(self, user):\n        return []\n", "home(self)"),
-    ("    async def on_home_action(self, name):\n        pass\n", "on_home_action(self, name, action)"),
-])
-def test_hooks_in_the_wrong_shape_are_refused_at_startup(tmp_path, hook, message):
-    folder = _lamp(tmp_path, "class Module:\n    def __init__(self, core):\n        self.core = core\n\n" + hook)
-    with pytest.raises(modules.ModuleError, match=message.replace("(", r"\(").replace(")", r"\)")):
+def test_event_hooks_in_the_wrong_shape_are_refused_at_startup(tmp_path):
+    folder = _lamp(tmp_path, "class Module:\n    async def on_event(self):\n        pass\n")
+    with pytest.raises(modules.ModuleError, match=r"on_event\(self, kind, data\)"):
         modules.load_code(modules.load_spec(folder))
 
 
@@ -149,7 +121,7 @@ async def background(executor):
 def _bell(root, code=BELL_CODE):
     folder = root / "bell"
     folder.mkdir(parents=True)
-    (folder / "module.toml").write_text('api = 1\nname = "bell"\nlabel = "ベル"\n[process]\nport = 8802\n',
+    (folder / "module.toml").write_text('api = 2\nname = "bell"\nlabel = "ベル"\n[process]\nport = 8802\n',
                                         encoding="utf-8")
     (folder / "agent.py").write_text(code, encoding="utf-8")
     return folder

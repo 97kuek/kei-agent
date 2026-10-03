@@ -91,7 +91,8 @@ def test_schedules_csv_turns_schedules_off_and_agents_csv_takes_only_ai_columns(
     (tmp_path / "schedules.csv").write_text("name,enabled,time\nreview,false,21:00\nreading,true,06:30\n"
                                             "maintenance,false,22:00\n")
     config = load_config(path, env={})
-    assert (config.schedule.review, config.schedule.module_times["reading"]) == ("", "06:30")
+    assert config.schedule.review == ""
+    assert "reading" not in config.schedule.module_times
     assert not config.maintenance.enabled and config.schedule.daily == "08:00"      # 書いていない処理は既定
     for rows, said in (("daily,true,8:00\n", "HH:MM"), ("dayly,true,08:00\n", "知らない処理"),
                        ("daily,true,\n", "time を書いて")):
@@ -126,27 +127,20 @@ def test_agent_profile_selects_codex_and_keeps_other_actors_unselected(tmp_path)
     assert config.agent_profiles["research"].provider == "codex"
     assert set(config.agent_profiles["research"].__dataclass_fields__) == {"provider", "model", "effort", "claude_account", "codex_account", "claude_email",
                                                                          "engines"}
-    assert config.agent_profiles["course"].provider == ""
+    assert config.agent_profiles["work"].provider == ""
+    assert "course" not in config.agent_profiles
 
 
 def test_agent_workspaces_are_stable_places_for_sessions(config):
-    """大学のチャンネルは大学のモジュールのもの。担当の作業場は ~/course（設定の course_root）で、
-    はじめて使うときに、モジュールのフォルダのひな形（AGENTS.template.md）から AGENTS.md を作る。"""
+    """機械同期の大学には AI の作業場を作らず、仕事の会話用作業場は維持する。"""
     ws = themes.resolve(config, "2-course")
     assert (ws.kind, ws.module, ws.cwd) == (ChannelKind.MODULE, "course", None)
-    course = themes.agent_workspace(config, "course")
     work = themes.agent_workspace(config, "work")
-    assert (course.kind, course.module, course.cwd) == (ChannelKind.MODULE, "course", config.course_root)
-    assert "授業と課題の資料は Box" in (course.cwd / "AGENTS.md").read_text()
-    # 仕事はモジュール。作業場は前と同じ場所（会話の続きが切れない）
-    assert (work.kind, work.module) == (ChannelKind.MODULE, "work") and work.cwd == config.state_dir / "agents" / "work"
-    assert work.cwd.is_dir() and (course.cwd / "CLAUDE.md").exists()
-    # 実行役を持たないモジュール（声）には、作業場が無い
-    with pytest.raises(ValueError):
-        themes.agent_workspace(config, "voice")
-
-
-# チャンネル名の先頭の番号（並び順のためのもの）
+    assert (work.kind, work.module, work.cwd) == (ChannelKind.MODULE, "work", config.state_dir / "agents" / "work")
+    assert work.cwd.is_dir() and (work.cwd / "CLAUDE.md").exists()
+    for module in ("course", "knowledge", "voice"):
+        with pytest.raises(ValueError, match="作業場を持たない"):
+            themes.agent_workspace(config, module)
 
 
 def test_theme_name_drops_the_sorting_number():
@@ -166,7 +160,6 @@ def test_module_channel_belongs_to_its_module(config):
     assert [themes.actor_of(themes.resolve(config, name)) for name in (
         "4-knowledge", "2-course", "3-work", "0-kei-agent", "vlm", "0-overview")] == [
         "knowledge", "course", "work", "improve", "research", "research"]
-    assert themes.agent_workspace(config, "knowledge").cwd == config.state_dir / "agents" / "knowledge"
     # 設定の [channels] で名前を変えたら、その名前がモジュールのもの。モジュールを外せば、ただのテーマ
     renamed = replace(config, module_channels={"knowledge": ("reading",)})
     assert themes.resolve(renamed, "reading").module == "knowledge"

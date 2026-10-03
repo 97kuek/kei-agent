@@ -2,13 +2,13 @@
 
 1行に1つの処理。列は name, enabled, time。
 
-- name … 本体の処理（daily・review・night・maintenance）か、モジュールの module.toml の [schedules] の名前
+- name … 本体の処理（intake・daily・review・night・maintenance）か、モジュールの module.toml の [schedules] の名前
 - enabled … true / false（大文字でもよい）。false なら、その処理を行わない
 - time … HH:MM（ローカル時刻）。enabled が true なら要る
 - 表に無い処理は、既定の時刻で動く（本体の既定と module.toml の default）
 
 config.toml には時刻（[schedule] の daily などと、[maintenance] の time・enabled）を書かない（書いてあれば、
-表に書くよう知らせて止める）。App Home では変えない。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
+表に書くよう知らせて止める）。読んだ中身は、config.toml と同じ形（[schedule] の時刻、空文字は
 行わない）にして load_config に渡す。
 """
 
@@ -21,8 +21,10 @@ from kei_agent.framework import modules
 
 SCHEDULES_FILE = "schedules.csv"
 COLUMNS = ("name", "enabled", "time")
+# 宣言元を廃止した旧配信。独自モジュールが同名の処理を宣言していれば、その設定を優先する。
+RETIRED_SCHEDULES = frozenset({"reading", "literature"})
 # 本体の処理と既定の時刻（保守は config.toml の [maintenance] の残りの項目と組む）
-CORE_TIMES = {"night": "00:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
+CORE_TIMES = {"night": "00:00", "intake": "08:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
 def known_names() -> dict[str, str]:
     """書ける処理の名前と既定の時刻（本体のものと、知っているすべてのモジュールのもの。オフのモジュールのものも書ける）。"""
     found = dict(CORE_TIMES)
@@ -38,6 +40,8 @@ def parse(text: str, name: str = SCHEDULES_FILE) -> dict[str, str]:
     for line, row in rows(text, name, COLUMNS):
         schedule = row["name"]
         where = f"{name} の {line} 行目（{schedule}）"
+        if schedule in RETIRED_SCHEDULES and schedule not in known:
+            continue
         if schedule not in known:
             raise TableError(f"{where}: 知らない処理です（書けるもの: {', '.join(sorted(known))}）")
         if schedule in found:

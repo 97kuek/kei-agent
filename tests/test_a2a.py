@@ -73,8 +73,8 @@ async def test_card_tells_what_the_agent_can_do(server):
     card = await Agent(server, TOKEN).card()
     assert card["name"].startswith("Kei Agent")
     assert [s["id"] for s in card["skills"]] == [
-        "sync-assignments", "list-due", "list-calendar-assignments", "list-classes",
-        "list-current-courses", "ask", "time-report"]
+        "sync-assignments", "sync-submissions", "list-due", "list-calendar-assignments", "list-classes",
+        "list-current-courses", "time-report"]
     # 自由な質問（ask）は claude を動かすので、流しながら返す
     assert card["capabilities"].get("streaming") is True
     assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
@@ -88,14 +88,15 @@ async def test_card_is_public_but_work_needs_the_password(server):
 
 async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
     """締切の一覧が JSON で返る（見せ方はオーケストレーターが決める）。"""
-    from datetime import datetime
+    from kei_agent_modules.course import notion_sync
 
-    from kei_agent_modules.course import ics, moodle
-
-    monkeypatch.setenv("MOODLE_ICS_URL", "https://example.invalid/calendar.ics")
-    monkeypatch.setattr(moodle, "due", lambda url, since=None, days=90: [
-        ics.Event(uid="1@moodle", summary="第3回レポート の 提出期限",
-                  starts_at=datetime(2026, 9, 25, 23, 59), course="データベース(2019ZZ)")])
+    monkeypatch.setattr(notion_sync, "list_calendar_assignments", lambda days, today: {
+        "complete": True, "items": [
+            {"id": "p1", "moodle_id": "1@moodle", "title": "第3回レポート", "course": "データベース",
+             "due": "2099-09-25T23:59:00+09:00", "status": "進行中", "url": "https://notion.example/p1"},
+            {"id": "done", "title": "提出済み", "due": "2099-09-24T23:59:00+09:00", "status": "提出済み"},
+            {"id": "past", "title": "期限切れ", "due": "2000-09-24T23:59:00+09:00", "status": "未着手"},
+        ]})
 
     # 日数などの指定は、本体（module.py）が本文の JSON で渡す
     result = await Agent(server, TOKEN).ask("list-due", json.dumps({"days": 30}))
@@ -107,10 +108,10 @@ async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
     assert payload["days"] == 30 and payload["more"] == 0
     item, = payload["items"]
     assert item["id"] == "1@moodle" and item["course"] == "データベース"
-    assert item["at"].startswith("2026-09-25T23:59")
+    assert item["at"].startswith("2099-09-25T23:59")
 
 
-@pytest.mark.parametrize("skill", ["sync-assignments", "list-due"])
+@pytest.mark.parametrize("skill", ["sync-assignments"])
 async def test_moodle_skills_say_what_is_missing_without_the_calendar_url(server, monkeypatch, skill):
     monkeypatch.delenv("MOODLE_ICS_URL", raising=False)
     result = await Agent(server, TOKEN).ask(skill)
@@ -132,27 +133,15 @@ async def test_calendar_assignments_pagination_failure_is_a_failed_task(server, 
     assert "TOKEN" not in result.answer
 
 
-async def test_ask_gets_the_question_not_the_envelope(server, monkeypatch):
-    """本体は session_id などを添えた JSON で頼む。provider に渡すのは質問だけにする。"""
-    from kei_agent.execution import runner
+async def test_course_refuses_ai_questions(server, monkeypatch):
     from kei_agent_a2a import run
 
-    seen = {}
+    async def unexpected(*args, **kwargs):
+        pytest.fail("大学の機械処理から AI を呼び出してはいけない")
 
-    async def run_model(_config, request, prompt, **_kwargs):
-        seen.update(prompt=prompt, request=request)
-        return runner.RunResult(text="過去問は Box にあるよ", session_id="s-1")
-
-    monkeypatch.setattr(run.runner, "run_model", run_model)
-    payload = json.dumps({"prompt": "情報Bの過去問ある？", "session_id": None, "use_case": "course_explain",
-                          "provider": "claude", "channel": "C123", "thread_ts": "1.2"}, ensure_ascii=False)
-
-    result = await Agent(server, TOKEN).stream("ask", text=payload)
-
-    assert result.ok and json.loads(result.answer)["text"] == "過去問は Box にあるよ"
-    assert seen["prompt"] == "情報Bの過去問ある？"
-    # スレッドの鍵やチャンネル ID は、質問ではなく実行要求として渡す
-    assert (seen["request"].channel, seen["request"].thread_ts) == ("C123", "1.2")
+    monkeypatch.setattr(run.runner, "run_model", unexpected)
+    result = await Agent(server, TOKEN).stream("ask", text=json.dumps({"prompt": "情報Bの過去問ある？"}))
+    assert not result.ok and "どの仕事か分かりません" in json.loads(result.answer)["text"]
 
 
 async def test_unknown_skill_fails_with_a_reason(server):

@@ -3,7 +3,6 @@
 from datetime import date, datetime
 
 from kei_agent.scheduling import deadline, morning
-from kei_agent_modules.course import module as course
 
 
 def test_midnight_is_the_end_of_the_previous_day():
@@ -29,11 +28,3 @@ def test_reminders_use_the_previous_day():
     item = {"id": "a", "at": "2026-10-26T00:00:00+09:00", "title": "Assignment A", "course": "情報"}
 
     assert "`10/25（日） 24:00` 情報 Assignment A" in morning.soon_deadlines([item], now, 2)
-
-
-def test_the_merged_due_notice_also_uses_the_previous_day():
-    """締切の課題の1行も、日付の振り分けは 0:00 ちょうどを前の日の 24:00 として扱う。"""
-    now = datetime(2026, 10, 25, 20, 0)                        # 「前の日」＝今日ぶんとして扱われる時刻
-    item = {"id": "a", "due": "2026-10-26T00:00:00+09:00", "title": "Assignment A", "course": "情報"}
-
-    assert course.due_soon_line(item, now) == "• ~ 24:00：情報／Assignment A"

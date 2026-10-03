@@ -11,6 +11,7 @@ import pytest
 from fakes import FakeAI, FakeHub, FakeNotion, final_answer, make_assistant, make_theme, use_engine
 from test_schedule import FakeCourseAgent, due_item
 
+from kei_agent.conversation.request import Request
 from kei_agent.execution import runner
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
@@ -49,7 +50,7 @@ def env(config, store, monkeypatch):
     claude = FakeAI()
     monkeypatch.setattr(runner, "run_model", claude)
     assistant, slack = make_assistant(config, store, {"C1": "vlm", "C5": "0-overview", "C9": "0-kei-agent"},
-                                      notion=FakeNotion(), team_url="https://example.slack.com/", hub=FakeHub())
+                                      notion=FakeNotion(), hub=FakeHub())
     return Scheduler(config, store, assistant), assistant, slack, claude
 
 
@@ -65,7 +66,7 @@ def test_the_daily_module_takes_daily_and_review(config):
     assert (spec.actor.data, spec.actor.notion) == ("own", "none")
     assert {u.name for u in spec.actor.use_cases} == {"daily_write", "review_write", "review_talk"}
     assert task_names(config)[-3:] == ("daily", "review", "maintenance")
-    # モジュールがオフなら、Daily と振り返りは動かさない（App Home にも出さない）
+    # モジュールがオフなら、Daily と振り返りは動かさない
     from kei_agent.storage import settings
     off = config.__class__(**{**config.__dict__, "modules": tuple(n for n in config.modules if n != "daily")})
     assert "daily" not in task_names(off) and "daily" not in settings.schedule_names(off)
@@ -191,7 +192,7 @@ async def test_review_is_saved_to_the_day_row_and_asks_what_was_learned(env, con
 
 async def _talk(assistant, text, ts):
     import asyncio
-    await assistant.on_message({"channel": "C5", "user": "UME", "ts": ts, "thread_ts": "1001.000", "text": text})
+    await assistant.submit(Request("C5", "overview", "1001.000", ts, text))
     while assistant.tasks:
         await asyncio.gather(*list(assistant.tasks))
 
@@ -319,4 +320,3 @@ def test_the_review_answer_shows_only_the_file_name_of_local_paths(path):
     """手元のパスは、答えごと捨てずにファイル名だけにする（Slack にも日別記録にも、場所を出さない）。"""
     shown = review_answer(final_answer(f"**今日の成果**\n{path}\n\n**未完了タスク**\nなし"))
     assert shown and path not in shown and path.rsplit("/", 1)[-1] in shown
-

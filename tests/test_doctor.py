@@ -27,7 +27,7 @@ def _secrets(config, tmp_path, text, mode=0o600):
     return replace(config, secrets_dir=directory)
 
 
-FULL = (f'export SLACK_BOT_TOKEN="{SECRET}"\nexport SLACK_APP_TOKEN="xapp-1"\nexport KEI_AGENT_ALLOWED_USER_ID="U1"\n'
+FULL = ('export KEI_AGENT_ALLOWED_USER_ID="U1"\n'
         'export KEI_AGENT_A2A_TOKEN="abc"\nexport NOTION_TOKEN="ntn_1"\nexport KEI_AGENT_NOTION_GATEWAY_TOKEN="g"\n'
         'export TOGGL_API_TOKEN="t"\nexport TOGGL_ORGANIZATION_ID="1"\nexport TOGGL_WORKSPACE_ID="2"\n')
 
@@ -50,14 +50,15 @@ def test_a_broken_config_is_the_only_finding(tmp_path):
 
 def test_secrets_are_checked_by_name_only(config, tmp_path):
     ok = _secrets(config, tmp_path, FULL)
-    assert levels(doctor.check_secrets(ok)) == [(OK, "要る鍵がそろっている")]
+    assert levels(doctor.check_secrets(ok)) == [
+        (OK, "要る鍵がそろっている"), (OK, "Moodle API の鍵は入れていない（任意）")]
 
     # 例の書き方のまま・空・無いものは、足りない鍵として名前だけ出す（値は出さない）
-    missing = _secrets(config, tmp_path, FULL.replace("xapp-1", "xapp-...").replace('"abc"', '""')
+    missing = _secrets(config, tmp_path, FULL.replace('"abc"', '""')
                        .replace("export NOTION_TOKEN", "# export NOTION_TOKEN"), mode=0o644)
     findings = doctor.check_secrets(missing)
     text = doctor.report(findings, verbose=True)
-    assert "SLACK_APP_TOKEN、KEI_AGENT_A2A_TOKEN、NOTION_TOKEN" in text
+    assert "KEI_AGENT_A2A_TOKEN、NOTION_TOKEN" in text
     assert "ほかの人も読める" in text and SECRET not in text
 
 
@@ -66,7 +67,7 @@ def test_a_process_key_can_be_in_its_own_file(config, tmp_path):
     folder = tmp_path / "user-modules" / "weather"
     folder.mkdir(parents=True)
     (folder / "module.toml").write_text(
-        'api = 1\nname = "weather"\n[process]\nport = 8899\n[secrets]\n'
+        'api = 2\nname = "weather"\n[process]\nport = 8899\n[secrets]\n'
         'WEATHER_API_KEY = { description = "天気の API のキー", required = true, own_file = true }\n', encoding="utf-8")
     (folder / "agent.py").write_text("SKILLS = []\n", encoding="utf-8")
     modules.register_user_modules(folder.parent)
@@ -75,7 +76,21 @@ def test_a_process_key_can_be_in_its_own_file(config, tmp_path):
     own = tmp_path / "secrets" / "kei-agent-weather.zsh"
     own.write_text('export WEATHER_API_KEY="w-1"\n', encoding="utf-8")
     own.chmod(0o600)
+    assert levels(doctor.check_secrets(config)) == [
+        (OK, "要る鍵がそろっている"), (OK, "Moodle API の鍵は入れていない（任意）")]
+
+
+def test_moodle_api_is_optional_but_partial_configuration_is_reported_by_name(config, tmp_path):
+    config = _secrets(config, tmp_path, FULL)
+    own = tmp_path / "secrets" / "kei-agent-course.zsh"
+    own.write_text('export MOODLE_API_URL="https://moodle.example"\n', encoding="utf-8")
+    own.chmod(0o600)
+    findings = doctor.check_secrets(config)
+    assert (WARN, "Moodle API の鍵が一部だけ: MOODLE_API_URL（MOODLE_API_TOKEN も入れないと使わない）") in levels(findings)
+    own.write_text('export MOODLE_API_URL="https://moodle.example"\nexport MOODLE_API_TOKEN="test-token"\n',
+                   encoding="utf-8")
     assert levels(doctor.check_secrets(config)) == [(OK, "要る鍵がそろっている")]
+    assert "test-token" not in doctor.report(findings, verbose=True)
 
 
 def test_a_missing_secrets_file_and_partial_toggl(config, tmp_path):
@@ -94,7 +109,7 @@ def test_a_missing_secrets_file_and_partial_toggl(config, tmp_path):
 
 def test_actors_without_an_ai_and_missing_commands(config):
     config = replace(config, agent_profiles={**config.agent_profiles, "work": AgentProfile(provider=""),
-                                             "course": AgentProfile(provider="codex")})
+                                             "research": AgentProfile(provider="codex")})
     findings = doctor.check_ai(config, which=lambda name: "/bin/claude" if name == "claude" else None)
     found = dict((text.split("（")[0], level) for level, text in levels(findings))
     assert found["AI が選ばれていない担当: 仕事"] == ERROR
@@ -116,7 +131,7 @@ def test_the_ai_comes_only_from_the_table_and_doctor_never_writes_the_state(conf
 def test_processes_must_be_registered_and_running(config, tmp_path):
     agents = tmp_path / "LaunchAgents"
     agents.mkdir()
-    for name in ("assistant", "course", "knowledge"):
+    for name in ("assistant", "course", "voice"):
         (agents / f"com.kei-agent.{name}.plist").write_text("x")
     config = replace(config, modules=("course", "research"))
     states = {"com.kei-agent.assistant": "running", "com.kei-agent.course": "waiting"}
@@ -125,7 +140,7 @@ def test_processes_must_be_registered_and_running(config, tmp_path):
     assert found["本体"][0] == OK
     assert found["大学"] == (ERROR, "~/Library/Logs/kei-agent/course-launchd.log を見る")
     assert found["研究"] == (ERROR, "deploy/install.sh research")
-    assert found["オフのモジュールの常駐が残っている: 知識"] == (WARN, "deploy/install.sh knowledge remove")
+    assert found["オフのモジュールの常駐が残っている: 声"] == (WARN, "deploy/install.sh voice remove")
 
 
 async def test_versions_are_compared_with_the_repository(config):
@@ -191,7 +206,7 @@ def test_the_command_runs_the_app_without_arguments(monkeypatch):
     assert unknown.value.code == 2
 
 
-# 手の口のトンネル
+# MCP のトンネル
 
 def test_the_tunnel_is_checked_only_when_configured_and_its_key_stays_in_its_own_file(config, tmp_path):
     agents = tmp_path / "LaunchAgents"

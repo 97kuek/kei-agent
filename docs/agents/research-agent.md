@@ -7,14 +7,14 @@
 | 項目 | 中身 |
 |---|---|
 | チャンネル | ほかのどれでもないチャンネル（`#1-<テーマ>` など）。`module.toml` の `[channels]` の `theme = ["*"]` |
-| 番地 | 8788 |
+| ポート | 8788 |
 | フォルダ | `modules/research/`（指示書 `research.md`、skill は `plugin/`） |
 | 触れる範囲 | 作業場を読み書き・コマンド・Web・研究ホーム（[制限の表](../agents.md#触れる範囲制限の表)） |
 
 ## テーマの作業場
 
-- チャンネルに招くと作業場・`AGENTS.md` のひな形（と、それを読み込む `CLAUDE.md`）・Notion の「テーマ」の行ができる
-- 招いたときに [既定の場所に作る] か [既存のフォルダを使う] を選ぶ
+- Slack でチャンネルを作って Dot を招き、作業場の作成を頼む。Dot が MCP の `create_workspace` で作業場・`AGENTS.md` のひな形（と、それを読み込む `CLAUDE.md`）・Notion の「テーマ」の行を作る
+- 既定の場所を使うか、既存のフォルダを `folder` に指定する
 
 ```text
 ~/research/<テーマ>/     既定の置き場所（agents.csv の research の行の folder）
@@ -39,23 +39,24 @@
 
 | 頼み方 | 起きること |
 |---|---|
-| `@Kei Agent 〜して` | 作業場で AI を動かして答える |
-| ファイルを添付 | `inputs/` に入る |
-| 依頼の頭に `[[research-design]]` など | 用途（深さ）を指定する。下の表 |
-| 🌙 を付ける | 今夜 00:00 に Task として動かす |
-| チャンネルをアーカイブ | 定期処理がそのテーマを見なくなる |
+| Slack の Dot に「〜して」（テーマのチャンネル） | Dot が MCP の `run` に頼み、作業場で AI を動かして答える |
+| ファイルを添付 | Dot が `put_file` で `inputs/` に置く（文のファイル） |
+| 依頼の頭に `[[research-design]]` など | Dot が `run` の `use_case` に用途を指定する。下の表 |
+| 「今夜やって」 | Dot が Task を「今夜やる」で作り、00:00 に動かす |
 
 ## AI の用途
 
-| 用途 | 使うとき | Claude | Codex |
-|---|---|---|---|
-| `research_extract` | 書誌・固定項目・ログの抜き出し | haiku-4-5 | luna / low |
-| `research_screen` | はっきりした基準での仕分け | haiku-4-5 | luna / low |
-| `research_compare` | 比較・結果の分析 | sonnet-5 / high | sol / medium |
-| `research_execute`（既定） | 実験コード・データ処理・ふつうの調査 | sonnet-5 / high | sol / high |
-| `research_design` | 仮説・実験計画・手法選び・厳しいレビュー | opus-5 / high | sol / xhigh |
-| `manual_fable` | `[[manual-fable]]` と書いたときだけ | fable-5 / high | — |
-| `manual_astra` | `[[manual-astra]]` と書いたときだけ | — | astra / xhigh |
+モデルと effort の設定は `modules/research/module.toml` の `[use_cases]`、許可するモデルは `src/kei_agent/framework/models.py` を参照する。
+
+| 用途 | 使うとき |
+| --- | --- |
+| `research_extract` | 書誌・固定項目・ログの抜き出し |
+| `research_screen` | はっきりした基準での仕分け |
+| `research_compare` | 比較・結果の分析 |
+| `research_execute`（既定） | 実験コード・データ処理・ふつうの調査 |
+| `research_design` | 仮説・実験計画・手法選び・厳しいレビュー |
+| `manual_fable` | `[[manual-fable]]` と書いたときだけ |
+| `manual_astra` | `[[manual-astra]]` と書いたときだけ |
 
 ## スキル
 
@@ -71,7 +72,7 @@
 
 - 数分以上かかる処理は、作業場の中のスクリプトを pueue（グループ `kei-agent`）で動かす
 - `--expect <ファイル>` で、できるはずのファイルを宣言する。終わったときに照合する
-- 本体が毎分状態を見て、終わったらその会話を続ける。ログの末尾は、進捗だけの行をまとめ、末尾に入らなかったエラーも添えて渡す
+- 本体が定期的に状態を見て、終わったら Outbox に通知する。Dot が同じ `conversation` で MCP の `run` に結果の確認を頼む。ログの末尾は、進捗だけの行をまとめ、末尾に入らなかったエラーも添えて渡す
 - 失敗したら、原因と直し方を報告して、入れ直してよいか聞く（頼まれるまで入れ直さない）
 - 失敗や確認待ちを24時間放っておくと、一度だけ声をかける
 
@@ -91,7 +92,7 @@
 | マイルストーン | 名前、期日、テーマ、状態 |
 | 先行研究 | 名前、テーマ、URL、ID（`arXiv:…`）、要点、この研究との関係、状態（未読 / 読んだ / 使う） |
 
-- 🌙 は Task を作る入口。00:00 に「今夜やる」を1件ずつ、一晩5件まで動かし、「状態」と「結果」を書く
+- 「今夜やる」の Task は、00:00 に Dot が1件ずつ（一晩5件まで）MCP の `run` に頼み、「状態」と「結果」を書く
 - テーマの前提と検索キーワードの正本は `AGENTS.md`、論文の正本は先行研究 DB
 - スレッドやジョブの状態は本体の SQLite が正本で、Notion には置かない
 

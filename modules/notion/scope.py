@@ -90,7 +90,7 @@ class Tree:
         self.clock = clock
         self._nodes: dict[str, tuple[float, Node]] = {}
         self._sources: dict[str, tuple[float, tuple[str, ...]]] = {}
-        # MCP の道具と中継の口は別々のスレッドで動く
+        # MCP と中継 API は別々のスレッドで動く
         self._lock = threading.Lock()
 
     def node(self, item_id: str, kind: str | None = None) -> Node:
