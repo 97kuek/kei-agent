@@ -19,7 +19,6 @@ from datetime import time as dtime
 import aiohttp
 
 from kei_agent.configuration.config import Config
-from kei_agent.configuration.schedules_table import CLOUD_SCHEDULES
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
 from kei_agent.conversation.slack_text import AWAITING_MARKER, clean_text, format_duration
@@ -197,12 +196,15 @@ class Scheduler:
 
     async def catch_up_deferred(self, now: float) -> None:
         """上限で止まった決まった時刻の処理を、明けてからやり直す（猶予の時間を過ぎていても動かす）。"""
+        current = set(task_names(self.config))
         for deferred_id, payload in self.store.due_deferred("schedule", now):
             self.store.finish_deferred(deferred_id)
-            if payload["name"] in CLOUD_SCHEDULES:
+            name = payload["name"]
+            # 待っている間に止めた処理や担当を外した処理は、予約も取り消す。
+            if name not in current or not settings.schedule_time(self.config, name):
                 continue
-            if not self.store.schedule_ran(payload["name"], payload["day"]):
-                await self.run_or_defer(payload["name"], payload["day"], now)
+            if not self.store.schedule_ran(name, payload["day"]):
+                await self.run_or_defer(name, payload["day"], now)
 
     # 朝の取り込み
 
@@ -291,12 +293,6 @@ class Scheduler:
             summary = "返答を利用者向けの形に整えられませんでした" if contract_failed else summarize(shown)
         await asyncio.to_thread(notion.update_task, task.id, status, summary)
         return {**info, "status": status, "summary": summary}
-
-    # Daily と振り返り
-
-    async def sync_meetings(self, events: list[dict], now: datetime, source: str) -> dict | str:
-        """朝に読んだ会議を、共通ホームの予定カレンダーに足す（briefing.py）。"""
-        return await briefing.sync_meetings(self.assistant, events, now, source)
 
     # 保守
 

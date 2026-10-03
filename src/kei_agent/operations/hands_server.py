@@ -35,11 +35,11 @@ INSTRUCTIONS = (
     "Kei Agent の MCP サーバー。作業場（研究テーマ・プロジェクト・仕事）で Claude Code か Codex を動かす。"
     "まず workspaces で頼める作業場を見て、run で頼む。重さは light（抜き出し・要約）・normal（ふつうの作業）・"
     "deep（設計・計画・厳密な見直し）。比べる・絞るなど決まった仕事は use_case で名前で選べる。"
-    "仕事（会社のデータ。仕事の担当と、そのプロジェクト work-*）は外へ出られないので、外の情報が要るなら Dot が調べて request に入れる。"
+    "仕事（会社のデータ。仕事の担当と、そのプロジェクト work-*）は外へ出られないので、外の情報が要るなら依頼元の MCP クライアントで調べて request に入れる。"
     "続きを頼むときは、前の結果の conversation を渡す。"
     "長い会話を区切るときは handoff に workspace と conversation を渡し、返った新しい conversation で run する。"
     "Daily・締切・振り返りの材料は、読む道具（agenda・reading・recent・jobs）で読む。"
-    "Kei Agent からの知らせを notices で読み、自分の名前で Slack に出す。"
+    "Kei Agent からの知らせを notices で読み、利用者が指定・許可した宛先へ配信する。配信成功した ID だけ notices の done に渡す。"
     "status が accepted なら、あとで status に ticket を渡して結果を見る。needs_input なら、本文の確認に答えて、"
     "同じ conversation で run する。担当・アカウント・届く範囲は作業場から決まり、変えられない"
 )
@@ -92,8 +92,7 @@ def build_mcp(hands: Hands) -> MCPServer:
             raise ToolError(str(e)) from None
 
 
-    @mcp.tool(description="研究テーマかプロジェクト（work-<名前> など）の作業場を作る（Slack でチャンネルを作って Kei Agent を"
-                          "招いていた代わり）。folder を渡すと既存のフォルダを使う。研究テーマは研究ホームにも登録する。"
+    @mcp.tool(description="研究テーマかプロジェクト（work-<名前> など）の作業場を作る。folder を渡すと既存のフォルダを使う。研究テーマは研究ホームにも登録する。"
                           "もうあれば作らない。返すのは name・kind・folder・created")
     async def create_workspace(name: str, folder: str = "") -> dict[str, Any]:
         try:
@@ -124,7 +123,7 @@ def build_mcp(hands: Hands) -> MCPServer:
             raise ToolError(str(error)) from None
 
     @mcp.tool(description="Mac が以前配信した読みものを URL で指定して Notion に保存する互換窓口。saved=false は保存を解除する。"
-                          "URL は reading で取得したものを使い、題名で推測しない。Dot 自身が見つけた記事は Dot の Notion 連携で保存する。"
+                          "URL は reading で取得したものを使い、題名で推測しない。クライアントが独自に見つけた記事は、そのクライアントの保存機能を使う。"
                           "返すのは url・saved・liked・errors。errors があれば保存成功として扱わない")
     async def save_reading(url: str, saved: bool = True) -> dict[str, Any]:
         try:
@@ -140,7 +139,7 @@ def build_mcp(hands: Hands) -> MCPServer:
         except HandsError as e:
             raise ToolError(str(e)) from None
 
-    @mcp.tool(description="作業場（研究テーマ・プロジェクト）の inputs/ に、文のファイルを置く（Slack の添付を渡すとき）。"
+    @mcp.tool(description="作業場（研究テーマ・プロジェクト）の inputs/ に、文のファイルを置く（依頼に添付された文など）。"
                           "name はフォルダを含まない名前、content は中身。返す path を run の頼みごとに書いて伝える")
     async def put_file(workspace: str, name: str, content: str) -> dict[str, Any]:
         try:
@@ -158,10 +157,10 @@ def build_mcp(hands: Hands) -> MCPServer:
             raise ToolError(str(e)) from None
 
     @mcp.tool(description="Kei Agent の通知（ジョブが終わった・困りごと・課題の新着など）のうち、"
-                          "まだ出していないもの（古い順）。done=[] で呼んで読み、Slack に出せたものの id を done に入れてもう一度呼ぶと、"
+                          "まだ出していないもの（古い順）。done=[] で呼んで読み、宛先に配信できたものの id を done に入れてもう一度呼ぶと、"
                           "それは次から返さない（done に入れなかったものは、次の回にもう一度返る）。読むだけでは確認済みにしない。"
                           "notices の1件は id・channel（出すつもりだった"
-                          "チャンネル）・thread_ts・thread（スレッドの親の本文）・text・at。Slack への投稿は Dot が担当する")
+                          "チャンネル）・thread_ts・thread（スレッドの親の本文）・text・at。配信は呼び出し元の MCP クライアントが担当する")
     async def notices(done: list[str] | None = None) -> dict[str, Any]:
         return hands.notices(done)
 

@@ -21,8 +21,8 @@ from kei_agent.framework import modules
 
 SCHEDULES_FILE = "schedules.csv"
 COLUMNS = ("name", "enabled", "time")
-# Dot が配信する予定。旧表の行は読めるが、Mac では実行しない。
-CLOUD_SCHEDULES = frozenset({"reading", "literature"})
+# 宣言元を廃止した旧配信。独自モジュールが同名の処理を宣言していれば、その設定を優先する。
+RETIRED_SCHEDULES = frozenset({"reading", "literature"})
 # 本体の処理と既定の時刻（保守は config.toml の [maintenance] の残りの項目と組む）
 CORE_TIMES = {"night": "00:00", "intake": "08:00", "daily": "08:00", "review": "21:00", "maintenance": "22:00"}
 def known_names() -> dict[str, str]:
@@ -40,7 +40,7 @@ def parse(text: str, name: str = SCHEDULES_FILE) -> dict[str, str]:
     for line, row in rows(text, name, COLUMNS):
         schedule = row["name"]
         where = f"{name} の {line} 行目（{schedule}）"
-        if schedule in CLOUD_SCHEDULES:
+        if schedule in RETIRED_SCHEDULES and schedule not in known:
             continue
         if schedule not in known:
             raise TableError(f"{where}: 知らない処理です（書けるもの: {', '.join(sorted(known))}）")

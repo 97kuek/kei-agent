@@ -1,5 +1,6 @@
 import json
 import time
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -403,6 +404,49 @@ async def test_a_task_stopped_by_the_limit_runs_again_after_it_resets(env, monke
     assert done == [("night", "2026-09-18"),
                     ("daily", "2026-09-18")]
     assert scheduler.store.due_deferred("schedule", reset + 200) == []
+
+
+@pytest.mark.parametrize("name", ["daily", "review", "night"])
+async def test_deferred_schedule_is_cancelled_after_disabling_its_time(env, name):
+    """上限待ちのあいだに止めた処理を、上限が明けても再開しない。"""
+    scheduler, *_ = env
+    scheduler.config = replace(scheduler.config, schedule=replace(scheduler.config.schedule, **{name: ""}))
+    scheduler.store.defer_run("schedule", {"name": name, "day": "2026-09-18"}, 1)
+
+    await scheduler.catch_up_deferred(2)
+
+    assert not scheduler.store.schedule_ran(name, "2026-09-18")
+    assert scheduler.store.pending_deferred("schedule") == []
+
+
+@pytest.mark.parametrize(("enabled", "hhmm", "runs"), [(True, "08:00", True), (False, "08:00", False),
+                                                       (True, "", False)])
+@pytest.mark.parametrize("task_name", ["custom_task", "reading", "literature"])
+async def test_deferred_custom_schedule_follows_current_module_selection(env, monkeypatch, tmp_path, enabled, hhmm, runs, task_name):
+    """任意名の拡張も、現在オンの担当があるときだけ上限待ちから再開する。"""
+    from kei_agent.framework import modules
+
+    scheduler, assistant, *_ = env
+    spec = modules.ModuleSpec(
+        name="custom", label="拡張", description="テスト用の拡張", path=tmp_path, builtin=False,
+        schedules=(modules.ScheduleSpec(task_name, "拡張の処理", "08:00"),))
+    known = {**modules.known(), "custom": spec}
+    monkeypatch.setattr(modules, "known", lambda: known)
+
+    class CustomModule:
+        async def run_schedule(self, name, day):
+            return {"status": "done", "name": name, "day": day}
+
+    assistant.modules["custom"] = CustomModule()
+    scheduler.config = replace(
+        scheduler.config, modules=(*scheduler.config.modules, "custom") if enabled else scheduler.config.modules,
+        schedule=replace(scheduler.config.schedule, module_times={task_name: hhmm}))
+    scheduler.store.defer_run("schedule", {"name": task_name, "day": "2026-09-18"}, 1)
+
+    await scheduler.catch_up_deferred(2)
+
+    assert scheduler.store.schedule_ran(task_name, "2026-09-18") is runs
+    assert scheduler.store.pending_deferred("schedule") == []
 
 
 # 授業の締切（大学エージェント）

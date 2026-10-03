@@ -2,6 +2,8 @@
 - Kei Agent のいまの作り（本体と、モジュールの枠）
 - 担当ごとの中身は [`agents.md`](agents.md)、モジュールの作り方は [`modules.md`](modules.md)、Dot への指示は [`dots.md`](dots.md)
 
+共通コードは MCP クライアントから独立している。以下の図と Dot の説明は、同梱する構成例。[クライアントの役割と拡張方針](extensibility.md#mcp-クライアントと共通コード) を参照。
+
 ![プロセスと通信](images/architecture.svg)
 
 ## Dot とローカル実行サービス
@@ -16,7 +18,7 @@ Kei Agent はアシスタント全体の名前。Dot は対話と連携を、Mac
 - Dot は OpenAI の Secure MCP Tunnel を通して Mac の MCP サーバーを呼ぶ（下の「MCP サーバー」）
 - Mac の実行サービスは Slack に直接接続しない。通知は `Outbox`（`conversation/outbox.py`）に保存し、Dot が MCP の `notices` で取得して Slack に出す。Slack の進捗表示とリアクションは Dot が担当する
 - Dot が選べるのは、作業場・頼みごと・重さ・表で許した AI だけ。担当・アカウント・届く範囲は作業場から決まる
-- 通話で受けた依頼は Dot が対応する Slack チャンネルに親投稿を作り、依頼・結果・未完了の状態をそのスレッドに残す
+- 通話の依頼・結果・未完了の状態は、利用者の依頼と投稿権限に従い、Dot が対応する Slack スレッドに残す
 - 領域別のローカル AI は研究・仕事だけ。大学のプロセスは Moodle の機械同期で、知識のローカル AI・プロセス・定期処理は持たない
 
 ## プロセス
@@ -99,7 +101,7 @@ Dot が MCP の run に作業場の名前を渡す。作業場から agents.csv 
 - 会話番号は作業場に結び付く。AI・指示書の変更やセッションの消失時は、保存した依頼と回答から会話を復元する
 - Slack 通知の送信元は Dot だけ。notices の done=[] で取得し、Slack に送信できた id だけ確認済みにする
 - ChatGPT（Dots）からは、OpenAI の Secure MCP Tunnel を通して届く。トンネルのプログラム（`tunnel-client`。`deploy/run-tunnel.sh` が launchd で動かす）がこの Mac から OpenAI へ出ていき、届いた呼び出しに合言葉を付けて MCP へ渡す。番号は `[hands] tunnel`、鍵はトンネルだけの `kei-agent-tunnel.zsh`。MCP は OAuth を使わず、`/.well-known/` には本文の無い 404 を返す
-- ChatGPT の MCP のアプリは、作ったときの道具の一覧を使い続ける（あとでサーバーが道具を増やしても、読み直しに来るだけで見える一覧は変わらない）。道具を足したり変えたりしたら、ChatGPT で MCP を作り直す
+- MCP の道具を変更した場合の Dot 側での再スキャンは [接続手順](dots.md) を参照
 
 ## AI の動かし方
 

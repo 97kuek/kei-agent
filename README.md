@@ -1,13 +1,13 @@
 # Kei Agent
 
-Kei Agent は、Dot での対話・プラグイン連携と、Mac の作業場での実行を含むアシスタント全体の名前。
+Kei Agent は、対話からローカルの作業実行までをつなぐ、モジュール式のアシスタント。使う機能・AI・アカウントを設定し、自分の用途に合わせて拡張できます。
 
-Slack や音声で頼んだ用事を、Dot が受け、必要に応じて Mac の担当が作業場で進めるパーソナルアシスタント。
+- MCP クライアントから、作業の依頼・進捗確認・通知の取得ができます。Dot は任意のクライアントです
+- 共通コードが実行管理・権限・状態保存を受け持ち、領域ごとの機能はモジュールとして追加します
+- 個人のプロフィール・接続情報・モジュールの選択はリポジトリの外に置きます
+- Slack・通話 → Dot → MCP → Mac の構成と、コピーして使える Dot 用プロンプトを同梱しています。通話の Slack 記録は利用者の依頼と投稿権限に従います
 
-- Slack の受け答えと決まった時刻の処理は Dot が受け持つ。Mac の実行サービスは自分の Mac で常駐し、Dot に MCP で呼ばれて作業する
-- Kei Agent の機能はどれもモジュールで、使うものだけをオンにする。自分のモジュールを足して作り替えられる
-- Mac で AI を動かす領域別の担当は研究と仕事。研究は Claude Code か Codex の CLI、仕事は現在、会社の Claude Code を使う。大学と知識の質問は Dot が直接答える
-- 通話で受けた依頼は、Dot が対応する Slack チャンネルに依頼と結果を記録する
+下の図と表のクラウド連携は、Dot を使う構成例です。共通部分とクライアントの役割は [設計の決めごと](docs/extensibility.md) を参照してください。
 
 ![Kei Agent の全体図](docs/images/overview.svg)
 
@@ -28,7 +28,7 @@ Slack や音声で頼んだ用事を、Dot が受け、必要に応じて Mac �
 ## はじめる
 
 - 要るもの: macOS、Claude Code か Codex の CLI、[uv](https://docs.astral.sh/uv/)、pueue
-- 対話に使うもの: 自分用の Slack のワークスペースと、OpenAI の Dot。Dot をつなぐ手順は [`docs/dots.md`](docs/dots.md)
+- 対話に使うもの: MCP クライアント。Dot と Slack を使う構成の接続手順は [`docs/dots.md`](docs/dots.md)
 - あれば使うもの: Notion、Toggl、OpenAI（声の会話）
 
 ```zsh

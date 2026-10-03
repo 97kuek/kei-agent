@@ -1,6 +1,7 @@
 """クラウドへ移した担当の旧設定・予約を、Mac で再実行しない。"""
 
 import time
+from dataclasses import replace
 
 import pytest
 from fakes import make_assistant
@@ -51,3 +52,32 @@ async def test_cloud_run_is_refused_without_leaving_a_ticket_or_thread(config, s
         await hands.run(workspace, "調べて", conversation="cloud-question")
     assert hands.records.items("ticket") == []
     assert store.get_thread("mcp", "cloud-question") is None
+
+
+@pytest.mark.parametrize("name", ["course", "knowledge"])
+def test_replacement_actor_keeps_its_configuration(monkeypatch, name):
+    """同名の独自担当を登録した場合は、宣言された AI 設定を尊重する。"""
+    from kei_agent.framework import modules
+
+    known = modules.known()
+    replacement = replace(known[name], actor=known["work"].actor)
+    monkeypatch.setattr(modules, "known", lambda: {**known, name: replacement})
+    parsed = agents_table.parse(
+        "module,enabled,channels,engine,model,effort,engines\n"
+        f"{name},true,,codex,,,claude codex\n")
+    assert parsed["agents"][name]["provider"] == "codex"
+    assert parsed["agents"][name]["engines"] == "claude codex"
+
+
+@pytest.mark.parametrize("name", ["reading", "literature"])
+def test_declared_schedule_can_reuse_retired_name(monkeypatch, tmp_path, name):
+    """旧配信の名前でも、現在のモジュールが宣言する処理なら設定できる。"""
+    from kei_agent.framework import modules
+
+    spec = modules.ModuleSpec(
+        name="custom", label="拡張", description="拡張", path=tmp_path, builtin=False,
+        schedules=(modules.ScheduleSpec(name, "配信", "09:00"),))
+    known = {**modules.known(), "custom": spec}
+    monkeypatch.setattr(modules, "known", lambda: known)
+    assert schedules_table.parse(f"name,enabled,time\n{name},true,10:00\n") == {name: "10:00"}
+    assert schedules_table.parse(f"name,enabled,time\n{name},false,10:00\n") == {name: ""}
