@@ -38,13 +38,30 @@ uv run kei-agent doctor                                 # 確かめる
 
 - 読み込んでよい Kei Agent の部品は窓口だけ: `module.py` は `kei_agent.api`、ほかのファイルは `kei_agent_a2a.api`
 - 同じフォルダのファイルは `from . import texts` のように読める
-- 枠の版は `api = 2`。合わない版や `[slash_commands]` の宣言、Slack の UI 用の差し込み口は読み込まない
+- 枠の版は `api = 3`（版2も読み込める）。対応しない版や `[slash_commands]` の宣言、Slack の UI 用の差し込み口は読み込まない
 - 触れる範囲は `[actor]` の `data`・`notion`・連携の道具から決まる。ファイル・コマンド・Web・通信の制限はコアが実行のときに適用する
 - AI に書かせてよいのは、自分のフォルダ（`core.state_dir`）か、作業場だけ
 - 秘密情報は `[secrets]` に名前と説明だけを書く。値はコード・ログ・Slack に出さない
 - 指示書の返答は `<<kei-agent-final>>` と `<<kei-agent-final-end>>` の間を本体が取り出し、Dot に渡す。印が無い、空、複数ある場合は出力契約で失敗扱いになる
 - 名前は英小文字・数字・-（フォルダの名前と同じ）
 - 用途・定期処理・チャンネルの種類・ポートは、ほかのモジュールとぶつけない（ぶつかれば設定を読むときに断る）
+
+## 版3の窓口
+
+- 版2のモジュールは、そのまま読み込める。版1や廃止済みの Slack UI の差し込み口には対応しない
+- 新しいモジュールや、以下の窓口を使うモジュールは `api = 3` にする。既存の差し込み口の引数・返り値は変わらない
+- `core_schedules` は `night` も受け持てる。任意の同期メソッド `schedule_provider(name)` は、その処理が使う `"claude"` / `"codex"`、未選択なら `""`、AI を使わないなら `None` を返す。書かなければ従来どおり、そのモジュールの実行役を使う
+- `core.dispatch(req)` はチャンネルの担当に実行を任せ、通知と実行・上限の記録を経て `DispatchResult(text, failed, awaiting)` を返す。`text` は表示用の答えで、出力契約違反も確認待ちになる
+- `core.fetch_message(channel, ts)` は端末にあるメッセージ1件、`core.workspace_provider` は研究テーマ（`*`）の担当の provider（担当か選択が無ければ空文字）を返す
+- 補助関数 `clean_text`・`parse_slack_permalink`・`summarize` も `kei_agent.api` から読み込める
+
+## 夜間の Task
+
+- `agents.csv` の `night` をオンにすると、研究ホームの 🌙 Task を研究テーマの担当に渡す。新しい担当 AI は持たず、研究テーマ（`*`）の担当とその `engine` が必要
+- `schedules.csv` の既存の `night` 行（時刻・オンオフ）をそのまま使う。未記載なら 00:00、逃した分は12時間以内に動く。`enabled=false` なら、モジュールがオンでも動かない
+- `config.toml` の `[schedule] night_max_tasks` は引き続き1回の最大件数（既定5件）。`core.night_max_tasks` は、この互換設定だけを読む窓口
+- 使うには `kei-agent module add night` で担当を選び、定期処理の表の `night` をオンにする。担当の表から外すと、延期していた予約も実行しない
+- Dot に夜間処理を任せる構成では、このモジュールを選ばない。Dot の予定は変更しない
 
 ## module.toml
 
@@ -53,12 +70,12 @@ uv run kei-agent doctor                                 # 確かめる
 - 知らないキーや形の違いは、読むときに断る（`src/kei_agent/framework/modules.py`）
 
 ```toml
-api = 2                         # 枠の版
+api = 3                         # 枠の版
 name = "weather"                # フォルダの名前と同じ
 label = "天気"                  # 担当の表示名
 description = "…"
 # core_channels = ["improve"]   # 会話を受け持つ本体のチャンネル（Kei Agent のチャンネル）
-# core_schedules = ["daily", "review"]   # 受け持つ本体の定期処理
+# core_schedules = ["night", "daily", "review"]   # 受け持つ本体の定期処理
 
 [depends]
 requires = []                   # 必須のモジュール
@@ -142,6 +159,7 @@ class Module:
 | 差し込み口 | 呼ばれるとき |
 |---|---|
 | `on_message(req, skill, params)` | モジュールへの会話依頼。MCP の `run` は直接 AI を動かすため、この処理を通らない |
+| `schedule_provider(name)` | 定期処理の provider を選ぶ（省略可、同期メソッド。版3） |
 | `run_schedule(name, day)` | 定期処理の時刻。`{"status": "error"}` を返すと朝の一覧に載る |
 | `tick(now)` | 毎分（間隔はモジュールが決める） |
 | `prepare(kind, day)` | Daily と振り返りの前。取り込み直す |

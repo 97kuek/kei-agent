@@ -186,7 +186,12 @@ def test_the_example_table_lists_every_builtin_module(tmp_path):
 
     home = _home(tmp_path, (REPO_ROOT / "agents.example.csv").read_text(encoding="utf-8"))
     config = _load(home)
-    assert set(config.modules) == set(modules.builtin())
+    # 夜間 Task は明示的に選ぶ例。定義は含めるが、初期状態では自動実行しない。
+    import csv
+    with (REPO_ROOT / "agents.example.csv").open() as source:
+        listed = {row["module"] for row in csv.DictReader(source)}
+    assert listed == set(modules.builtin()) | {"router", "overview"}
+    assert set(config.modules) == set(modules.builtin()) - {"night"}
     # 例は AI を選んでいない状態で始まる（config.example.toml と同じ）
     assert all(not p.provider and not p.model for p in config.agent_profiles.values())
 

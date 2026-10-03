@@ -67,7 +67,7 @@ def test_a_first_setup_writes_the_profile_config_and_secrets(tmp_path, capsys):
     assert "研究: （例" not in profile and "## 話し方" in profile
 
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
-    assert config.modules == ("course", "daily", "improve", "knowledge", "notion", "research", "time")
+    assert config.modules == ("course", "daily", "improve", "knowledge", "night", "notion", "research", "time")
     assert config.research_root.name == "study" and config.notion.hub_home == PAGE and config.notion.research_home == ""
     # モジュール・チャンネル・AI は担当の表に書き、config.toml には残さない（説明のコメントも）
     assert config.agents_table.name == "agents.csv"

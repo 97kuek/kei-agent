@@ -21,7 +21,7 @@ from kei_agent.framework import modules
 FIRST_PORT = 8800
 
 MODULE_TOML = Template('''# ${label}のモジュール（kei-agent module new が作った。書き方は docs/modules.md の「module.toml」）
-api = 2
+api = 3
 name = "${name}"
 label = "${label}"
 description = "${description}"

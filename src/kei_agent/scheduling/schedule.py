@@ -1,7 +1,7 @@
-"""決まった時刻の処理: 🌙 の夜間 Task、保守、放置されたスレッドへの声かけ。
+"""決まった時刻の処理: モジュールの呼び出し、保守、放置されたスレッドへの声かけ。
 
 モジュールの定期処理（module.toml の [schedules]）と、モジュールが受け持つ本体の定期処理（core_schedules。
-Daily と Retro & Planning）も同じ順番の中で動かし、中身はモジュールの run_schedule に任せる。
+夜間・Daily と Retro & Planning）も同じ順番の中で動かし、中身はモジュールの run_schedule に任せる。
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import json
 import logging
 import socket
 import time
-from contextlib import suppress
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 
@@ -21,15 +20,12 @@ import aiohttp
 from kei_agent.configuration.config import Config
 from kei_agent.conversation.assistant import Assistant
 from kei_agent.conversation.request import Request
-from kei_agent.conversation.slack_text import AWAITING_MARKER, clean_text, format_duration
+from kei_agent.conversation.slack_text import format_duration
 from kei_agent.execution import jobs
 from kei_agent.framework import modules, version
 from kei_agent.scheduling import briefing, maintenance
 from kei_agent.storage import settings
-from kei_agent.storage.notion import NotionError
-from kei_agent.storage.notion_store import Task, parse_slack_permalink, summarize
 from kei_agent.storage.store import Store
-from kei_agent.workspaces import themes
 
 log = logging.getLogger(__name__)
 
@@ -37,13 +33,15 @@ log = logging.getLogger(__name__)
 def task_names(config: Config) -> tuple[str, ...]:
     """実行する順。同じ時刻なら、夜間の Task → モジュールの処理（朝の読みものなど）→ 朝の取り込み → Daily → 振り返り → 保守。
 
-    夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。Daily と振り返りは、受け持つモジュール
-    （core_schedules。Daily・振り返りのモジュール）があるときだけ動く。朝の取り込みは、Daily が動かないときだけ
+    夜間の Task とモジュールの処理の結果を、Daily と朝の一覧に載せるため。夜間・Daily と振り返りは、受け持つモジュール
+    （core_schedules）があるときだけ動く。朝の取り込みは、Daily が動かないときだけ
     （Daily が動くなら、Daily が取り込む）。
     """
     taken = tuple(name for name in modules.CORE_SCHEDULES if modules.core_schedule_owner(config.modules, name))
     intake = () if "daily" in taken and settings.schedule_time(config, "daily") else ("intake",)
-    return ("night", *(s.name for s in settings.module_schedules(config)), *intake, *taken, "maintenance")
+    early = tuple(name for name in taken if name == "night")
+    later = tuple(name for name in taken if name != "night")
+    return (*early, *(s.name for s in settings.module_schedules(config)), *intake, *later, "maintenance")
 # 夜間の Task は、朝に Mac が起きたときにも実行する
 NIGHT_CATCH_UP_HOURS = 12
 # 取り込んだ新しい版で起動し直したかを見る間隔（秒）。見つけてから、もう一度この時間たっても古ければ知らせる
@@ -147,11 +145,16 @@ class Scheduler:
     async def run_task(self, name: str, day: str, record: bool = True) -> dict:
         log.info("定期処理を始めます: %s（%s）", name, day)
         try:
-            # モジュールの定期処理と、モジュールが受け持つ本体の定期処理（core_schedules。Daily・振り返り）
+            # モジュールの定期処理と、モジュールが受け持つ本体の定期処理（core_schedules）
             owner = (modules.schedule_owner(self.config.modules, name)
                      or modules.core_schedule_owner(self.config.modules, name))
             module = self.assistant.modules.get(owner.name) if owner is not None else None
-            detail = await (module.run_schedule(name, day) if module is not None else getattr(self, f"run_{name}")(day))
+            if module is not None:
+                detail = await module.run_schedule(name, day)
+            elif name in ("intake", "maintenance"):
+                detail = await getattr(self, f"run_{name}")(day)
+            else:
+                detail = {"status": "disabled"}
         except Exception as e:
             log.exception("定期処理 %s が失敗しました", name)
             detail = {"status": "error", "error": f"{type(e).__name__}: {e}"}
@@ -166,11 +169,16 @@ class Scheduler:
         owner = (modules.core_schedule_owner(self.config.modules, name)
                  or modules.schedule_owner(self.config.modules, name))
         if owner is not None:
+            module = self.assistant.modules.get(owner.name)
+            choose = getattr(module, "schedule_provider", None)
+            if choose is not None:
+                provider = choose(name)
+                if provider not in (None, "", *modules.PROVIDERS):
+                    raise ValueError(f"定期処理 {name} の provider が不正です")
+                return provider
             # モジュールの処理は、そのモジュールの実行役の provider（AI を使わないモジュールなら要らない）
             return settings.selected_provider(self.config, owner.name) if owner.actor else None
-        # 夜間の Task などは、研究テーマを受け持つモジュールの担当（無ければ動かさない）
-        owner = themes.catch_all_module(self.config)
-        return settings.selected_provider(self.config, owner) if owner else ""
+        return None
 
     def can_run(self, name: str, now: float, provider: str | None = None) -> bool:
         provider = self.task_provider(name) if provider is None else provider
@@ -178,11 +186,16 @@ class Scheduler:
 
     async def run_or_defer(self, name: str, day: str, now: float) -> bool:
         """実行する。途中で契約の上限に当たったら、その日の分として残さず、明けてからやり直す。"""
-        provider = self.task_provider(name)
+        try:
+            provider = self.task_provider(name)
+        except Exception as e:
+            log.exception("定期処理 %s の provider を選べませんでした", name)
+            self.store.record_schedule(name, day, {"status": "error", "error": f"{type(e).__name__}: {e}"})
+            return False
         if provider == "":
             self.store.record_schedule(name, day, {"status": "provider_unselected"})
             return False
-        if not self.can_run(name, now, provider):
+        if provider and self.store.limit_until(provider) > now:
             until = self.store.limit_until(provider)
         else:
             await self.run_task(name, day)
@@ -214,85 +227,6 @@ class Scheduler:
         会議を予定カレンダーへ写すのは Dot の予定なので、ここでは写さない（docs/dots.md）。"""
         found = await briefing.build(self.assistant, datetime.now(), write_meetings=False)
         return {"status": "done", **found.detail}
-
-    # 夜間の Task
-
-    async def run_night(self, day: str) -> dict:
-        notion = self.assistant.notion
-        if notion is None:
-            return {"status": "no_notion"}
-        try:
-            tasks = await asyncio.to_thread(notion.tonight_tasks, self.config.schedule.night_max_tasks)
-        except NotionError as e:
-            await self.assistant.notify_trouble(f"夜間の Task を Notion から読めなかったので、今夜は実行しません: {e}")
-            return {"status": "error", "error": str(e)}
-        ids = await self.assistant.channel_ids()
-        done = []
-        for task in tasks:
-            try:
-                done.append(await self._run_night_task(task, ids))
-            except Exception as e:
-                # 「実行中」のまま残ると二度と実行されないので、確認待ちに戻して知らせる
-                log.exception("夜間の Task「%s」が止まりました", task.title)
-                reason = f"途中で止まりました: {type(e).__name__}: {e}"
-                await self.assistant.notify_trouble(f"夜間の Task「{task.title}」が{reason}")
-                with suppress(NotionError):
-                    await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
-                done.append({"title": task.title, "status": "error", "reason": reason, "url": task.url})
-        try:
-            remaining = await asyncio.to_thread(notion.count_tonight_tasks)
-        except NotionError:
-            remaining = None
-        return {"status": "done", "tasks": done, "remaining": remaining}
-
-    async def _run_night_task(self, task: Task, ids: dict[str, str]) -> dict:
-        notion = self.assistant.notion
-        info = {"title": task.title, "url": task.url, "theme": ", ".join(task.theme_names)}
-        theme = task.theme_names[0] if task.theme_names else None
-        channel_name = theme
-        if theme is None or channel_name not in ids:
-            reason = "テーマを設定してください" if theme is None else f"テーマのチャンネル #{theme} に Kei Agent がいません"
-            await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
-            return {**info, "status": "確認待ち", "reason": reason}
-
-        await asyncio.to_thread(notion.update_task, task.id, "実行中")
-        body = await asyncio.to_thread(notion.page_markdown, task.id)
-        channel = ids[channel_name]
-        source = parse_slack_permalink(task.slack_url)
-        message: dict = {}
-        # 元のメッセージがテーマのチャンネルにあるときだけ、そのスレッドで続ける
-        if source and source[0] == channel:
-            message = await self.assistant.fetch_message(*source) or {}
-        if message:
-            message_ts = source[1]
-            thread_ts = message.get("thread_ts") or message_ts
-        else:
-            message_ts = None
-            resp = await self.assistant.slack.chat_postMessage(channel=channel, text=f"🌙 Task: {task.title}")
-            thread_ts = resp["ts"]
-            await asyncio.to_thread(notion.update_task, task.id, None, None,
-                                    await self.assistant.permalink(channel, thread_ts))
-
-        text = (
-            "[🌙 夜間の Task] 依頼者は寝ているので、その場で聞き返せません。"
-            "判断が必要なところまで進めたら、最後の行を「❓ 確認:」で始めて止めてください。\n\n"
-            f"タイトル: {task.title}\n優先度: {task.priority or '-'} / 期日: {task.due or '-'}\n"
-            f"Notion: {task.url}\n\n## 本文\n\n{body or '（なし）'}\n"
-        )
-        if message:
-            text += f"\n## 元の Slack のメッセージ\n\n{clean_text(message.get('text', ''))}\n"
-        req = Request(channel, channel_name, thread_ts, None, text, trigger="night")
-        result = await self.assistant.process(req)
-
-        if result is None or result.is_error:
-            status = "確認待ち"
-            summary = "エラーで止まりました"
-        else:
-            shown, contract_failed = self.assistant.render_reply(result)
-            status = "確認待ち" if contract_failed or AWAITING_MARKER in result.text else "完了"
-            summary = "返答を利用者向けの形に整えられませんでした" if contract_failed else summarize(shown)
-        await asyncio.to_thread(notion.update_task, task.id, status, summary)
-        return {**info, "status": status, "summary": summary}
 
     # 保守
 
