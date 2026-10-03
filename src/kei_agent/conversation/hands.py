@@ -11,6 +11,8 @@ MCP サーバーは 127.0.0.1 で動き、KEI_AGENT_HANDS_TOKEN で認証する�
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 import secrets
@@ -128,12 +130,22 @@ class Hands:
 
     async def run(self, workspace: str, request: str, weight: str = "normal", engine: str = "",
                   conversation: str = "", use_case: str = "", read_only: bool = False,
-                  minutes: int = 0) -> dict:
+                  minutes: int = 0, client_request_id: str = "") -> dict:
         """作業場で AI を動かす。短ければ答えを、長ければ受付番号を返す。受け付けられなければ HandsError。
 
         use_case を渡せば重さより先に使う（workspaces の use_cases の名前）。read_only なら、書く・動かす・通信する
         手段を外す。minutes は上限時間（workspaces の max_minutes まで。0 なら担当の既定）。
+        client_request_id は依頼ごとの任意のID。同じIDと同じ引数の再送は元の受付を返す。
         """
+        if client_request_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", client_request_id):
+            raise HandsError("client_request_id は英数字と . _ : - だけの128字までにしてください")
+        # 解決前の引数を比較する。既定値や利用上限が変わっても、再送は元の受付へ戻す。
+        fingerprint = hashlib.sha256(json.dumps(
+            [workspace, request, weight, engine, conversation, use_case, read_only, minutes],
+            ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest()
+        if client_request_id and (previous := self.records.get("request", client_request_id)) is not None:
+            return await self._replay_request(previous, fingerprint)
         plan = self._plan(workspace, request, weight, engine, use_case, read_only, minutes)
         if conversation and (not CONVERSATION.fullmatch(conversation) or ".." in conversation):
             raise HandsError("conversation は英数字と . _ - だけの64字までにしてください（Slack のスレッドの ts など）")
@@ -141,16 +153,34 @@ class Hands:
         row = self.assistant.store.get_thread(CHANNEL, conversation)
         if row is not None and row["channel_name"] != plan.ws.channel_name:
             raise HandsError("conversation は別の作業場の会話です。新しい会話として頼んでください")
-        # 受付時に結び付ける。待機中の同じ番号を別の作業場で使わせない。
-        self.assistant.store.upsert_thread(CHANNEL, conversation, plan.ws.channel_name, None)
         ticket = f"t-{secrets.token_hex(6)}"
-        self.records.put("ticket", ticket, {"ticket": ticket, "status": "running", "phase": "queued", "workspace": plan.ws.channel_name,
-                                            "conversation": conversation, "started_at": time.time()},
-                         keep_days=KEEP_DAYS)
+        started = time.time()
+        entry = {"ticket": ticket, "status": "running", "phase": "queued", "workspace": plan.ws.channel_name,
+                 "conversation": conversation, "started_at": started}
+        if client_request_id:
+            previous = self.assistant.store.claim_hands_ticket(
+                client_request_id, fingerprint, entry, started + KEEP_DAYS * 86400)
+            if previous is not None:
+                return await self._replay_request(previous, fingerprint)
+        else:
+            self.records.put("ticket", ticket, entry, keep_days=KEEP_DAYS)
+        # 予約から task 登録までは await しない。応答が失われても実行は元の受付に残る。
+        self.assistant.store.upsert_thread(CHANNEL, conversation, plan.ws.channel_name, None)
         task = asyncio.create_task(self._work(ticket, plan, request, conversation))
         self._tasks[ticket] = task
         task.add_done_callback(lambda _: self._tasks.pop(ticket, None))
         return await self._wait_ticket(ticket, task, conversation)
+
+    async def _replay_request(self, previous: dict, fingerprint: str) -> dict:
+        if previous["fingerprint"] != fingerprint:
+            raise HandsError("client_request_id は別の依頼内容で使用済みです。新しい依頼には新しいIDを使ってください")
+        ticket = previous["ticket"]
+        found = self.records.get("ticket", ticket)
+        if found is None:
+            raise HandsError(f"受付番号 {ticket} の結果は保存期限を過ぎています。同じIDでは再実行しません")
+        if (task := self._tasks.get(ticket)) is not None:
+            return await self._wait_ticket(ticket, task, found["conversation"])
+        return self.status(ticket)
 
     async def _wait_ticket(self, ticket: str, task: asyncio.Task, conversation: str) -> dict:
         done, _ = await asyncio.wait({task}, timeout=SHORT_SECONDS)
