@@ -5,6 +5,7 @@
 | 貼り付け先 | 時刻（日本時間） | 全文 | 出力先 |
 |---|---|---|---|
 | Dot との会話（継続指示） | — | [Slack・通話・MCP・安全と Notion の扱い](dot-custom-instructions.md) | 依頼元のスレッド・通話 |
+| Dot との会話（継続指示） | — | [個人開発とプロジェクト対応表](dot-development.md) | 依頼元スレッド・PR |
 | 定期実行の指示 | 07:00 | [先行研究の新着](dot-literature.md) | Slack `#0-overview`、研究ホームの「先行研究」 |
 | 定期実行の指示 | 07:00 | [読みもの](dot-reading.md) | Slack `#4-knowledge`（記事ごとの親投稿） |
 | 定期実行の指示 | 07:40 | [カレンダーの同期](dot-calendar-sync.md) | 共通ホームの「予定カレンダー」（異常の通知は `#0-overview`） |

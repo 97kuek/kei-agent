@@ -19,7 +19,7 @@
 
 Kei Agent の MCP の notices を done=[] で呼ぶ（MCP が使えないときは、何もせずに終える）。
 返った知らせを、1件ずつ Slack に出す。出す先は channel（研究テーマ・course・kei-agent・overview など。番号つきの
-Slack のチャンネル名で、名前の数字の後ろが一致するもの。例 vlm → #1-vlm、kei-agent → #0-kei-agent、knowledge → #4-knowledge）。
+Slack のチャンネル名で、名前の数字の後ろが一致するもの。例 vlm → #1-vlm、kei-agent → #5-kei-agent、knowledge → #4-knowledge）。
 - thread（スレッドの親の本文）があれば、そのチャンネルで、その本文の投稿のスレッドに返す。見つからなければ、
   本文の頭に親の本文の1行目を引用して、チャンネルに出す
 - 同じ id の知らせが前にも来ていたら（書き換えられた困りごと）、前の投稿を書き換える。書き換えられなければ、新しく出す
