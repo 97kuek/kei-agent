@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -53,7 +53,7 @@ CALENDAR_ADDITIONS = {
 MANAGED_END = "— Kei Agent の本文ここまで —"
 # 研究・大学・仕事の時間を1つにまとめる DB。記録 ID で1回だけ作る
 TIME_TITLE = "時間記録"
-# 知識の担当が毎朝読む設定のページ（共通ホームの子ページ）。書き方は COLLECT_NOTE
+# 知識の担当が毎朝読む設定のページ（知識ホームの子ページ）。書き方は COLLECT_NOTE
 COLLECT_TITLE = "収集"
 COLLECT_INTERESTS = "興味"
 COLLECT_SOURCES = "情報源"
@@ -121,31 +121,24 @@ TIME_PROPERTIES = {
     "出典": {"select": {"options": [{"name": name} for name in TIME_SOURCES]}},
 }
 TIME_CHART_NAME = "週ごとの時間"
-# 朝の読みもので 👍 した記事（Slack から入れる。状態は自分で「読んだ」に変える）
-READING_TITLE = "読みもの"
-READING_STATES = ("気になる", "読んだ")
-READING_PROPERTIES = {
-    "名前": {"title": {}},
-    "URL": {"url": {}},
-    "出どころ": {"select": {"options": []}},
-    "興味": {"multi_select": {"options": []}},
-    "要約": {"rich_text": {}},
-    "日付": {"date": {}},
-    "状態": {"select": {"options": [{"name": name} for name in READING_STATES]}},
-}
-
-
-# 振り返りの会話で言語化した学び（職場・学校で学んだこと、大切な助言）。1件1ページで、本文は場面・学んだこと・次にどう使うか
-LEARNING_TITLE = "学びのノート"
-LEARNING_FIELDS = ("仕事", "大学", "研究", "そのほか")
-LEARNING_KINDS = ("学び", "助言", "気づき")
-LEARNING_PROPERTIES = {
-    "名前": {"title": {}},
-    "日付": {"date": {}},
-    "分野": {"select": {"options": [{"name": name} for name in LEARNING_FIELDS]}},
-    "種類": {"select": {"options": [{"name": name} for name in LEARNING_KINDS]}},
-    "出典": {"rich_text": {}},
-    "Slack": {"url": {}},
+# 知識ホーム（共通ホームと同じくワークスペースの直下）の DB。記事（Article）と、振り返りの会話で言語化した学び
+# （Learning・Advice・Insight）を1つにまとめる。日付は持たず、ページの作成日時を使う
+KNOWLEDGE_HOME_TITLE = "知識ホーム"
+KNOWLEDGE_TITLE = "Knowledge"
+ARTICLE = "Article"
+LEARNING = "Learning"
+KNOWLEDGE_TYPES = (ARTICLE, LEARNING, "Advice", "Insight")
+UNREAD = "Unread"
+KNOWLEDGE_STATUSES = (UNREAD, "Read")
+# 振り返りの会話の種類（AI は日本語で返す）→ Type
+LEARNING_TYPES = {"学び": LEARNING, "助言": "Advice", "気づき": "Insight"}
+# 列はこの順に作り、表の表示もこの順にそろえる（notion_hub_setup.HubSetup._order_view）
+KNOWLEDGE_PROPERTIES = {
+    "Title": {"title": {}},
+    "Type": {"select": {"options": [{"name": name} for name in KNOWLEDGE_TYPES]}},
+    "Summary": {"rich_text": {}},
+    "Source": {"rich_text": {}},
+    "Status": {"select": {"options": [{"name": name} for name in KNOWLEDGE_STATUSES]}},
 }
 
 
@@ -174,10 +167,17 @@ class HubState:
     time_db_id: str = ""
     time_ds_id: str = ""
     time_chart_view_id: str = ""
-    reading_db_id: str = ""
-    reading_ds_id: str = ""
-    learning_db_id: str = ""
-    learning_ds_id: str = ""
+    knowledge_home_id: str = ""
+    knowledge_db_id: str = ""
+    knowledge_ds_id: str = ""
+
+    @classmethod
+    def from_json(cls, raw: dict) -> HubState:
+        """状態ファイルの中身から作る。今は使わない鍵（前の読みもの・学びのノートの ID など）は読み飛ばす。"""
+        if not isinstance(raw, dict):
+            raise TypeError("共通ホームの状態ファイルの形が違います")
+        known = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in raw.items() if key in known})
 
 
 class HubStore:
@@ -201,8 +201,7 @@ class HubStore:
                 if props.get(name, {}).get("type") != kind:
                     problems.append(f"{label} の「{name}」が {kind} ではありません")
         for label, ds_id, spec_of in (("時間記録", self.state.time_ds_id, TIME_PROPERTIES),
-                                      (READING_TITLE, self.state.reading_ds_id, READING_PROPERTIES),
-                                      (LEARNING_TITLE, self.state.learning_ds_id, LEARNING_PROPERTIES)):
+                                      (KNOWLEDGE_TITLE, self.state.knowledge_ds_id, KNOWLEDGE_PROPERTIES)):
             if not ds_id:
                 continue
             props = self.notion.request("GET", f"/data_sources/{ds_id}").get("properties", {})
@@ -350,74 +349,94 @@ class HubStore:
         """その日のレトプラ全体（翌朝の Daily の材料）。"""
         return self.section_text(day, "振り返り")
 
-    # 収集
+    # 収集（知識ホームの子ページ）
 
     def collect_settings(self) -> tuple[list[dict], list[str]]:
-        """「収集」ページの興味と情報源（知識の担当に渡す）。"""
-        page = next((block for block in self.notion.children(self.state.home_id)
+        """知識ホームの「収集」ページの興味と情報源。"""
+        if not self.state.knowledge_home_id:
+            raise NotionError(f"{KNOWLEDGE_HOME_TITLE}が未設定です（agents.csv の knowledge の行の notion に書き、"
+                              "kei-agent-hub-setup --apply を実行してください）")
+        page = next((block for block in self.notion.children(self.state.knowledge_home_id)
                      if block.get("type") == "child_page" and block["child_page"].get("title") == COLLECT_TITLE), None)
         if page is None:
-            raise NotionError("共通ホームに「収集」ページがありません（kei-agent-hub-setup --apply で作れます）")
+            raise NotionError(f"{KNOWLEDGE_HOME_TITLE}に「{COLLECT_TITLE}」ページがありません"
+                              "（kei-agent-hub-setup --apply で作れます）")
         return parse_collect(self.notion.children(page["id"]))
 
-    # 読みもの
+    # Knowledge（知識ホームの DB）
 
     @property
-    def has_reading_db(self) -> bool:
-        """「読みもの」が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
-        return bool(self.state.reading_ds_id)
+    def has_knowledge_db(self) -> bool:
+        """知識ホームの Knowledge が作ってあるか（kei-agent-hub-setup --apply で作る）。"""
+        return bool(self.state.knowledge_ds_id)
 
-    def add_reading(self, item: dict, day: str) -> str:
-        """👍 した記事を「読みもの」に「気になる」で入れる。返り値はページ ID。"""
-        if not self.state.reading_ds_id:
-            raise NotionError("読みものが未作成です。kei-agent-hub-setup --apply を実行してください")
-        properties = {
-            "名前": {"title": rich_text(str(item.get("title") or "").strip()[:200] or "（題名なし）")},
-            "URL": {"url": str(item.get("url") or "").strip() or None},
-            "要約": {"rich_text": rich_text(str(item.get("summary") or ""))},
-            "日付": {"date": {"start": day}},
-            "状態": {"select": {"name": READING_STATES[0]}},
-        }
-        if str(item.get("source") or "").strip():
-            properties["出どころ"] = {"select": {"name": _option(item["source"])}}
-        interests = [_option(name) for name in item.get("interests") or [] if str(name).strip()]
-        if interests:
-            properties["興味"] = {"multi_select": [{"name": name} for name in dict.fromkeys(interests)]}
+    def _knowledge_ds(self) -> str:
+        if not self.state.knowledge_ds_id:
+            raise NotionError(f"{KNOWLEDGE_TITLE} が未作成です。agents.csv の knowledge の行の notion に"
+                              f"{KNOWLEDGE_HOME_TITLE}を書き、kei-agent-hub-setup --apply を実行してください")
+        return self.state.knowledge_ds_id
+
+    def find_article(self, url: str) -> str | None:
+        """Source が url の Article の行（照合キー）。無ければ None。重なっていれば古いほう。"""
+        ds_id = self._knowledge_ds()
+        rows = self.notion.paginate("POST", f"/data_sources/{ds_id}/query", {
+            "filter": {"and": [
+                {"property": "Type", "select": {"equals": ARTICLE}},
+                {"property": "Source", "rich_text": {"equals": url.strip()}},
+            ]},
+            "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
+            "page_size": 10,
+        })
+        return rows[0]["id"] if rows else None
+
+    def add_article(self, item: dict) -> str:
+        """記事を Type=Article・Status=Unread で1行入れる。同じ URL の Article があれば作らずにそれを返す。返り値はページ ID。
+
+        item は title・url・summary（要約2文）。ほかの鍵（出どころ・興味など）は書かない。
+        """
+        url = str(item.get("url") or "").strip()
+        if not url:
+            raise ValueError("記事の URL がありません")
+        found = self.find_article(url)
+        if found:
+            return found
         page = self.notion.request("POST", "/pages", {
-            "parent": {"type": "data_source_id", "data_source_id": self.state.reading_ds_id},
-            "properties": properties})
+            "parent": {"type": "data_source_id", "data_source_id": self._knowledge_ds()},
+            "properties": {
+                "Title": {"title": rich_text(str(item.get("title") or "").strip()[:200] or "（題名なし）")},
+                "Type": {"select": {"name": ARTICLE}},
+                "Summary": {"rich_text": rich_text(str(item.get("summary") or "").strip())},
+                "Source": {"rich_text": rich_text(url)},
+                "Status": {"select": {"name": UNREAD}},
+            }})
         return page["id"]
 
-    # 学びのノート
+    def add_learning(self, item: dict, link: str = "") -> tuple[str, str]:
+        """振り返りの会話で整理した学びを1件、Knowledge に入れる。返り値は (ページ ID, URL)。
 
-    @property
-    def has_learning_db(self) -> bool:
-        """「学びのノート」が作ってあるか（古い状態ファイルには無い。kei-agent-hub-setup --apply で足す）。"""
-        return bool(self.state.learning_ds_id)
-
-    def add_learning(self, item: dict, day: str, link: str = "") -> tuple[str, str]:
-        """振り返りの会話で整理した学びを1件、「学びのノート」に入れる。返り値は (ページ ID, URL)。
-
-        item は title・field（仕事・大学・研究・そのほか）・kind（学び・助言・気づき）・source（出典）・
-        scene（場面）・lesson（学んだこと）・next（次にどう使うか）。
+        item は title・kind（学び・助言・気づき。英語の Type でもよい）・source（誰から・どこで）・
+        scene（場面）・lesson（学んだこと）・next（次にどう使うか）。Status は付けない。
+        本文の最後に、学びが出た Slack のスレッドのリンクを書く。
         """
-        if not self.state.learning_ds_id:
-            raise NotionError("学びのノートが未作成です。kei-agent-hub-setup --apply を実行してください")
-        field = str(item.get("field") or "")
-        kind = str(item.get("kind") or "")
+        ds_id = self._knowledge_ds()
+        kind = str(item.get("kind") or "").strip()
+        kind = LEARNING_TYPES.get(kind, kind)
         properties = {
-            "名前": {"title": rich_text(str(item.get("title") or "").strip()[:200] or "（題なし）")},
-            "日付": {"date": {"start": day}},
-            "分野": {"select": {"name": field if field in LEARNING_FIELDS else LEARNING_FIELDS[-1]}},
-            "種類": {"select": {"name": kind if kind in LEARNING_KINDS else LEARNING_KINDS[0]}},
-            "出典": {"rich_text": rich_text(str(item.get("source") or "").strip()[:500])},
-            "Slack": {"url": link or None},
+            "Title": {"title": rich_text(str(item.get("title") or "").strip()[:200] or "（題なし）")},
+            # 知らない種類で選択肢を増やさない（Article も学びには使わない）
+            "Type": {"select": {"name": kind if kind in KNOWLEDGE_TYPES[1:] else LEARNING}},
+            "Summary": {"rich_text": rich_text(str(item.get("lesson") or "").strip()[:500])},
+            "Source": {"rich_text": rich_text(str(item.get("source") or "").strip()[:500])},
         }
         body = "\n\n".join(f"## {heading}\n{str(item.get(key) or '').strip() or '（なし）'}"
                             for heading, key in (("場面", "scene"), ("学んだこと", "lesson"), ("次にどう使うか", "next")))
+        children = markdown_to_blocks(body)
+        if link:
+            children.append({"type": "paragraph", "paragraph": {"rich_text": [
+                {"type": "text", "text": {"content": "Slack のスレッド", "link": {"url": link}}}]}})
         page = self.notion.request("POST", "/pages", {
-            "parent": {"type": "data_source_id", "data_source_id": self.state.learning_ds_id},
-            "properties": properties, "children": markdown_to_blocks(body)})
+            "parent": {"type": "data_source_id", "data_source_id": ds_id},
+            "properties": properties, "children": children})
         return page["id"], str(page.get("url") or "")
 
     def trash_page(self, page_id: str) -> None:
@@ -552,16 +571,18 @@ def load_hub(config, env: dict[str, str] | None = None) -> HubStore | None:
         return None
     try:
         raw = json.loads(config.hub_state_path.read_text(encoding="utf-8"))
-        state = HubState(**raw)
+        state = HubState.from_json(raw)
     except (OSError, ValueError, TypeError) as e:
         log.error("共通 Notion ホームの状態ファイルを読めません: %s", e)
         return None
     if notion_id(state.home_id) != config.notion.hub_home:
         log.error("共通 Notion ホームのページ ID が設定と一致しません")
         return None
+    if notion_id(state.knowledge_home_id) != notion_id(config.notion.knowledge_home):
+        # 知識ホームを替えたのに setup をやり直していない。古いホームの Knowledge には書かない
+        if state.knowledge_ds_id:
+            log.warning("知識ホームのページ ID が設定と一致しません。kei-agent-hub-setup --apply を実行するまで "
+                        "Knowledge には書きません")
+        state = replace(state, knowledge_home_id="", knowledge_db_id="", knowledge_ds_id="")
     return HubStore(gateway_notion("kei-agent", env, config), state)
 
-
-def _option(value: object) -> str:
-    """選択肢の名前（Notion は選択肢にカンマを使えない。長さも抑える）。"""
-    return str(value).strip().replace(",", "、")[:100]

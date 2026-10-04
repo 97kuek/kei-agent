@@ -177,7 +177,7 @@ Mac の音声サービスの仕様は [Mac の声](using.md#mac-の声) を参�
 
 - 鍵 `NOTION_TOKEN` を持つのはゲートウェイ（:8791）だけ。ほかの起動スクリプトは読んだあとで消す
 - 合言葉は使う側（client）ごと。親の合言葉 `KEI_AGENT_NOTION_GATEWAY_TOKEN` から HMAC-SHA256 で作る
-- 届くホームは `agents.csv` の `notion` 列（共通ホームは overview の行）
+- 届くホームは `agents.csv` の `notion` 列（共通ホームは overview の行、知識ホームは knowledge の行）
 
 | client | 使うところ | 届くホーム | API / MCP |
 |---|---|---|---|
@@ -199,11 +199,9 @@ Mac の音声サービスの仕様は [Mac の声](using.md#mac-の声) を参�
 | 予定カレンダー | 出典（Outlook / Google Calendar / 課題 / 手入力）つきの予定。見えなくなった行は消さず「要確認」 |
 | 時間記録 | 研究・大学・仕事の時間。週ごとのグラフのビュー |
 | 今週のタスク | 締切が今週・来週の授業課題、期限切れで終わっていないもの（研究の Task はテーマごとの DB にあり、横断の確認は Daily） |
-| 読みもの | 保存を選んだ記事（気になる / 読んだ） |
-| 学びのノート | 振り返りの会話で言語化した学び・助言（題・日付・分野・種類・出典。本文は場面・学んだこと・次にどう使うか） |
-| 収集 | Dot が毎朝読む興味と情報源（[knowledge-agent.md](agents/knowledge-agent.md)） |
+| リンク | 知識ホーム（収集と Knowledge。[knowledge-agent.md](agents/knowledge-agent.md#知識ホーム)）へのリンク |
 
-- 作るのは `uv run kei-agent-hub-setup --apply`
+- 作るのは `uv run kei-agent-hub-setup --apply`（知識ホームの収集と Knowledge も）
 - 研究ホームは [research-agent.md](agents/research-agent.md)、授業ホームは [course-agent.md](agents/course-agent.md)
 
 ## コードの地図

@@ -125,7 +125,8 @@ def build_mcp(hands: Hands) -> MCPServer:
         except HandsError as error:
             raise ToolError(str(error)) from None
 
-    @mcp.tool(description="Mac が以前配信した読みものを URL で指定して Notion に保存する互換窓口。saved=false は保存を解除する。"
+    @mcp.tool(description="Mac が以前配信した読みものを URL で指定して、知識ホームの Knowledge に Article として保存する互換窓口"
+                          "（同じ URL の行があれば作らない）。saved=false は同じ URL の行をゴミ箱に入れる。"
                           "URL は reading で取得したものを使い、題名で推測しない。クライアントが独自に見つけた記事は、そのクライアントの保存機能を使う。"
                           "返すのは url・saved・liked・errors。errors があれば保存成功として扱わない")
     async def save_reading(url: str, saved: bool = True) -> dict[str, Any]:
@@ -178,7 +179,7 @@ def build_mcp(hands: Hands) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY,
               description="この days 日（1〜7）の Mac の旧配信分の読みもの（新しい順）。title・url・source・summary・"
-                          "why（選んだ理由）・liked（依頼者が 👍 した）・saved（Notion の読みものに入れた）")
+                          "why（選んだ理由）・liked（依頼者が 👍 した）・saved（知識ホームの Knowledge に入れた）")
     async def reading(days: int = 1) -> dict[str, Any]:
         return await materials.reading(assistant, days)
 

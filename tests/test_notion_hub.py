@@ -1,15 +1,16 @@
 """The shared hub must locate its existing sources before writing anything."""
 
 import json
+from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
 from fakes import check_notion_body
 
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.notion_hub import HubState, HubStore, load_hub
+from kei_agent.storage.notion_hub import COLLECT_DEFAULT, HubState, HubStore, load_hub
 from kei_agent.storage.notion_hub_setup import HubSetup
-from kei_agent.storage.notion_store import plain_text
+from kei_agent.storage.notion_store import markdown_to_blocks, plain_text
 
 
 def test_corrupt_hub_state_disables_only_hub(config):
@@ -73,11 +74,13 @@ class FakeHubNotion:
             "home": {"id": "home", "parent": {"type": "workspace"}},
             "research-home": {"id": "research-home", "parent": {"type": "workspace"}},
             "course-home": {"id": "course-home", "parent": {"type": "workspace"}},
+            "knowledge-home": {"id": "knowledge-home", "parent": {"type": "workspace"}},
         }
         self.blocks = {
             "home": [self.child_db("calendar-db", "今月の予定")],
             "research-home": [],
             "course-home": [self.child_db("assignments-db", "課題")],
+            "knowledge-home": [],
         }
         self.databases = {
             "calendar-db": {"id": "calendar-db", "parent": {"type": "page_id", "page_id": "home"},
@@ -93,6 +96,7 @@ class FakeHubNotion:
         self.daily_view = {"id": "daily-default-view", "name": "Default view", "type": "table",
                            "configuration": None}
         self.daily_view_ids = ["daily-default-view"]
+        self.knowledge_view = {"id": "knowledge-view", "type": "table", "configuration": None}
         self.hide_request_fields = False
         self.fail_chart = False
 
@@ -118,20 +122,25 @@ class FakeHubNotion:
             if path.startswith("/views?"):
                 if path == "/views?database_id=daily-db":
                     return {"results": [{"id": view_id} for view_id in self.daily_view_ids]}
+                if path == "/views?database_id=knowledge-db":
+                    return {"results": [{"id": "knowledge-view"}]}
                 return {"results": list(self.views)}
             if path.startswith("/views/"):
                 if path == "/views/daily-default-view":
                     return self.daily_view
+                if path == "/views/knowledge-view":
+                    return self.knowledge_view
                 view = next(view for view in self.views if view["id"] == path.removeprefix("/views/"))
                 return {k: v for k, v in view.items() if k != "create_database"} if self.hide_request_fields else view
             raise AssertionError(path)
         self.writes.append((method, path, body))
         if method == "POST" and path == "/databases":
             title = body["title"][0]["text"]["content"]
-            prefix = {"日別記録": "daily", "時間記録": "time", "読みもの": "reading", "学びのノート": "learning"}[title]
+            parent = body["parent"]["page_id"]
+            prefix = {"日別記録": "daily", "時間記録": "time", "Knowledge": "knowledge"}[title]
             db_id, ds_id = f"{prefix}-db", f"{prefix}-ds"
-            self.blocks["home"].append(self.child_db(db_id, title))
-            self.databases[db_id] = {"id": db_id, "parent": {"type": "page_id", "page_id": "home"},
+            self.blocks[parent].append(self.child_db(db_id, title))
+            self.databases[db_id] = {"id": db_id, "parent": {"type": "page_id", "page_id": parent},
                                      "data_sources": [{"id": ds_id}]}
             self.sources[ds_id] = {"id": ds_id, "properties": {
                 name: {"id": name, "type": next(iter(config))}
@@ -153,10 +162,14 @@ class FakeHubNotion:
         if (method, path) == ("PATCH", "/views/daily-default-view"):
             self.daily_view.update(body)
             return self.daily_view
-        if method == "POST" and path == "/pages" and body.get("parent", {}).get("page_id") == "home":
+        if (method, path) == ("PATCH", "/views/knowledge-view"):
+            self.knowledge_view.update(body)
+            return self.knowledge_view
+        if method == "POST" and path == "/pages" and body.get("parent", {}).get("type") == "page_id":
+            parent = body["parent"]["page_id"]
             page_id = f"child-page-{len(self.blocks)}"
             title = body["properties"]["title"]["title"][0]["text"]["content"]
-            self.blocks.setdefault("home", []).append(
+            self.blocks.setdefault(parent, []).append(
                 {"id": page_id, "type": "child_page", "child_page": {"title": title}})
             self.blocks[page_id] = list(body.get("children") or [])
             return {"id": page_id}
@@ -189,7 +202,8 @@ def fake_notion():
 
 def setup(fake_notion, tmp_path):
     return HubSetup(fake_notion, "home", tmp_path / "hub.json",
-                    research_home_id="research-home", course_home_id="course-home")
+                    research_home_id="research-home", course_home_id="course-home",
+                    knowledge_home_id="knowledge-home")
 
 
 def add_existing_daily(notion, tmp_path, with_state=False, extra_view=False):
@@ -222,7 +236,7 @@ def test_setup_problems_are_rejected_before_any_write(fake_notion, tmp_path, bre
 
 
 def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path):
-    """二度目の setup では何も書かない。日別・時間・読みもの・集め方のページは1つずつで、正本の親は動かさない。"""
+    """二度目の setup では何も書かない。日別・時間・集め方のページは1つずつで、正本の親は動かさない。"""
     from kei_agent.storage.notion_hub import COLLECT_TITLE
 
     hub_setup = setup(fake_notion, tmp_path)
@@ -233,9 +247,9 @@ def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path)
     assert len(fake_notion.writes) == writes_after_first
     assert (first.calendar_ds_id, first.daily_ds_id) == ("calendar-ds", "daily-ds")
     titles = [b["child_database"]["title"] for b in fake_notion.blocks["home"] if b["type"] == "child_database"]
-    assert titles.count("日別記録") == 1 and titles.count("読みもの") == 1
-    assert [b["child_page"]["title"] for b in fake_notion.blocks["home"]
-            if b["type"] == "child_page"].count(COLLECT_TITLE) == 1
+    assert titles.count("日別記録") == 1 and not {"読みもの", "学びのノート"} & set(titles)
+    assert COLLECT_TITLE not in [b["child_page"]["title"] for b in fake_notion.blocks["home"]
+                                 if b["type"] == "child_page"]
     assert [view["name"] for view in fake_notion.views] == ["授業課題", "週ごとの時間"]
     visible = [prop["property_id"] for prop in fake_notion.daily_view["configuration"]["properties"]
                if prop["visible"]]
@@ -263,17 +277,6 @@ def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path)
     assert config["y_axis"] == {"aggregator": "sum", "property_id": "分"}
     assert config["stack_by"]["property_id"] == "領域"
     assert json.loads((tmp_path / "hub.json").read_text())["time_ds_id"] == "time-ds"
-
-    # 👍 した記事の入れ先
-    assert (first.reading_db_id, first.reading_ds_id) == ("reading-db", "reading-ds")
-    assert {name: prop["type"] for name, prop in fake_notion.sources["reading-ds"]["properties"].items()} == {
-        "名前": "title", "URL": "url", "出どころ": "select", "興味": "multi_select", "要約": "rich_text",
-        "日付": "date", "状態": "select"}
-
-    # 集め方のページは、朝の読みもの（schedule.run_reading）と同じ呼び方で読み返せる
-    interests, sources = HubStore(fake_notion, HubState("home", "calendar-ds", "daily-ds")).collect_settings()
-    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
-    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
 
 
 def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, tmp_path):
@@ -313,6 +316,120 @@ def test_inspect_reports_existing_sources_without_writes(fake_notion, tmp_path):
     assert any("授業課題" in line for line in details)
     assert not any("研究 Task" in line for line in details)
     assert fake_notion.writes == []
+
+
+def test_setup_makes_the_knowledge_home_with_collect_and_knowledge_in_column_order(fake_notion, tmp_path):
+    """知識ホームには「収集」と Knowledge だけを置く。列は Title → Type → Summary → Source → Status の順で、表もその順。"""
+    hub_setup = setup(fake_notion, tmp_path)
+    state = hub_setup.run()
+    assert (state.knowledge_home_id, state.knowledge_db_id, state.knowledge_ds_id) == (
+        "knowledge-home", "knowledge-db", "knowledge-ds")
+    kinds = [(b["type"], b.get("child_page", b.get("child_database", {})).get("title"))
+             for b in fake_notion.blocks["knowledge-home"]]
+    assert kinds == [("child_page", "収集"), ("child_database", "Knowledge")]
+    home_titles = {b.get("child_page", b.get("child_database", {})).get("title") for b in fake_notion.blocks["home"]}
+    assert not {"収集", "読みもの", "学びのノート", "Knowledge"} & home_titles
+    props = fake_notion.sources["knowledge-ds"]["properties"]
+    assert list(props) == ["Title", "Type", "Summary", "Source", "Status"]
+    assert {name: prop["type"] for name, prop in props.items()} == {
+        "Title": "title", "Type": "select", "Summary": "rich_text", "Source": "rich_text", "Status": "select"}
+    created = next(body for method, path, body in fake_notion.writes
+                   if (method, path) == ("POST", "/databases") and body["title"][0]["text"]["content"] == "Knowledge")
+    assert created["parent"] == {"type": "page_id", "page_id": "knowledge-home"}
+    options = created["initial_data_source"]["properties"]
+    assert [o["name"] for o in options["Type"]["select"]["options"]] == ["Article", "Learning", "Advice", "Insight"]
+    assert [o["name"] for o in options["Status"]["select"]["options"]] == ["Unread", "Read"]
+    shown = [p["property_id"] for p in fake_notion.knowledge_view["configuration"]["properties"] if p["visible"]]
+    assert shown == ["Title", "Type", "Summary", "Source", "Status"]
+    assert json.loads((tmp_path / "hub.json").read_text())["knowledge_ds_id"] == "knowledge-ds"
+    # 収集は知識ホームから読み返せる
+    interests, sources = HubStore(fake_notion, state).collect_settings()
+    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
+    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
+    # 二度目は何も書かない
+    writes = len(fake_notion.writes)
+    fake_notion.hide_request_fields = True
+    assert hub_setup.run() == state and len(fake_notion.writes) == writes
+
+
+def test_setup_stops_before_writing_while_collect_is_still_in_the_common_home(fake_notion, tmp_path):
+    """収集を知識ホームへ移す前に --apply すると、既定の収集を作らずに、何も書く前に止まる。移したあとは通る。"""
+    fake_notion.blocks["home"].append({"id": "old-collect", "type": "child_page", "child_page": {"title": "収集"}})
+    with pytest.raises(NotionError, match="共通ホームに「収集」が残っています"):
+        setup(fake_notion, tmp_path).run()
+    with pytest.raises(NotionError, match="共通ホームに「収集」が残っています"):
+        setup(fake_notion, tmp_path).inspect()
+    assert fake_notion.writes == []
+    fake_notion.blocks["home"].pop()
+    fake_notion.blocks["knowledge-home"].append(
+        {"id": "moved-collect", "type": "child_page", "child_page": {"title": "収集"}})
+    setup(fake_notion, tmp_path).run()
+    assert [b["id"] for b in fake_notion.blocks["knowledge-home"] if b["type"] == "child_page"] == ["moved-collect"]
+
+
+def test_setup_adopts_a_knowledge_database_made_by_hand(fake_notion, tmp_path):
+    """移し替えで先に手で作った Knowledge は作り直さず、ID を控えて表の列だけそろえる。"""
+    fake_notion.blocks["knowledge-home"].append(fake_notion.child_db("knowledge-db", "Knowledge"))
+    fake_notion.databases["knowledge-db"] = {"id": "knowledge-db", "parent": {"type": "page_id", "page_id": "knowledge-home"},
+                                             "data_sources": [{"id": "knowledge-ds"}]}
+    fake_notion.sources["knowledge-ds"] = fake_notion.ds("knowledge-ds", {
+        "Title": "title", "Type": "select", "Summary": "rich_text", "Source": "rich_text", "Status": "select"})
+    fake_notion.knowledge_view["configuration"] = {"properties": [
+        {"property_id": name, "visible": True} for name in ("Title", "Status", "Type", "Source", "Summary")]}
+    state = setup(fake_notion, tmp_path).run()
+    assert state.knowledge_ds_id == "knowledge-ds"
+    assert not any(path == "/databases" and body["title"][0]["text"]["content"] == "Knowledge"
+                   for method, path, body in fake_notion.writes if method == "POST")
+    shown = [p["property_id"] for p in fake_notion.knowledge_view["configuration"]["properties"] if p["visible"]]
+    assert shown == ["Title", "Type", "Summary", "Source", "Status"]
+
+
+def test_setup_keeps_columns_the_user_hid_in_the_knowledge_view(fake_notion, tmp_path):
+    """隠した列は --apply のたびに表示へ戻さない。順番だけそろえる。"""
+    fake_notion.blocks["knowledge-home"].append(fake_notion.child_db("knowledge-db", "Knowledge"))
+    fake_notion.databases["knowledge-db"] = {"id": "knowledge-db", "parent": {"type": "page_id", "page_id": "knowledge-home"},
+                                             "data_sources": [{"id": "knowledge-ds"}]}
+    fake_notion.sources["knowledge-ds"] = fake_notion.ds("knowledge-ds", {
+        "Title": "title", "Type": "select", "Summary": "rich_text", "Source": "rich_text", "Status": "select"})
+    fake_notion.knowledge_view["configuration"] = {"properties": [
+        {"property_id": name, "visible": name != "Source"} for name in ("Title", "Status", "Type", "Source", "Summary")]}
+    setup(fake_notion, tmp_path).run()
+    assert fake_notion.knowledge_view["configuration"]["properties"] == [
+        {"property_id": name, "visible": name != "Source"} for name in ("Title", "Type", "Summary", "Source", "Status")]
+    writes = len(fake_notion.writes)
+    setup(fake_notion, tmp_path).run()
+    assert len(fake_notion.writes) == writes
+
+
+def test_column_order_is_left_alone_when_views_are_paged(fake_notion, tmp_path, monkeypatch):
+    original = fake_notion.request
+
+    def paged(method, path, body=None):
+        response = original(method, path, body)
+        return {**response, "has_more": True} if path == "/views?database_id=knowledge-db" else response
+
+    monkeypatch.setattr(fake_notion, "request", paged)
+    hub_setup = setup(fake_notion, tmp_path)
+    hub_setup.run()
+    assert not any(path == "/views/knowledge-view" for method, path, body in fake_notion.writes if method == "PATCH")
+    assert any("全件確認できません" in warning for warning in hub_setup.warnings)
+
+
+def test_setup_without_a_knowledge_home_leaves_knowledge_empty_and_says_so(fake_notion, tmp_path):
+    hub_setup = HubSetup(fake_notion, "home", tmp_path / "hub.json",
+                         research_home_id="research-home", course_home_id="course-home")
+    state = hub_setup.run()
+    assert (state.knowledge_home_id, state.knowledge_ds_id) == ("", "")
+    assert fake_notion.blocks["knowledge-home"] == []
+    assert any("knowledge の行" in warning for warning in hub_setup.warnings)
+    assert any(line.startswith("知識ホーム: 未設定") for line in hub_setup.inspect())
+
+
+def test_column_order_failure_does_not_stop_setup(fake_notion, tmp_path):
+    fake_notion.knowledge_view["type"] = "board"
+    hub_setup = setup(fake_notion, tmp_path)
+    assert hub_setup.run().knowledge_ds_id == "knowledge-ds"
+    assert any("列の順番" in warning for warning in hub_setup.warnings)
 
 
 def test_old_state_and_old_research_task_view_do_not_break_setup(fake_notion, tmp_path):
@@ -423,31 +540,181 @@ def test_upsert_refuses_duplicate_day_before_write(day_hub):
     assert len(day_hub.notion.writes) == before
 
 
-def test_likes_are_written_to_the_reading_db():
-    """👍 した記事は「気になる」で入る。選択肢にカンマは使えない。"""
-    class Pages:
-        def __init__(self):
-            self.sent = []
+class FakeKnowledgeNotion:
+    """Knowledge の DB と、ページの子だけの偽物。query は Type（select）と Source（rich_text）の equals だけを見る。"""
 
-        def request(self, method, path, body=None):
-            self.sent.append((method, path, body))
-            return {"id": "page-1"}
+    def __init__(self):
+        self.rows: list[dict] = []
+        self.sent: list[tuple] = []
+        self.blocks: dict[str, list[dict]] = {}
 
-    pages = Pages()
-    hub = HubStore(pages, HubState("home", "calendar-ds", "daily-ds", reading_ds_id="reading-ds"))
-    assert hub.has_reading_db and not HubStore(pages, HubState("home", "c", "d")).has_reading_db
-    page_id = hub.add_reading({"title": "LLM の話", "url": "https://zenn.dev/x", "source": "Zenn, Inc.",
-                               "interests": ["AI", "AI"], "summary": "要約"}, "2026-09-26")
-    method, path, body = pages.sent[0]
-    props = body["properties"]
-    assert (page_id, method, path, body["parent"]) == (
-        "page-1", "POST", "/pages", {"type": "data_source_id", "data_source_id": "reading-ds"})
-    assert plain_text(props["名前"]["title"]) == "LLM の話" and props["URL"] == {"url": "https://zenn.dev/x"}
-    assert props["出どころ"] == {"select": {"name": "Zenn、 Inc."}}
-    assert props["興味"] == {"multi_select": [{"name": "AI"}]}
-    assert props["日付"] == {"date": {"start": "2026-09-26"}} and props["状態"] == {"select": {"name": "気になる"}}
-    hub.trash_page("page-1")
-    assert pages.sent[-1] == ("PATCH", "/pages/page-1", {"in_trash": True})
+    def paginate(self, method, path, body):
+        assert (method, path) == ("POST", "/data_sources/knowledge-ds/query")
+
+        def holds(row, cond):
+            prop = row["properties"].get(cond["property"], {})
+            if "select" in cond:
+                return (prop.get("select") or {}).get("name") == cond["select"]["equals"]
+            return plain_text(prop.get("rich_text") or []) == cond["rich_text"]["equals"]
+
+        return [row for row in self.rows if all(holds(row, cond) for cond in body["filter"]["and"])]
+
+    def children(self, page_id):
+        return list(self.blocks.get(page_id, []))
+
+    def request(self, method, path, body=None):
+        check_notion_body(body)
+        self.sent.append((method, path, body))
+        if (method, path) == ("POST", "/pages"):
+            number = len(self.rows) + 1
+            page = {"id": f"knowledge-{number}", "url": f"https://notion.so/knowledge-{number}",
+                    "properties": body["properties"], "children": body.get("children") or []}
+            self.rows.append(page)
+            return page
+        if method == "PATCH" and path.startswith("/pages/"):
+            return {"id": path.removeprefix("/pages/")}
+        raise AssertionError((method, path, body))
+
+
+def knowledge_hub(notion=None) -> HubStore:
+    return HubStore(notion or FakeKnowledgeNotion(), HubState(
+        "home", "calendar-ds", "daily-ds", knowledge_home_id="knowledge-home",
+        knowledge_db_id="knowledge-db", knowledge_ds_id="knowledge-ds"))
+
+
+def test_articles_go_to_knowledge_once_per_url():
+    """記事は Type=Article・Status=Unread で入る。同じ URL（前後の空白は除く）の Article があれば作らない。"""
+    hub = knowledge_hub()
+    assert hub.has_knowledge_db and not HubStore(hub.notion, HubState("home", "c", "d")).has_knowledge_db
+    item = {"title": "LLM の話", "url": "https://zenn.dev/x", "summary": "要約の1文目。2文目。",
+            "source": "Zenn, Inc.", "interests": ["AI"]}
+    page_id = hub.add_article(item)
+    assert hub.add_article({**item, "url": " https://zenn.dev/x ", "title": "別の題"}) == page_id
+    (row,) = hub.notion.rows
+    props = row["properties"]
+    assert list(props) == ["Title", "Type", "Summary", "Source", "Status"]
+    assert plain_text(props["Title"]["title"]) == "LLM の話"
+    assert props["Type"] == {"select": {"name": "Article"}}
+    assert plain_text(props["Summary"]["rich_text"]) == "要約の1文目。2文目。"
+    assert plain_text(props["Source"]["rich_text"]) == "https://zenn.dev/x"
+    assert props["Status"] == {"select": {"name": "Unread"}}
+    assert hub.notion.sent[0][2]["parent"] == {"type": "data_source_id", "data_source_id": "knowledge-ds"}
+    # 同じ文字列を Source に持つ学びの行とは取り違えない
+    hub.add_learning({"title": "記事から学んだ", "kind": "学び", "source": "https://zenn.dev/y"})
+    assert hub.add_article({**item, "url": "https://zenn.dev/y"}) not in (page_id, "knowledge-2")
+    assert len(hub.notion.rows) == 3
+    hub.trash_page(page_id)
+    assert hub.notion.sent[-1] == ("PATCH", f"/pages/{page_id}", {"in_trash": True})
+
+
+@pytest.mark.parametrize(("kind", "expected"), [
+    ("学び", "Learning"), ("助言", "Advice"), ("気づき", "Insight"),
+    ("Advice", "Advice"), ("教訓", "Learning"), ("Article", "Learning"), ("", "Learning")])
+def test_learning_kinds_become_types_without_new_options_or_status(kind, expected):
+    """学びは種類を Type にする（知らない種類は Learning）。Status は付けない。本文の最後に Slack のリンク。"""
+    hub = knowledge_hub()
+    page_id, url = hub.add_learning({
+        "title": "レビューは結論から書く", "kind": kind, "field": "仕事", "source": "上司との1on1",
+        "scene": "設計レビュー", "lesson": "先に結論を言うと議論が速い", "next": "次の資料で1行目に結論"},
+        "https://slack.example/archives/C5/p1001")
+    (row,) = hub.notion.rows
+    props = row["properties"]
+    assert (page_id, url) == ("knowledge-1", "https://notion.so/knowledge-1")
+    assert list(props) == ["Title", "Type", "Summary", "Source"]
+    assert props["Type"] == {"select": {"name": expected}}
+    assert plain_text(props["Summary"]["rich_text"]) == "先に結論を言うと議論が速い"
+    assert plain_text(props["Source"]["rich_text"]) == "上司との1on1"
+    headings = [plain_text(b["heading_2"]["rich_text"]) for b in row["children"] if b["type"] == "heading_2"]
+    assert headings == ["場面", "学んだこと", "次にどう使うか"]
+    link = row["children"][-1]["paragraph"]["rich_text"][0]["text"]
+    assert link["link"] == {"url": "https://slack.example/archives/C5/p1001"}
+
+
+def test_learning_without_a_link_ends_with_the_next_step():
+    hub = knowledge_hub()
+    hub.add_learning({"title": "学び", "kind": "学び", "next": "次に試す"})
+    assert hub.notion.rows[0]["children"][-1]["type"] == "paragraph"
+    assert plain_text(hub.notion.rows[0]["children"][-1]["paragraph"]["rich_text"]) == "次に試す"
+
+
+def test_collect_settings_come_from_the_knowledge_home_only():
+    """収集は知識ホームのものだけを読む。共通ホームに残っていても読まない。"""
+    notion = FakeKnowledgeNotion()
+    notion.blocks["home"] = [{"id": "old-collect", "type": "child_page", "child_page": {"title": "収集"}}]
+    hub = knowledge_hub(notion)
+    with pytest.raises(NotionError, match="知識ホームに「収集」"):
+        hub.collect_settings()
+    notion.blocks["knowledge-home"] = [{"id": "collect", "type": "child_page", "child_page": {"title": "収集"}}]
+    notion.blocks["collect"] = markdown_to_blocks(COLLECT_DEFAULT)
+    interests, sources = hub.collect_settings()
+    assert [i["name"] for i in interests] == ["AI・LLM・エージェント", "電子工作・ロボット", "Web・アプリ開発"]
+    assert sources[0].startswith("zenn: llm") and "https://vercel.com/atom" in sources
+    with pytest.raises(NotionError, match="agents.csv の knowledge"):
+        HubStore(notion, HubState("home", "calendar-ds", "daily-ds")).collect_settings()
+
+
+def test_schema_check_reads_the_knowledge_columns():
+    class SchemaNotion:
+        def request(self, method, path):
+            if path == "/data_sources/knowledge-ds":
+                return {"properties": {"Title": {"type": "title"}, "Type": {"type": "rich_text"},
+                                       "Summary": {"type": "rich_text"}, "Source": {"type": "rich_text"},
+                                       "Status": {"type": "select"}}}
+            if path.startswith("/data_sources/"):
+                return {"properties": {}}
+            return {"id": "home"}
+
+    hub = HubStore(SchemaNotion(), HubState("home", "calendar-ds", "daily-ds", knowledge_ds_id="knowledge-ds"))
+    assert "Knowledgeの「Type」が select ではありません" in hub.schema_problems()
+
+
+def _write_state(config, raw: dict):
+    config.hub_state_path.parent.mkdir(parents=True, exist_ok=True)
+    config.hub_state_path.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def test_an_old_state_file_with_reading_ids_still_loads_the_hub(config, monkeypatch):
+    """前の hub.json（読みもの・学びのノートの ID がある）でも共通ホームは止めない。Knowledge は未作成として扱う。"""
+    monkeypatch.setattr("kei_agent.storage.notion_hub.gateway_notion", lambda *args, **kwargs: object())
+    config = replace(config, notion=replace(config.notion, hub_home="home"))
+    _write_state(config, {"home_id": "home", "calendar_ds_id": "calendar-ds", "daily_ds_id": "daily-ds",
+                          "reading_db_id": "reading-db", "reading_ds_id": "reading-ds",
+                          "learning_db_id": "learning-db", "learning_ds_id": "learning-ds"})
+    hub = load_hub(config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "test-token"})
+    assert hub is not None and hub.state.daily_ds_id == "daily-ds" and not hub.has_knowledge_db
+    _write_state(config, ["not", "a", "dict"])
+    assert load_hub(config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "test-token"}) is None
+
+
+@pytest.mark.parametrize(("configured", "kept"), [("knowledge-home", True), ("KNOWLEDGEHOME", True),
+                                                  ("other-home", False), ("", False)])
+def test_knowledge_is_used_only_for_the_configured_home(config, monkeypatch, configured, kept):
+    """hub.json の知識ホームが agents.csv と違えば（未設定も）、setup をやり直すまで Knowledge には書かない。"""
+    monkeypatch.setattr("kei_agent.storage.notion_hub.gateway_notion", lambda *args, **kwargs: object())
+    homes = {"knowledge": configured} if configured else {}
+    config = replace(config, notion=replace(config.notion, hub_home="home", homes=homes))
+    _write_state(config, HubState("home", "calendar-ds", "daily-ds", knowledge_home_id="knowledge-home",
+                                  knowledge_db_id="knowledge-db", knowledge_ds_id="knowledge-ds").__dict__)
+    hub = load_hub(config, {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "test-token"})
+    assert hub is not None and hub.state.daily_ds_id == "daily-ds" and hub.has_knowledge_db is kept
+    if not kept:
+        with pytest.raises(NotionError, match="agents.csv の knowledge"):
+            hub.add_article({"title": "x", "url": "https://zenn.dev/x"})
+        with pytest.raises(NotionError, match="agents.csv の knowledge"):
+            hub.add_learning({"title": "x"})
+
+
+def test_setup_reads_an_old_state_file_and_drops_the_old_ids(fake_notion, tmp_path):
+    """前の hub.json でも setup は止まらない。書き直した状態から古い鍵が消え、読みもの・学びのノートは作らない。"""
+    (tmp_path / "hub.json").write_text(json.dumps({
+        "home_id": "home", "calendar_ds_id": "calendar-ds", "daily_ds_id": "",
+        "reading_db_id": "reading-db", "reading_ds_id": "reading-ds",
+        "learning_db_id": "learning-db", "learning_ds_id": "learning-ds"}), encoding="utf-8")
+    setup(fake_notion, tmp_path).run()
+    saved = json.loads((tmp_path / "hub.json").read_text())
+    assert not any(key.startswith(("reading_", "learning_")) for key in saved)
+    titles = [b["child_database"]["title"] for b in fake_notion.blocks["home"] if b["type"] == "child_database"]
+    assert not {"読みもの", "学びのノート"} & set(titles)
 
 
 def test_chart_failure_does_not_stop_setup(fake_notion, tmp_path):

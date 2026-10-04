@@ -83,7 +83,7 @@ def review_prompt(day: str, material_text: str) -> str:
 
 # 振り返りのあと、スレッドで聞くこと（返事が来たら、会話で学びに整理する）
 RETRO_QUESTION = ("今日、職場や学校で学んだこと・印象に残った助言はある？ ひと言でいいよ。"
-                  "少し聞き返して整理したら、学びのノートに残すね。")
+                  "少し聞き返して整理したら、Knowledge に残すね。")
 # 整理できたときの合図の行（そのあとに JSON。Slack には出さない）
 LEARNING_MARKER = "📒 学び"
 
@@ -104,7 +104,7 @@ def talk_prompt(day: str, history: str, saved: list[str], latest: str = "") -> s
         "Slack に出す本文は <<kei-agent-final>> と <<kei-agent-final-end>> の間にだけ書く。日本語で短く。"
         "見出し・表・作業手順は書かない。\n"
         f"学びに整理したときは、本文の最後に `{LEARNING_MARKER}` の1行と、次の形の JSON を1行で書く（marker の内側）:\n"
-        '[{"title": "学びを1行で", "field": "仕事|大学|研究|そのほか", "kind": "学び|助言|気づき", '
+        '[{"title": "学びを1行で", "kind": "学び|助言|気づき", '
         '"source": "誰から・どの場面で", "scene": "場面", "lesson": "学んだこと", "next": "次にどう使うか"}]\n'
         "本文には、残す学びの題を1行ずつ書く（JSON の中身は繰り返さない）。"
     )

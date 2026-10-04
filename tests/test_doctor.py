@@ -163,6 +163,7 @@ def test_notion_homes_and_tools(config):
                      notion=replace(config.notion, hub_home="", course_home=""))
     notion = levels(doctor.check_notion(config))
     assert (WARN, "agents.csv の overview の行の notion が空（Daily・振り返り・時間記録・予定カレンダーを Notion に残さない）") in notion
+    assert (WARN, "agents.csv の knowledge の行の notion が空（知識ホームの記事と学びを Notion に残さない）") in notion
     tools = levels(doctor.check_tools(config, which=lambda name: "/bin/pueue" if name == "pueue" else None))
     assert tools == [(OK, "pueue がある（研究のジョブ）"), (WARN, "gh が見つからない（使うもの: 要望の GitHub issue）")]
     assert levels(doctor.check_notion(replace(config, modules=())))[0][0] == WARN

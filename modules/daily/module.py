@@ -6,7 +6,7 @@
   材料は前回の Daily から（core.digest）。共通ホームの日別記録に1日1行で残す
 - 振り返り（Retro & Planning）: 今日の成果と未完了を書き、スレッドに明日・明後日の締切を並べる。日別記録のレトプラに
   残す。そのあとスレッドで今日学んだこと・助言を聞き、スレッドを引き取って（core.claim_thread）会話する。AI が聞き返して
-  言語化し、まとまったら確かめずに共通ホームの「学びのノート」に1件1ページで残し、日別記録のレトプラにも題とリンクを足す
+  言語化し、まとまったら確かめずに知識ホームの「Knowledge」に1件1ページで残し、日別記録のレトプラにも題とリンクを足す
 
 AI は研究全体の作業場を読むだけで動かす（研究テーマのフォルダとスレッドの記録を読める）。答えが決まった形でなければ
 Slack には出さず、日別記録にも残さない。
@@ -93,7 +93,7 @@ class Module:
         self.core = core
 
     async def on_message(self, req: Request, skill: str = "", params: dict | None = None) -> None:
-        """振り返りのスレッドの返事（学びの会話）。聞き返すか、まとまったら学びのノートに残す。"""
+        """振り返りのスレッドの返事（学びの会話）。聞き返すか、まとまったら Knowledge に残す。"""
         retro = self.core.records.get(RETRO, req.thread_ts)
         if retro is None:
             await self.core.reply(req, "このスレッドの振り返りは、もう受け付けていないよ。")
@@ -114,16 +114,16 @@ class Module:
         saved = await self._keep(req, retro, items)
         lines = [f"• <{item['url']}|{escape(item['title'])}>" if item.get("url") else f"• {escape(item['title'])}"
                  for item in saved]
-        done = "📒 学びのノートに残したよ。直したいときは、ここに書いてね。\n" + "\n".join(lines) if saved else ""
+        done = "📒 Knowledge に残したよ。直したいときは、ここに書いてね。\n" + "\n".join(lines) if saved else ""
         await self.core.reply(req, "\n\n".join(part for part in (body, done) if part) or failure_text("review"),
                               failed=not saved)
 
     async def _keep(self, req: Request, retro: dict, items: list[dict]) -> list[dict]:
-        """学びを学びのノートに入れ、日別記録のレトプラに題とリンクを足す。前に残したもの（直したとき）は捨てる。"""
+        """学びを Knowledge に入れ、日別記録のレトプラに題とリンクを足す。前に残したもの（直したとき）は捨てる。"""
         hub = self.core.hub
-        if hub is None or not hub.has_learning_db:
-            await self.core.notify_trouble("学びのノートに残せませんでした。共通 Notion ホームの共有と "
-                                           "kei-agent-hub-setup --apply を確認してください")
+        if hub is None or not hub.has_knowledge_db:
+            await self.core.notify_trouble("学びを Knowledge に残せませんでした。知識ホーム（agents.csv の knowledge の行の "
+                                           "notion）と kei-agent-hub-setup --apply を確認してください")
             return []
         link = await self.core.permalink(req.channel, req.thread_ts)
         saved = []
@@ -131,15 +131,15 @@ class Module:
             for old in retro.get("saved") or []:
                 await self.core.to_thread(hub.trash_page, old["id"])
             for item in items:
-                page_id, url = await self.core.to_thread(hub.add_learning, item, retro["day"], link)
+                page_id, url = await self.core.to_thread(hub.add_learning, item, link)
                 saved.append({"id": page_id, "url": url, "title": str(item["title"]).strip()})
             if retro.get("note"):
                 summary = "\n".join(f"- [{item['title']}]({item['url']})" if item["url"] else f"- {item['title']}"
                                     for item in saved)
-                await self.core.to_thread(hub.append_review_conclusion, retro["note"], f"学びのノート\n{summary}",
+                await self.core.to_thread(hub.append_review_conclusion, retro["note"], f"Knowledge に残した学び\n{summary}",
                                           datetime.now(), req.message_ts)
         except NotionError as e:
-            await self.core.notify_trouble(f"学びのノートに残せませんでした: {e}")
+            await self.core.notify_trouble(f"学びを Knowledge に残せませんでした: {e}")
         self.core.records.update(RETRO, req.thread_ts, saved=saved)
         return saved
 
