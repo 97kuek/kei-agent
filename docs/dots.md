@@ -1,6 +1,6 @@
 # Dot（Slack・通話・定期処理）
 
-Slack で話しかける相手と、決まった時刻の処理は、OpenAI の Dot が受け持つ。Kei Agent はアシスタント全体の名前で、Dot での対話と Mac での実行を含む。Mac の実行サービスは Slack に直接接続しない。MCP サーバー・取り込み・ジョブ・担当（研究・仕事）と Moodle の同期だけを動かし、Dot に呼ばれて作業する。この文書は接続と定期処理の設定案内。貼り付ける指示の全文は [プロンプト一覧](prompts/README.md) にまとめている。
+Slack で話しかける相手と、決まった時刻の処理は、OpenAI の Dot が受け持つ。Kei Agent はアシスタント全体の名前で、Dot での対話と Mac での実行を含む。Mac の実行サービスは Slack に直接接続しない。MCP サーバー・取り込み・ジョブ・担当（研究・仕事）と Moodle の同期だけを動かし、Dot に呼ばれて作業する。この文書は接続と定期処理の設定案内。貼り付ける指示の全文は Notion にある（[Dot の指示の正本](#dot-の指示の正本)）。
 
 ![Dot と Kei Agent の役割](images/dots-plan.svg)
 
@@ -11,29 +11,38 @@ Slack で話しかける相手と、決まった時刻の処理は、OpenAI の 
 - MCP は Mac で動く。閉じている間、予定・読みもの・Daily は Notion と Dot 自身の連携を使う。夜間の Task と MCP の知らせの確認は状態を変えずに次回へ回す
 - Kei Agent に残す決まった時刻の処理は、秘密情報を使う取り込み（Moodle の課題・Toggl）と、保守とバックアップ（`maintenance`）。Dot の予定には秘密情報（URL の token・API キー）を置く場所が無いため。ほかの処理は `schedules.csv` で止める（下の「Kei Agent 側で止めるもの」）
 
+## Dot の指示の正本
+
+- 継続指示と定期実行8件の全文は、Notion の共通ホームの子ページ「Kei Agent コンテキスト管理」に置く。リポジトリには置かない
+- 子ページは、方針（プロフィールと優先事項・応対と運用・参照先とプロジェクト前提・更新と採用）と、定期実行ごとのページ（時刻・出力先・全文）
+- Notion を直しても、Dot の実設定は変わらない。直したら Dot に「要約・言い換え・追記をせず、そのまま保存して」と頼み、同名の予定と継続指示を更新する。実設定はプロフィールの Scheduled と Settings → Personalization → Permissions → Custom rules で確かめる
+- 定期実行の全文は、共通の決まり（口調・Slack と Notion の扱い・安全・作業記録）のあとに、その予定の本文を続けたもの。共通の決まりを直すときは8件すべてをそろえる
+- 指示は DB・項目・照合キーの名前と、data source の ID（`collection://…`）で Notion を指す。コードで DB や項目の名前を変えたら、Notion の指示も直す
+- 認証情報は指示に入れず、接続側に設定する
+
 ## 個人開発
 
-個人開発と Kei Agent 自身のクラウド修正は [個人開発ガイド](agents/development-agent.md) に従う。Dot が公開済み Codex クラウド環境へ直接依頼し、Mac の MCP を経由しない。プロジェクトの対応表と実行範囲は、[継続指示](prompts/dot-custom-instructions.md)の「個人開発」の節にある。
+個人開発と Kei Agent 自身のクラウド修正は [個人開発ガイド](agents/development-agent.md) に従う。Dot が公開済み Codex クラウド環境へ直接依頼し、Mac の MCP を経由しない。プロジェクトの対応表と実行範囲は、継続指示の「個人開発」の節にある（[Dot の指示の正本](#dot-の指示の正本)）。
 
 ## 音声対話は Dot の通話
 
 同じ Dot の通話で相談し、必要な作業を MCP に頼む。ChatGPT の Dot との会話で電話ボタンを押すか、デスクトップアプリの Dot のプロフィールで **Call** を選ぶ。通話中も文字で補足でき、通話を切っても依頼済みの作業は継続する。Slack と通話は同じ Dot を使う。製品が発言を両方へ自動転載するわけではない（[公式の通話仕様](https://learn.chatgpt.com/docs/dots/channels)）。
 
-通話の指示は [カスタム指示の全文](prompts/dot-custom-instructions.md) に含む。通話の Slack 記録は利用者の依頼と投稿権限に従う。個別投稿の許可を継続的な自動記録には流用しない。記録を依頼され、許可された作業依頼は実行前に Slack の適切なチャンネルへ1依頼1親投稿で記録し、確認事項・進捗・結果をそのスレッドに残す。既存依頼の続きは同じスレッドを使う。Slack への記録に失敗した依頼は、記録できるまで実行を保留する。Slack と通話を同じ指示で設定する。
+通話の指示は継続指示に含む。通話の Slack 記録は利用者の依頼と投稿権限に従う。個別投稿の許可を継続的な自動記録には流用しない。記録を依頼され、許可された作業依頼は実行前に Slack の適切なチャンネルへ1依頼1親投稿で記録し、確認事項・進捗・結果をそのスレッドに残す。既存依頼の続きは同じスレッドを使う。Slack への記録に失敗した依頼は、記録できるまで実行を保留する。Slack と通話を同じ指示で設定する。
 
 ## Slack での受け答え（Dot の指示に入れる）
 
-[カスタム指示の全文](prompts/dot-custom-instructions.md) のコードブロックを1回で貼る。受け答え・通話・プラグインと MCP の使い分け・安全と Notion の扱いを含む。
+継続指示の全文を1回で貼る。受け答え・通話・プラグインと MCP の使い分け・安全と Notion の扱いを含む。
 
 ## 予定の一覧
 
 ![1日の処理と実行場所](images/schedule.svg)
 
-時刻・出力先・貼り付ける指示は [プロンプト一覧](prompts/README.md) を正本とする。同名の既存予定を更新し、重複させない。文書を変更しても実設定は変わらない。
+時刻・出力先・貼り付ける指示は Notion の定期実行のページを正本とする（[Dot の指示の正本](#dot-の指示の正本)）。同名の既存予定を更新し、重複させない。文書を変更しても実設定は変わらない。
 
 ## 締切の知らせ（08:00・18:00）
 
-[締切の知らせの全文](prompts/dot-deadlines.md) を両方の時刻に使う。
+締切の知らせの全文を両方の時刻に使う。
 
 ## Kei Agent 側で止めるもの
 
@@ -65,7 +74,7 @@ Moodle は [大学の同期](agents/course-agent.md#自動でしていること)
 
 1. ChatGPT の Dot のプロフィールで名前を「Kei Agent」にし、Slack で表示を確認する
 2. Dot のプラグインで Kei Agent の MCP と Notion・Box・Slack・Outlook・Google Calendar・Gmail・Google Drive・GitHub を有効にする。接続時の認証も確認する
-3. Dot の指示に [カスタム指示の全文](prompts/dot-custom-instructions.md) を入れ、各予定に [プロンプト一覧](prompts/README.md) から対応する全文を入れる。同名の古い予定は重ねて作らず更新する
+3. Dot の指示に継続指示の全文を入れ、各予定に対応する定期実行の全文を入れる（[Dot の指示の正本](#dot-の指示の正本)）。同名の古い予定は重ねて作らず更新する
 4. Settings → Personalization → Permissions → Custom rules に、会議の参加リンクとパスコードの掲載、`#0-overview` への指定された投稿、依頼の投稿へのリアクション（👀 ✅ ❓ ⚠️）の3つを入れる。リアクションのルールが無いと、Dot は承認待ちで止まる
 5. 共通ホームに作業記録の DB「Dot Work Log」（Task・Status・engine・model・effort・Duration・Started At・Ended At）を置く。Duration は Started At と Ended At から数式で出す
 6. ローカルの schedules.csv は上の停止対象だけ false にする。設定変更と再起動は利用者が行う

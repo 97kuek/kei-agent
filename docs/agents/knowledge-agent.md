@@ -35,7 +35,7 @@ Mac が閉じていても処理できる。`run(workspace="knowledge")` は使�
 
 ## 定期実行と保存
 
-[プロンプト一覧](../prompts/README.md) の読みもの・先行研究の指示を使う。毎朝の記事選びは、収集の興味と、最近の Article の Title と Summary から好みを読み取る。記事の各スレッドで「詳しく」「要約して」「保存して」と頼める。「保存して」は Knowledge に Title・Type=Article・Summary・Source=URL・Status=Unread で1行入れる。
+Notion にある読みもの・先行研究の定期実行の指示を使う（[Dot の指示の正本](../dots.md#dot-の指示の正本)）。毎朝の記事選びは、収集の興味と、最近の Article の Title と Summary から好みを読み取る。記事の各スレッドで「詳しく」「要約して」「保存して」と頼める。「保存して」は Knowledge に Title・Type=Article・Summary・Source=URL・Status=Unread で1行入れる。
 
 「収集」ページは、見出し「興味」「情報源」の下に箇条書きで書く。
 

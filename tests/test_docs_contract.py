@@ -5,8 +5,7 @@ from pathlib import Path
 from kei_agent.framework import modules
 
 DOCS = ("README.md", "CONTRIBUTING.md", "deploy/README.md", "docs/using.md", "docs/dots.md", "docs/architecture.md", "docs/modules.md",
-        "docs/extensibility.md", "docs/agents.md", *(str(p) for p in sorted(Path("docs/agents").glob("*.md"))),
-        *(str(p) for p in sorted(Path("docs/prompts").glob("*.md"))))
+        "docs/extensibility.md", "docs/agents.md", *(str(p) for p in sorted(Path("docs/agents").glob("*.md"))))
 
 
 def test_architecture_documents_actor_scoped_read_only_execution_without_legacy_voice_codex():
