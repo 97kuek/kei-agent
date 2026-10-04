@@ -653,14 +653,10 @@ class FakeHub:
         self.knowledge[page_id] = {"type": "Article", "url": url, "item": item}
         return page_id
 
-    has_learning_db = True
-
-    def add_learning(self, item, day, link=""):
-        """学びのノートに入れる（learnings に ページ ID → 中身）。"""
-        if not hasattr(self, "learnings"):
-            self.learnings = {}
-        page_id = f"learning-{len(self.learnings) + 1}"
-        self.learnings[page_id] = {"item": item, "day": day, "link": link}
+    def add_learning(self, item, link=""):
+        """Knowledge に学びを入れる（種類の写し方は本物の HubStore が持つ）。"""
+        page_id = f"knowledge-{len(self.knowledge) + 1}"
+        self.knowledge[page_id] = {"type": "Learning", "item": item, "link": link}
         return page_id, f"https://notion.example/{page_id}"
 
     def trash_page(self, page_id):

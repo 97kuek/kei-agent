@@ -196,13 +196,18 @@ async def _talk(assistant, text, ts):
 
 
 LEARNED = ('<<kei-agent-final>>\nレビューは結論から書く、を残すね。\n📒 学び\n'
-           '[{"title": "レビューは結論から書く", "field": "仕事", "kind": "助言", "source": "上司との1on1", '
+           '[{"title": "レビューは結論から書く", "kind": "助言", "source": "上司との1on1", '
            '"scene": "設計レビュー", "lesson": "先に結論を言うと議論が速い", "next": "次の資料で1行目に結論"}]\n'
            '<<kei-agent-final-end>>')
 
 
+def learnings(hub) -> list[tuple[str, dict]]:
+    """Knowledge に入った学び（記事を除く）。"""
+    return [(page_id, row) for page_id, row in hub.knowledge.items() if row["type"] != "Article"]
+
+
 async def test_the_review_thread_turns_what_was_learned_into_notes(env):
-    """振り返りのスレッドでは、AI が聞き返して言語化し、まとまったら確かめずに学びのノートに残す。"""
+    """振り返りのスレッドでは、AI が聞き返して言語化し、まとまったら確かめずに Knowledge に残す。"""
     scheduler, assistant, slack, claude = env
     claude.behaviors = [{"text": REVIEW_REPLY}]
     await daily(assistant).review("2026-09-18")
@@ -217,17 +222,36 @@ async def test_the_review_thread_turns_what_was_learned_into_notes(env):
 
     claude.behaviors = [{"text": LEARNED}]
     await _talk(assistant, "設計レビューのとき", "1001.6")
-    (page_id, kept), = assistant.hub.learnings.items()
-    assert kept["day"] == "2026-09-18" and kept["item"]["kind"] == "助言"
+    (page_id, kept), = learnings(assistant.hub)
+    assert kept["item"]["kind"] == "助言" and "field" not in kept["item"]
     shown = slack.texts()[-1]
-    assert "📒 学びのノートに残したよ" in shown and "レビューは結論から書く" in shown and "[{" not in shown
+    assert "📒 Knowledge に残したよ" in shown and "レビューは結論から書く" in shown and "[{" not in shown
     (row, summary), = assistant.hub.appended                                      # 日別記録にも題とリンク
     assert row == note.id and "レビューは結論から書く" in summary
 
     # 「直して」で、前に残したものは捨てて差し替える
     claude.behaviors = [{"text": LEARNED.replace("1行目に結論", "冒頭で結論")}]
     await _talk(assistant, "次にどう使うかを直して", "1001.7")
-    assert assistant.hub.trashed == [page_id] and len(assistant.hub.learnings) == 2
+    assert assistant.hub.trashed == [page_id] and len(learnings(assistant.hub)) == 2
+
+
+async def test_review_talk_without_knowledge_says_where_to_fix_and_keeps_the_day_row(env):
+    """Knowledge が使えなくても日別記録は残り、知識ホームの設定を確かめるよう知らせる。"""
+    scheduler, assistant, slack, claude = env
+    claude.behaviors = [{"text": REVIEW_REPLY}]
+    await daily(assistant).review("2026-09-18")
+    assistant.hub.has_knowledge_db = False
+    claude.behaviors = [{"text": LEARNED}]
+    await _talk(assistant, "設計レビューのとき", "1001.6")
+    notices = "\n".join(kw["text"] for _, kw in slack.calls if kw.get("channel") == "C9")
+    assert "agents.csv の knowledge の行の notion" in notices
+    assert learnings(assistant.hub) == [] and assistant.hub.notes
+
+
+def test_the_talk_prompt_asks_for_kinds_but_not_fields():
+    prompt = texts.talk_prompt("2026-09-18", "（履歴）", [])
+    assert '"kind": "学び|助言|気づき"' in prompt and '"field"' not in prompt
+    assert "Knowledge に残すね" in texts.RETRO_QUESTION
 
 
 async def test_without_hub_daily_and_review_still_post_and_say_so(env, config):
