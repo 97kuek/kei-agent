@@ -88,11 +88,7 @@ Slack → Dot → MCP → Mac のプロジェクト作業場 → ローカルの
 
 ## Kei Agent の修正
 
-`#0-kei-agent` の修正依頼をクラウドの Codex に渡し、指定リポジトリの PR をレビューする運用は、Dot の指示と外部で設定したワークフローによる。このリポジトリにはクラウド Codex のタスク投入・PR 作成を自動で行う実装はない。接続先と権限が設定されている場合に使う。
-
-MCP の `run` で Codex を選ぶ場合は、Mac の `codex exec` がローカルの作業場を変更して結果を返す。これだけでクラウドのタスクや PR が作られることはない。取り込み後の Mac への反映は [更新手順](../../deploy/README.md) に従う。
-
-`guard.py`・`config.example.toml`・`deploy/` の変更は人が行う。本物の設定はリポジトリの外に置く。
+Kei Agent 自身のクラウド開発は [個人開発](development-agent.md) が受け持つ。仕事の MCP `run` は Mac 上の実行であり、クラウドへの投入ではない。取り込み後の Mac への反映は [更新手順](../../deploy/README.md) に従う。
 
 ### ローカルの自己改善モジュール（`improve`）
 
