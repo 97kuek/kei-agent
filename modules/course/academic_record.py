@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+# 単位要件の Kind（授業ホームの「単位要件」の選択肢と同じ）
+KIND_CATEGORY, KIND_SUBTOTAL, KIND_TOTAL, KIND_OTHER = "Category", "Subtotal", "Total", "Other"
+KINDS = (KIND_CATEGORY, KIND_SUBTOTAL, KIND_TOTAL, KIND_OTHER)
+
 
 @dataclass(frozen=True)
 class Grade:

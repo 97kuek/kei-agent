@@ -86,11 +86,10 @@ def test_waseda_orders_gpa_by_term_and_links_grades_with_verified_names():
 
 
 def test_course_database_options_come_from_the_school():
-    """「授業」の「学期」「科目群」の選択肢は学校から。早稲田は今までと同じ名前。"""
+    """「授業」の Term の選択肢は学校から。早稲田は今までと同じ名前。"""
     spec = notion_setup.course_spec(school.load({"school": "waseda"}))["properties"]
-    names = {key: [option["name"] for option in spec[key]["select"]["options"]] for key in ("学期", "科目群")}
-    assert names == {"学期": ["春学期", "秋学期", "通年", "春ク", "夏ク", "秋ク", "冬ク", "その他"],
-                     "科目群": ["A群", "B群", "C群", "他箇所聴講科目", "その他"]}
+    assert [option["name"] for option in spec["Term"]["select"]["options"]] == [
+        "春学期", "秋学期", "通年", "春ク", "夏ク", "秋ク", "冬ク", "その他"]
     plain = notion_setup.course_spec(school.School())["properties"]
-    assert [option["name"] for option in plain["学期"]["select"]["options"]] == ["その他"]
-    assert notion_setup.COURSES["properties"]["学期"]["select"]["options"] == []    # 元の形は書き換えない
+    assert [option["name"] for option in plain["Term"]["select"]["options"]] == ["その他"]
+    assert notion_setup.COURSES["properties"]["Term"]["select"]["options"] == []    # 元の形は書き換えない
