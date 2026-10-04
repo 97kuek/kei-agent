@@ -384,6 +384,37 @@ def test_setup_adopts_a_knowledge_database_made_by_hand(fake_notion, tmp_path):
     assert shown == ["Title", "Type", "Summary", "Source", "Status"]
 
 
+def test_setup_keeps_columns_the_user_hid_in_the_knowledge_view(fake_notion, tmp_path):
+    """隠した列は --apply のたびに表示へ戻さない。順番だけそろえる。"""
+    fake_notion.blocks["knowledge-home"].append(fake_notion.child_db("knowledge-db", "Knowledge"))
+    fake_notion.databases["knowledge-db"] = {"id": "knowledge-db", "parent": {"type": "page_id", "page_id": "knowledge-home"},
+                                             "data_sources": [{"id": "knowledge-ds"}]}
+    fake_notion.sources["knowledge-ds"] = fake_notion.ds("knowledge-ds", {
+        "Title": "title", "Type": "select", "Summary": "rich_text", "Source": "rich_text", "Status": "select"})
+    fake_notion.knowledge_view["configuration"] = {"properties": [
+        {"property_id": name, "visible": name != "Source"} for name in ("Title", "Status", "Type", "Source", "Summary")]}
+    setup(fake_notion, tmp_path).run()
+    assert fake_notion.knowledge_view["configuration"]["properties"] == [
+        {"property_id": name, "visible": name != "Source"} for name in ("Title", "Type", "Summary", "Source", "Status")]
+    writes = len(fake_notion.writes)
+    setup(fake_notion, tmp_path).run()
+    assert len(fake_notion.writes) == writes
+
+
+def test_column_order_is_left_alone_when_views_are_paged(fake_notion, tmp_path, monkeypatch):
+    original = fake_notion.request
+
+    def paged(method, path, body=None):
+        response = original(method, path, body)
+        return {**response, "has_more": True} if path == "/views?database_id=knowledge-db" else response
+
+    monkeypatch.setattr(fake_notion, "request", paged)
+    hub_setup = setup(fake_notion, tmp_path)
+    hub_setup.run()
+    assert not any(path == "/views/knowledge-view" for method, path, body in fake_notion.writes if method == "PATCH")
+    assert any("全件確認できません" in warning for warning in hub_setup.warnings)
+
+
 def test_setup_without_a_knowledge_home_leaves_knowledge_empty_and_says_so(fake_notion, tmp_path):
     hub_setup = HubSetup(fake_notion, "home", tmp_path / "hub.json",
                          research_home_id="research-home", course_home_id="course-home")

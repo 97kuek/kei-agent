@@ -1440,7 +1440,7 @@ git commit -m "docs: describe the knowledge home"
 ```
 
 ```text
-- 読みものの投稿に「保存して」「よかった」: 旧ローカル配信分で MCP reading にある記事だけは save_reading(url, saved=true) を使う。saved と errors を見て保存成功を伝える。Dot 自身が選んだ記事は Notion プラグインで知識ホームの「Knowledge」に、Title・Type=Article・Summary（要約2文）・Source=URL・Status=Unread で1行作る（Source が同じ行があれば作らない）
+- 読みものの投稿に「保存して」「よかった」: 旧ローカル配信分で MCP reading にある記事だけは save_reading(url, saved=true) を使う。saved と errors を見て保存成功を伝える。Dot 自身が選んだ記事は Notion プラグインで知識ホームの「Knowledge」に、Title・Type=Article・Summary（要約2文）・Source=URL・Status=Unread で1行作る（Type=Article で Source が同じ行があれば作らない）
 ```
 
 ```text

@@ -293,9 +293,14 @@ class HubSetup:
         return source
 
     def _order_view(self, title: str, source: _Source, names: tuple[str, ...]) -> None:
-        """DB の表の列を names の順にし、ほかの列はその右に置く。そろっていれば書かない。できなくても止めない（warnings）。"""
+        """DB の表の列を names の順にし、ほかの列はその右に置く。そろっていれば書かない。できなくても止めない（warnings）。
+
+        利用者が隠した列は隠したままにする。ビューにまだ載っていない列だけ表示にする。
+        """
         try:
             response = self.notion.request("GET", f"/views?database_id={source.database_id}")
+            if response.get("has_more"):
+                raise NotionError("ビューを全件確認できません")
             ids = [view["id"] for view in response.get("results", [])]
             if len(ids) != 1:
                 raise NotionError(f"表のビューが {len(ids)} 個あります")
@@ -303,12 +308,15 @@ class HubSetup:
             if view.get("type") != "table":
                 raise NotionError("ビューが表ではありません")
             order = [*names, *(name for name in source.properties if name not in names)]
-            wanted = [source.properties[name]["id"] for name in order]
-            actual = [prop["property_id"] for prop in (view.get("configuration") or {}).get("properties", [])
-                      if prop.get("visible")]
-            if actual != wanted:
+            shown = [(prop.get("property_id"), prop.get("visible"))
+                     for prop in (view.get("configuration") or {}).get("properties", [])]
+            current = dict(shown)
+            wanted = [(source.properties[name]["id"], current.get(source.properties[name]["id"], True))
+                      for name in order]
+            if shown != wanted:
                 self.notion.request("PATCH", f"/views/{ids[0]}", {"configuration": {
-                    "type": "table", "properties": [{"property_id": pid, "visible": True} for pid in wanted]}})
+                    "type": "table", "properties": [{"property_id": pid, "visible": visible}
+                                                    for pid, visible in wanted]}})
         except (NotionError, KeyError, TypeError) as e:
             message = f"{title}の表の列の順番をそろえられませんでした（Notion の画面でそろえてください）: {e}"
             log.warning(message)
