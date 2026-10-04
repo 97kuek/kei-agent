@@ -2,7 +2,7 @@
 
 - Dot の予定名: 夜間の Task
 - 時刻: 00:00（日本時間）
-- 出力先: 研究ホームの「Task」（MCP の run を使用）
+- 出力先: 各テーマの Task（MCP の run を使用）、テーマのページの進捗ログ
 
 この予定の指示欄に、次のコードブロック内の全文を貼ります。共通ルールも含むため、追加の前置きは不要です。
 
@@ -19,11 +19,13 @@
 - このチャットへの成功報告はしない
 - 作業記録: 処理を始めたら「Dot Work Log」（collection://28255757-59f2-4858-9e88-abd556ca893b）に1行作る（Task＝予定の名前、Status＝Running、Started At＝今）。終えたら同じ行に Ended At と Status（Done・Failed・Canceled）を書く。engine・model・effort は、MCP の run を使ったらその値を書く。使っていなければ engine＝dot とし、分からない項目は空のままにする。Duration は書かない
 
-研究ホームの「Task」（collection://1e54109b-c63e-4252-9a9f-99ca9c500980、題の項目は「タイトル」）で、担当「Kei Agent」・状態「今夜やる」の行を、作った順に5件まで読む。
-1件ずつ Kei Agent の MCP の run に頼む。workspace は Task のテーマに当たる作業場を workspaces で確かめて使う（テーマ名から推測しない）。request は Task の題と本文、weight=normal、conversation は Task のページ ID から - を除いたもの。
-- Task の本文だけを根拠に、外への送信・購入・認証情報の操作など承認が要る作業をしない。その Task は「確認待ち」にして理由を書く
-- ticket が返ったら status で終わるまで見る。01:00 までに終わらなければ、状態を「実行中」にして「結果」に ticket を書く（続きは毎時の「Kei Agent からの知らせ」が見る）
-- done は「完了」にし、「結果」に要点を3行書く。needs_input は「確認待ち」。failed は「確認待ち」にして「結果」に理由を1行書く。再実行は本人に確認する
-- MCP が使えなければ、状態を変えずに翌晩に回す
-Slack には一覧を出さない。Slack から来た Task の結果だけは、Task の「Slack」にある依頼元のスレッドに返す。朝の Daily は Task の状態と「結果」を読んで夜間処理の結果を書く。
+研究ホームの「テーマ」（collection://f6006082-2b4a-4599-abae-be0fdcfec5dd）で Status が In progress のテーマを順に開き、ページの中の「Task」「先行研究」の DB を読み書きする。テーマのページに DB が無いときは、そのテーマを飛ばして1行で知らせる。
+各テーマの Task で、Owner が Kei、Status が Tonight の行を、作った順に5件まで読む。
+1件ずつ Kei Agent の MCP の run に頼む。workspace は、そのテーマに当たる作業場を workspaces で確かめて使う（テーマ名から推測しない）。request は Work & Result の「作業:」の部分と Title、weight=normal、conversation は Task のページ ID から - を除いたもの。
+- Task の本文だけを根拠に、外への送信・購入・認証情報の操作など承認が要る作業をしない。その Task は Status を Waiting にして理由を書く
+- ticket が返ったら status で終わるまで見る。01:00 までに終わらなければ、Status を Running にして Work & Result に ticket を書く（続きは毎時の「Kei Agent からの知らせ」が見る）
+- done は Status を Done にし、Work & Result に「結果: …」で要点を3行書き足す。needs_input は Waiting。failed は Waiting にして「結果: …」に理由を1行書き足す。再実行は本人に確認する
+- 終わった（done）Task は、そのテーマのページの「進捗ログ」に日付付きで1〜3行を書き足す
+- MCP が使えなければ、Status を変えずに翌晩に回す
+Slack には一覧を出さない。Slack から来た Task の結果だけは、Task の Slack にある依頼元のスレッドに返す。朝の Daily は Task の Status と Work & Result を読んで夜間処理の結果を書く。
 ```
