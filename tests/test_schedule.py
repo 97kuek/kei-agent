@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 import pytest
 from fakes import FakeAI, FakeHub, FakeNotion, make_assistant, make_theme
 
-from kei_agent.api import Request
+from kei_agent.api import DONE, NOT_STARTED, TONIGHT, WAITING, Request
 from kei_agent.conversation.hands import Hands
 from kei_agent.execution import runner
 from kei_agent.scheduling import briefing, morning
@@ -201,8 +201,8 @@ async def test_night_runs_slack_task_in_its_thread(env, config):
     call, = claude.calls
     assert call["thread_ts"] == "1789636700.000100" and call["cwd"] == config.research_root / "vlm"
     assert "[🌙 夜間の Task]" in call["prompt"] and "試行は3回" in call["prompt"] and task.url in call["prompt"]
-    assert task.status == "完了" and assistant.notion.results[task.id] == "結果 / 条件Cは 71% でした"
-    assert detail["tasks"][0]["status"] == "完了" and detail["remaining"] == 0
+    assert task.status == DONE and assistant.notion.results[task.id] == "結果 / 条件Cは 71% でした"
+    assert detail["tasks"][0]["status"] == DONE and detail["remaining"] == 0
 
 
 @pytest.mark.parametrize("slack_url", [None, "https://example.slack.com/archives/C9/p1789636798229039"])
@@ -210,28 +210,29 @@ async def test_night_runs_other_tasks_in_a_new_theme_thread(env, config, slack_u
     """Notion で作った Task も、別のチャンネルで作った Task も、テーマのチャンネルに新しいスレッドを立てて動かす。"""
     scheduler, assistant, slack, claude = env
     make_theme(config)
-    task = assistant.notion.add_task("先行研究を追加で探す", "vlm", body="2024年以降に絞る", slack_url=slack_url)
+    task = assistant.notion.add_task("先行研究を追加で探す", "vlm", body="作業: 2024年以降に絞る", slack_url=slack_url)
 
     await scheduler.run_task("night", "2026-09-18")
 
     assert slack.posted()[0]["channel"] == "C1"
     assert slack.posted()[0]["text"] == "🌙 Task: 先行研究を追加で探す"
     assert claude.calls[0]["thread_ts"] == "1001.000" and claude.calls[0]["cwd"] == config.research_root / "vlm"
-    assert task.status == "完了"
+    assert task.status == DONE
+    assert "2024年以降に絞る" in claude.calls[0]["prompt"]
     assert task.slack_url == slack_url
 
 
 async def test_night_marks_awaiting(env, config):
     scheduler, assistant, slack, claude = env
     make_theme(config)
-    no_theme = assistant.notion.add_task("テーマなし")
+    no_theme = assistant.notion.add_task("テーマなし", None)
     asks = assistant.notion.add_task("判断が要る", "vlm")
     claude.behaviors = [{"text": "途中まで\n❓ 確認: 条件Bも含めますか？"}]
 
     await scheduler.run_task("night", "2026-09-18")
 
-    assert no_theme.status == "確認待ち" and assistant.notion.results[no_theme.id] == "テーマを設定してください"
-    assert asks.status == "確認待ち" and len(claude.calls) == 1
+    assert no_theme.status == WAITING and assistant.notion.results[no_theme.id] == "テーマが分かりません"
+    assert asks.status == WAITING and len(claude.calls) == 1
 
 
 async def test_night_skips_when_notion_is_down(env, config):
@@ -253,7 +254,7 @@ async def test_night_respects_limit(env, config):
 
 async def test_mcp_workspace_creation_registers_the_theme_in_notion(env, config):
     _, assistant, _, _ = env
-    assert assistant.notion.themes == {} and not (config.research_root / "vlm").exists()
+    assert assistant.notion.themes == set() and not (config.research_root / "vlm").exists()
     created = await Hands(assistant).create_workspace("vlm")
     assert created["name"] == "vlm" and created["created"] is True
     assert "vlm" in assistant.notion.themes
@@ -318,7 +319,7 @@ async def test_night_task_recovers_from_unexpected_error(env, config, monkeypatc
     monkeypatch.setattr(slack, "chat_postMessage", broken_post)
     detail = await scheduler.run_task("night", "2026-09-18")
 
-    assert task.status == "確認待ち" and "slack is down" in assistant.notion.results[task.id]
+    assert task.status == WAITING and "slack is down" in assistant.notion.results[task.id]
     assert detail["tasks"][0]["status"] == "error"
 
 
@@ -356,7 +357,7 @@ async def test_theme_is_registered_in_notion_on_first_use(env, config):
     """初めて作業を頼むときに、Notion のテーマの行ができる。"""
     scheduler, assistant, slack, claude = env
     make_theme(config, "vlm")
-    assert assistant.notion.themes == {}
+    assert assistant.notion.themes == set()
 
     await assistant.submit(Request("C1", "vlm", "10.1", "10.1", "図を作って"))
     await settle(assistant)
@@ -638,7 +639,7 @@ async def test_daily_digest_is_capped_and_does_not_ask_the_agents_again(env, con
     course_agent, work_agent = assistant.agents["course"], assistant.agents["work"] = (
         FakeCourseAgent([]), FakeWorkAgent([]))
     today = datetime.now().date()
-    task = assistant.notion.add_task("今日の締切の Task", "vlm", status="未着手")
+    task = assistant.notion.add_task("今日の締切の Task", "vlm", status=NOT_STARTED)
     task.due = today.isoformat()
     for i in range(40):
         assistant.notion.notes.append(Note(f"note-{i}", f"考察{i}", "考察", "2026-09-17",
@@ -749,7 +750,7 @@ async def test_night_module_disabled_cancels_deferred_and_never_reads_notion(env
     assert not scheduler.store.schedule_ran("night", "2026-09-18")
     assert scheduler.store.pending_deferred("schedule") == []
     assert await scheduler.run_task("night", "2026-09-18", record=False) == {"status": "disabled"}
-    assert task.status == "今夜やる" and ai.calls == [] and slack.posted() == []
+    assert task.status == TONIGHT and ai.calls == [] and slack.posted() == []
 
 
 async def test_night_module_uses_workspace_provider_to_defer_real_dispatch(env, config):
@@ -759,12 +760,12 @@ async def test_night_module_uses_workspace_provider_to_defer_real_dispatch(env, 
     scheduler.store.set_limit_until("claude", 100)
     assert scheduler.task_provider("night") == "claude"
     assert not await scheduler.run_or_defer("night", "2026-09-18", 90)
-    assert ai.calls == [] and task.status == "今夜やる"
+    assert ai.calls == [] and task.status == TONIGHT
 
     await scheduler.catch_up_deferred(101)
-    assert len(ai.calls) == 1 and task.status == "完了"
+    assert len(ai.calls) == 1 and task.status == DONE
     detail = assistant.cores["night"].schedule_detail("night", "2026-09-18")
-    assert detail["tasks"][0]["status"] == "完了"
+    assert detail["tasks"][0]["status"] == DONE
 
 
 async def test_night_module_keeps_custom_max_tasks(env, config):
@@ -787,7 +788,7 @@ async def test_night_failed_answer_never_completes_the_task(env, config, behavio
     task = assistant.notion.add_task("答えを確認する", "vlm")
     ai.behaviors = [behavior]
     detail = await scheduler.run_task("night", "2026-09-18")
-    assert task.status == detail["tasks"][0]["status"] == "確認待ち"
+    assert task.status == detail["tasks"][0]["status"] == WAITING
     assert assistant.notion.results[task.id] == summary
 
 

@@ -172,5 +172,5 @@ async def test_the_knowledge_channel_cannot_be_created_as_a_research_workspace(e
     scheduler, assistant, slack, claude = env
     with pytest.raises(HandsError, match="担当のチャンネル"):
         await Hands(assistant).create_workspace("knowledge")
-    assert assistant.notion.themes == {}
+    assert assistant.notion.themes == set()
     assert not (config.research_root / "knowledge").exists()

@@ -4,7 +4,17 @@ import asyncio
 import logging
 from contextlib import suppress
 
-from kei_agent.api import Core, NotionError, Request, clean_text, parse_slack_permalink, summarize
+from kei_agent.api import (
+    DONE,
+    RUNNING,
+    WAITING,
+    Core,
+    NotionError,
+    Request,
+    clean_text,
+    parse_slack_permalink,
+    summarize,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +46,7 @@ class Module:
                 reason = f"途中で止まりました: {type(e).__name__}: {e}"
                 await self.core.notify_trouble(f"夜間の Task「{task.title}」が{reason}")
                 with suppress(NotionError):
-                    await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
+                    await asyncio.to_thread(notion.update_task, task.id, WAITING, reason)
                 done.append({"title": task.title, "status": "error", "reason": reason, "url": task.url})
         try:
             remaining = await asyncio.to_thread(notion.count_tonight_tasks)
@@ -46,17 +56,14 @@ class Module:
 
     async def _run_night_task(self, task, ids: dict[str, str]) -> dict:
         notion = self.core.notion
-        info = {"title": task.title, "url": task.url, "theme": ", ".join(task.theme_names)}
-        theme = task.theme_names[0] if task.theme_names else None
-        channel_name = theme
-        if theme is None or channel_name not in ids:
-            reason = "テーマを設定してください" if theme is None else f"テーマのチャンネル #{theme} に Kei Agent がいません"
-            await asyncio.to_thread(notion.update_task, task.id, "確認待ち", reason)
-            return {**info, "status": "確認待ち", "reason": reason}
+        info = {"title": task.title, "url": task.url, "theme": task.theme or ""}
+        if task.theme is None or task.theme not in ids:
+            reason = "テーマが分かりません" if task.theme is None else f"テーマのチャンネル #{task.theme} に Kei Agent がいません"
+            await asyncio.to_thread(notion.update_task, task.id, WAITING, reason)
+            return {**info, "status": WAITING, "reason": reason}
 
-        await asyncio.to_thread(notion.update_task, task.id, "実行中")
-        body = await asyncio.to_thread(notion.page_markdown, task.id)
-        channel = ids[channel_name]
+        await asyncio.to_thread(notion.update_task, task.id, RUNNING)
+        channel = ids[task.theme]
         source = parse_slack_permalink(task.slack_url)
         message: dict = {}
         # 元のメッセージがテーマのチャンネルにあるときだけ、そのスレッドで続ける
@@ -70,22 +77,23 @@ class Module:
             await asyncio.to_thread(notion.update_task, task.id, None, None,
                                     await self.core.permalink(channel, thread_ts))
 
+        work = task.work.split("\n結果: ", 1)[0].removeprefix("作業: ").strip()
         text = (
             "[🌙 夜間の Task] 依頼者は寝ているので、その場で聞き返せません。"
             "判断が必要なところまで進めたら、最後の行を「❓ 確認:」で始めて止めてください。\n\n"
-            f"タイトル: {task.title}\n優先度: {task.priority or '-'} / 期日: {task.due or '-'}\n"
-            f"Notion: {task.url}\n\n## 本文\n\n{body or '（なし）'}\n"
+            f"タイトル: {task.title}\n期日: {task.due or '-'}\nNotion: {task.url}\n\n"
+            f"## 作業\n\n{work or '（作業の中身なし）'}\n"
         )
         if message:
             text += f"\n## 元の Slack のメッセージ\n\n{clean_text(message.get('text', ''))}\n"
-        req = Request(channel, channel_name, thread_ts, None, text, trigger="night")
+        req = Request(channel, task.theme, thread_ts, None, text, trigger="night")
         result = await self.core.dispatch(req)
 
         if result.failed:
-            status = "確認待ち"
+            status = WAITING
             summary = "エラーで止まりました"
         else:
-            status = "確認待ち" if result.awaiting else "完了"
+            status = WAITING if result.awaiting else DONE
             summary = summarize(result.text)
         await asyncio.to_thread(notion.update_task, task.id, status, summary)
         return {**info, "status": status, "summary": summary}

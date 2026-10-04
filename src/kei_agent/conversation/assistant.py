@@ -363,7 +363,7 @@ class Assistant(StartupChecks, ModuleBridge, LimitDeferral,
         if self.notion is None:
             return
         try:
-            await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name, "", f"{ws.cwd}/")
+            await asyncio.to_thread(self.notion.ensure_theme, ws.channel_name)
         except NotionError as e:
             await self.notify_trouble(f"Notion にテーマ「{ws.channel_name}」を登録できませんでした: {e}")
 
