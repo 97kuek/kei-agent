@@ -1,7 +1,7 @@
 # 使い方
 
 - Slack で頼むときの案内。Slack で受け答えするのは Dot で、ローカルの作業は Mac、個人開発は Codex クラウドが受け持つ
-- Dot に全文コピペする指示は [プロンプト一覧](prompts/README.md)、担当ごとの中身は [`agents.md`](agents.md)、Dot の接続と予定は [`dots.md`](dots.md#dot-側の設定)、Mac の常駐は [`deploy/README.md`](../deploy/README.md)
+- Dot に全文コピペする指示は Notion（[Dot の指示の正本](dots.md#dot-の指示の正本)）、担当ごとの中身は [`agents.md`](agents.md)、Dot の接続と予定は [`dots.md`](dots.md#dot-側の設定)、Mac の常駐は [`deploy/README.md`](../deploy/README.md)
 
 ## チャンネル
 
@@ -52,7 +52,7 @@
 
 ## 定期実行
 
-[予定と Mac の停止対象](dots.md#予定の一覧) を参照。設定する指示の全文は [プロンプト一覧](prompts/README.md) にある。
+[予定と Mac の停止対象](dots.md#予定の一覧) を参照。設定する指示の全文は Notion にある（[Dot の指示の正本](dots.md#dot-の指示の正本)）。
 
 ## 自己改善（`#5-kei-agent`）
 

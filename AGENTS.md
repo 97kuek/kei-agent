@@ -7,6 +7,7 @@ Claude Code・Codex・自己改善の AI が、このリポジトリを直す前
 - 機能はモジュール（`modules/<名前>/`）に書く。モジュールがコアに触れるのは `kei_agent.api` の窓口だけ
 - コアは領域ごとのフォルダ（`src/kei_agent/<領域>/`）。どこに何があるかと依存の向きは docs/architecture.md の「コードの地図」。下の層から上の層を読み込まない（`tests/test_layers.py` が見る）
 - モジュールのオンオフ・チャンネル・AI は `~/.config/kei-agent/agents.csv`。`config.toml` には書かない
+- Dot に貼る指示（継続指示・定期実行）の正本は Notion。DB・項目の名前や照合キーを変えたら、Notion の指示も直すよう人に伝える
 - モデル名は `src/kei_agent/framework/models.py` と `module.toml` の `[use_cases]` にだけ書く
 - 柵（`src/kei_agent/execution/guard.py`・`config.example.toml`・`deploy/`）は変えない。要るときは人に頼む
 - 本物の状態・秘密情報・launchd に触れない。テストは `tests/fakes.py` の偽物と、設定を書く `write_config`・`write_agents`・`write_schedules` を使う

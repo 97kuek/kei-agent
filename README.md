@@ -21,7 +21,7 @@ Kei Agent は、対話からローカルの作業実行までをつなぐ、モ�
 | 記事や論文を探し、保存する | [知識](docs/agents/knowledge-agent.md) |
 | 会社の資料を読む、コードを変更する | [仕事・コード変更](docs/agents/work-agent.md) |
 | 個人のアプリ・サイト・Kei Agent をクラウドで開発する | [個人開発](docs/agents/development-agent.md) |
-| Dot を接続し、定期実行を設定する | [接続・予定](docs/dots.md) → [コピーするプロンプト](docs/prompts/README.md) |
+| Dot を接続し、定期実行を設定する | [接続・予定](docs/dots.md) → [指示の正本（Notion）](docs/dots.md#dot-の指示の正本) |
 | 機能を足す | [モジュールの契約と作り方](docs/modules.md) |
 | Mac を導入・更新・点検する | [運用手順](deploy/README.md) |
 
