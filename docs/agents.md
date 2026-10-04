@@ -1,6 +1,6 @@
 # 用途別ガイドと担当の契約
 
-研究・大学・仕事・知識は利用上の4つの役割。Mac のローカル AI は研究・仕事だけで、大学は機械同期、知識は Dot のクラウド処理となる。
+研究・大学・仕事・知識・個人開発を役割として分ける。Mac のローカル AI は研究・仕事だけで、大学は機械同期、知識は Dot のクラウド処理となる。
 
 ## 一覧
 
@@ -10,6 +10,7 @@
 | 大学 | 質問は Dot。Moodle の機械同期は Mac・8787 | `#2-course` | [course-agent.md](agents/course-agent.md) |
 | 仕事 | Mac の会社 Claude・8789。Outlook は Dot | `#3-work`・`#work-<名前>` | [work-agent.md](agents/work-agent.md) |
 | 知識 | Dot（Mac のプロセスなし） | `#4-knowledge` | [knowledge-agent.md](agents/knowledge-agent.md) |
+| 個人開発 | Dot → Codex クラウド（Mac のプロセスなし） | `#5-<プロジェクト>` | [development-agent.md](agents/development-agent.md) |
 
 ## 触れる範囲（制限の表）
 
@@ -35,7 +36,7 @@
 | 会話 | 1スレッド = 1会話。Dot からは `run` の `conversation`（Slack のスレッドの番号）ごとに1会話。AI と指示書の版が同じ間は続け、変われば始め直す |
 | 上限 | MCP の実行中に利用上限に当たったら `failed` で理由を返す。上限中の `run` は受け付けない。Dot が案内し、利用できる AI の選択や再実行を行う |
 | 様子の確認 | 「進捗は？」など様子を聞かれただけの回は、読むだけで動かす（作業は始まらない） |
-| ログイン切れ | Dot への答えにそう書き、`#0-kei-agent` への知らせ（Dot が出す）に入り直し方を1回だけ書く |
+| ログイン切れ | Dot への答えにそう書き、`#5-kei-agent` への知らせ（Dot が出す）に入り直し方を1回だけ書く |
 | 持たないもの | Slack への投稿、スレッドと会話の対応、ほかの担当の鍵、ほかの担当への連絡 |
 
 `ask` の依頼と、全部の担当に共通の返事の形:

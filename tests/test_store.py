@@ -121,3 +121,41 @@ def test_runs_remember_the_actor_use_case_and_model(tmp_path):
     other = store.start_run("C", "3", "vlm", "message")
     store.end_run(other, True, None)
     assert tuple(store.conn.execute("SELECT actor, model FROM runs WHERE id = ?", (other,)).fetchone()) == (None, None)
+
+
+def test_hands_reservation_is_atomic_across_connections(store):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    barrier = Barrier(4)
+
+    def claim(number):
+        other = Store(store.path)
+        try:
+            barrier.wait(timeout=5)
+            ticket = {"ticket": f"t-{number}", "conversation": f"c-{number}"}
+            return number, other.claim_hands_ticket("same-id", "same-payload", ticket, 100)
+        finally:
+            other.conn.close()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(claim, range(4)))
+    winners = [n for n, previous in results if previous is None]
+    assert len(winners) == 1
+    ticket = f"t-{winners[0]}"
+    assert all(previous["ticket"] == ticket for _, previous in results if previous is not None)
+    assert len(store.module_records("hands", "ticket")) == 1
+    assert json.loads(store.module_record("hands", "request", "same-id")["value"])["ticket"] == ticket
+
+
+def test_hands_reservation_rolls_back_if_ticket_cannot_be_saved(store):
+    import sqlite3
+
+    import pytest
+
+    store.put_module_record("hands", "ticket", "collision", "{}", 100)
+    with pytest.raises(sqlite3.IntegrityError):
+        store.claim_hands_ticket("request-1", "payload", {"ticket": "collision"}, 100)
+    assert store.module_record("hands", "request", "request-1") is None
+    assert store.module_record("hands", "ticket", "collision")["value"] == "{}"

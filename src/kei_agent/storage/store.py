@@ -506,6 +506,29 @@ class Store:
                      updated_at = excluded.updated_at, expires_at = excluded.expires_at""",
                 (module, kind, key, value, time.time(), expires_at))
 
+    def claim_hands_ticket(self, request_id: str, fingerprint: str, ticket: dict,
+                           expires_at: float) -> dict | None:
+        """依頼の予約と受付番号を同時に保存する。予約済みなら元の対応だけを返す。
+
+        module_records の主キーで、別接続からの同時再送も一つに絞る。
+        結果を消した後も予約は残し、古い再送で作業を再実行しない。
+        """
+        with self.conn:
+            inserted = self.conn.execute(
+                """INSERT INTO module_records (module, kind, key, value, updated_at, expires_at)
+                   VALUES ('hands', 'request', ?, ?, ?, NULL)
+                   ON CONFLICT (module, kind, key) DO NOTHING""",
+                (request_id, json.dumps({"fingerprint": fingerprint, "ticket": ticket["ticket"]}), time.time()),
+            ).rowcount
+            if not inserted:
+                return json.loads(self.module_record("hands", "request", request_id)["value"])
+            self.conn.execute(
+                """INSERT INTO module_records (module, kind, key, value, updated_at, expires_at)
+                   VALUES ('hands', 'ticket', ?, ?, ?, ?)""",
+                (ticket["ticket"], json.dumps(ticket, ensure_ascii=False), time.time(), expires_at),
+            )
+        return None
+
     def module_record(self, module: str, kind: str, key: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM module_records WHERE module = ? AND kind = ? AND key = ?",
                                  (module, kind, key)).fetchone()

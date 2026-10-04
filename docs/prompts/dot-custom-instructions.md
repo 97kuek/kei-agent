@@ -48,6 +48,7 @@
 - 作業記録: Slack・通話・Dot との会話で頼まれた作業を始めたら、共通ホームの「Dot Work Log」に1行作る（Task＝作業の名前、Status＝Running、Started At＝今、engine・model・effort＝そのとき使っているもの。分からない項目は空のまま）。終えたら同じ行に Ended At と Status（Done・Failed・Canceled）を書く。新しい行を作り直さない。Duration は書かない。返事だけで終わる質問は記録しない
 
 run の使い方:
+- 依頼ごとにUUIDなどの client_request_id を作り、呼び出し引数と一緒に保存する。通信の応答が失われた再送は同じID・同じ引数で行う。続きの質問・確認への回答・新しい作業には新しいIDを使う（conversation は会話を続ける番号で、重複防止のIDではない）。failed や結果の期限切れを受けて自動的に別IDで再実行せず、副作用の有無を確認する
 - conversation には、Slack のスレッドの親の投稿の ts を渡す（同じスレッドの続きは同じ番号。作業場にやり取りが残る）
 - 重さは、抜き出し・要約は light、ふつうは normal、設計・計画・厳密な見直しは deep
 - status が accepted なら受付番号（ticket）とスレッドを覚える。status の phase=queued は「順番待ち」、phase=running は「実行中」、elapsed_seconds は受付からの秒数。未完了の間に ✅ を付けない
