@@ -1,8 +1,8 @@
 """Moodle の締切を、Notion の「課題」に書き込む。
 
-`kei-agent-module course setup` で作った授業用の Notion に、ics から読んだ締切を1行ずつ入れる。
-同じ課題を二重に作らないよう、Moodle のイベント ID（ics の UID）を目印にする。
-依頼者が手で直した「状態」「見積時間」「実績時間」には触らない。
+`kei-agent-module course setup` で作った授業ホームに、ics から読んだ締切を1行ずつ入れる。
+同じ課題を二重に作らないよう、Moodle のイベント ID（ics の UID）を Moodle ID に入れて照合する。
+書くのは Name・Due・Course・Link・Moodle ID と、新しい行の Status（Not started）だけ。手で直した Status には触らない。
 取り込むのは「授業」に入れた履修科目の締切だけにする（Moodle のカレンダーには、
 新入生向けの資料など、履修していない科目の締切も並ぶため）。
 
@@ -27,6 +27,7 @@ from kei_agent_a2a.api import Notion, NotionError, gateway_notion, load_config
 from .course_identity import normalize_course_name
 from .ics import Event
 from .notion_props import number, plain, select
+from .notion_setup import DONE, NOT_STARTED, TAKING
 from .school import School
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ NO_STATE = "授業用の Notion がまだありません（kei-agent-module cour
 # 1回の取り込みで書き込む上限。ics を読み違えたときに、大量の行を作ってしまわないようにする
 MAX_WRITES = 50
 TITLE_LIMIT = 200
-REQUIRED_DATABASES = frozenset({"courses", "assignments", "grades", "requirements", "gpa"})
+REQUIRED_DATABASES = frozenset({"courses", "assignments", "grades", "requirements"})
 _QUOTED_DUE = re.compile(r"^「(?P<title>.+)」の提出期限$")
 # 通知の行だけで落とす、Moodle の言い回し（Notion のページ名には残す）
 _NOTICE_SUFFIX = re.compile(r"\s*の\s*(?:受験可能期間\s*の?\s*(?:開始|終了)|提出期限)\s*$")
@@ -152,7 +153,7 @@ class CourseNotion:
 
     def _course_names(self) -> dict[str, str]:
         """「授業」のページ ID → 科目名（表示用。normalize_course_name は通さない）。"""
-        return {row["id"]: plain(row["properties"].get("科目名")) for row in self._rows(self.courses)}
+        return {row["id"]: plain(row["properties"].get("Name")) for row in self._rows(self.courses)}
 
     def calendar_assignments(self, days: int, today: date) -> dict:
         """課題 DB の締切を全件読む。Moodle ICS の件数上限や同期は通さない。"""
@@ -161,8 +162,8 @@ class CourseNotion:
         through = today + timedelta(days=days - 1)
         rows = self.notion.paginate("POST", f"/data_sources/{self.assignments}/query", {
             "filter": {"and": [
-                {"property": "締切", "date": {"on_or_after": today.isoformat()}},
-                {"property": "締切", "date": {"on_or_before": through.isoformat()}},
+                {"property": "Due", "date": {"on_or_after": today.isoformat()}},
+                {"property": "Due", "date": {"on_or_before": through.isoformat()}},
             ]},
             "page_size": 100,
         })
@@ -175,7 +176,7 @@ class CourseNotion:
                 raise SyncError("課題 DB のページ ID が欠落または重複しています")
             seen.add(page_id)
             props = row.get("properties") or {}
-            due = (props.get("締切", {}).get("date") or {}).get("start")
+            due = (props.get("Due", {}).get("date") or {}).get("start")
             if not due:
                 continue
             try:
@@ -184,27 +185,27 @@ class CourseNotion:
                 raise SyncError(f"課題 {page_id} の締切が不正です") from None
             if not today <= due_day <= through:
                 continue
-            title = plain(props.get("課題"))
+            title = plain(props.get("Name"))
             url = row.get("url")
             if not title or not url:
                 raise SyncError(f"課題 {page_id} の名前または URL がありません")
-            related = [r.get("id") for r in (props.get("科目") or {}).get("relation") or []]
+            related = [r.get("id") for r in (props.get("Course") or {}).get("relation") or []]
             course = next((course_names[rid] for rid in related if rid in course_names), "")
             items.append({"id": page_id, "title": notice_title(title), "due": due,
-                          "status": ((props.get("状態") or {}).get("status") or {}).get("name") or "",
+                          "status": ((props.get("Status") or {}).get("status") or {}).get("name") or "",
                           "url": url, "course": course,
-                          "moodle": (props.get("Moodle") or {}).get("url") or "",
+                          "moodle": (props.get("Link") or {}).get("url") or "",
                           "moodle_id": plain(props.get("Moodle ID"))})
         items.sort(key=lambda item: (item["due"], item["title"], item["id"]))
         return {"complete": True, "items": items}
 
     def course_ids(self) -> dict[str, str]:
-        """科目名 → 「授業」のページ ID。"""
+        """科目名 → 「授業」のページ ID（Status が Done の授業は除く）。"""
         found: dict[str, str] = {}
         for row in self._rows(self.courses):
-            if select(row["properties"].get("状態")) == "終了":
+            if select(row["properties"].get("Status")) == DONE:
                 continue
-            name = normalize_course_name(plain(row["properties"].get("科目名")))
+            name = normalize_course_name(plain(row["properties"].get("Name")))
             if not name:
                 continue
             if name in found:
@@ -213,28 +214,28 @@ class CourseNotion:
         return found
 
     def courses_on(self, weekday: str = "", on: date | None = None) -> list[dict]:
-        """履修中の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。
+        """履修中（Status が Taking か空）の科目（曜日・時限つき）。weekday を渡すと、その曜日だけ。
 
         学期の終わった科目が残っていても混ざらないよう、その日の学期（と通年）だけを返す。
-        年度が入っている科目は、その日の年度のものだけ（去年の「履修中」を今年に出さない）。
+        年度が入っている科目は、その日の年度のものだけ（去年の Taking を今年に出さない）。
         """
         on = on or date.today()
         found = []
         for row in self._rows(self.courses):
             props = row["properties"]
-            if select(props.get("状態")) not in ("", "履修中"):
+            if select(props.get("Status")) not in ("", TAKING):
                 continue
-            if not self.school.in_term(select(props.get("学期")), on, number(props.get("年度"))):
+            if not self.school.in_term(select(props.get("Term")), on, number(props.get("Year"))):
                 continue
-            day = select(props.get("曜日"))
+            day = select(props.get("Day"))
             if weekday and day != weekday:
                 continue
             found.append({
                 "id": row["id"],
-                "subject": plain(props.get("科目名")),
+                "subject": plain(props.get("Name")),
                 "weekday": day,
-                "term": select(props.get("学期")),
-                "period": (props.get("時限") or {}).get("number"),
+                "term": select(props.get("Term")),
+                "period": (props.get("Period") or {}).get("number"),
                 "url": row.get("url", ""),
             })
         found.sort(key=lambda c: (c["period"] is None, c["period"] or 0, c["subject"]))
@@ -286,7 +287,7 @@ class CourseNotion:
                 break
             props = self._properties(event, course_id)
             if row is None:
-                props["状態"] = {"status": {"name": "未着手"}}
+                props["Status"] = {"status": {"name": NOT_STARTED}}
                 page = self.notion.request("POST", "/pages", {
                     "parent": {"type": "data_source_id", "data_source_id": self.assignments},
                     "properties": props})
@@ -302,29 +303,28 @@ class CourseNotion:
 
     def _properties(self, event: Event, course_id: str | None) -> dict:
         props = {
-            "課題": {"title": [{"text": {"content": assignment_title(event.summary)[:TITLE_LIMIT]}}]},
+            "Name": {"title": [{"text": {"content": assignment_title(event.summary)[:TITLE_LIMIT]}}]},
             # ics は手元の時刻に直してあるので、時差を付けて渡す（Notion 側でずれない）
-            "締切": {"date": {"start": event.starts_at.astimezone().isoformat()}},
-            "出どころ": {"select": {"name": "Moodle"}},
+            "Due": {"date": {"start": event.starts_at.astimezone().isoformat()}},
             "Moodle ID": {"rich_text": [{"text": {"content": event.uid}}]},
         }
         if event.url:
-            props["Moodle"] = {"url": event.url}
+            props["Link"] = {"url": event.url}
         if course_id:
-            props["科目"] = {"relation": [{"id": course_id}]}
+            props["Course"] = {"relation": [{"id": course_id}]}
         return props
 
     def _differs(self, row: dict, event: Event, course_id: str | None) -> bool:
-        """Moodle 側と食い違っているか（状態や見積時間は見ない）。"""
+        """Moodle 側と食い違っているか（Status は見ない）。"""
         props = row.get("properties") or {}
-        if plain(props.get("課題")) != assignment_title(event.summary)[:TITLE_LIMIT]:
+        if plain(props.get("Name")) != assignment_title(event.summary)[:TITLE_LIMIT]:
             return True
-        when = _when(props.get("締切"))
+        when = _when(props.get("Due"))
         if when is None or when != event.starts_at.astimezone():
             return True
-        if event.url and (props.get("Moodle") or {}).get("url") != event.url:
+        if event.url and (props.get("Link") or {}).get("url") != event.url:
             return True
-        related = [r.get("id") for r in (props.get("科目") or {}).get("relation") or []]
+        related = [r.get("id") for r in (props.get("Course") or {}).get("relation") or []]
         return bool(course_id) and course_id not in related
 
     def _label(self, event: Event) -> str:
@@ -359,7 +359,7 @@ def course_catalog(notion: Notion, state: dict) -> tuple[str, ...]:
     """授業 DB の科目名だけを読み出す。ページ・relation・DB は一切変更しない。"""
     data_source_id = state["databases"]["courses"]["data_source_id"]
     rows = notion.paginate("POST", f"/data_sources/{data_source_id}/query", {"page_size": 100})
-    return tuple(sorted({plain(row.get("properties", {}).get("科目名")) for row in rows}
+    return tuple(sorted({plain(row.get("properties", {}).get("Name")) for row in rows}
                         - {""}))
 
 

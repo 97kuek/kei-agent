@@ -116,7 +116,7 @@ def build_mcp(hands: Hands) -> MCPServer:
         except HandsError as e:
             raise ToolError(str(e)) from None
 
-    @mcp.tool(description="Moodle の課題提出・小テスト受験終了を認証付き API で確認し、Notion の課題を提出済みにする。"
+    @mcp.tool(description="Moodle の課題提出・小テスト受験終了を認証付き API で確認し、Notion の課題の Status を Submitted にする。"
                           "AI は使わない。未提出・取得失敗で状態を戻さない。最大10件、残りは次回。"
                           "返すのは ok・text・enabled（API設定済みか）・completed・checked・skipped・errors・next_id")
     async def sync_submissions() -> dict[str, Any]:

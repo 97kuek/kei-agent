@@ -292,7 +292,7 @@ class CourseSetup(Setup):
                    term: str = "", year: int | None = None) -> None:
         """科目を1つ足す（同じ年度・同じ名前があれば何もしない）。曜日と時限は別の列に入れる。
 
-        年度を省くと今日の年度、学期を省くと今日の学期にする。年度が無いと、次の年も「履修中」の科目として出てしまう。
+        年度を省くと今日の年度、学期を省くと今日の学期にする。年度が無いと、次の年も Taking の科目として出てしまう。
         """
         today = date.today()
         year = year or self.school.academic_year(today)
@@ -300,21 +300,21 @@ class CourseSetup(Setup):
         db = self.state["databases"]["courses"]
         for row in self.notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
             props = row.get("properties", {})
-            if notion_props.select(props.get("状態")) == "終了":
+            if notion_props.select(props.get("Status")) == DONE:
                 continue
-            if notion_props.number(props.get("年度")) not in (None, year):
+            if notion_props.number(props.get("Year")) not in (None, year):
                 continue
-            if normalize_course_name(notion_props.plain(props.get("科目名"))) == normalize_course_name(name):
+            if normalize_course_name(notion_props.plain(props.get("Name"))) == normalize_course_name(name):
                 return
         self.notion.request("POST", "/pages", {
             "parent": {"type": "data_source_id", "data_source_id": db["data_source_id"]},
             "properties": {
-                "科目名": notion_props.title(name),
-                "年度": {"number": year},
-                "曜日": {"select": {"name": weekday}},
-                "時限": {"number": period},
-                "学期": {"select": {"name": term}},
-                "状態": {"select": {"name": "履修中"}},
+                "Name": notion_props.title(name),
+                "Status": {"select": {"name": TAKING}},
+                "Year": {"number": year},
+                "Term": {"select": {"name": term}},
+                "Day": {"select": {"name": weekday}},
+                "Period": {"number": period},
             },
         })
         self.log.append(f"科目を追加: {name}（{year}年度 {weekday}{period or ''}）")

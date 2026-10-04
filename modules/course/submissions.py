@@ -9,6 +9,7 @@ from kei_agent_a2a.api import NotionError
 
 from . import moodle_api, notion_sync
 from .notion_props import plain
+from .notion_setup import SUBMITTED
 
 # 1回の見回りを A2A の待ち時間内に収める。次回は記録したページ ID の続きから読む。
 MAX_CHECKS = 10
@@ -45,8 +46,8 @@ def sync(*, api: moodle_api.Client | None = None, client: notion_sync.CourseNoti
         return Result(enabled=False)
     client = client or notion_sync._client()
     rows = sorted(client.taken().values(), key=lambda row: row["id"])
-    pending = [row for row in rows if ((row.get("properties", {}).get("状態") or {}).get("status") or {}).get("name")
-               != "提出済み"]
+    pending = [row for row in rows if ((row.get("properties", {}).get("Status") or {}).get("status") or {}).get("name")
+               != SUBMITTED]
     # 最後まで読んだ次の回は先頭へ戻る。完了した行が消えてもカーソルは有効。
     remaining = [row for row in pending if row["id"] > after] or pending
     batch = remaining[:MAX_CHECKS]
@@ -55,8 +56,8 @@ def sync(*, api: moodle_api.Client | None = None, client: notion_sync.CourseNoti
     updates = []
     for row in batch:
         props = row["properties"]
-        title = notion_sync.notice_title(plain(props.get("課題")))
-        url = (props.get("Moodle") or {}).get("url") or ""
+        title = notion_sync.notice_title(plain(props.get("Name")))
+        url = (props.get("Link") or {}).get("url") or ""
         uid = plain(props.get("Moodle ID"))
         try:
             key = url or uid
@@ -71,9 +72,9 @@ def sync(*, api: moodle_api.Client | None = None, client: notion_sync.CourseNoti
             continue
         result.checked += 1
         if outcome.completed:
-            changes = {"状態": {"status": {"name": "提出済み"}}}
+            changes = {"Status": {"status": {"name": SUBMITTED}}}
             if not url:
-                changes["Moodle"] = {"url": outcome.url}
+                changes["Link"] = {"url": outcome.url}
             updates.append((row["id"], title, changes))
     for page_id, title, changes in updates:
         try:

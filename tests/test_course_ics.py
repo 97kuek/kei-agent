@@ -171,8 +171,8 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     class _Notion:
         def paginate(self, _method, _path, _body):
             # 去年の同名科目は、今年の科目とは別に足す
-            return [{"id": "old", "properties": {"科目名": {"title": [{"plain_text": "データベース"}]},
-                                                  "年度": {"number": 2025}}}]
+            return [{"id": "old", "properties": {"Name": {"title": [{"plain_text": "データベース"}]},
+                                                  "Year": {"number": 2025}}}]
 
         def request(self, method, path, body=None):
             posts.append(body)
@@ -181,7 +181,8 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     setup = notion_setup.CourseSetup(_Notion(), "home", tmp_path / "notion-course.json")
     setup.state = {"databases": {"courses": {"data_source_id": "ds"}}}
     setup.add_course("データベース", "月", 2, year=2026)
-    assert posts[0]["properties"]["年度"] == {"number": 2026}
+    assert posts[0]["properties"]["Year"] == {"number": 2026}
+    assert posts[0]["properties"]["Status"] == {"select": {"name": "Taking"}}
 
     seed = tmp_path / "courses.toml"
     seed.write_text('year = 2027\nterm = "春学期"\n[[courses]]\nname = "英語"\nweekday = "火"\nperiod = 1\n'
@@ -207,7 +208,7 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     setup.state = {"databases": {"courses": {"data_source_id": "ds"}}}
     posts.clear()
     setup.add_course("統計", "水", 3, year=2026)
-    assert posts[0]["properties"]["学期"]["select"]["name"] in ("春学期", "秋学期")
+    assert posts[0]["properties"]["Term"]["select"]["name"] in ("春学期", "秋学期")
 
 
 @pytest.mark.parametrize(("text", "message"), [
