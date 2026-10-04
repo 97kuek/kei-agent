@@ -23,7 +23,6 @@ from kei_agent.storage.notion import (
     append_blocks,
     gateway_notion,
     schema_problems,
-    theme_papers_view,
 )
 
 log = logging.getLogger(__name__)
@@ -253,20 +252,15 @@ class NotionStore:
         return self._theme_names[page_id]
 
     def ensure_theme(self, name: str, slack_url: str, directory: str) -> bool:
-        """テーマの行がなければ作る。作ったら True。そのページには、テーマの論文だけの表も置く。"""
+        """テーマの行がなければ作る。作ったら True。"""
         if self.theme_page_id(name):
             return False
-        page = self._create_page("themes", {
+        self._create_page("themes", {
             "名前": {"title": rich_text(name)},
             "状態": {"select": {"name": "進行中"}},
             "Slack": {"url": slack_url or None},
             "ディレクトリ": {"rich_text": rich_text(directory)},
         })
-        if "papers" in self.state.get("databases", {}):
-            try:
-                self.notion.request("POST", "/views", theme_papers_view(self._db("papers"), page["id"]))
-            except NotionError as e:
-                log.warning("テーマのページに先行研究の表を置けません: %s", e)
         return True
 
     # 先行研究
