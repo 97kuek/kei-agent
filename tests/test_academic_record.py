@@ -38,9 +38,9 @@ def test_parse_waseda_grade_and_credit_tables(tmp_path: Path):
 
     grade, = record.grades
     assert (grade.course_name, grade.category, grade.gp) == ("数学", "Ａ群 / 基礎科目", 4.0)
-    assert (record.requirements[-1].name, record.requirements[-1].remaining) == ("総合計", 5.0)
-    assert [entry.kind for entry in record.gpa] == ["春学期", "秋学期", "通算"]
-    assert record.gpa[-1].gpa == 3.4
+    assert [(r.name, r.kind) for r in record.requirements] == [("専門必修", "Category"), ("総合計", "Total")]
+    assert (record.requirements[-1].included, record.requirements[-1].remaining) == (15.0, 5.0)
+    assert not hasattr(record, "gpa")
 
 
 def test_waseda_needs_the_grade_and_credit_pages_in_order(tmp_path: Path):
