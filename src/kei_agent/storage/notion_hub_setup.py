@@ -148,8 +148,6 @@ class HubSetup:
             actual = calendar.properties.get(name)
             if actual and actual.get("type") != next(iter(spec)):
                 raise NotionError(f"予定カレンダーの「{name}」の型が異なります")
-        tasks = self._source(self.research_home_id, ("Task",), "研究 Task",
-                             required={"タイトル": "title", "期日": "date", "状態": "status"})
         assignments = self._source(self.course_home_id, ("課題",), "授業課題",
                                    required={"締切": "date", "状態": "status"})
         saved_views = {}
@@ -161,12 +159,12 @@ class HubSetup:
                 raise NotionError(f"共通ホームの状態ファイルを確認できません: {e}") from None
             if notion_id(saved.home_id) != notion_id(self.home_id):
                 raise NotionError("共通ホームの状態ファイルの親ページが異なります")
-            saved_views = {"研究 Task": saved.task_view_id, "授業課題": saved.assignment_view_id}
+            saved_views = {"授業課題": saved.assignment_view_id}
             saved_daily_id = saved.daily_view_id
         if daily is not None:
             self._daily_view(daily, saved_daily_id)
         existing_views: dict[str, dict] = {}
-        for name, source in (("研究 Task", tasks), ("授業課題", assignments)):
+        for name, source in (("授業課題", assignments),):
             response = self.notion.request("GET", f"/views?data_source_id={source.data_source_id}")
             if response.get("has_more"):
                 raise NotionError(f"{name} のビューを全件取得できません")
@@ -187,7 +185,7 @@ class HubSetup:
                 existing_views[name] = matches[0]
             if saved_views.get(name) and (not matches or matches[0]["id"] != saved_views[name]):
                 raise NotionError(f"{name} の保存済みリンクドビューを確認できません")
-        return calendar, daily, tasks, assignments, existing_views
+        return calendar, daily, assignments, existing_views
 
     def _owned_source(self, title: str, properties: dict) -> _Source | None:
         """共通ホームの直下の、Kei Agent が書く DB（時間記録・読みもの）。無ければ None。"""
@@ -255,7 +253,7 @@ class HubSetup:
             return ""
 
     def inspect(self) -> list[str]:
-        calendar, daily, tasks, assignments, views = self._preflight()
+        calendar, daily, assignments, views = self._preflight()
         time_source = self._owned_source(TIME_TITLE, TIME_PROPERTIES)
         reading = self._owned_source(READING_TITLE, READING_PROPERTIES)
         learning = self._owned_source(LEARNING_TITLE, LEARNING_PROPERTIES)
@@ -265,13 +263,12 @@ class HubSetup:
             f"時間記録: {time_source.database_id if time_source else '未作成'}",
             f"読みもの: {reading.database_id if reading else '未作成（--apply で作る）'}",
             f"学びのノート: {learning.database_id if learning else '未作成（--apply で作る）'}",
-            f"研究 Task: {tasks.database_id}",
             f"授業課題: {assignments.database_id}",
             f"親ページのリンクドビュー: {', '.join(views) if views else '未作成'}",
         ]
 
     def run(self) -> HubState:
-        calendar, daily, tasks, assignments, views = self._preflight()
+        calendar, daily, assignments, views = self._preflight()
         if daily is None:
             created = self.notion.request("POST", "/databases", {
                 "parent": {"type": "page_id", "page_id": self.home_id},
@@ -306,7 +303,6 @@ class HubSetup:
             self.notion.request("PATCH", f"/databases/{calendar.database_id}", {
                 "title": [{"text": {"content": "予定カレンダー"}}]})
         for name, source, due, status in (
-            ("研究 Task", tasks, "期日", "完了"),
             ("授業課題", assignments, "締切", "提出済み"),
         ):
             spec = task_view_spec(due, status)
@@ -340,8 +336,8 @@ class HubSetup:
         chart_id = self._time_chart(time_source, saved_chart)
         state = HubState(self.home_id, calendar.data_source_id, daily.data_source_id,
                          calendar.database_id, daily.database_id,
-                         tasks.data_source_id, assignments.data_source_id,
-                         views["研究 Task"]["id"], views["授業課題"]["id"], daily_view_id,
+                         "", assignments.data_source_id,
+                         "", views["授業課題"]["id"], daily_view_id,
                          time_source.database_id, time_source.data_source_id, chart_id,
                          reading_db_id=reading.database_id, reading_ds_id=reading.data_source_id,
                          learning_db_id=learning.database_id, learning_ds_id=learning.data_source_id)

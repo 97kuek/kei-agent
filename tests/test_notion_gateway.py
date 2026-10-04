@@ -555,55 +555,60 @@ def test_course_setup_and_sync_run_through_the_gateway(via, world, tmp_path):
     assert refused.value.status == 403 and "course can't reach" in str(refused.value)
 
 
-@pytest.mark.parametrize("slack_url", ["https://slack.example/c", ""])
-def test_research_setup_and_tasks_run_through_the_gateway(via, api, world, tmp_path, slack_url):
+def test_research_setup_and_theme_tasks_run_through_the_gateway(via, api, world, tmp_path):
     """--apply を付けないときは読むだけで、作るもの・足すものを並べる。作ったあとは何も出ない。"""
     from kei_agent.storage.notion import Setup, safe_to_resend
-    from kei_agent.storage.notion_store import NotionStore
+    from kei_agent.storage.notion_store import OWNER_KEI, TONIGHT, NotionStore
 
     kei = via("kei-agent")
     state = tmp_path / "notion.json"
     plan = Setup(kei, world.research.root, state).plan()
     assert plan[0] == "ページを作る: 中長期の方針"
-    assert "データベースを作る: 先行研究（ビューも作る）" in plan
-    assert any(line.startswith("ホームに見出しとビューを足す: 自分の Task") for line in plan)
+    assert "データベースを作る: テーマ（ビューも作る）" in plan
     assert all(safe_to_resend(method, path) for method, path, _ in api.forwarded)     # 読んだだけ
     Setup(kei, world.research.root, state).run()
-    assert [line for line in Setup(kei, world.research.root, state).plan()
-            if not line.startswith("ノートのテンプレート")] == []
+    assert Setup(kei, world.research.root, state).plan() == []
 
     store = NotionStore(kei, state)
-    assert store.ensure_theme("vlm", slack_url, "~/research/vlm")
-    page = kei.request("GET", f"/pages/{store.theme_page_id('vlm')}")
-    assert page["properties"]["Slack"]["url"] == (slack_url or None)
-    task = store.create_night_task("試す", "vlm", "https://slack.example/p1", "本文")
-    assert [found.id for found in store.tonight_tasks(5)] == [task.id]
-    assert task.theme_names == ["vlm"]
+    assert store.ensure_theme("1-vlm")
+    (name, page_id), = store.active_themes()
+    assert name == "vlm"
+    source = store.theme_tasks(name, page_id)
+    kei.request("POST", "/pages", {
+        "parent": {"type": "data_source_id", "data_source_id": source},
+        "properties": {"Title": {"title": [{"text": {"content": "試す"}}]}, "Status": {"status": {"name": TONIGHT}},
+                       "Owner": {"select": {"name": OWNER_KEI}}}})
+    assert [(t.title, t.theme) for t in store.tonight_tasks(5)] == [("試す", "vlm")]
 
     with pytest.raises(NotionError) as refused:
         via("research").request("GET", f"/pages/{world.course.page}")
     assert refused.value.status == 403
 
 
-def test_papers_are_filed_once_and_every_theme_page_shows_its_own(via, api, world, tmp_path):
-    """同じ論文は1行に、関係するテーマを並べる。テーマのページには、そのテーマの論文だけの表を1つ置く。"""
-    from kei_agent.storage.notion import THEME_PAPERS_VIEW, Setup
+def test_papers_are_filed_in_each_themes_own_database(via, api, world, tmp_path):
+    """論文はテーマのページの「先行研究」DB に入る。別のテーマの DB には出ない。"""
+    from kei_agent.storage.notion import PAPERS_TITLE, Setup
     from kei_agent.storage.notion_store import NotionStore
 
     kei = via("kei-agent")
     state = tmp_path / "notion.json"
     Setup(kei, world.research.root, state).run()
     store = NotionStore(kei, state)
-    store.ensure_theme("vlm", "https://slack.example/c1", "~/research/vlm")
-    store.ensure_theme("amr", "https://slack.example/c2", "~/research/amr")
-    paper = {"id": "arXiv:2609.00001", "title": "Counting with VLMs", "url": "https://arxiv.org/abs/2609.00001",
-             "authors": ["A. Author"], "year": "2026", "venue": "", "summary": "要点", "relation": "関係"}
+    store.ensure_theme("vlm")
+    store.ensure_theme("amr")
+    papers = {}
+    for name, page_id in store.active_themes():
+        db, = [b["id"] for b in kei.children(page_id)
+               if b["type"] == "child_database" and b["child_database"]["title"] == PAPERS_TITLE]
+        papers[name] = kei.request("GET", f"/databases/{db}")["data_sources"][0]["id"]
+    assert len(set(papers.values())) == 2
 
-    assert store.add_papers("vlm", [paper], "毎朝の新着") == 1
-    assert store.add_papers("amr", [paper], "依頼") == 1          # 同じ行にテーマを足す
-    assert store.add_papers("amr", [paper], "依頼") == 0
-    assert store.paper_ids() == ["arXiv:2609.00001"]
+    kei.request("POST", "/pages", {
+        "parent": {"type": "data_source_id", "data_source_id": papers["vlm"]},
+        "properties": {"Title": {"title": [{"text": {"content": "Counting with VLMs"}}]}}})
+    rows = {name: kei.request("POST", f"/data_sources/{ds}/query", {})["results"] for name, ds in papers.items()}
+    assert [len(rows["vlm"]), len(rows["amr"])] == [1, 0]
 
-    Setup(kei, world.research.root, state).run()                   # 作り直しても表は増えない
-    shown = [item for item in api.items.values() if item["object"] == "view" and item["name"] == THEME_PAPERS_VIEW]
-    assert len(shown) == 2
+    Setup(kei, world.research.root, state).run()                   # 作り直しても DB は増えない
+    assert len([i for i in api.items.values() if i["object"] == "database"
+                and "".join(t["text"]["content"] for t in i["title"]) == PAPERS_TITLE]) == 2

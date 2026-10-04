@@ -23,5 +23,5 @@ async def test_task_without_theme_waits_for_confirmation(module_kit):
     kit = module_kit(MODULE)
     task = kit.notion.add_task("テーマを選ぶ")
     detail = await kit.schedule("night")
-    assert detail["tasks"][0]["status"] == task.status == "確認待ち"
+    assert detail["tasks"][0]["status"] == task.status == "Waiting"
     assert kit.ai.calls == []

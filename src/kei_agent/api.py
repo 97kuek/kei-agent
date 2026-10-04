@@ -44,7 +44,17 @@ from kei_agent.scheduling.calendar_sync import JST, CalendarItem, CalendarSnapsh
 from kei_agent.scheduling.timelog import Toggl, TogglAmbiguousWrite, TogglError, load_toggl
 from kei_agent.storage import settings
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.notion_store import parse_slack_permalink, summarize
+from kei_agent.storage.notion_store import (
+    DONE,
+    NOT_STARTED,
+    OWNER_KEI,
+    OWNER_ME,
+    RUNNING,
+    TONIGHT,
+    WAITING,
+    parse_slack_permalink,
+    summarize,
+)
 from kei_agent.storage.records import Records
 from kei_agent.storage.store import schedule_detail
 from kei_agent.workspaces import themes
@@ -61,7 +71,7 @@ __all__ = ["API_VERSION", "ASK", "DIGEST_CHARS", "FAILED_PREFIX", "AIError", "Co
            "contains_secret",
            "day_label", "due_clock", "due_day", "escape", "failure_text", "final_answer", "is_status_inquiry", "json_list", "json_object",
            "load_toggl", "parse_time",
-           "theme_name", "weekday"]
+           "theme_name", "weekday", "DONE", "NOT_STARTED", "OWNER_KEI", "OWNER_ME", "RUNNING", "TONIGHT", "WAITING"]
 # Daily・振り返りの材料（core.digest）の上限の字数
 DIGEST_CHARS = digest.MAX_DIGEST_CHARS
 # 定型に当てはまらない質問の窓口（どの担当の名刺でも同じ名前）
@@ -200,7 +210,7 @@ class Core:
 
     @property
     def notion(self):
-        """研究ホーム（kei_agent.storage.notion_store.NotionStore）。"""
+        """研究ホーム（テーマと、テーマごとの Task・先行研究。kei_agent.storage.notion_store.NotionStore）。"""
         return self._assistant.notion
 
     @property
@@ -519,10 +529,10 @@ class Core:
         return await self._assistant.module_agenda(days, frozenset(kinds) if kinds is not None else None)
 
     async def digest(self, since: float, now: float, title: str, *, agenda: bool = False) -> str:
-        """Daily・振り返りの材料（DIGEST_CHARS 字までで、超えた分は後ろのノートから省いたもの）。
+        """Daily・振り返りの材料（DIGEST_CHARS 字までで、超えた分は後ろの振り返りから省いたもの）。
 
         本体の記録（やり取りのあったスレッドとその記録の場所・終わったジョブ・夜間の Task・止まっているテーマ・
-        返事待ち・Kei Agent の稼働）、モジュールの材料（material）、研究ホームの Task とノート、前日の振り返り。
+        返事待ち・Kei Agent の稼働）、モジュールの材料（material）、研究ホームの Task、前日の振り返り。
         agenda にすると、モジュールの予定（今日あったもの・明日のもの・締切）も入れる。
         """
         ids = await self._assistant.channel_ids()

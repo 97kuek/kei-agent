@@ -165,5 +165,5 @@ def test_module_channel_belongs_to_its_module(config):
     assert themes.resolve(renamed, "reading").module == "knowledge"
     assert themes.resolve(renamed, "knowledge").kind is ChannelKind.THEME
     assert themes.resolve(replace(config, modules=(), module_channels={}), "knowledge").kind is ChannelKind.THEME
-    # 研究テーマのディレクトリには、もう papers/ を作らない（論文は研究ホームの先行研究 DB）
+    # 研究テーマのディレクトリには、もう papers/ を作らない（論文はテーマのページの先行研究 DB）
     assert "papers" not in themes.THEME_SUBDIRS

@@ -11,7 +11,7 @@ import json
 
 from kei_agent.execution import runner
 from kei_agent.storage.notion import NotionError
-from kei_agent.storage.notion_store import Note, Task
+from kei_agent.storage.notion_store import OWNER_KEI, TONIGHT, WAITING, Note, Task
 
 # Notion API 2026-03-11 で消えたキー。送ったら落として気づけるようにする
 _LEGACY_NOTION_KEYS = {"after": "position.after_block", "archived": "in_trash"}
@@ -144,16 +144,12 @@ class FakeAI:
 
 
 class FakeNotion:
-    """NotionStore の代わり。Task とノートをメモリに持つ。"""
+    """NotionStore の代わり。テーマごとの Task をメモリに持つ。"""
 
     def __init__(self):
         self.tasks: dict[str, Task] = {}
-        self.bodies: dict[str, str] = {}
         self.results: dict[str, str] = {}
-        self.notes: list[Note] = []
-        self.themes: dict[str, str] = {}
-        # 先行研究 DB（ID → 行）
-        self.papers: dict[str, dict] = {}
+        self.themes: set[str] = set()
         self.fail = False
         self._n = 0
 
@@ -161,43 +157,20 @@ class FakeNotion:
         if self.fail:
             raise NotionError("503 Service Unavailable")
 
-    def paper_ids(self):
-        self._check()
-        return list(self.papers)
-
-    def add_papers(self, theme, items, source):
-        self._check()
-        for item in items:
-            row = self.papers.setdefault(item["id"], {**item, "themes": [], "source": source, "state": "未読"})
-            if theme not in row["themes"]:
-                row["themes"].append(theme)
-        return len(items)
-
-    def add_task(self, title, theme=None, status="今夜やる", slack_url=None, body="", assignee="Kei Agent"):
+    def add_task(self, title, theme=None, status=TONIGHT, slack_url=None, body="", assignee=OWNER_KEI):
         self._n += 1
-        task = Task(f"task-{self._n}", title, status, assignee, "P1", None, slack_url,
-                    [f"theme-{theme}"] if theme else [], f"https://notion.example/task-{self._n}",
-                    [theme] if theme else [])
+        task = Task(f"task-{self._n}", title, status, assignee, None, body, slack_url, theme,
+                    f"https://notion.example/task-{self._n}")
         self.tasks[task.id] = task
-        self.bodies[task.id] = body
         return task
-
-    def create_night_task(self, title, theme_name, slack_url, body):
-        self._check()
-        for t in self.tasks.values():
-            if t.slack_url == slack_url:
-                t.status = "今夜やる"
-                return t
-        return self.add_task(title, theme_name, slack_url=slack_url, body=body)
-
 
     def tonight_tasks(self, limit):
         self._check()
-        return [t for t in self.tasks.values() if t.assignee == "Kei Agent" and t.status == "今夜やる"][:limit]
+        return [t for t in self.tasks.values() if t.owner == OWNER_KEI and t.status == TONIGHT][:limit]
 
     def count_tonight_tasks(self):
         self._check()
-        return len([t for t in self.tasks.values() if t.assignee == "Kei Agent" and t.status == "今夜やる"])
+        return len(self.tonight_tasks(10_000))
 
     def update_task(self, page_id, status=None, result=None, slack_url=None):
         self._check()
@@ -209,23 +182,16 @@ class FakeNotion:
         if slack_url:
             task.slack_url = slack_url
 
-    def page_markdown(self, page_id):
-        return self.bodies.get(page_id, "")
-
-    def ensure_theme(self, name, slack_url, directory):
+    def ensure_theme(self, name):
         self._check()
         if name in self.themes:
             return False
-        self.themes[name] = slack_url
+        self.themes.add(name)
         return True
-
-    def notes_edited_since(self, since, kinds):
-        self._check()
-        return [n for n in self.notes if n.kind in kinds]
 
     def awaiting_tasks(self):
         self._check()
-        return [t for t in self.tasks.values() if t.status == "確認待ち"]
+        return [t for t in self.tasks.values() if t.status == WAITING]
 
     def tasks_due_on(self, day):
         """その日が期日の Task。済みも返す（Daily で取り消し線にするため）。"""
@@ -234,10 +200,6 @@ class FakeNotion:
     def tasks_due_within(self, today, days):
         self._check()
         return []
-
-    def upcoming_milestones(self, today, limit=5):
-        self._check()
-        return [{"name": "中間発表", "due": "2026-10-01", "url": "https://notion.example/m1"}]
 
 
 class FakeNotionAPI:
@@ -476,7 +438,7 @@ class FakeNotionAPI:
                     page[key] = body[key]
         return self._ok(page)
 
-    def _append(self, parent_id: str, child: dict, after: str | None = None) -> dict:
+    def _append(self, parent_id: str, child: dict, after: str | None = None, start: bool = False) -> dict:
         kind = child["type"]
         block_id = self.new_id()
         parent = self.items[self.key(parent_id)]
@@ -486,7 +448,8 @@ class FakeNotionAPI:
                  kind: {**child.get(kind, {}), "rich_text": self._rich(child.get(kind, {}).get("rich_text") or [])}}
         self.items[self.key(block_id)] = block
         kids = self.children.setdefault(self.key(parent_id), [])
-        kids.insert(kids.index(self.key(after)) + 1 if after else len(kids), self.key(block_id))
+        at = kids.index(self.key(after)) + 1 if after else 0 if start else len(kids)
+        kids.insert(at, self.key(block_id))
         return block
 
     def _blocks(self, method, item_id, tail, body, query):
@@ -496,9 +459,10 @@ class FakeNotionAPI:
         if tail == "children":
             if method == "PATCH":
                 after = ((body.get("position") or {}).get("after_block") or {}).get("id")
+                start = (body.get("position") or {}).get("type") == "start"
                 added = []
                 for child in body["children"]:
-                    added.append(self._append(item_id, child, after))
+                    added.append(self._append(item_id, child, after, start and not added))
                     after = added[-1]["id"]
                 return self._ok({"object": "list", "results": added})
             kids = [self._block_view(self.items[key]) for key in self.children.get(self.key(item_id), [])
@@ -517,6 +481,7 @@ class FakeNotionAPI:
 
             db_id, _ = self.add_database(parent, plain_text(body.get("title") or []),
                                          (body.get("initial_data_source") or {}).get("properties"))
+            self.items[self.key(db_id)]["is_inline"] = bool(body.get("is_inline"))
             return self._ok(self.items[self.key(db_id)])
         db = self._get(item_id, "database")
         if db is None:

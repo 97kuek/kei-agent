@@ -11,19 +11,22 @@ import logging
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 
 from kei_agent.configuration.config import Config
 from kei_agent.storage.notion import (
     BLOCKS_PER_REQUEST,
+    PREMISES_HEADING,
+    TASKS_TITLE,
     Notion,
     NotionError,
     append_blocks,
+    create_theme_databases,
     gateway_notion,
     schema_problems,
-    theme_papers_view,
+    theme_page_blocks,
 )
 
 log = logging.getLogger(__name__)
@@ -39,22 +42,35 @@ RESULT_LIMIT = 300
 _PERMALINK = re.compile(r"/archives/(?P<channel>[A-Z0-9]+)/p(?P<ts>\d{10})(?P<frac>\d{6})")
 
 
+NOT_STARTED, TONIGHT, RUNNING, WAITING, DONE = "Not started", "Tonight", "Running", "Waiting", "Done"
+OWNER_ME, OWNER_KEI = "Me", "Kei"
+THEME_ACTIVE, THEME_ON_HOLD = "In progress", "On hold"
+RESULT_PREFIX = "結果: "
+
+_NUMBERED = re.compile(r"^\d+-")
+
+
+def workspace_name(channel_name: str) -> str:
+    """チャンネル名（1-amr-query）から作業場の名前（amr-query）を取る。"""
+    return _NUMBERED.sub("", channel_name.lstrip("#"))
+
+
 @dataclass
 class Task:
     id: str
     title: str
     status: str
-    assignee: str | None
-    priority: str | None
+    owner: str | None
     due: str | None
+    work: str
     slack_url: str | None
-    theme_ids: list[str]
+    theme: str | None
     url: str | None = None
-    theme_names: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Note:
+    """Daily・振り返りの1行。notion_hub.HubStore が使うので、Hub が整理されるまで残す。"""
     id: str
     title: str
     kind: str | None
@@ -214,7 +230,7 @@ class NotionStore:
             self.state = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
             raise NotionError(f"{state_path} を読めません: {e}") from None
-        self._theme_names: dict[str, str] = {}
+        self._task_sources: dict[str, str | None] = {}
 
     def schema_problems(self) -> list[str]:
         """Notion の項目が Kei Agent の使う形からずれていないか見る（起動時の確認）。"""
@@ -242,195 +258,110 @@ class NotionStore:
 
     # テーマ
 
+    def active_themes(self) -> list[tuple[str, str]]:
+        rows = self._query("themes", {"filter": {"property": "Status", "status": {"equals": THEME_ACTIVE}}})
+        return [(plain_text(_prop(r["properties"], "Name")["title"]), r["id"]) for r in rows]
+
     def theme_page_id(self, name: str) -> str | None:
-        rows = self._query("themes", {"filter": {"property": "名前", "title": {"equals": name}}})
+        rows = self._query("themes", {"filter": {"property": "Name", "title": {"equals": workspace_name(name)}}})
         return rows[0]["id"] if rows else None
 
-    def theme_name(self, page_id: str) -> str:
-        if page_id not in self._theme_names:
-            page = self.notion.request("GET", f"/pages/{page_id}")
-            self._theme_names[page_id] = plain_text(_prop(page["properties"], "名前")["title"])
-        return self._theme_names[page_id]
+    def theme_tasks(self, theme: str, page_id: str) -> str | None:
+        """テーマのページの子の「Task」DB の data_source_id。無ければ None（そのテーマは飛ばす）。"""
+        if page_id not in self._task_sources:
+            ids = [b["id"] for b in self.notion.children(page_id)
+                   if b["type"] == "child_database" and b["child_database"]["title"] == TASKS_TITLE]
+            if len(ids) > 1:
+                raise NotionError(f"テーマ「{theme}」のページに「{TASKS_TITLE}」の DB が {len(ids)} つあります")
+            self._task_sources[page_id] = (
+                self.notion.request("GET", f"/databases/{ids[0]}")["data_sources"][0]["id"] if ids else None)
+            if not ids:
+                log.warning("テーマ「%s」のページに「%s」の DB がありません", theme, TASKS_TITLE)
+        return self._task_sources[page_id]
 
-    def ensure_theme(self, name: str, slack_url: str, directory: str) -> bool:
-        """テーマの行がなければ作る。作ったら True。そのページには、テーマの論文だけの表も置く。"""
-        if self.theme_page_id(name):
+    def _has_heading(self, page_id: str, heading: str) -> bool:
+        return any(b["type"] == "heading_2" and plain_text(b["heading_2"]["rich_text"]) == heading
+                   for b in self.notion.children(page_id))
+
+    def ensure_theme(self, name: str) -> bool:
+        """テーマの行がなければ作り、ページに見出しと Task・先行研究の DB を置く。作ったら True。"""
+        name = workspace_name(name)
+        existing = self.theme_page_id(name)
+        if existing:
+            # 作りかけ・古いページも整える（何度やっても同じ）
+            create_theme_databases(self.notion, existing)
+            if not self._has_heading(existing, PREMISES_HEADING):
+                self.notion.request("PATCH", f"/blocks/{existing}/children",
+                                    {"children": theme_page_blocks(), "position": {"type": "start"}})
             return False
-        page = self._create_page("themes", {
-            "名前": {"title": rich_text(name)},
-            "状態": {"select": {"name": "進行中"}},
-            "Slack": {"url": slack_url or None},
-            "ディレクトリ": {"rich_text": rich_text(directory)},
+        page = self.notion.request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": self._db("themes")["data_source_id"]},
+            "properties": {"Name": {"title": rich_text(name)}, "Status": {"status": {"name": THEME_ACTIVE}},
+                           "Start": {"date": {"start": date.today().isoformat()}}},
+            "children": theme_page_blocks(),
         })
-        if "papers" in self.state.get("databases", {}):
-            try:
-                self.notion.request("POST", "/views", theme_papers_view(self._db("papers"), page["id"]))
-            except NotionError as e:
-                log.warning("テーマのページに先行研究の表を置けません: %s", e)
+        create_theme_databases(self.notion, page["id"])
         return True
-
-    # 先行研究
-
-    def paper_ids(self) -> list[str]:
-        """先行研究 DB にある論文の ID（同じ論文を二度入れないため）。"""
-        return [pid for row in self._query("papers", {})
-                if (pid := plain_text(_prop(row["properties"], "ID").get("rich_text") or []))]
-
-    def add_papers(self, theme: str, items: list[dict], source: str) -> int:
-        """論文を先行研究 DB に「未読」で入れる。同じ ID の行があれば、テーマを足すだけ。書いた行の数を返す。"""
-        theme_id = self.theme_page_id(theme)
-        if theme_id is None:
-            raise NotionError(f"研究ホームの「テーマ」に {theme} の行がありません")
-        written = 0
-        for item in items:
-            paper_id = str(item.get("id") or "").strip()
-            title = str(item.get("title") or "").strip()
-            if not paper_id or not title:
-                continue
-            rows = self._query("papers", {"filter": {"property": "ID", "rich_text": {"equals": paper_id}}})
-            if rows:
-                related = [r["id"] for r in _prop(rows[0]["properties"], "テーマ").get("relation") or []]
-                if theme_id not in related:
-                    self.notion.request("PATCH", f"/pages/{rows[0]['id']}", {"properties": {
-                        "テーマ": {"relation": [{"id": i} for i in [*related, theme_id]]}}})
-                    written += 1
-                continue
-            year = str(item.get("year") or "")
-            self._create_page("papers", {
-                "名前": {"title": rich_text(title[:200])},
-                "URL": {"url": str(item.get("url") or "") or None},
-                "ID": {"rich_text": rich_text(paper_id)},
-                "著者": {"rich_text": rich_text(", ".join(str(a) for a in item.get("authors") or [])[:500])},
-                "年": {"number": int(year) if year.isdigit() else None},
-                "会場": {"rich_text": rich_text(str(item.get("venue") or ""))},
-                "要点": {"rich_text": rich_text(str(item.get("summary") or ""))},
-                "この研究との関係": {"rich_text": rich_text(str(item.get("relation") or ""))},
-                "見つけた日": {"date": {"start": str(item.get("found") or date.today().isoformat())}},
-                "出どころ": {"select": {"name": source}},
-                "状態": {"select": {"name": "未読"}},
-                "テーマ": {"relation": [{"id": theme_id}]},
-            })
-            written += 1
-        return written
 
     # Task
 
-    def _task(self, page: dict) -> Task:
+    def _task(self, page: dict, theme: str) -> Task:
         props = page["properties"]
-        title = plain_text(_prop(props, "タイトル")["title"])
-        status = (_prop(props, "状態").get("status") or {}).get("name", "")
-        assignee = (_prop(props, "担当").get("select") or {}).get("name")
-        priority = (_prop(props, "優先度").get("select") or {}).get("name")
-        due = (_prop(props, "期日").get("date") or {}).get("start")
-        theme_ids = [r["id"] for r in _prop(props, "テーマ").get("relation") or []]
-        task = Task(page["id"], title, status, assignee, priority, due, _prop(props, "Slack").get("url"),
-                    theme_ids, page.get("url"))
-        task.theme_names = [self.theme_name(t) for t in theme_ids]
-        return task
+        return Task(
+            page["id"], plain_text(_prop(props, "Title")["title"]),
+            (_prop(props, "Status").get("status") or {}).get("name", ""),
+            (_prop(props, "Owner").get("select") or {}).get("name"),
+            (_prop(props, "Due").get("date") or {}).get("start"),
+            plain_text(_prop(props, "Work & Result").get("rich_text") or []),
+            _prop(props, "Slack").get("url"), theme, page.get("url"))
+
+    def _tasks(self, body: dict) -> list[Task]:
+        """In progress のテーマを順に開き、それぞれの Task の DB を同じ条件で読む。"""
+        found = []
+        for theme, page_id in self.active_themes():
+            source = self.theme_tasks(theme, page_id)
+            if source is None:
+                continue
+            rows = self.notion.paginate("POST", f"/data_sources/{source}/query", {**body, "page_size": 100})
+            found += [self._task(r, theme) for r in rows]
+        return found
 
     def tonight_tasks(self, limit: int) -> list[Task]:
-        rows = self._query("tasks", {
-            "filter": {"and": [
-                {"property": "担当", "select": {"equals": "Kei Agent"}},
-                {"property": "状態", "status": {"equals": "今夜やる"}},
-            ]},
-            "sorts": [{"timestamp": "created_time", "direction": "ascending"}],
-        })
-        return [self._task(r) for r in rows[:limit]]
+        return self._tasks({"filter": {"and": [
+            {"property": "Owner", "select": {"equals": OWNER_KEI}},
+            {"property": "Status", "status": {"equals": TONIGHT}},
+        ]}, "sorts": [{"timestamp": "created_time", "direction": "ascending"}]})[:limit]
 
     def count_tonight_tasks(self) -> int:
-        return len(self._query("tasks", {"filter": {"and": [
-            {"property": "担当", "select": {"equals": "Kei Agent"}},
-            {"property": "状態", "status": {"equals": "今夜やる"}},
-        ]}}))
-
-    def task_by_slack_url(self, slack_url: str) -> Task | None:
-        rows = self._query("tasks", {"filter": {"property": "Slack", "url": {"equals": slack_url}}})
-        return self._task(rows[0]) if rows else None
-
-    def create_night_task(self, title: str, theme_name: str, slack_url: str, body: str) -> Task:
-        """依頼元の URL をキーに夜間 Task を作る。既存なら「今夜やる」に戻す。"""
-        existing = self.task_by_slack_url(slack_url)
-        if existing:
-            self.update_task(existing.id, status="今夜やる")
-            existing.status = "今夜やる"
-            return existing
-        theme_id = self.theme_page_id(theme_name)
-        properties = {
-            "タイトル": {"title": rich_text(title)},
-            "状態": {"status": {"name": "今夜やる"}},
-            "担当": {"select": {"name": "Kei Agent"}},
-            "Slack": {"url": slack_url},
-        }
-        if theme_id:
-            properties["テーマ"] = {"relation": [{"id": theme_id}]}
-        return self._task(self._create_page("tasks", properties, body))
+        return len(self.tonight_tasks(10_000))
 
     def update_task(self, page_id: str, status: str | None = None, result: str | None = None,
                     slack_url: str | None = None) -> None:
-        properties = {}
+        properties: dict = {}
         if status:
-            properties["状態"] = {"status": {"name": status}}
+            properties["Status"] = {"status": {"name": status}}
         if result is not None:
-            properties["結果"] = {"rich_text": rich_text(result[:RESULT_LIMIT])}
+            page = self.notion.request("GET", f"/pages/{page_id}")
+            before = plain_text(_prop(page["properties"], "Work & Result").get("rich_text") or [])
+            added = RESULT_PREFIX + result[:RESULT_LIMIT]
+            properties["Work & Result"] = {"rich_text": rich_text(f"{before}\n{added}" if before else added)}
         if slack_url:
             properties["Slack"] = {"url": slack_url}
         self.notion.request("PATCH", f"/pages/{page_id}", {"properties": properties})
 
     def awaiting_tasks(self) -> list[Task]:
-        return [self._task(r) for r in self._query("tasks", {
-            "filter": {"property": "状態", "status": {"equals": "確認待ち"}}})]
+        return self._tasks({"filter": {"property": "Status", "status": {"equals": WAITING}}})
 
     def tasks_due_on(self, day: date) -> list[Task]:
-        """その日が期日の Task。**済みも返す**（Daily では取り消し線にして、やったことも見せる）。"""
-        rows = self._query("tasks", {
-            "filter": {"property": "期日", "date": {"equals": day.isoformat()}},
-            "sorts": [{"property": "期日", "direction": "ascending"}],
-        })
-        return [self._task(r) for r in rows]
+        """その日が Due の Task。**済みも返す**（Daily では取り消し線にして、やったことも見せる）。"""
+        return self._tasks({"filter": {"property": "Due", "date": {"equals": day.isoformat()}}})
 
     def tasks_due_within(self, today: date, days: int) -> list[Task]:
-        rows = self._query("tasks", {
-            "filter": {"and": [
-                {"property": "期日", "date": {"on_or_before": (today + timedelta(days=days)).isoformat()}},
-                {"property": "状態", "status": {"does_not_equal": "完了"}},
-            ]},
-            "sorts": [{"property": "期日", "direction": "ascending"}],
-        })
-        return [self._task(r) for r in rows]
-
-    # ノートとマイルストーン
-
-    def _note(self, page: dict, with_body: bool) -> Note:
-        props = page["properties"]
-        note = Note(
-            page["id"], plain_text(_prop(props, "タイトル")["title"]),
-            (_prop(props, "種類").get("select") or {}).get("name"),
-            (_prop(props, "日付").get("date") or {}).get("start"),
-            page.get("url"),
-        )
-        if with_body:
-            note.body = self.page_markdown(page["id"])
-        return note
-
-    def notes_edited_since(self, since: datetime, kinds: list[str]) -> list[Note]:
-        rows = self._query("notes", {
-            "filter": {"and": [
-                {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": since.astimezone().isoformat()}},
-                {"or": [{"property": "種類", "select": {"equals": k}} for k in kinds]},
-            ]},
-            "sorts": [{"timestamp": "last_edited_time", "direction": "ascending"}],
-        })
-        return [self._note(r, with_body=True) for r in rows]
-
-    def upcoming_milestones(self, today: date, limit: int = 5) -> list[dict]:
-        rows = self._query("milestones", {
-            "filter": {"property": "期日", "date": {"on_or_after": today.isoformat()}},
-            "sorts": [{"property": "期日", "direction": "ascending"}],
-        })
-        return [{"name": plain_text(_prop(r["properties"], "名前")["title"]),
-                 "due": (_prop(r["properties"], "期日").get("date") or {}).get("start"),
-                 "url": r.get("url")} for r in rows[:limit]]
+        tasks = self._tasks({"filter": {"and": [
+            {"property": "Due", "date": {"on_or_before": (today + timedelta(days=days)).isoformat()}},
+            {"property": "Status", "status": {"does_not_equal": DONE}},
+        ]}})
+        return sorted(tasks, key=lambda t: t.due or "")
 
 
 def load_notion(config: Config, env: dict[str, str] | None = None) -> NotionStore | None:

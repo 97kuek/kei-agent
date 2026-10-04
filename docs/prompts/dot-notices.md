@@ -2,7 +2,7 @@
 
 - Dot の予定名: Kei Agent からの知らせ
 - 時刻: 毎時（日本時間）
-- 出力先: 知らせの channel と依頼元のスレッド、研究ホームの「Task」
+- 出力先: 知らせの channel と依頼元のスレッド、各テーマの Task、テーマのページの進捗ログ
 
 この予定の指示欄に、次のコードブロック内の全文を貼ります。共通ルールも含むため、追加の前置きは不要です。
 
@@ -26,13 +26,15 @@ Kei Agent の MCP の notices を done=[] で呼ぶ。MCP が使えなければ�
 - thread（スレッドの親の本文）があれば、そのチャンネルに実在する投稿のスレッドに返す。見つからなければ、親の本文の1行目を引用してチャンネルに出す
 - 同じ id の知らせが前にも来ていたら、そのチャンネルの自分の投稿から前の投稿を探して書き換える。見つからない・書き換えられないときは新しく出す
 - 文は言い換えずにそのまま出す
-- ジョブが終わった知らせで conversation があれば、保存している依頼元と照合してから、run（同じ workspace と conversation、weight=light、read_only=true）に「ジョブの結果を読んでまとめて」と頼む。結果は依頼元（Slack のスレッド、または夜間の Task の「結果」）に返す
+- ジョブが終わった知らせで conversation があれば、保存している依頼元と照合してから、run（同じ workspace と conversation、weight=light、read_only=true）に「ジョブの結果を読んでまとめて」と頼む。結果は依頼元（Slack のスレッド、または夜間の Task の Work & Result の「結果: …」）に返す
 - 「📎 名前」の知らせ（作業場にできたファイル）は、channel を workspace にして read_file で読み、要点を添えて出す
 - workspace は workspaces にあるものだけを使う
-研究ホームの「Task」（collection://1e54109b-c63e-4252-9a9f-99ca9c500980）で、担当「Kei Agent」・状態「実行中」の行の「結果」にある ticket を status で見る。
+研究ホームの「テーマ」（collection://f6006082-2b4a-4599-abae-be0fdcfec5dd）で Status が In progress のテーマを順に開き、ページの中の「Task」「先行研究」の DB を読み書きする。テーマのページに DB が無いときは、そのテーマを飛ばして1行で知らせる。
+各テーマの Task で、Owner が Kei、Status が Running の行の Work & Result にある ticket を status で見る。
 - queued・running: そのままにする。同じ依頼を出し直さない
-- done は「完了」、needs_input は「確認待ち」にし、「結果」に要点を3行で足す
-- failed、または ticket が見つからないときは「確認待ち」にして理由を残す。自動で再実行しない
+- done は Status を Done、needs_input は Waiting にし、Work & Result に「結果: …」で要点を3行で足す
+- failed、または ticket が見つからないときは Waiting にして理由を残す。自動で再実行しない
+- ジョブの結果が出たときは、そのテーマのページの「進捗ログ」に日付付きで1〜3行を書き足す
 Slack に出せた知らせの id だけを done に入れて、notices をもう一度呼ぶ（出せなかったものは次の回にまた来る）。
 知らせも状態の変わった Task も無い回は、Slack に何も出さず、作業記録も付けない。
 ```

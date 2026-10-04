@@ -5,14 +5,14 @@
 | 貼り付け先 | 時刻（日本時間） | 全文 | 出力先 |
 |---|---|---|---|
 | Dot との会話（継続指示） | — | [Slack・通話・MCP・安全と Notion の扱い](dot-custom-instructions.md) | 依頼元のスレッド・通話 |
-| 定期実行の指示 | 07:00 | [先行研究の新着](dot-literature.md) | Slack `#0-overview`、研究ホームの「先行研究」 |
+| 定期実行の指示 | 07:00 | [先行研究の新着](dot-literature.md) | Slack `#0-overview`、各テーマの先行研究 |
 | 定期実行の指示 | 07:00 | [読みもの](dot-reading.md) | Slack `#4-knowledge`（記事ごとの親投稿） |
 | 定期実行の指示 | 07:40 | [カレンダーの同期](dot-calendar-sync.md) | 共通ホームの「予定カレンダー」（異常の通知は `#0-overview`） |
 | 定期実行の指示 | 08:00 | [朝の一覧と Daily](dot-daily.md) | Slack `#0-overview`、共通ホームの「日別記録」 |
 | 定期実行の指示 | 08:00・18:00 | [締切の知らせ](dot-deadlines.md) | Slack `#0-overview` |
-| 定期実行の指示 | 21:00 | [振り返り（Retro & Planning）](dot-review.md) | Slack `#0-overview`、共通ホームの「日別記録」 |
-| 定期実行の指示 | 毎時 | [Kei Agent からの知らせ](dot-notices.md) | 知らせの channel と依頼元のスレッド、研究ホームの「Task」 |
-| 定期実行の指示 | 00:00 | [夜間の Task](dot-night-tasks.md) | 研究ホームの「Task」（MCP の run を使用） |
+| 定期実行の指示 | 21:00 | [振り返り（Retro & Planning）](dot-review.md) | Slack `#0-overview`、共通ホームの「日別記録」、動きがあったテーマの進捗ログ |
+| 定期実行の指示 | 毎時 | [Kei Agent からの知らせ](dot-notices.md) | 知らせの channel と依頼元のスレッド、各テーマの Task と進捗ログ |
+| 定期実行の指示 | 00:00 | [夜間の Task](dot-night-tasks.md) | 各テーマの Task と進捗ログ（MCP の run を使用） |
 
 - 同名の既存予定を更新します。文書を作るだけでは、Dot やローカルの実設定は変わりません。
 - 朝の読みものは `#4-knowledge` に1記事1親投稿です。3記事なら3投稿になり、それぞれのスレッドで続けられます。

@@ -16,13 +16,14 @@ from kei_agent.conversation.slack_text import format_duration
 from kei_agent.framework import modules
 from kei_agent.scheduling import deadline, timelog
 from kei_agent.storage.notion import NotionError
+from kei_agent.storage.notion_store import DONE
 from kei_agent.storage.store import Store, schedule_detail
 from kei_agent.workspaces import themes
 
 if TYPE_CHECKING:
     from kei_agent.conversation.assistant import Assistant
 
-# 材料に入れるノートの本文の長さ
+# 材料に入れる振り返りの本文の長さ
 NOTE_EXCERPT = 1500
 # 前日の振り返り（貼られた結論を含む）を材料に入れる長さ
 REVIEW_EXCERPT = 4000
@@ -31,8 +32,6 @@ MAX_DIGEST_CHARS = 30000
 TRUNCATED = "（材料が長いので、ここから先は省いた）"
 # 大学・仕事の材料で、1行に並べる件数の上限（材料が長いと、要点が埋もれる）
 MAX_DOMAIN_ITEMS = 4
-# Notion の Task の「終わった」状態の名前
-DONE = "完了"
 
 
 def _ts(value: float | None) -> str:
@@ -111,7 +110,7 @@ class DigestBuilder:
         lines += self._agent_time(now)
         if domains:
             lines += await self._agenda(now)
-        # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
+        # 長くなりうる本文（前日の振り返り）は最後に置く。上限を超えたらそこから削れる
         tasks, notes = await self._notion(since, now)
         lines += ["", *tasks]
         lines += await self._yesterday_review(now)
@@ -214,23 +213,21 @@ class DigestBuilder:
         return [*lines, _excerpt(text.strip(), REVIEW_EXCERPT) if text.strip() else "- なし"]
 
     async def _notion(self, since: float, now: float) -> tuple[list[str], list[str]]:
-        """（Task とマイルストーンの一覧, ノートの本文）。一覧は短く、今日のタスクの元になるので先に置く。"""
+        """（テーマの Task の一覧, 前回以降の振り返り）。一覧は短く、今日のタスクの元になるので先に置く。"""
         notion = self.assistant.notion
         if notion is None:
             return ["## Notion", "", "- 設定されていない"], []
         today = datetime.fromtimestamp(now).date()
         yesterday = (today - timedelta(days=1)).isoformat()
         try:
-            notes = await asyncio.to_thread(notion.notes_edited_since, datetime.fromtimestamp(since), ["計画", "考察"])
+            reviews = []
             if self.assistant.hub is not None:
-                hub_reviews = await asyncio.to_thread(
-                    self.assistant.hub.reviews_edited_since, datetime.fromtimestamp(since))
-                # 振り返りは共通ホームの DB から。前日の分は「前日の振り返り」に丸ごと入れてある
-                notes += [review for review in hub_reviews if review.day != yesterday]
+                # 前日の分は「前日の振り返り」に丸ごと入れてある
+                reviews = [r for r in await asyncio.to_thread(
+                    self.assistant.hub.reviews_edited_since, datetime.fromtimestamp(since)) if r.day != yesterday]
             today_tasks = await asyncio.to_thread(notion.tasks_due_on, today)
             awaiting = await asyncio.to_thread(notion.awaiting_tasks)
             due = await asyncio.to_thread(notion.tasks_due_within, today, 3)
-            milestones = await asyncio.to_thread(notion.upcoming_milestones, today)
             tonight = await asyncio.to_thread(notion.count_tonight_tasks)
         except NotionError as e:
             await self.assistant.notify_trouble(f"Daily の材料を Notion から読めませんでした: {e}")
@@ -238,20 +235,17 @@ class DigestBuilder:
 
         # Daily の「今日のタスク」になる。済みも入れて、やったことも見せる
         lines = ["## Notion: 今日が期日の Task（済みを含む）", ""]
-        lines += [f"- {'済' if t.status == DONE else '未'} {t.title}（{t.status}） {t.url}"
+        lines += [f"- {'済' if t.status == DONE else '未'} {t.title}（{t.theme}・{t.status}） {t.url}"
                   for t in today_tasks] or ["- なし"]
         lines += ["", "## Notion: 確認待ちの Task", ""]
-        lines += [f"- {t.title}（{', '.join(t.theme_names) or '-'}） {t.url}" for t in awaiting] or ["- なし"]
+        lines += [f"- {t.title}（{t.theme}） {t.url}" for t in awaiting] or ["- なし"]
         lines += ["", "## Notion: 期日が3日以内の Task", ""]
-        lines += [f"- {t.due} {t.title}（{t.status}・{t.assignee or '-'}） {t.url}" for t in due] or ["- なし"]
-        lines += ["", "## Notion: 近いマイルストーン", ""]
-        lines += [f"- {m['due']} {m['name']} {m['url']}" for m in milestones] or ["- なし"]
+        lines += [f"- {t.due} {t.title}（{t.theme}・{t.status}・{t.owner or '-'}） {t.url}" for t in due] or ["- なし"]
         lines += ["", f"- 今夜やる Task: {tonight} 件"]
 
-        bodies = ["## Notion: 前回以降に書かれた計画・考察・振り返りのノート", ""]
-        for n in notes:
-            bodies += [f"### {n.kind}: {n.title}（{n.day or '-'}） {n.url}", "",
-                       _excerpt(n.body, NOTE_EXCERPT) or "（本文なし）", ""]
-        if not notes:
+        bodies = ["## Notion: 前回以降の振り返り", ""]
+        for r in reviews:
+            bodies += [f"### 振り返り（{r.day or '-'}） {r.url}", "", _excerpt(r.body, NOTE_EXCERPT) or "（本文なし）", ""]
+        if not reviews:
             bodies += ["- なし"]
         return lines, bodies

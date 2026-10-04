@@ -1,9 +1,23 @@
 import json
+from datetime import date
 
 import pytest
 
-from kei_agent.storage.notion import Notion, NotionError
+from kei_agent.storage.notion import (
+    PREMISES_HEADING,
+    TASKS_TITLE,
+    THEME_TASKS,
+    THEMES,
+    Notion,
+    NotionError,
+    create_theme_databases,
+)
 from kei_agent.storage.notion_store import (
+    DONE,
+    OWNER_KEI,
+    OWNER_ME,
+    TONIGHT,
+    WAITING,
     NotionStore,
     blocks_to_markdown,
     load_notion,
@@ -11,6 +25,7 @@ from kei_agent.storage.notion_store import (
     parse_slack_permalink,
     summarize,
 )
+from kei_agent.testing.fakes import FakeNotionAPI
 
 
 def test_parse_slack_permalink():
@@ -62,38 +77,6 @@ class RecordingNotion:
         return []
 
 
-@pytest.fixture
-def state(tmp_path):
-    path = tmp_path / "notion.json"
-    path.write_text(json.dumps({"databases": {
-        k: {"database_id": f"db-{k}", "data_source_id": f"ds-{k}", "properties": {}}
-        for k in ("themes", "tasks", "notes", "milestones")}}))
-    return path
-
-
-def test_create_night_task_links_theme(state):
-    notion = RecordingNotion([
-        {"results": [], "has_more": False},                   # 同じ Slack リンクの Task はない
-        {"results": [{"id": "theme-1"}], "has_more": False},  # テーマを探す
-        {"id": "task-1", "url": "https://notion.example/task-1", "properties": {
-            "タイトル": {"title": [{"plain_text": "条件C"}]}, "状態": {"status": {"name": "今夜やる"}},
-            "担当": {"select": {"name": "Kei Agent"}}, "優先度": {"select": None}, "期日": {"date": None},
-            "テーマ": {"relation": [{"id": "theme-1"}]}, "Slack": {"url": "https://s/p1"}}},
-        {"properties": {"名前": {"title": [{"plain_text": "vlm"}]}}},  # テーマ名を引く
-    ])
-    store = NotionStore(notion, state)
-
-    task = store.create_night_task("条件C", "vlm", "https://s/p1", "本文")
-
-    method, path, body = notion.calls[2]
-    assert (method, path) == ("POST", "/pages")
-    assert body["parent"] == {"type": "data_source_id", "data_source_id": "ds-tasks"}
-    assert body["properties"]["テーマ"] == {"relation": [{"id": "theme-1"}]}
-    assert body["properties"]["状態"] == {"status": {"name": "今夜やる"}}
-    assert body["children"][0]["type"] == "paragraph"
-    assert task.theme_names == ["vlm"]
-
-
 def test_load_notion_needs_gateway_token_and_state(config, tmp_path):
     gateway = {"KEI_AGENT_NOTION_GATEWAY_TOKEN": "master"}
     assert load_notion(config, env={}) is None
@@ -112,15 +95,6 @@ def test_store_requires_setup(tmp_path):
         NotionStore(RecordingNotion([]), tmp_path / "missing.json")
 
 
-def test_missing_property_is_reported_as_a_notion_error(state):
-    """Notion の画面でプロパティ名を変えると、素の KeyError で黙って止まっていた。"""
-    notion = RecordingNotion([
-        {"results": [{"id": "t1", "url": "u", "properties": {"タイトル": {"title": []}}}], "has_more": False},
-    ])
-    with pytest.raises(NotionError, match="状態"):
-        NotionStore(notion, state).tonight_tasks(5)
-
-
 def test_pagination_stops_when_the_cursor_is_empty():
     """has_more が立ったまま next_cursor が空だと、同じページを取り続けてしまう。"""
     notion = RecordingNotion([{"results": [{"id": "a"}], "has_more": True, "next_cursor": None}])
@@ -136,42 +110,174 @@ def test_blocks_to_markdown_reads_nested_blocks():
     assert blocks_to_markdown(blocks) == "- 考察"
 
 
+# テーマごとの Task
+
+
+def _client(api):
+    class Client:
+        request = staticmethod(api.request)
+
+        def paginate(self, method, path, body=None):
+            return Notion.paginate(self, method, path, body)
+
+        def children(self, block_id):
+            return Notion.children(self, block_id)
+
+    return Client()
+
+
+@pytest.fixture
+def home(tmp_path):
+    """テーマの DB が1つある研究ホームと、それを読む NotionStore。"""
+    api = FakeNotionAPI()
+    page = api.add_page(title="研究ホーム")
+    db, ds = api.add_database(page, "テーマ", THEMES["properties"])
+    path = tmp_path / "notion.json"
+    path.write_text(json.dumps({"databases": {"themes": {"database_id": db, "data_source_id": ds, "properties": {}}}}))
+    return api, ds, NotionStore(_client(api), path)
+
+
+def _theme(api, ds, name, status="In progress"):
+    page = api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": name}}]},
+                                                    "Status": {"status": {"name": status}}})
+    return page, create_theme_databases(_client(api), page)
+
+
+def _task(api, tasks_ds, title, status=TONIGHT, owner=OWNER_KEI, due=None, work="作業: 条件Cを回す"):
+    props = {"Title": {"title": [{"text": {"content": title}}]}, "Status": {"status": {"name": status}},
+             "Owner": {"select": {"name": owner}}, "Work & Result": {"rich_text": [{"text": {"content": work}}]}}
+    if due:
+        props["Due"] = {"date": {"start": due}}
+    return api.add_page(data_source=tasks_ds, properties=props)
+
+
+def test_tonight_tasks_come_only_from_active_themes(home):
+    api, ds, store = home
+    _, active = _theme(api, ds, "amr-query")
+    _, paused = _theme(api, ds, "vlm", status="On hold")
+    _task(api, active["tasks"], "条件C")
+    _task(api, active["tasks"], "自分の分", owner=OWNER_ME)
+    _task(api, paused["tasks"], "止めたテーマ")
+    tasks = store.tonight_tasks(5)
+    assert [(t.title, t.theme, t.work) for t in tasks] == [("条件C", "amr-query", "作業: 条件Cを回す")]
+    assert store.count_tonight_tasks() == 1
+
+
+def test_update_task_appends_the_result_to_work_and_result(home):
+    api, ds, store = home
+    _, dbs = _theme(api, ds, "amr-query")
+    task_id = _task(api, dbs["tasks"], "条件C")
+    store.update_task(task_id, status=DONE, result="71%")
+    page = api.request("GET", f"/pages/{task_id}")
+    text = "".join(t["plain_text"] for t in page["properties"]["Work & Result"]["rich_text"])
+    assert text == "作業: 条件Cを回す\n結果: 71%"
+    assert page["properties"]["Status"]["status"]["name"] == DONE
+
+
+def test_due_and_waiting_tasks_cross_themes(home):
+    api, ds, store = home
+    _, a = _theme(api, ds, "amr-query")
+    _, b = _theme(api, ds, "vlm")
+    _task(api, a["tasks"], "今日", status="Not started", owner=OWNER_ME, due="2026-10-04")
+    _task(api, b["tasks"], "待ち", status=WAITING)
+    assert [t.title for t in store.tasks_due_on(date(2026, 10, 4))] == ["今日"]
+    assert [(t.title, t.theme) for t in store.awaiting_tasks()] == [("待ち", "vlm")]
+
+
+def test_a_theme_without_a_task_database_is_skipped(home):
+    api, ds, store = home
+    api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": "作りかけ"}}]},
+                                             "Status": {"status": {"name": "In progress"}}})
+    _, dbs = _theme(api, ds, "amr-query")
+    _task(api, dbs["tasks"], "条件C")
+    assert [t.theme for t in store.tonight_tasks(5)] == ["amr-query"]
+
+
+def test_ensure_theme_uses_the_workspace_name_and_builds_the_page(home):
+    api, ds, store = home
+    assert store.ensure_theme("1-amr-query") is True
+    assert store.ensure_theme("amr-query") is False
+    (name, page_id), = store.active_themes()
+    assert name == "amr-query"
+    kinds = [b["type"] for b in _client(api).children(page_id)]
+    assert kinds.count("heading_2") == 2 and kinds.count("child_database") == 2
+
+
+def test_two_task_databases_on_a_theme_page_stop_reads_with_the_theme_named(home):
+    api, ds, store = home
+    page, _ = _theme(api, ds, "amr-query")
+    api.add_database(page, TASKS_TITLE, THEME_TASKS["properties"])
+    with pytest.raises(NotionError, match="amr-query"):
+        store.tonight_tasks(5)
+
+
+def test_ensure_theme_repairs_an_existing_theme_page_without_creating_a_row(home):
+    api, ds, store = home
+    page = api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": "amr-query"}}]},
+                                                    "Status": {"status": {"name": "In progress"}}})
+    api.add_block(page, "paragraph", "手で書いたメモ")
+    assert store.ensure_theme("amr-query") is False
+    assert store.ensure_theme("amr-query") is False
+    blocks = _client(api).children(page)
+    headings = [b["heading_2"]["rich_text"][0]["plain_text"] for b in blocks if b["type"] == "heading_2"]
+    assert headings == [PREMISES_HEADING, "進捗ログ"]
+    assert blocks[0]["type"] == "heading_2"
+    assert [b["child_database"]["title"] for b in blocks if b["type"] == "child_database"] == ["Task", "先行研究"]
+    assert len(store.active_themes()) == 1
+
+
 # Notion の項目のずれ（起動時の確認）
 
 
-class _SchemaApi:
-    """data_sources の GET だけに、SPECS どおりの項目で答える偽物。change(key, live) で中身を変えられる。"""
+def test_schema_problems_reports_theme_and_per_theme_database_drift(home):
+    """Notion の画面で選択肢や列を変えると、絞り込みが落ちる。それを起動のときに先に知らせる。"""
+    api, ds, store = home
+    page, dbs = _theme(api, ds, "amr-query")
+    assert store.schema_problems() == []
 
-    def __init__(self, change=lambda key, live: None):
-        self.change = change
+    api.items[api.key(dbs["tasks"])]["properties"] = {
+        k: v for k, v in api.items[api.key(dbs["tasks"])]["properties"].items() if k != "Owner"}
+    problems = store.schema_problems()
+    assert len(problems) == 1 and "Owner" in problems[0] and "amr-query" in problems[0]
 
-    def request(self, method, path, body=None):
-        from kei_agent.storage.notion import SPECS
+    live = api.items[api.key(ds)]["properties"]
+    live["Status"] = {**live["Status"], "status": {"options": [{"name": "進行中"}]}}
+    assert any("Status" in p for p in store.schema_problems())
 
-        key = path.split("/")[2].removeprefix("ds-")
-        live = {}
-        for name, want in SPECS[key]["properties"].items():
-            kind = next(iter(want))
-            live[name] = {"type": kind, kind: dict(want[kind])}
-        for name in SPECS[key].get("relations", {}):
-            live[name] = {"type": "relation", "relation": {}}
-        self.change(key, live)
-        return {"properties": live}
+    del store.state["databases"]["themes"]
+    assert any("themes: notion.json にありません" in p for p in store.schema_problems())
 
 
-def test_schema_problems_reports_renamed_options_and_missing_columns_and_databases():
-    """Notion の画面で「Kei Agent」を別名にすると、夜間 Task の絞り込みが落ちる。それを起動のときに先に知らせる。"""
-    from kei_agent.storage.notion import SPECS, schema_problems
+def test_schema_problems_skips_themes_that_are_not_in_progress(home):
+    api, ds, store = home
+    _theme(api, ds, "done-theme", status="Done")
+    api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": "held"}}]},
+                                             "Status": {"status": {"name": "On hold"}}})
+    assert store.schema_problems() == []
 
-    state = {"databases": {k: {"data_source_id": f"ds-{k}"} for k in SPECS}}
-    assert schema_problems(_SchemaApi(), state) == []
 
-    def rename(key, live):
-        if key == "tasks":
-            live["担当"]["select"]["options"] = [{"name": "自分"}, {"name": "Ezra"}]
-            del live["優先度"]
+def test_schema_problems_keeps_going_when_one_theme_page_cannot_be_read(home):
+    api, ds, store = home
+    page, _ = _theme(api, ds, "broken")
+    _theme(api, ds, "fine")
+    inner = store.notion
+    real = inner.children
 
-    assert schema_problems(_SchemaApi(rename), state) == [
-        'tasks: 項目「担当」に選択肢 Kei Agent がありません', 'tasks: 項目「優先度」がありません']
-    del state["databases"]["notes"]
-    assert any("notes: notion.json にありません" in p for p in schema_problems(_SchemaApi(), state))
+    def children(block_id):
+        if api.key(block_id) == api.key(page):
+            raise NotionError("boom")
+        return real(block_id)
+
+    inner.children = children
+    problems = store.schema_problems()
+    assert len(problems) == 1 and "broken" in problems[0] and "boom" in problems[0]
+
+
+def test_schema_problems_reads_each_theme_page_once(home):
+    api, ds, store = home
+    _theme(api, ds, "amr-query")
+    calls = []
+    real = store.notion.children
+    store.notion.children = lambda block_id: calls.append(block_id) or real(block_id)
+    assert store.schema_problems() == []
+    assert len(calls) == 1

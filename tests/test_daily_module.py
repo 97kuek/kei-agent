@@ -15,7 +15,7 @@ from kei_agent.conversation.request import Request
 from kei_agent.execution import runner
 from kei_agent.framework import modules
 from kei_agent.scheduling.schedule import Scheduler, task_names
-from kei_agent.storage.notion_store import Note
+from kei_agent.storage.notion_store import WAITING, Note
 from kei_agent_modules.daily import texts
 from kei_agent_modules.daily.module import daily_answer, review_answer
 
@@ -83,9 +83,9 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     store.record_schedule("literature", "2026-09-18", {"themes": {"vlm": {"status": "no_new"}}})
     store.record_schedule("night", "2026-09-18", {"status": "done", "tasks": [
         {"title": "条件Cも回して", "theme": "vlm", "status": "完了", "summary": "71%", "url": "https://notion.example/t"}]})
-    assistant.notion.add_task("返事が要る", "vlm", status="確認待ち")
-    assistant.notion.notes.append(Note("note-1", "条件Bの考察", "考察", "2026-09-17",
-                                       "https://notion.example/note-1", "質問を先に見せると精度が上がる"))
+    assistant.notion.add_task("返事が要る", "vlm", status=WAITING)
+    assistant.hub.edited.append(Note("review-1", "振り返り", "振り返り", "2026-09-17",
+                                     "https://notion.example/review-1", "質問を先に見せると精度が上がる"))
     claude.behaviors = [{"text": DAILY_REPLY, "session_id": "daily-sess"}]
 
     detail = await daily(assistant).daily("2026-09-18")
@@ -102,15 +102,14 @@ async def test_daily_posts_to_overview_and_notion(env, config, store):
     # 「今日のタスク」の元になる（済みも入れて、取り消し線にする）
     assert "## Notion: 今日が期日の Task（済みを含む）" in text
     assert "条件Cも回して（vlm）: 完了 71%" in text
-    assert "### 考察: 条件Bの考察" in text and "質問を先に見せると精度が上がる" in text
-    assert "返事が要る" in text and "中間発表" in text
+    assert "### 振り返り（2026-09-17）" in text and "質問を先に見せると精度が上がる" in text
+    assert "返事が要る（vlm）" in text and "マイルストーン" not in text
     header, body = slack.posted()
     # 見出しには、朝の時系列（今日の予定）と Daily の題を1通にまとめて出す
     # チャンネルには予定だけ、Daily の見出しはスレッドの先頭
     assert header["channel"] == "C5" and header["text"].startswith("☀️") and "Daily" not in header["text"]
     note = assistant.hub.notes[-1]
     assert (note.title, note.kind, note.body) == ("Daily 9/18（金）", "Daily", DAILY_REPLY)
-    assert [n.kind for n in assistant.notion.notes] == ["考察"]
     assert detail["notion_url"] == note.url
     assert not (config.overview_dir / "daily").exists()
 
@@ -138,7 +137,7 @@ async def test_an_answer_in_the_wrong_shape_is_not_posted_or_saved(env, task, da
     result = await getattr(daily(assistant), task)(day)
 
     assert result["status"] == "error"
-    assert assistant.notion.notes == [] and assistant.hub.notes == []
+    assert assistant.hub.notes == []
     assert all("まず材料を確認します" not in shown and "*今日のタスク*" not in shown for shown in slack.texts())
     assert not notice or any(notice in shown for shown in slack.texts())
 
@@ -186,7 +185,6 @@ async def test_review_is_saved_to_the_day_row_and_asks_what_was_learned(env, con
     assert "振り返りの問い" not in "".join(texts)
     # 最後に、今日学んだこと・助言を聞く（返事は振り返りの担当が受ける）
     assert texts[2].startswith("今日、職場や学校で学んだこと") and len(texts) == 3
-    assert assistant.notion.notes == []
     assert not (config.overview_dir / "reviews").exists()
 
 
@@ -248,7 +246,6 @@ async def test_without_hub_daily_and_review_still_post_and_say_so(env, config):
     notices = "\n".join(kw["text"] for _, kw in slack.calls if kw.get("channel") == "C9")
     assert "Daily 9/24（木） を日別記録に保存できませんでした。共通 Notion ホームが使えません" in notices
     assert "Retro & Planning 9/23（水） を日別記録に保存できませんでした" in notices
-    assert assistant.notion.notes == []
     assert not (config.overview_dir / "daily").exists() and not (config.overview_dir / "reviews").exists()
     # 人の時間は読めないと材料に書く（落ちない）
     assert "共通 Notion ホームが使えない" in material(claude.calls[0]["prompt"])
