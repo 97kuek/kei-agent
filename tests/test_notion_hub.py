@@ -76,20 +76,17 @@ class FakeHubNotion:
         }
         self.blocks = {
             "home": [self.child_db("calendar-db", "今月の予定")],
-            "research-home": [self.child_db("tasks-db", "Task")],
+            "research-home": [],
             "course-home": [self.child_db("assignments-db", "課題")],
         }
         self.databases = {
             "calendar-db": {"id": "calendar-db", "parent": {"type": "page_id", "page_id": "home"},
                             "data_sources": [{"id": "calendar-ds"}]},
-            "tasks-db": {"id": "tasks-db", "parent": {"type": "page_id", "page_id": "research-home"},
-                         "data_sources": [{"id": "tasks-ds"}]},
             "assignments-db": {"id": "assignments-db", "parent": {"type": "page_id", "page_id": "course-home"},
                                "data_sources": [{"id": "assignments-ds"}]},
         }
         self.sources = {
             "calendar-ds": self.ds("calendar-ds", {"名前": "title", "日付": "date", "タグ": "multi_select"}),
-            "tasks-ds": self.ds("tasks-ds", {"タイトル": "title", "期日": "date", "状態": "status"}),
             "assignments-ds": self.ds("assignments-ds", {"課題": "title", "締切": "date", "状態": "status"}),
         }
         self.views = []
@@ -211,7 +208,7 @@ def add_existing_daily(notion, tmp_path, with_state=False, extra_view=False):
 @pytest.mark.parametrize(("breaks", "match"), [
     (lambda n, _: n.blocks["home"].append(n.child_db("calendar-duplicate", "今月の予定")), "重複"),
     (lambda n, _: n.pages.pop("home"), "共有|アクセス"),
-    (lambda n, _: n.databases["tasks-db"]["parent"].update(page_id="other"), "正本|親"),
+    (lambda n, _: n.databases["assignments-db"]["parent"].update(page_id="other"), "正本|親"),
     # 状態ファイルのない既存の日別記録に、ビューを二重に作らない
     (lambda n, t: add_existing_daily(n, t), "状態ファイル|既存の日別"),
     (lambda n, t: add_existing_daily(n, t, with_state=True, extra_view=True), "ビュー.*一意"),
@@ -239,16 +236,16 @@ def test_run_creates_schema_views_and_databases_only_once(fake_notion, tmp_path)
     assert titles.count("日別記録") == 1 and titles.count("読みもの") == 1
     assert [b["child_page"]["title"] for b in fake_notion.blocks["home"]
             if b["type"] == "child_page"].count(COLLECT_TITLE) == 1
-    assert [view["name"] for view in fake_notion.views] == ["研究 Task", "授業課題", "週ごとの時間"]
+    assert [view["name"] for view in fake_notion.views] == ["授業課題", "週ごとの時間"]
     visible = [prop["property_id"] for prop in fake_notion.daily_view["configuration"]["properties"]
                if prop["visible"]]
     assert visible == ["日付", "Daily", "レトプラ"]
-    for view in fake_notion.views[:2]:
+    for view in fake_notion.views[:1]:
         assert view["create_database"]["parent"]["page_id"] == "home"
         whens = [next(iter(cond["date"])) for cond in view["filter"]["and"][0]["or"]]
         assert whens == ["past_year", "this_week", "next_week"]
         assert view["sorts"][0]["direction"] == "ascending"
-    assert fake_notion.databases["tasks-db"]["parent"]["page_id"] == "research-home"
+    assert (first.tasks_ds_id, first.task_view_id) == ("", "")
     assert fake_notion.databases["assignments-db"]["parent"]["page_id"] == "course-home"
 
     # 時間記録と週ごとのグラフ
@@ -283,26 +280,40 @@ def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, 
     """前の絞り込み（締切が今週だけ）の表は次の setup で一度だけ直す。状態ファイルがあっても重複した表は見つけて止める。"""
     hub_setup = setup(fake_notion, tmp_path)
     hub_setup.run()
-    for view in fake_notion.views[:2]:
+    for view in fake_notion.views[:1]:
         view["filter"] = {"and": [{"property": "締切", "date": {"this_week": {}}}]}
         view.pop("sorts")
     writes_before = len(fake_notion.writes)
     hub_setup.run()
     hub_setup.run()
-    assert len(fake_notion.writes) == writes_before + 2
-    assert all("past_year" in str(view["filter"]) for view in fake_notion.views[:2])
+    assert len(fake_notion.writes) == writes_before + 1
+    assert all("past_year" in str(view["filter"]) for view in fake_notion.views[:1])
 
     fake_notion.views.append(dict(fake_notion.views[0], id="duplicate-view"))
     with pytest.raises(NotionError, match="重複"):
         hub_setup.run()
-    assert len(fake_notion.writes) == writes_before + 2
+    assert len(fake_notion.writes) == writes_before + 1
 
 
 def test_inspect_reports_existing_sources_without_writes(fake_notion, tmp_path):
     details = setup(fake_notion, tmp_path).inspect()
     assert any("今月の予定" in line for line in details)
-    assert any("Task" in line for line in details)
+    assert any("授業課題" in line for line in details)
+    assert not any("研究 Task" in line for line in details)
     assert fake_notion.writes == []
+
+
+def test_old_state_and_old_research_task_view_do_not_break_setup(fake_notion, tmp_path):
+    """研究ホームに Task DB が無くても動く。古い状態ファイルの task 項目と、残っている「研究 Task」ビューには触れない。"""
+    hub_setup = setup(fake_notion, tmp_path)
+    hub_setup.run()
+    old = json.loads((tmp_path / "hub.json").read_text())
+    old.update(tasks_ds_id="old-tasks-ds", task_view_id="old-view")
+    (tmp_path / "hub.json").write_text(json.dumps(old), encoding="utf-8")
+    writes_before = len(fake_notion.writes)
+    assert hub_setup.run().tasks_ds_id == ""
+    assert hub_setup.inspect()
+    assert len(fake_notion.writes) == writes_before
 
 
 class FakeDayNotion:
