@@ -1,6 +1,6 @@
 ---
 name: researching-literature
-description: Use when先行研究や関連論文を探すとき、ある論文の周辺を整理するとき、見つけた論文を研究ホームの先行研究 DB に残すとき。
+description: Use when先行研究や関連論文を探すとき、ある論文の周辺を整理するとき、見つけた論文をテーマのページの先行研究 DB に残すとき。
 ---
 
 # 文献調査
