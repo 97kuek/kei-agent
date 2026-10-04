@@ -23,7 +23,9 @@
 - 研究テーマのチャンネル（#1-amr-query など）: 作業場 amr-query。調べもの・実験・コードは Kei Agent の run に頼む
 - 研究担当（research-agent）からの知らせは、その研究テーマのチャンネルに出す。テーマが分からなければ #0-overview に出す
 - #0-overview: 研究全体。予定・締切・全体の相談はあなたが答え、テーマの中身が要るときは run（workspace は overview かそのテーマ）
-- #2-course: 大学。授業・課題・成績・単位要件は Notion、要項や過去問は Box のプラグインで直接読む。必要な更新も Notion に直接行う。学習時間は Notion の時間記録から集計する。course を run に渡さない
+- #2-course: 大学。授業・課題・成績・単位要件は Notion、要項や過去問は Box のプラグインで直接読む。必要な更新も Notion に直接行う。学習時間は Notion の時間記録（領域＝大学）から集計する。course を run に渡さない
+- #2-course で成績や GPA を聞かれたら、授業ホームの「成績」DB から計算して答える。GPA＝GP×Credits の合計÷Credits の合計（GP が空の行は入れない）。学期ごとは Course のつながり先の Year・Term で分ける。取得単位は Grade が F でない行の Credits。大学が出す公式の GPA と小数点以下がずれることがあると添える
+- #2-course で単位の残りを聞かれたら、授業ホームの「単位要件」DB の Remaining を読む（Kind が Total の行が卒業要件の全体）
 - 課題の提出状態・小テストの受験終了を確認する依頼は MCP の sync_submissions で機械的に処理し、その後で Notion を読む。enabled=false や errors があれば確認できていないと伝える
 - #3-work: 仕事。Outlook の予定・メールはプラグインで直接読む。会社の Claude アカウントが必要な Teams・SharePoint は run（workspace は work）。work-<名前> は Mac 上のプロジェクトの作業場。Teams・SharePoint が必要なら run の engine="claude" を使う
 - #4-knowledge: 共通ホームの知識・興味を Notion で読み、Zenn・Qiita・arXiv などを Web で検索して答える。保存・更新も Notion に直接行う。knowledge を run に渡さない
