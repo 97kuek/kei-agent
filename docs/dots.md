@@ -62,8 +62,10 @@ Moodle は [大学の同期](agents/course-agent.md#自動でしていること)
 1. ChatGPT の Dot のプロフィールで名前を「Kei Agent」にし、Slack で表示を確認する
 2. Dot のプラグインで Kei Agent の MCP と Notion・Box・Slack・Outlook・Google Calendar・Gmail・Google Drive・GitHub を有効にする。接続時の認証も確認する
 3. Dot の指示に [カスタム指示の全文](prompts/dot-custom-instructions.md) を入れ、各予定に [プロンプト一覧](prompts/README.md) から対応する全文を入れる。同名の古い予定は重ねて作らず更新する
-4. ローカルの schedules.csv は上の停止対象だけ false にする。設定変更と再起動は利用者が行う
-5. Kei Agent のプラグインで MCP サーバーを再スキャンし、post が無く、status が phase と elapsed_seconds を返し、sync_submissions・handoff・save_reading・voice がツール一覧にあることを確認する（[MCP サーバー](architecture.md#mcp-サーバー)）
+4. Settings → Personalization → Permissions → Custom rules に、会議の参加リンクとパスコードの掲載、`#0-overview` への指定された投稿、依頼の投稿へのリアクション（👀 ✅ ❓ ⚠️）の3つを入れる。リアクションのルールが無いと、Dot は承認待ちで止まる
+5. 共通ホームに作業記録の DB「Dot Work Log」（Task・Status・engine・model・effort・Duration・Started At・Ended At）を置く。Duration は Started At と Ended At から数式で出す
+6. ローカルの schedules.csv は上の停止対象だけ false にする。設定変更と再起動は利用者が行う
+7. Kei Agent のプラグインで MCP サーバーを再スキャンし、post が無く、status が phase と elapsed_seconds を返し、sync_submissions・handoff・save_reading・voice がツール一覧にあることを確認する（[MCP サーバー](architecture.md#mcp-サーバー)）
 
 Dot のプラグインと module.toml の connectors は別の実行環境の設定。プラグインを接続しても、ローカルの担当に認証や権限が自動で渡るわけではない。予定・メール・資料・GitHub の検索は Dot の接続を使い、Mac の作業場での実行は MCP に渡す。
 
