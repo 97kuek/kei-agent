@@ -113,6 +113,42 @@ def test_table_views_show_the_columns_in_the_spec_order_including_the_back_relat
     assert [title for _kind, title in home_children(api, home)].count("授業時間表") == 1
 
 
+def test_a_column_hidden_in_a_view_stays_hidden_and_the_order_is_applied(tmp_path):
+    api, _home, setup = new_home(tmp_path)
+    setup.run()
+    db = setup.state["databases"]["assignments"]
+    props = api.items[api.key(db["data_source_id"])]["properties"]
+    view = api.add_view(db["database_id"], "Default view")
+    reversed_names = list(reversed(ASSIGNMENT_COLUMNS))
+    api.request("PATCH", f"/views/{view}", {"configuration": {"type": "table", "properties": [
+        {"property_id": props[n]["id"], "visible": n != "Link"} for n in reversed_names[:-1]]}})
+
+    setup.run()
+
+    shown = api.request("GET", f"/views/{view}")["configuration"]["properties"]
+    by_id = {p["id"]: name for name, p in props.items()}
+    assert [by_id[p["property_id"]] for p in shown] == ASSIGNMENT_COLUMNS
+    assert {by_id[p["property_id"]]: p["visible"] for p in shown} == {
+        n: n != "Link" for n in ASSIGNMENT_COLUMNS}
+
+
+def test_more_views_than_one_page_stop_the_setup(tmp_path):
+    api, _home, setup = new_home(tmp_path)
+    setup.run()
+    db = setup.state["databases"]["courses"]
+    real = api.request
+
+    def request(method, path, body=None):
+        out = real(method, path, body)
+        if path.startswith("/views?database_id="):
+            out = {**out, "has_more": True}
+        return out
+
+    setup.notion.request = request
+    with pytest.raises(NotionError, match="ビュー"):
+        setup.order_views(db, notion_setup.COURSES)
+
+
 @pytest.mark.parametrize(("legacy", "match"), [("title", "科目名"), ("grades", "📊 成績履歴")])
 def test_setup_on_a_home_that_is_not_migrated_stops_before_any_write(tmp_path, legacy, match):
     api = FakeNotionAPI()

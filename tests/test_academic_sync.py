@@ -142,6 +142,26 @@ def test_academic_sync_preserves_an_existing_grade_course_relation():
     assert result.unchanged == {"grades": 1, "requirements": 0}
 
 
+def test_a_linked_grade_with_no_name_match_creates_no_course():
+    """手で授業に結んだ成績は、名前が合う授業が無くても、新しい授業の行を作らない（成績の値だけ直す）。"""
+    notion = RowsNotion({
+        "grades": [{"id": "grade-1", "properties": {
+            "Name": {"title": [{"plain_text": "数学"}]},
+            "Record ID": {"rich_text": [{"plain_text": "grade:2025:春期:数学"}]},
+            "Credits": {"number": 2}, "Grade": {"rich_text": [{"plain_text": "B"}]},
+            "GP": {"number": 3}, "Group": {"rich_text": [{"plain_text": "基礎"}]},
+            "Category": {"rich_text": []},
+            "Course": {"relation": [{"id": "manually-linked-course"}]},
+        }}],
+    })
+    result = AcademicSync(notion, STATE, WASEDA).sync(record([MATH]))
+
+    assert notion.rows["courses"] == [] and result.new_courses == ()
+    grade, = notion.rows["grades"]
+    assert grade["properties"]["Course"] == {"relation": [{"id": "manually-linked-course"}]}
+    assert grade["properties"]["Grade"] != {"rich_text": [{"plain_text": "B"}]}
+
+
 class _ReadingSchool:
     """成績のファイルを読んだことにする学校（読んだファイルを覚える）。"""
 

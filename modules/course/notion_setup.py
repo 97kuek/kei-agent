@@ -272,14 +272,22 @@ class CourseSetup(Setup):
         return {**spec, "properties": properties}
 
     def order_views(self, info: dict, spec: dict) -> None:
-        """表のビューの列を spec の順にそろえる（戻り側の列も含む）。spec に無い列は消さず、右に残す。"""
+        """表のビューの列を spec の順にそろえる（戻り側の列も含む）。spec に無い列は消さず、右に残す。
+
+        利用者が隠した列は隠したままにする。ビューにまだ載っていない列だけ表示にする。
+        """
         live = self.notion.request("GET", f"/data_sources/{info['data_source_id']}")["properties"]
         names = [n for n in spec["properties"] if n in live] + [n for n in live if n not in spec["properties"]]
-        wanted = [{"property_id": live[n]["id"], "visible": True} for n in names]
-        for view in self.notion.request("GET", f"/views?database_id={info['database_id']}").get("results", []):
+        listing = self.notion.request("GET", f"/views?database_id={info['database_id']}")
+        if listing.get("has_more"):
+            raise NotionError("授業ホームのビューを全件確認できません")
+        for view in listing.get("results", []):
             full = self.notion.request("GET", f"/views/{view['id']}")
             if full.get("type") != "table":
                 continue
+            current = {p.get("property_id"): p.get("visible")
+                       for p in (full.get("configuration") or {}).get("properties", [])}
+            wanted = [{"property_id": live[n]["id"], "visible": current.get(live[n]["id"], True)} for n in names]
             shown = [(p.get("property_id"), p.get("visible"))
                      for p in (full.get("configuration") or {}).get("properties", [])]
             if shown == [(p["property_id"], p["visible"]) for p in wanted]:

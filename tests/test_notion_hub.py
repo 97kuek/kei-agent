@@ -296,11 +296,14 @@ def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, 
 
 
 def test_the_assignment_view_reads_the_new_course_columns(fake_notion, tmp_path):
-    """授業課題の表は、課題の Due と Status（Submitted 以外）で絞り、Due の近い順に並べる。"""
+    """授業課題の表は、課題の Due と Status（Submitted と Overdue 以外）で絞り、Due の近い順に並べる。"""
     setup(fake_notion, tmp_path).run()
 
     view = next(view for view in fake_notion.views if view["name"] == "授業課題")
-    assert view["filter"]["and"][1] == {"property": "Status", "status": {"does_not_equal": "Submitted"}}
+    assert view["filter"]["and"][1:] == [
+        {"property": "Status", "status": {"does_not_equal": "Submitted"}},
+        {"property": "Status", "status": {"does_not_equal": "Overdue"}},
+    ]
     assert view["sorts"] == [{"property": "Due", "direction": "ascending"}]
 
 

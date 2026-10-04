@@ -47,12 +47,16 @@ class _Source:
     properties: dict
 
 
-def task_view_spec(due: str, done: str, status: str = "状態") -> dict:
-    """共通ホームの「今週のタスク」の表。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に。"""
+def task_view_spec(due: str, done: str, status: str = "状態", overdue: str = "Overdue") -> dict:
+    """共通ホームの授業課題の表。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に。
+
+    提出済み（done）と、手で期限切れにしたもの（overdue）は除く。
+    """
     return {
         "filter": {"and": [
             {"or": [{"property": due, "date": {when: {}}} for when in ("past_year", "this_week", "next_week")]},
             {"property": status, "status": {"does_not_equal": done}},
+            {"property": status, "status": {"does_not_equal": overdue}},
         ]},
         "sorts": [{"property": due, "direction": "ascending"}],
     }
