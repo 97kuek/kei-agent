@@ -50,7 +50,7 @@ class Module:
                      if isinstance(post.get("item"), dict) and post["item"].get("url") == url]
             if not posts:
                 raise ValueError("その URL の読みものは投稿の控えにありません")
-            errors = await (self._save(posts) if saved else self._forget(posts))
+            errors = await (self._save(posts) if saved else self._forget(url, posts))
             return {"url": url, "saved": any(post.get("page") for post in posts),
                     "liked": any(post.get("liked_at") for post in posts), "errors": errors}
 
@@ -66,26 +66,33 @@ class Module:
         errors = []
         hub = self.core.hub
         if page is None:
-            if hub is None or not hub.has_reading_db:
-                errors.append("共通ホームに「読みもの」がないので、Notion に保存していません")
+            if hub is None or not hub.has_knowledge_db:
+                errors.append("知識ホームに「Knowledge」がないので、Notion に保存していません")
             else:
                 try:
-                    page = await self.core.to_thread(hub.add_reading, posts[0]["item"], posts[0]["day"])
+                    page = await self.core.to_thread(hub.add_article, posts[0]["item"])
                     if not page:
-                        errors.append("Notion の「読みもの」の保存先を確認できませんでした")
+                        errors.append("Notion の「Knowledge」の保存先を確認できませんでした")
                 except NotionError as e:
-                    errors.append(f"Notion の「読みもの」に保存できませんでした: {e}")
+                    errors.append(f"Notion の「Knowledge」に保存できませんでした: {e}")
         now = time.time()
         for post in posts:
             self._remember(post, post.get("liked_at") or now, post.get("page") or page)
         return errors
 
-    async def _forget(self, posts: list[dict]) -> list[str]:
-        """保存を解除して Notion の行をゴミ箱に入れる。失敗した行は控えを残して再試行できるようにする。"""
+    async def _forget(self, url: str, posts: list[dict]) -> list[str]:
+        """保存を解除して、Knowledge の同じ URL の行をゴミ箱に入れる。控えに保存先が無ければ URL で探す。
+        失敗した行は控えを残して再試行できるようにする。"""
         pages = {post["page"] for post in posts if post.get("page")}
         errors = []
         failed = set()
         hub = self.core.hub
+        if not pages and hub is not None and hub.has_knowledge_db:
+            try:
+                found = await self.core.to_thread(hub.find_article, url)
+            except NotionError as e:
+                return [f"Notion の「Knowledge」で同じ URL の行を探せませんでした: {e}"]
+            pages = {found} if found else set()
         for page in pages:
             if hub is None:
                 failed.add(page)
@@ -95,7 +102,7 @@ class Module:
                 await self.core.to_thread(hub.trash_page, page)
             except NotionError as e:
                 failed.add(page)
-                errors.append(f"Notion の「読みもの」の保存を解除できませんでした: {e}")
+                errors.append(f"Notion の「Knowledge」の保存を解除できませんでした: {e}")
         for post in posts:
             if post.get("page") not in failed:
                 self._remember(post, None, None)

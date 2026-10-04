@@ -597,10 +597,11 @@ class FakeNotionAPI:
 
 class FakeHub:
     has_time_db = True
-    has_reading_db = True
+    has_knowledge_db = True
 
     def __init__(self):
-        self.readings: dict[str, dict] = {}
+        # 知識ホームの Knowledge（ページ ID → {"type", "url"（Article だけ）, "item", "link"（学びだけ）}）
+        self.knowledge: dict[str, dict] = {}
         self.trashed: list[str] = []
         self.notes = []
         self.appended = []
@@ -637,9 +638,19 @@ class FakeHub:
     def record_time(self, entry_id, domain, label, started_at, minutes, memo="", slack_url="", source="Slack"):
         self.recorded.append((entry_id, domain, label, minutes, source))
 
-    def add_reading(self, item, day):
-        page_id = f"reading-{len(self.readings) + 1}"
-        self.readings[page_id] = {"item": item, "day": day}
+    def find_article(self, url):
+        """同じ URL の Article（ゴミ箱に入れたものは数えない）。"""
+        return next((page_id for page_id, row in self.knowledge.items()
+                     if row["type"] == "Article" and row["url"] == url.strip() and page_id not in self.trashed), None)
+
+    def add_article(self, item):
+        """Knowledge に Article で入れる。同じ URL の行があればそれを返す。"""
+        url = str(item.get("url") or "").strip()
+        found = self.find_article(url)
+        if found:
+            return found
+        page_id = f"knowledge-{len(self.knowledge) + 1}"
+        self.knowledge[page_id] = {"type": "Article", "url": url, "item": item}
         return page_id
 
     has_learning_db = True
