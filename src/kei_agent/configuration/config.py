@@ -159,6 +159,11 @@ class NotionConfig:
         found = {"research": self.research_home, "course": self.course_home, **self.homes}
         return {name: home for name, home in found.items() if home}
 
+    @property
+    def knowledge_home(self) -> str:
+        """知識ホーム（agents.csv の knowledge の行の notion）。収集のページと Knowledge の DB を置く。"""
+        return self.homes.get("knowledge", "")
+
 
 def _notion(data: dict) -> NotionConfig:
     _check_keys(data, {f.name for f in fields(NotionConfig)}, "[notion]")

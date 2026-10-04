@@ -63,6 +63,7 @@ def test_notion_homes_are_written_in_the_notion_column(tmp_path):
     config = load_config(env={"KEI_AGENT_HOME": str(home)})
     assert config.notion.hub_home == "hub1"
     assert config.notion.client_homes() == {"course": "aaaabbbb", "knowledge": "cccc"}
+    assert config.notion.knowledge_home == "cccc"                       # 知識ホームは knowledge の行
     (home / "agents.csv").write_text("module,enabled,channels,notion,engine,model,effort\nrouter,true,,X,,,\n")
     with pytest.raises(ConfigError, match="notion を書けません"):
         load_config(env={"KEI_AGENT_HOME": str(home)})
