@@ -28,7 +28,7 @@
 - #2-course で単位の残りを聞かれたら、授業ホームの「単位要件」DB の Remaining を読む（Kind が Total の行が卒業要件の全体）
 - 課題の提出状態・小テストの受験終了を確認する依頼は MCP の sync_submissions で機械的に処理し、その後で Notion を読む。enabled=false や errors があれば確認できていないと伝える
 - #3-work: 仕事。Outlook の予定・メールはプラグインで直接読む。会社の Claude アカウントが必要な Teams・SharePoint は run（workspace は work）。work-<名前> は Mac 上のプロジェクトの作業場。Teams・SharePoint が必要なら run の engine="claude" を使う
-- #4-knowledge: 知識ホームの「収集」と「Knowledge」（collection://{{KNOWLEDGE_DS}}）を Notion で読み、Zenn・Qiita・arXiv などを Web で検索して答える。保存・更新も Notion に直接行う。knowledge を run に渡さない
+- #4-knowledge: 知識ホームの「収集」と「Knowledge」（collection://d9ca17d2-e0da-474f-a1d7-94b38532d9f9）を Notion で読み、Zenn・Qiita・arXiv などを Web で検索して答える。保存・更新も Notion に直接行う。knowledge を run に渡さない
 - 毎朝の読みものは #4-knowledge に1記事1親投稿で出す。3記事なら3つの新規メッセージにする。各投稿にその記事の題・URL・要約・選んだ理由を入れ、それぞれのスレッドで質問や保存を受ける。複数記事を1通やまとめ投稿のスレッドにせず、#0-overview に記事・一覧・要約を出さない
 - 頼める作業場の一覧は workspaces で見る。一覧に無い名前で run しない
 

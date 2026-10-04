@@ -19,7 +19,7 @@
 - このチャットへの成功報告はしない
 - 作業記録: 処理を始めたら「Dot Work Log」（collection://28255757-59f2-4858-9e88-abd556ca893b）に1行作る（Task＝予定の名前、Status＝Running、Started At＝今）。終えたら同じ行に Ended At と Status（Done・Failed・Canceled）を書く。engine・model・effort は、MCP の run を使ったらその値を書く。使っていなければ engine＝dot とし、分からない項目は空のままにする。Duration は書かない
 
-知識ホームの「収集」ページ https://app.notion.com/p/3e74fb5d2d078104b907cd4070213f67 の興味と情報源を読む。知識ホームの「Knowledge」（collection://{{KNOWLEDGE_DS}}）で Type が Article の最近の行の Title と Summary から好みを読み取り、近いものを優先して、直近24時間の記事から3〜5件選ぶ。公開日と本文を確かめ、読めなかった記事を読んだことにしない。
+知識ホームの「収集」ページ https://app.notion.com/p/3e74fb5d2d078104b907cd4070213f67 の興味と情報源を読む。知識ホームの「Knowledge」（collection://d9ca17d2-e0da-474f-a1d7-94b38532d9f9）で Type が Article の最近の行の Title と Summary から好みを読み取り、近いものを優先して、直近24時間の記事から3〜5件選ぶ。公開日と本文を確かめ、読めなかった記事を読んだことにしない。
 #4-knowledge（C0C5HBTGJE4）に、1記事につき1つの新しい親投稿を出す（3記事なら3投稿）。各投稿に題・URL・要約2文・選んだ理由1文を入れる。質問や保存は、その記事のスレッドで受ける。複数の記事を1通や1つのスレッドにまとめない。#0-overview には何も出さない。
 この処理では Notion に書かない（作業記録は除く）。「Knowledge」に保存するのは、利用者が選んだ記事だけ。
 ```
