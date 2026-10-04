@@ -42,7 +42,7 @@ def test_columns_follow_the_spec():
     assert [o["name"] for o in THEME_TASKS["properties"]["Status"]["status"]["options"]] == [
         "Not started", "Tonight", "Running", "Waiting", "Done"]
     assert [o["name"] for o in THEME_TASKS["properties"]["Owner"]["select"]["options"]] == ["Me", "Kei"]
-    assert list(THEME_PAPERS["properties"]) == ["Title", "Summary", "Link", "Status"]
+    assert list(THEME_PAPERS["properties"]) == ["Title", "Status", "Summary", "Link"]
     assert [o["name"] for o in THEME_PAPERS["properties"]["Status"]["select"]["options"]] == ["Unread", "Read", "Use"]
 
 

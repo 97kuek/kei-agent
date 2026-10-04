@@ -263,9 +263,9 @@ THEME_PAPERS = {
     "description": "このテーマの先行研究。Link で照合し、同じ論文を2行にしない（arXiv は abs の URL、バージョン番号は外す）。",
     "properties": {
         "Title": {"title": {}},
+        "Status": {"select": {"options": _options(("Unread", "gray"), ("Read", "blue"), ("Use", "green"))}},
         "Summary": {"rich_text": {}},
         "Link": {"url": {}},
-        "Status": {"select": {"options": _options(("Unread", "gray"), ("Read", "blue"), ("Use", "green"))}},
     },
 }
 
