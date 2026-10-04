@@ -93,9 +93,9 @@ async def test_asking_a_skill_comes_back_with_an_answer(server, monkeypatch):
     monkeypatch.setattr(notion_sync, "list_calendar_assignments", lambda days, today: {
         "complete": True, "items": [
             {"id": "p1", "moodle_id": "1@moodle", "title": "第3回レポート", "course": "データベース",
-             "due": "2099-09-25T23:59:00+09:00", "status": "進行中", "url": "https://notion.example/p1"},
-            {"id": "done", "title": "提出済み", "due": "2099-09-24T23:59:00+09:00", "status": "提出済み"},
-            {"id": "past", "title": "期限切れ", "due": "2000-09-24T23:59:00+09:00", "status": "未着手"},
+             "due": "2099-09-25T23:59:00+09:00", "status": "In progress", "url": "https://notion.example/p1"},
+            {"id": "done", "title": "提出済み", "due": "2099-09-24T23:59:00+09:00", "status": "Submitted"},
+            {"id": "past", "title": "期限切れ", "due": "2000-09-24T23:59:00+09:00", "status": "Not started"},
         ]})
 
     # 日数などの指定は、本体（module.py）が本文の JSON で渡す

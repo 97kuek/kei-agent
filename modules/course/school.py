@@ -13,10 +13,8 @@
 - `read_record(files)` … 成績のファイル（`kei-agent-module course academic-import` に渡したもの）を読んで、
   AcademicRecord（academic_record.py）を返す。無ければ成績は取り込めない
 - `course_term(term)` … 成績の学期 → 授業 DB の学期（無ければ、そのまま）
-- `gpa_kind(term, year, course)` … その成績が入る GPA の期間（無ければ、成績と GPA を結ばない）
-- `GPA_KINDS` … GPA の期間の並び（「📈 GPA推移」の名前に番号を振る。無ければ TERMS の順）
-- `requirement_names(group, category)` … 成績の区分に当たる「🎓 単位要件」の名前の候補（無ければ区分の名前だけ）
-- `COURSE_GROUPS` … 成績の科目群 → 授業 DB の「科目群」
+- `requirement_names(group, category)` … 成績の区分に当たる「単位要件」の名前の候補（無ければ区分の名前だけ）
+- 単位要件の kind は academic_record.py の KINDS（Category / Subtotal / Total / Other）のどれかで返す
 """
 
 from __future__ import annotations
@@ -122,31 +120,10 @@ class School:
         convert = self._part("course_term")
         return convert(term) if convert is not None else term
 
-    def gpa_kind(self, term: str, year: int | None, course: str) -> str | None:
-        """その成績が入る GPA の期間。分からなければ None（結ばない）。"""
-        kind = self._part("gpa_kind")
-        return kind(term, year, course) if kind is not None else None
-
-    def gpa_label(self, year: int | None, kind: str) -> str | None:
-        """GPA の期間の名前。グラフで時系列に並ぶよう、年度・学期の番号・学期の名前の順にする（例: 2026 1 春学期）。"""
-        kinds = tuple(self._part("GPA_KINDS") or self.terms)
-        if not year or kind not in kinds:
-            return None
-        return f"{year} {kinds.index(kind) + 1} {kind}"
-
     def requirement_names(self, group: str, category: str) -> tuple[str, ...]:
         """成績の区分に当たる単位要件の名前の候補（前から順に探す）。"""
         names = self._part("requirement_names")
         return tuple(names(group, category)) if names is not None else (category,)
-
-    def course_group(self, group: str) -> str | None:
-        """成績の科目群 → 授業 DB の「科目群」。分からなければ None。"""
-        return (self._part("COURSE_GROUPS") or {}).get(group)
-
-    @property
-    def course_groups(self) -> tuple[str, ...]:
-        """授業 DB の「科目群」の選択肢（「その他」は含めない）。"""
-        return tuple(dict.fromkeys((self._part("COURSE_GROUPS") or {}).values()))
 
 
 def next_weekday(weekday: str, today: date) -> date:

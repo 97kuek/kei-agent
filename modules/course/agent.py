@@ -29,6 +29,7 @@ from kei_agent_a2a.api import (
 
 from . import moodle, moodle_api, notion_sync, submissions, toggl_report
 from .ics import Event
+from .notion_setup import OVERDUE, SUBMITTED
 from .school import SchoolError, from_config, next_weekday
 from .skills import (
     LIST_CALENDAR_ASSIGNMENTS,
@@ -56,7 +57,7 @@ SKILLS = [
         id=SYNC_SUBMISSIONS,
         name="提出・受験状態を同期する",
         description="認証付き Moodle API で課題の提出・小テストの受験終了を確認し、"
-                    "Notion の対応する課題を提出済みにする。未提出・取得失敗では状態を戻さない",
+                    "Notion の対応する課題の Status を Submitted にする。未提出・取得失敗では Status を戻さない",
         tags=["moodle", "notion"],
         examples=["提出状態を確認して", "小テストの受験終了を反映して"],
     ),
@@ -130,11 +131,11 @@ def asked_weekday(text: str) -> str:
 
 
 def due_data(items: list[dict], days: int, *, now: datetime | None = None) -> dict:
-    """Notion の状態を使い、提出済みと期限切れを締切一覧から除く。"""
+    """Notion の Status を使い、Submitted と Overdue の課題を締切一覧から除く。"""
     now = now or datetime.now().astimezone()
     pending = []
     for item in items:
-        if item.get("status") == "提出済み":
+        if item.get("status") in (SUBMITTED, OVERDUE):
             continue
         at = datetime.fromisoformat(item["due"])
         if len(item["due"]) == 10:

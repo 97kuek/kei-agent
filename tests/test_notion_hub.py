@@ -87,7 +87,7 @@ class FakeHubNotion:
         }
         self.sources = {
             "calendar-ds": self.ds("calendar-ds", {"名前": "title", "日付": "date", "タグ": "multi_select"}),
-            "assignments-ds": self.ds("assignments-ds", {"課題": "title", "締切": "date", "状態": "status"}),
+            "assignments-ds": self.ds("assignments-ds", {"Name": "title", "Due": "date", "Status": "status"}),
         }
         self.views = []
         self.daily_view = {"id": "daily-default-view", "name": "Default view", "type": "table",
@@ -281,7 +281,7 @@ def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, 
     hub_setup = setup(fake_notion, tmp_path)
     hub_setup.run()
     for view in fake_notion.views[:1]:
-        view["filter"] = {"and": [{"property": "締切", "date": {"this_week": {}}}]}
+        view["filter"] = {"and": [{"property": "Due", "date": {"this_week": {}}}]}
         view.pop("sorts")
     writes_before = len(fake_notion.writes)
     hub_setup.run()
@@ -293,6 +293,18 @@ def test_old_views_are_widened_once_and_duplicate_views_stop_setup(fake_notion, 
     with pytest.raises(NotionError, match="重複"):
         hub_setup.run()
     assert len(fake_notion.writes) == writes_before + 1
+
+
+def test_the_assignment_view_reads_the_new_course_columns(fake_notion, tmp_path):
+    """授業課題の表は、課題の Due と Status（Submitted と Overdue 以外）で絞り、Due の近い順に並べる。"""
+    setup(fake_notion, tmp_path).run()
+
+    view = next(view for view in fake_notion.views if view["name"] == "授業課題")
+    assert view["filter"]["and"][1:] == [
+        {"property": "Status", "status": {"does_not_equal": "Submitted"}},
+        {"property": "Status", "status": {"does_not_equal": "Overdue"}},
+    ]
+    assert view["sorts"] == [{"property": "Due", "direction": "ascending"}]
 
 
 def test_inspect_reports_existing_sources_without_writes(fake_notion, tmp_path):

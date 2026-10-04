@@ -19,7 +19,7 @@
 - このチャットへの成功報告はしない
 - 作業記録: 処理を始めたら「Dot Work Log」（collection://28255757-59f2-4858-9e88-abd556ca893b）に1行作る（Task＝予定の名前、Status＝Running、Started At＝今）。終えたら同じ行に Ended At と Status（Done・Failed・Canceled）を書く。engine・model・effort は、MCP の run を使ったらその値を書く。使っていなければ engine＝dot とし、分からない項目は空のままにする。Duration は書かない
 
-授業ホームの「課題」（collection://05cd00df-4ce4-49c4-9674-fb217c07331d）で、期限切れと提出済みを除き、締切が24時間以内のものと、3日以内で状態が「未着手」のものを集める。
-直近3日に #0-overview へ自分が出した締切の知らせと、科目・題・締切で照合し、新しく対象になった課題と締切が変わった課題だけを出す。
+授業ホームの「課題」（collection://05cd00df-4ce4-49c4-9674-fb217c07331d）で、Status が Overdue と Submitted のものを除き、Due が24時間以内のものと、Due が3日以内で Status が Not started のものを集める。
+直近3日に #0-overview へ自分が出した締切の知らせと、科目（Course のつながり先の Name）・題（Name）・締切（Due）で照合し、新しく対象になった課題と締切が変わった課題だけを出す。
 #0-overview に「⏰ 締切が近い課題」の見出しで、締切の早い順に `10/03 23:59` 科目 題 の形で並べる。出すものが無ければ何も出さない。
 ```

@@ -65,10 +65,10 @@ def test_an_own_school_part_can_live_in_the_user_folder(tmp_path):
     (home / "schools" / "tokyo_tech.py").write_text(
         'from ..academic_record import AcademicRecord\n\n'
         'LABEL = "東京科学大学"\nPERIODS = {1: "08:50-10:30"}\nTERMS = {"1Q": [4, 5], "2Q": [6, 7, 8]}\n\n\n'
-        'def read_record(files):\n    return AcademicRecord((), (), ())\n', encoding="utf-8")
+        'def read_record(files):\n    return AcademicRecord((), ())\n', encoding="utf-8")
     own = school.from_config(load_config(env={"KEI_AGENT_HOME": str(home)}))
     assert (own.name, own.label, own.term_of(date(2026, 6, 1))) == ("tokyo_tech.py", "東京科学大学", "2Q")
-    assert own.read_record([]) == AcademicRecord((), (), ())
+    assert own.read_record([]) == AcademicRecord((), ())
     assert own.course_term("1Q") == "1Q" and own.requirement_names("A", "B") == ("B",)   # 書かなければ、そのまま
 
     (home / "schools" / "broken.py").write_text("raise RuntimeError('書きかけ')\n", encoding="utf-8")
@@ -76,21 +76,18 @@ def test_an_own_school_part_can_live_in_the_user_folder(tmp_path):
         school.load({"school": "schools/broken.py"}, home)
 
 
-def test_waseda_orders_gpa_by_term_and_links_grades_with_verified_names():
+def test_waseda_turns_grade_terms_into_course_terms_and_links_grades_with_verified_names():
     waseda = school.load({"school": "waseda"})
-    assert waseda.gpa_label(2026, "春学期") == "2026 1 春学期" and waseda.gpa_label(2026, "秋学期") == "2026 2 秋学期"
-    assert waseda.gpa_label(2026, "通算") is None and waseda.gpa_label(0, "春学期") is None
-    assert waseda.course_term("春期") == "春学期" and waseda.gpa_kind("冬ク", 2026, "x") is None
+    assert waseda.course_term("春期") == "春学期" and waseda.course_term("夏ク") == "夏ク"
     assert waseda.requirement_names("Ａ群", "外国語 英語") == ("外国語 英語", "外国語 英語 必修")
-    assert waseda.course_group("Ｃ群(専門教育科目)") == "C群"
+    assert not hasattr(waseda, "gpa_kind") and not hasattr(waseda, "course_group")
 
 
 def test_course_database_options_come_from_the_school():
-    """「授業」の「学期」「科目群」の選択肢は学校から。早稲田は今までと同じ名前。"""
+    """「授業」の Term の選択肢は学校から。早稲田は今までと同じ名前。"""
     spec = notion_setup.course_spec(school.load({"school": "waseda"}))["properties"]
-    names = {key: [option["name"] for option in spec[key]["select"]["options"]] for key in ("学期", "科目群")}
-    assert names == {"学期": ["春学期", "秋学期", "通年", "春ク", "夏ク", "秋ク", "冬ク", "その他"],
-                     "科目群": ["A群", "B群", "C群", "他箇所聴講科目", "その他"]}
+    assert [option["name"] for option in spec["Term"]["select"]["options"]] == [
+        "春学期", "秋学期", "通年", "春ク", "夏ク", "秋ク", "冬ク", "その他"]
     plain = notion_setup.course_spec(school.School())["properties"]
-    assert [option["name"] for option in plain["学期"]["select"]["options"]] == ["その他"]
-    assert notion_setup.COURSES["properties"]["学期"]["select"]["options"] == []    # 元の形は書き換えない
+    assert [option["name"] for option in plain["Term"]["select"]["options"]] == ["その他"]
+    assert notion_setup.COURSES["properties"]["Term"]["select"]["options"] == []    # 元の形は書き換えない

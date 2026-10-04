@@ -12,6 +12,7 @@ pytest.importorskip("a2a")
 from test_course_sync import QUIZ, REPORT, STATE, FakeNotion, _row
 
 from kei_agent_modules.course import moodle_api, notion_sync, submissions
+from kei_agent_modules.course.notion_setup import IN_PROGRESS, NOT_STARTED, OVERDUE, SUBMITTED
 
 ROOT = "https://moodle.example/moodle"
 
@@ -157,7 +158,7 @@ def client_for(*rows):
 def quiz_row():
     row = _row(QUIZ)
     row["properties"]["Moodle ID"] = {"rich_text": [{"plain_text": "123@moodle.example/moodle"}]}
-    row["properties"]["状態"] = {"status": {"name": "進行中"}}
+    row["properties"]["Status"] = {"status": {"name": IN_PROGRESS}}
     return row
 
 
@@ -168,11 +169,22 @@ def test_completed_quiz_updates_only_status_and_missing_link_once():
     first = submissions.sync(api=api, client=client)
     assert first.completed == ["Short test 1"] and first.checked == 1
     assert notion.calls == [("PATCH", "/pages/row-1", {"properties": {
-        "状態": {"status": {"name": "提出済み"}},
-        "Moodle": {"url": ROOT + "/mod/quiz/view.php?id=42"},
+        "Status": {"status": {"name": "Submitted"}},
+        "Link": {"url": ROOT + "/mod/quiz/view.php?id=42"},
     }})]
     assert submissions.sync(api=api, client=client).completed == []
     assert len(notion.calls) == 1
+
+
+@pytest.mark.parametrize("status", [SUBMITTED, OVERDUE])
+def test_submitted_and_overdue_assignments_are_left_out_of_the_due_list(status):
+    """手で Overdue にした課題や Submitted の課題は、Due がまだ先でも締切一覧に出さない。"""
+    from kei_agent_modules.course.agent import due_data
+
+    now = datetime(2026, 10, 2, 12, tzinfo=timezone(timedelta(hours=9)))
+    rows = [{"id": "kept", "title": "レポート", "due": "2026-10-05T23:59:00+09:00", "status": NOT_STARTED},
+            {"id": "dropped", "title": "手で閉じた課題", "due": "2026-10-04T23:59:00+09:00", "status": status}]
+    assert [item["id"] for item in due_data(rows, 14, now=now)["items"]] == ["kept"]
 
 
 def test_unfinished_and_failed_checks_preserve_manual_progress():
@@ -192,7 +204,7 @@ def test_manual_and_already_submitted_rows_are_not_checked():
     manual = _row(REPORT, "manual")
     manual["properties"].pop("Moodle ID")
     done = quiz_row()
-    done["properties"]["状態"]["status"]["name"] = "提出済み"
+    done["properties"]["Status"]["status"]["name"] = SUBMITTED
     client, notion = client_for(manual, done)
     api = FakeAPI()
     assert submissions.sync(api=api, client=client).checked == 0
@@ -261,7 +273,7 @@ def test_date_only_deadline_is_visible_through_that_day():
     from kei_agent_modules.course.agent import due_data
 
     now = datetime(2026, 10, 2, 12, tzinfo=timezone(timedelta(hours=9)))
-    row = {"id": "manual", "title": "時刻未指定", "due": "2026-10-02", "status": "未着手"}
+    row = {"id": "manual", "title": "時刻未指定", "due": "2026-10-02", "status": NOT_STARTED}
     data = due_data([row], 14, now=now)
     assert len(data["items"]) == 1
     at = datetime.fromisoformat(data["items"][0]["at"])
@@ -296,4 +308,4 @@ async def test_partial_notion_failure_still_records_success_and_calendar_refresh
     assert data["completed"] == ["Short test 1"] and len(data["errors"]) == 1
     assert "private-response" not in json.dumps(data)
     assert executor.records.get("calendar", "dirty")["dirty"] is True
-    assert second["properties"]["状態"]["status"]["name"] == "進行中"
+    assert second["properties"]["Status"]["status"]["name"] == IN_PROGRESS

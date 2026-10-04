@@ -47,12 +47,16 @@ class _Source:
     properties: dict
 
 
-def task_view_spec(due: str, done: str) -> dict:
-    """共通ホームの「今週のタスク」の表。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に。"""
+def task_view_spec(due: str, done: str, status: str = "状態", overdue: str = "Overdue") -> dict:
+    """共通ホームの授業課題の表。締切が今週・来週のものと、期限切れで終わっていないものを、締切の近い順に。
+
+    提出済み（done）と、手で期限切れにしたもの（overdue）は除く。
+    """
     return {
         "filter": {"and": [
             {"or": [{"property": due, "date": {when: {}}} for when in ("past_year", "this_week", "next_week")]},
-            {"property": "状態", "status": {"does_not_equal": done}},
+            {"property": status, "status": {"does_not_equal": done}},
+            {"property": status, "status": {"does_not_equal": overdue}},
         ]},
         "sorts": [{"property": due, "direction": "ascending"}],
     }
@@ -149,7 +153,7 @@ class HubSetup:
             if actual and actual.get("type") != next(iter(spec)):
                 raise NotionError(f"予定カレンダーの「{name}」の型が異なります")
         assignments = self._source(self.course_home_id, ("課題",), "授業課題",
-                                   required={"締切": "date", "状態": "status"})
+                                   required={"Due": "date", "Status": "status"})
         saved_views = {}
         saved_daily_id = ""
         if self.state_path.exists():
@@ -302,10 +306,11 @@ class HubSetup:
         if any(b.get("child_database", {}).get("title") == "今月の予定" for b in self.notion.children(self.home_id)):
             self.notion.request("PATCH", f"/databases/{calendar.database_id}", {
                 "title": [{"text": {"content": "予定カレンダー"}}]})
-        for name, source, due, status in (
-            ("授業課題", assignments, "締切", "提出済み"),
+        for name, source, due, status, done in (
+            # 授業ホームの「課題」の列と値（modules/course/notion_setup.py の ASSIGNMENTS）
+            ("授業課題", assignments, "Due", "Status", "Submitted"),
         ):
-            spec = task_view_spec(due, status)
+            spec = task_view_spec(due, done, status)
             if name not in views:
                 views[name] = self.notion.request("POST", "/views", {
                     "data_source_id": source.data_source_id,
@@ -316,7 +321,7 @@ class HubSetup:
                 })
             elif any(_without_property(views[name].get(key)) != _without_property(value)
                      for key, value in spec.items()):
-                # 前の絞り込み（締切が今週だけ）で作った表を、いまの絞り込みにそろえる
+                # 前の絞り込み（古い列名や今週だけ）で作った表を、いまの絞り込みにそろえる
                 self.notion.request("PATCH", f"/views/{views[name]['id']}", spec)
         if not any(block.get("type") == "child_page" and block["child_page"].get("title") == COLLECT_TITLE
                    for block in self.notion.children(self.home_id)):

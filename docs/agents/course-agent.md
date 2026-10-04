@@ -19,7 +19,7 @@
 | 言い方 | 起きること |
 |---|---|
 | 「課題を取り込んで」 | Moodle の締切を「課題」に入れる（履修している科目だけ） |
-| 「提出状態を確認して」 | Moodle の提出・受験終了を確認し、Notion の対応する課題を「提出済み」にする |
+| 「提出状態を確認して」 | Moodle の提出・受験終了を確認し、Notion の対応する課題の Status を Submitted にする |
 | 「締切を教えて」 | これから2週間ぶんを近い順に。「一番近い」なら1件 |
 | 「今週どれくらいやった？」 | Dot が Notion の時間記録を科目ごとに集計する |
 | そのほか | Dot が Box の要項・過去問と授業ホームを直接読んで答える |
@@ -57,18 +57,27 @@ Notion・Box の閲覧や Notion の更新に Mac は不要。Dot から `run(wo
 
 ## 授業ホーム（Notion）
 
-| DB | 中身 |
+上から順に置く。列の名前と選択肢は英語で、列は表の順（名前 → よく見る列 → 時間と数字 → つながりと照合キー）。表のビューも同じ順にそろえる。
+
+| 置くもの | 列（左から） |
 |---|---|
-| 授業 | 科目名、科目コード、学期、曜日、時限、Moodle、状態、科目群・科目区分・必選区分 |
-| 課題 | 課題名、締切、状態、授業への relation |
-| 📊 成績履歴 | 科目群、科目区分、授業名、成績、GP、単位、取得年度 |
-| 🎓 単位要件 | 大区分、要件名、所定・既得・算入・残り単位（`総合計` が卒業要件の全体） |
-| 📈 GPA推移 | 春学期・秋学期・通算の GPA |
+| 授業時間表（ページ） | 何限が何時から何時か。Dot は授業の時刻をここから換算する |
+| 授業 | Name・Status（Taking / Done）・Year・Term・Day・Period・Credits・Moodle。成績とは Name＋Year＋Term で突き合わせる |
+| 課題 | Name・Status（Not started / In progress / Submitted / Overdue）・Due・Course・Link・Moodle ID（空なら手入力の課題） |
+| 成績 | Name・Grade・GP・Credits・Category（科目区分）・Group（科目群）・Course・Requirement・Record ID |
+| 単位要件 | Name・Remaining・Required・Counted・Group（大区分）・Kind（Category / Subtotal / Total / Other）・Grades・Record ID |
+
+- 取得済みかは Grade が F でないことで見る。GPA は保存せず、Dot が成績から計算する（GP が空の行は除き、GP×Credits の合計÷Credits の合計）。大学の公式の GPA と小数点以下がずれることがある
+- 単位の残りは単位要件の Remaining（Kind が Total の行が卒業要件の全体）。既得単位は取り込まない
+- 勉強時間は共通ホームの「時間記録」（領域＝大学）で持つ
+- 既にある授業ホームでは、API で授業時間表のページを先頭に挿せない。`setup` のあと、授業時間表を手で一度いちばん上へ動かす
+- `setup` は、題の列が Name でない DB や「📊 成績履歴」「🎓 単位要件」が残るホームには何も書かずに止まる
+- 課題の Status を手で Overdue や Submitted にしても、Moodle の取り込みは変えない
 
 ## コマンド
 
 ```zsh
-uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml   # 5つの DB をそろえ、履修科目を入れる
+uv run kei-agent-module course setup --seed ~/.config/kei-agent/courses.toml   # 授業時間表のページと4つの DB をそろえ、履修科目を入れる
 uv run kei-agent-module course sync                  # 手で締切を取り込む（--all で履修外も）
 uv run kei-agent-module course sync-submissions      # 最大10件の提出・受験終了を確認する（再実行で続き）
 uv run kei-agent-module course inspect               # Moodle と「授業」を読むだけで照合する
@@ -77,6 +86,7 @@ uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.
 
 - 履修科目のファイルの書き方は `modules/course/courses.example.toml`
 - 成績のファイルはローカルで読み、Notion には置かない（`--delete-inputs` で消す）
+- 成績に当たる授業が「授業」に無ければ、終わった授業（Status＝Done）として足して結ぶ。単位要件は成績の Requirement で結ぶ
 
 ## 設定と秘密情報
 
@@ -105,10 +115,10 @@ uv run kei-agent-module course academic-import --dry-run <grades.html> <credits.
 | `mod_quiz_get_user_attempts` | `userid=0` でトークン所有者の小テスト受験状態を確認 |
 
 - API が返す対象は `userid=0`（トークン所有者）。ICS の利用者との本人照合は行わないため、締切を取得する利用者本人の API トークンを設定する
-- 課題は `submitted`、小テストはプレビュー以外の受験が `finished` または `submitted` のときだけ「提出済み」にする。グループ課題は本人の提出済み、またはグループ提出済みで提出待ちのメンバーがいない場合に限る
+- 課題は `submitted`、小テストはプレビュー以外の受験が `finished` または `submitted` のときだけ Status を Submitted にする。グループ課題は本人の提出済み、またはグループ提出済みで提出待ちのメンバーがいない場合に限る
 - Notion の Moodle ID・活動 URL と API の活動 ID・種類を照合する。URL は設定した Moodle のものだけ使い、タイトルの類似では照合しない
-- 未提出・下書き・受験途中・取得失敗では状態を戻さない。「提出済み」の行と手入力の課題は確認対象から外す。Moodle ID の重複があれば書き込まない
+- 未提出・下書き・受験途中・取得失敗では状態を戻さない。Status が Submitted の行と手入力の課題（Moodle ID が空）は確認対象から外す。Moodle ID の重複があれば書き込まない
 - 判別できない活動はそのまま残す。確認件数が10件を超える場合、全件の確認には複数回の見回りが必要。Mac を閉じている間は同期しない
-- 締切一覧は Notion の状態を参照し、提出済みと期限切れを除く。Dot の締切通知も同じ Notion の状態を見る
+- 締切一覧は Notion の Status を参照し、Submitted と Overdue を除く。Dot の締切通知も同じ Status を見る
 
 API の判定は Moodle 公式の [課題 API](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/assign/externallib.php)、[小テスト API](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/classes/external.php)、[カレンダー API](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/calendar/externallib.php)、[活動 API](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/course/externallib.php) に基づく。学校で使える関数はサービスの権限による。

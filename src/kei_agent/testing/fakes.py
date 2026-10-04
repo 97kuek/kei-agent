@@ -281,7 +281,22 @@ class FakeNotionAPI:
                    "data_sources": [{"id": ds_id, "name": title}]}, self.key(parent))
         self._put({"object": "data_source", "id": ds_id, "parent": {"type": "database_id", "database_id": db_id},
                    "title": self._rich([{"text": {"content": title}}]), "properties": schema})
+        self._link_back(ds_id, schema)
         return db_id, ds_id
+
+    def _link_back(self, ds_id: str, properties: dict) -> None:
+        """本物と同じく、dual_property のつながりは相手のデータソースの右端に戻り側の列を作る。"""
+        for name, spec in properties.items():
+            relation = spec.get("relation") or {}
+            if relation.get("type") != "dual_property":
+                continue
+            target = self.items.get(self.key(relation.get("data_source_id") or ""))
+            back = relation["dual_property"]["synced_property_name"]
+            if target is None or target["object"] != "data_source" or back in target["properties"]:
+                continue
+            target["properties"].update(self._schema({back: {"relation": {
+                "data_source_id": ds_id, "type": "dual_property",
+                "dual_property": {"synced_property_name": name}}}}))
 
     def add_view(self, database: str, name: str, kind: str = "table") -> str:
         db = self.items[self.key(database)]
@@ -301,7 +316,7 @@ class FakeNotionAPI:
         schema = {}
         for name, spec in properties.items():
             kind = next(iter(spec))
-            schema[name] = {"id": self.key(self.new_id())[:4], "name": name, "type": kind, kind: spec[kind]}
+            schema[name] = {"id": self.key(self.new_id())[-6:], "name": name, "type": kind, kind: spec[kind]}
         return schema
 
     def _props(self, values: dict, schema: dict) -> dict:
@@ -513,6 +528,7 @@ class FakeNotionAPI:
                     ds["properties"][spec["name"]] = {**ds["properties"].pop(old), "name": spec["name"]}
                 else:
                     ds["properties"].update(self._schema({name: spec}))
+                    self._link_back(ds["id"], {name: spec})
         return self._ok(ds)
 
     def _views(self, method, item_id, body, query):

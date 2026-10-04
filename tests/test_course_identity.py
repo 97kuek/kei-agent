@@ -12,8 +12,8 @@ class Notion:
     """「授業」の行だけを返す Notion の代わり。書き込みが来たら落ちる。"""
 
     def __init__(self, *rows):
-        self.rows = [{"id": key, "properties": {"科目名": {"title": [{"plain_text": name}]},
-                                               **({"状態": {"select": {"name": status}}} if status else {})}}
+        self.rows = [{"id": key, "properties": {"Name": {"title": [{"plain_text": name}]},
+                                               **({"Status": {"select": {"name": status}}} if status else {})}}
                      for key, name, status in rows]
 
     def paginate(self, method, path, _body=None):
@@ -43,7 +43,7 @@ def test_course_lookup_refuses_ambiguous_normalized_duplicates():
 
 
 def test_course_lookup_ignores_completed_historical_course():
-    notion = Notion(("old", "情報セキュリティB", "終了"), ("current", "情報セキュリティB", "履修中"))
+    notion = Notion(("old", "情報セキュリティB", "Done"), ("current", "情報セキュリティB", "Taking"))
     assert CourseNotion(notion, STATE).course_ids() == {"情報セキュリティB": "current"}
 
 

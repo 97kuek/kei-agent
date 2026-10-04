@@ -16,8 +16,8 @@ class FakeNotion:
     def paginate(self, method: str, path: str, body: dict):
         self.calls.append((method, path, body))
         return [
-            {"id": "course-1", "properties": {"科目名": _title("情報通信ネットワークB")}},
-            {"id": "course-2", "properties": {"科目名": _title("既知の科目")}},
+            {"id": "course-1", "properties": {"Name": _title("情報通信ネットワークB")}},
+            {"id": "course-2", "properties": {"Name": _title("既知の科目")}},
         ]
 
 

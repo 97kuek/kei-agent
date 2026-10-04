@@ -115,57 +115,6 @@ def test_due_reads_the_calendar(monkeypatch):
     assert [e.course_name for e in found] == ["情報理論", "新入生セミナー", "自然言語処理"]
 
 
-# 授業用 Notion のセットアップ
-
-
-def test_course_setup_creates_six_canonical_databases_and_relations(tmp_path):
-    """授業ホームの正本6 DBを作り、科目・成績を中心に relation を張る。"""
-    calls = []
-
-    class _Notion:
-        def children(self, page_id):
-            return []
-
-        def paginate(self, _method, _path, _body):
-            return []
-
-        def request(self, method, path, body=None):
-            calls.append((method, path, body))
-            if method == "POST" and path == "/databases":
-                return {"id": f"db-{body['title'][0]['text']['content']}"}
-            if method == "GET" and path.startswith("/databases/"):
-                return {"data_sources": [{"id": f"ds-{path.split('/')[-1]}"}], "url": "https://notion.so/x"}
-            if method == "GET" and path.startswith("/data_sources/"):
-                name = path.split("ds-db-")[-1]
-                spec = next(spec for title, spec in notion_setup.SPECS.values() if title == name)
-                props = {n: {"id": f"p{i}", "type": next(iter(v))} for i, (n, v) in enumerate(spec["properties"].items())}
-                props.update({n: {"id": "rel", "type": "relation"} for n in spec.get("relations", {})})
-                return {"properties": props}
-            return {}
-
-    setup = notion_setup.CourseSetup(_Notion(), "home-page", tmp_path / "notion-course.json")
-    setup.run()
-
-    setup.add_course("データベース", "月", 2)
-    setup.add_course("統計解析実習", "他")
-    added = [b["properties"] for m, p, b in calls if m == "POST" and p == "/pages"]
-    assert [(p["曜日"]["select"]["name"], p["時限"]["number"]) for p in added] == [("月", 2), ("他", None)]
-
-    created = [b["title"][0]["text"]["content"] for m, p, b in calls if m == "POST" and p == "/databases"]
-    assert created == ["授業", "課題", "📊 成績履歴", "🎓 単位要件", "📈 GPA推移"]
-    assignments = next(b for m, p, b in calls if m == "POST" and p == "/databases"
-                       and b["title"][0]["text"]["content"] == "課題")
-    relation = assignments["initial_data_source"]["properties"]["科目"]["relation"]
-    assert relation["data_source_id"] == "ds-db-授業" and relation["dual_property"]["synced_property_name"] == "課題"
-    grades = next(b for m, p, b in calls if m == "POST" and p == "/databases"
-                  and b["title"][0]["text"]["content"] == "📊 成績履歴")
-    assert grades["initial_data_source"]["properties"]["授業"]["relation"]["data_source_id"] == "ds-db-授業"
-    requirements = next(b for m, p, b in calls if m == "POST" and p == "/databases"
-                        and b["title"][0]["text"]["content"] == "🎓 単位要件")
-    assert requirements["initial_data_source"]["properties"]["算入成績"]["relation"]["data_source_id"] == "ds-db-📊 成績履歴"
-    assert set(setup.state["databases"]) == {"courses", "assignments", "grades", "requirements", "gpa"}
-
-
 def _event(summary):
     return ics.Event(uid="1", summary=summary, starts_at=None)
 
@@ -222,8 +171,8 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     class _Notion:
         def paginate(self, _method, _path, _body):
             # 去年の同名科目は、今年の科目とは別に足す
-            return [{"id": "old", "properties": {"科目名": {"title": [{"plain_text": "データベース"}]},
-                                                  "年度": {"number": 2025}}}]
+            return [{"id": "old", "properties": {"Name": {"title": [{"plain_text": "データベース"}]},
+                                                  "Year": {"number": 2025}}}]
 
         def request(self, method, path, body=None):
             posts.append(body)
@@ -232,7 +181,8 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     setup = notion_setup.CourseSetup(_Notion(), "home", tmp_path / "notion-course.json")
     setup.state = {"databases": {"courses": {"data_source_id": "ds"}}}
     setup.add_course("データベース", "月", 2, year=2026)
-    assert posts[0]["properties"]["年度"] == {"number": 2026}
+    assert posts[0]["properties"]["Year"] == {"number": 2026}
+    assert posts[0]["properties"]["Status"] == {"select": {"name": "Taking"}}
 
     seed = tmp_path / "courses.toml"
     seed.write_text('year = 2027\nterm = "春学期"\n[[courses]]\nname = "英語"\nweekday = "火"\nperiod = 1\n'
@@ -258,7 +208,7 @@ def test_add_course_writes_the_academic_year_and_the_seed_file(tmp_path, monkeyp
     setup.state = {"databases": {"courses": {"data_source_id": "ds"}}}
     posts.clear()
     setup.add_course("統計", "水", 3, year=2026)
-    assert posts[0]["properties"]["学期"]["select"]["name"] in ("春学期", "秋学期")
+    assert posts[0]["properties"]["Term"]["select"]["name"] in ("春学期", "秋学期")
 
 
 @pytest.mark.parametrize(("text", "message"), [

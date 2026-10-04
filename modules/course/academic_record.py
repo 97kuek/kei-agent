@@ -1,7 +1,8 @@
 """成績の記録の形（学校の部品の read_record が返す）と、保存した学務の HTML から表を拾う道具。
 
 成績のページの読み方は学校ごとに違うので、学校の部品（schools/。書き方は school.py）に置く。ここには、どの学校でも
-同じ記録の形（成績・単位要件・GPA）と、部品が使える HTML の表の読み方だけを置く。原文は残さない。
+同じ記録の形（成績・単位要件）と、部品が使える HTML の表の読み方だけを置く。原文は残さない。
+GPA と既得単位は持たない（GPA は Dot が成績から計算する）。
 """
 
 from __future__ import annotations
@@ -10,6 +11,10 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
+
+# 単位要件の Kind（授業ホームの「単位要件」の選択肢と同じ）
+KIND_CATEGORY, KIND_SUBTOTAL, KIND_TOTAL, KIND_OTHER = "Category", "Subtotal", "Total", "Other"
+KINDS = (KIND_CATEGORY, KIND_SUBTOTAL, KIND_TOTAL, KIND_OTHER)
 
 
 @dataclass(frozen=True)
@@ -30,17 +35,9 @@ class Requirement:
     name: str
     group: str
     required: float
-    earned: float
     included: float
     remaining: float
-    kind: str
-
-
-@dataclass(frozen=True)
-class GPAEntry:
-    period: str
-    year: int
-    gpa: float
+    # KINDS のどれか（ほかの値は Other として書く）
     kind: str
 
 
@@ -48,7 +45,6 @@ class GPAEntry:
 class AcademicRecord:
     grades: tuple[Grade, ...]
     requirements: tuple[Requirement, ...]
-    gpa: tuple[GPAEntry, ...]
 
 
 class _TableParser(HTMLParser):

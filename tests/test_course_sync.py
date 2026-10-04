@@ -10,6 +10,7 @@ pytest.importorskip("a2a", reason="a2a-sdk は course のグループに入っ�
 from kei_agent.conversation.dates import weekday
 from kei_agent_modules.course import notion_sync, school
 from kei_agent_modules.course.ics import Event
+from kei_agent_modules.course.notion_setup import DONE, NOT_STARTED, TAKING
 
 # 時限の時刻と学期は、早稲田の部品の既定
 WASEDA = school.load({"school": "waseda"})
@@ -17,7 +18,6 @@ WASEDA = school.load({"school": "waseda"})
 STATE = {"home_page_id": "course-home", "databases": {
     "courses": {"data_source_id": "ds-courses"},
     "assignments": {"data_source_id": "ds-assignments"},
-    "study_logs": {"data_source_id": "ds-study-logs"},
 }}
 
 REPORT = Event(uid="2345678@moodle", summary="第3回レポート の 提出期限",
@@ -36,20 +36,20 @@ def _rich(text):
     return {"rich_text": [{"plain_text": text}]}
 
 
-def _row(event, page_id="row-1", course_page="page-db", when=None):
+def _row(event, page_id="row-1", course_page="page-db", when=None, status=NOT_STARTED):
     return {"id": page_id, "url": f"https://notion.example/{page_id}", "properties": {
-        "課題": _title(event.summary),
+        "Name": _title(event.summary),
+        "Status": {"status": {"name": status}},
+        "Due": {"date": {"start": when or event.starts_at.astimezone().isoformat()}},
+        "Course": {"relation": [{"id": course_page}]},
+        "Link": {"url": event.url},
         "Moodle ID": _rich(event.uid),
-        "締切": {"date": {"start": when or event.starts_at.astimezone().isoformat()}},
-        "Moodle": {"url": event.url},
-        "科目": {"relation": [{"id": course_page}]},
     }}
 
 
 class FakeNotion:
-    def __init__(self, courses=(), assignments=(), study_logs=(), page_children=None):
-        self.rows = {"ds-courses": list(courses), "ds-assignments": list(assignments),
-                     "ds-study-logs": list(study_logs)}
+    def __init__(self, courses=(), assignments=(), page_children=None):
+        self.rows = {"ds-courses": list(courses), "ds-assignments": list(assignments)}
         self.calls = []
         self.page_children = dict(page_children or {})
 
@@ -72,7 +72,7 @@ class FakeNotion:
                 for block in self.page_children.get(page_id, []) if block.get("type") == "heading_2"]
 
 
-COURSE_ROWS = [{"id": "page-db", "properties": {"科目名": _title("データベース")}}]
+COURSE_ROWS = [{"id": "page-db", "properties": {"Name": _title("データベース")}}]
 
 
 def _sync(notion, events, known_only=True):
@@ -84,11 +84,11 @@ def _page_writes(notion):
 
 
 def test_calendar_assignment_snapshot_reads_all_rows_with_course_link_and_clean_title():
-    """手入力の行も含めて全部読み（書き込みはしない）、締切のまとめ知らせ用に科目名・Moodle のリンク・言い回しを落とした課題名を返す。"""
+    """手入力の行も含めて全部読み（書き込みはしない）、締切のまとめ知らせ用に科目名・Link・言い回しを落とした課題名を返す。"""
     assignments = [_row(REPORT, page_id=f"p-{i}") for i in range(21)]
     assignments.append({"id": "manual", "url": "https://notion.example/manual", "properties": {
-        "課題": _title("手入力の課題"), "締切": {"date": {"start": "2026-10-01T23:59:00+09:00"}},
-        "状態": {"status": {"name": "未着手"}},
+        "Name": _title("手入力の課題"), "Due": {"date": {"start": "2026-10-01T23:59:00+09:00"}},
+        "Status": {"status": {"name": NOT_STARTED}},
     }})
     notion = FakeNotion(courses=COURSE_ROWS, assignments=assignments)
 
@@ -100,7 +100,7 @@ def test_calendar_assignment_snapshot_reads_all_rows_with_course_link_and_clean_
     items = {item["id"]: item for item in snapshot["items"]}
     assert items["manual"] == {
         "id": "manual", "title": "手入力の課題", "due": "2026-10-01T23:59:00+09:00",
-        "status": "未着手", "url": "https://notion.example/manual",
+        "status": "Not started", "url": "https://notion.example/manual",
         "course": "", "moodle": "", "moodle_id": ""}
     assert (items["p-0"]["title"], items["p-0"]["course"], items["p-0"]["moodle"], items["p-0"]["moodle_id"]) == (
         "第3回レポート", "データベース", REPORT.url, REPORT.uid)
@@ -108,21 +108,22 @@ def test_calendar_assignment_snapshot_reads_all_rows_with_course_link_and_clean_
 
 
 def test_a_new_deadline_becomes_a_row_with_sections():
-    """新しい締切は行になり、本文に見出しの型を入れる。すでに本文のあるページには足さない。"""
+    """新しい締切は行になり、本文に見出しの型を入れる。出どころは書かない。すでに本文のあるページには足さない。"""
     notion = FakeNotion(courses=COURSE_ROWS, page_children={"new-row": []})
     result = _sync(notion, [REPORT])
 
     (method, path, body), = _page_writes(notion)
     assert (method, path) == ("POST", "/pages")
     props = body["properties"]
-    assert props["課題"]["title"][0]["text"]["content"] == "第3回レポート の 提出期限"
+    assert set(props) == {"Name", "Status", "Due", "Course", "Link", "Moodle ID"}
+    assert props["Name"]["title"][0]["text"]["content"] == "第3回レポート の 提出期限"
     # 手元の時刻に時差を付けて渡す（Notion 側でずれない）
-    assert props["締切"]["date"]["start"] == REPORT.starts_at.astimezone().isoformat()
-    assert props["出どころ"]["select"]["name"] == "Moodle"
+    assert props["Due"]["date"]["start"] == REPORT.starts_at.astimezone().isoformat()
     assert props["Moodle ID"]["rich_text"][0]["text"]["content"] == REPORT.uid
+    assert props["Link"] == {"url": REPORT.url}
     # 科目名は履修コードを外して「授業」と突き合わせる
-    assert props["科目"]["relation"] == [{"id": "page-db"}]
-    assert props["状態"]["status"]["name"] == "未着手"
+    assert props["Course"]["relation"] == [{"id": "page-db"}]
+    assert props["Status"]["status"]["name"] == "Not started"
     # 通知の行は Moodle の言い回しを落とし、締切の時刻を付ける
     assert result.added == ["`09/25 23:59` データベース / 第3回レポート"] and result.unchanged == 0
     assert notion.appended_children("new-row") == ["やること", "提出物", "進捗メモ", "資料・リンク"]
@@ -134,7 +135,7 @@ def test_a_new_deadline_becomes_a_row_with_sections():
 
 def test_the_notification_label_moves_the_time_range():
     """末尾の時刻幅（14:20-14:50）は日付側の囲みに寄せる。"""
-    notion = FakeNotion(courses=[*COURSE_ROWS, {"id": "page-mm", "properties": {"科目名": _title("マルチメディア工学Ｂ")}}])
+    notion = FakeNotion(courses=[*COURSE_ROWS, {"id": "page-mm", "properties": {"Name": _title("マルチメディア工学Ｂ")}}])
     result = _sync(notion, [QUIZ])
 
     assert result.added == ["`10/02 14:20-14:50` マルチメディア工学Ｂ / Short test 1"]
@@ -156,14 +157,15 @@ def test_the_same_deadline_is_left_alone():
 
 
 def test_a_moved_deadline_updates_the_same_row():
-    """締切が変わったら、同じ行を直す（新しい行を作らない）。状態や見積時間には触らない。"""
-    old = _row(REPORT, when="2026-09-20T23:59:00+09:00")
+    """締切が変わったら、同じ行を直す（新しい行を作らない）。手で直した Status には触らない。"""
+    old = _row(REPORT, when="2026-09-20T23:59:00+09:00", status="Submitted")
     notion = FakeNotion(courses=COURSE_ROWS, assignments=[old])
     result = _sync(notion, [REPORT])
 
     (method, path, body), = notion.calls
     assert (method, path) == ("PATCH", "/pages/row-1")
-    assert "状態" not in body["properties"] and "見積時間" not in body["properties"]
+    assert "Status" not in body["properties"]
+    assert set(body["properties"]) <= {"Name", "Due", "Course", "Link", "Moodle ID"}
     assert len(result.updated) == 1
 
 
@@ -182,7 +184,7 @@ def test_a_course_that_is_not_taken_is_skipped_unless_all_are_asked():
 
     result = _sync(notion, [OTHER], known_only=False)
     (_, _, body), = _page_writes(notion)
-    assert "科目" not in body["properties"]
+    assert "Course" not in body["properties"]
     assert len(result.added) == 1 and result.other_courses == ["新入生セミナー"]
 
 
@@ -208,6 +210,14 @@ def test_missing_or_legacy_state_says_what_to_run(tmp_path, state):
         notion_sync.read_state(path)
 
 
+def test_a_state_without_the_gpa_database_is_enough(tmp_path):
+    """GPA推移の DB は無くなった。授業・課題・成績・単位要件がそろっていれば読める。"""
+    path = tmp_path / "notion-course.json"
+    keys = ("courses", "assignments", "grades", "requirements")
+    path.write_text(json.dumps({"databases": {key: {} for key in keys}}))
+    assert set(notion_sync.read_state(path)["databases"]) == set(keys)
+
+
 # 履修中の科目（朝のまとめで、時限を時刻に直すのに使う）
 
 
@@ -215,19 +225,19 @@ def _select(name):
     return {"select": {"name": name}}
 
 
-def _course(key, name, day="月", period=2, status="履修中", term="秋学期", year=None):
-    props = {"科目名": _title(name), "曜日": _select(day), "時限": {"number": period}, "状態": _select(status)}
+def _course(key, name, day="月", period=2, status=TAKING, term="秋学期", year=None):
+    props = {"Name": _title(name), "Day": _select(day), "Period": {"number": period}, "Status": _select(status)}
     if term:
-        props["学期"] = _select(term)
+        props["Term"] = _select(term)
     if year:
-        props["年度"] = {"number": year}
+        props["Year"] = {"number": year}
     return {"id": key, "url": f"https://notion/{key}", "properties": props}
 
 
 COURSE_ROWS_FULL = [
     _course("p1", "データベース"),
     _course("p2", "次世代ネットワーク", day="金", period=4),
-    _course("p3", "去年の科目", period=1, status="終了", term=None),
+    _course("p3", "去年の科目", period=1, status=DONE, term=None),
     _course("p4", "プロジェクト研究B", day="他", period=None),
 ]
 
