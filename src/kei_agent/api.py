@@ -529,10 +529,10 @@ class Core:
         return await self._assistant.module_agenda(days, frozenset(kinds) if kinds is not None else None)
 
     async def digest(self, since: float, now: float, title: str, *, agenda: bool = False) -> str:
-        """Daily・振り返りの材料（DIGEST_CHARS 字までで、超えた分は後ろのノートから省いたもの）。
+        """Daily・振り返りの材料（DIGEST_CHARS 字までで、超えた分は後ろの振り返りから省いたもの）。
 
         本体の記録（やり取りのあったスレッドとその記録の場所・終わったジョブ・夜間の Task・止まっているテーマ・
-        返事待ち・Kei Agent の稼働）、モジュールの材料（material）、研究ホームの Task とノート、前日の振り返り。
+        返事待ち・Kei Agent の稼働）、モジュールの材料（material）、研究ホームの Task、前日の振り返り。
         agenda にすると、モジュールの予定（今日あったもの・明日のもの・締切）も入れる。
         """
         ids = await self._assistant.channel_ids()

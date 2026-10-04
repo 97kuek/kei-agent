@@ -44,7 +44,7 @@
 | Slack の Dot に「〜して」（テーマのチャンネル） | Dot が MCP の `run` に頼み、作業場で AI を動かして答える |
 | ファイルを添付 | Dot が `put_file` で `inputs/` に置く（文のファイル） |
 | 依頼の頭に `[[research-design]]` など | Dot が `run` の `use_case` に用途を指定する。下の表 |
-| 「今夜やって」 | Dot が Task を「今夜やる」で作り、00:00 に動かす |
+| 「今夜やって」 | Dot がそのテーマの Task を Tonight で作り、00:00 に動かす |
 
 ## AI の用途
 
@@ -68,7 +68,7 @@
 | `submit-job` | ジョブを pueue に入れる（作業場か研究全体の作業場の中だけ） |
 | `list-jobs` / `cancel-job` / `forget-job` | ジョブの状態を見る・止める・片づける |
 
-- skill（`plugin/skills/`）: `researching-literature`（論文探しと先行研究 DB）、`running-jobs`、`managing-research-notion`、`managing-wandb`
+- skill（`plugin/skills/`）: `researching-literature`（論文探しとテーマの先行研究 DB）、`running-jobs`、`managing-research-notion`、`managing-wandb`
 
 ## ジョブ
 
@@ -88,16 +88,50 @@
 
 - 作るのは `uv run kei-agent-notion-setup --apply`（付けなければ、作るものを並べるだけ）
 
-| DB | 主な項目 |
-|---|---|
-| テーマ | 名前（チャンネル名と同じ）、状態、目的、Slack、ディレクトリ |
-| Task | タイトル、テーマ、状態（未着手 / 今夜やる / 実行中 / 確認待ち / 完了）、担当、優先度、期日、結果 |
-| ノート | タイトル、種類（計画 / 考察 / 議論メモ）、テーマ、日付 |
-| マイルストーン | 名前、期日、テーマ、状態 |
-| 先行研究 | 名前、テーマ、URL、ID（`arXiv:…`）、要点、この研究との関係、状態（未読 / 読んだ / 使う） |
+研究ホームに置くのは、テーマの DB、「中長期の方針」のページ、研究室のリンクだけ。テーマの DB は、Status が In progress のテーマを上に出す。テーマをまたいだ一覧は置かず、朝の Daily が受け持つ。
 
-- 「今夜やる」の Task は、00:00 に Dot が1件ずつ（一晩5件まで）MCP の `run` に頼み、「状態」と「結果」を書く
-- テーマの前提と検索キーワードの正本は `AGENTS.md`、論文の正本は先行研究 DB
+**テーマ（DB）**
+
+| 列 | 中身 |
+|---|---|
+| Name | テーマの名前（Slack のチャンネル名の「数字-」より後ろと同じ） |
+| Status | In progress / On hold / Done |
+| Start | 始めた日 |
+| End | 終えた日 |
+| Duration | Start から End までの日数（End が空なら今日まで） |
+
+**テーマのページ**は、上から次の順に置く。見出しと DB の名前は固定で、Dot はこの名前で探す。
+
+1. 前提とキーワード（見出し）: どんな論文やデータが関係するかの前提と、先行研究を探す検索キーワード
+2. 進捗ログ（見出し）: Dot が日付付きで書き足す。何かが進んだとき（Task が終わった、実験やジョブの結果が出た、チャンネルで方針が決まった）に1〜3行。夜の振り返りでは、その日に動きがあったテーマにだけ「今日のまとめ」を1件
+3. Task（DB）
+4. 先行研究（DB）
+
+計画や議論メモは、テーマのページの下に普通のページとして作る。
+
+**Task（テーマごとの DB）**
+
+| 列 | 中身 |
+|---|---|
+| Title | Task の名前 |
+| Status | Not started / Tonight / Running / Waiting / Done |
+| Owner | Me / Kei |
+| Due | 期日 |
+| Work & Result | 作るときに「作業: …」、実行中は受付番号、終わったら「結果: …」を書き足す |
+| Slack | 頼まれたスレッド。結果をそこに返す |
+
+**先行研究（テーマごとの DB）**
+
+| 列 | 中身 |
+|---|---|
+| Title | 論文の題 |
+| Status | Unread / Read / Use |
+| Summary | 2〜3文の要約と、このテーマとの関係1文 |
+| Link | 照合キー（arXiv は `abs` の URL にそろえ、バージョン番号を外して比べる） |
+
+- 同じ論文が複数のテーマにかかわるときは、それぞれのテーマの先行研究に1行ずつ入れる。見つけた日は Notion のページの作成日時を使う
+- 夜間の Task は、In progress のテーマを順に開き、Owner が Kei で Status が Tonight の行を拾う。「作業:」の部分を Kei Agent への頼みごとにする。00:00 に Dot が1件ずつ（一晩5件まで）MCP の `run` に頼み、Status と Work & Result を書く
+- テーマの前提と検索キーワードの正本は、テーマのページの「前提とキーワード」（Mac の各テーマの `AGENTS.md` はそれを写す側）、論文の正本は各テーマの先行研究 DB
 - スレッドやジョブの状態は本体の SQLite が正本で、Notion には置かない
 
 ## 設定と秘密情報

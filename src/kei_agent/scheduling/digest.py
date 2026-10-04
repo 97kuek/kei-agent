@@ -23,7 +23,7 @@ from kei_agent.workspaces import themes
 if TYPE_CHECKING:
     from kei_agent.conversation.assistant import Assistant
 
-# 材料に入れるノートの本文の長さ
+# 材料に入れる振り返りの本文の長さ
 NOTE_EXCERPT = 1500
 # 前日の振り返り（貼られた結論を含む）を材料に入れる長さ
 REVIEW_EXCERPT = 4000
@@ -110,7 +110,7 @@ class DigestBuilder:
         lines += self._agent_time(now)
         if domains:
             lines += await self._agenda(now)
-        # 長くなりうる本文（前日の振り返り、ノート）は最後に置く。上限を超えたらそこから削れる
+        # 長くなりうる本文（前日の振り返り）は最後に置く。上限を超えたらそこから削れる
         tasks, notes = await self._notion(since, now)
         lines += ["", *tasks]
         lines += await self._yesterday_review(now)

@@ -26,7 +26,7 @@ NIGHT_QUESTION = "夜間に実行したいタスクはありますか？"
 def material(text: str, limit: int) -> str:
     """プロンプトに入れる材料の部分。"""
     return (f"{MATERIAL_START}\n{text.strip()}\n{MATERIAL_END}\n"
-            f"（材料は {limit} 字までで、超えた分は後ろのノートから省いています）")
+            f"（材料は {limit} 字までで、超えた分は後ろの振り返りから省いています）")
 
 
 def daily_prompt(day: str, material_text: str) -> str:

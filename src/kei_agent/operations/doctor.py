@@ -279,7 +279,7 @@ def check_notion(config: Config) -> list[Finding]:
     notion = config.notion
     findings = []
     for row, value, lost in (("overview", notion.hub_home, "Daily・振り返り・時間記録・予定カレンダー"),
-                             ("research", notion.research_home, "研究ホーム（Task・ノート・先行研究）"),
+                             ("research", notion.research_home, "研究ホーム（テーマと、テーマごとの Task・先行研究）"),
                              ("course", notion.course_home, "授業ホーム（授業・課題）")):
         if value:
             findings.append(Finding(OK, "Notion", f"agents.csv の {row} の行の notion が書いてある"))
