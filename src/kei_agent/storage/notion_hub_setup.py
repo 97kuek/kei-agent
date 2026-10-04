@@ -24,10 +24,6 @@ from kei_agent.storage.notion_hub import (
     COLLECT_DEFAULT,
     COLLECT_TITLE,
     DAILY_PROPERTIES,
-    LEARNING_PROPERTIES,
-    LEARNING_TITLE,
-    READING_PROPERTIES,
-    READING_TITLE,
     TIME_CHART_NAME,
     TIME_PROPERTIES,
     TIME_TITLE,
@@ -158,7 +154,7 @@ class HubSetup:
         saved_daily_id = ""
         if self.state_path.exists():
             try:
-                saved = HubState(**json.loads(self.state_path.read_text(encoding="utf-8")))
+                saved = HubState.from_json(json.loads(self.state_path.read_text(encoding="utf-8")))
             except (OSError, ValueError, TypeError) as e:
                 raise NotionError(f"共通ホームの状態ファイルを確認できません: {e}") from None
             if notion_id(saved.home_id) != notion_id(self.home_id):
@@ -259,14 +255,10 @@ class HubSetup:
     def inspect(self) -> list[str]:
         calendar, daily, assignments, views = self._preflight()
         time_source = self._owned_source(TIME_TITLE, TIME_PROPERTIES)
-        reading = self._owned_source(READING_TITLE, READING_PROPERTIES)
-        learning = self._owned_source(LEARNING_TITLE, LEARNING_PROPERTIES)
         return [
             f"今月の予定／予定カレンダー: {calendar.database_id}",
             f"日別記録: {daily.database_id if daily else '未作成'}",
             f"時間記録: {time_source.database_id if time_source else '未作成'}",
-            f"読みもの: {reading.database_id if reading else '未作成（--apply で作る）'}",
-            f"学びのノート: {learning.database_id if learning else '未作成（--apply で作る）'}",
             f"授業課題: {assignments.database_id}",
             f"親ページのリンクドビュー: {', '.join(views) if views else '未作成'}",
         ]
@@ -288,7 +280,7 @@ class HubSetup:
             daily = self._source(self.home_id, ("日別記録",), "日別記録", required={"日付": "title"})
         saved_daily_id = ""
         if self.state_path.exists():
-            saved_daily_id = HubState(**json.loads(self.state_path.read_text(encoding="utf-8"))).daily_view_id
+            saved_daily_id = HubState.from_json(json.loads(self.state_path.read_text(encoding="utf-8"))).daily_view_id
         daily_view = self._daily_view(daily, saved_daily_id)
         daily_view_id = daily_view["id"]
         shown_names = ("日付", "Daily", "レトプラ")
@@ -333,19 +325,15 @@ class HubSetup:
                 "children": markdown_to_blocks(COLLECT_DEFAULT),
             })
         time_source = self._ensure_source(TIME_TITLE, TIME_PROPERTIES)
-        reading = self._ensure_source(READING_TITLE, READING_PROPERTIES, icon="📰")
-        learning = self._ensure_source(LEARNING_TITLE, LEARNING_PROPERTIES, icon="📒")
         saved_chart = ""
         if self.state_path.exists():
-            saved_chart = HubState(**json.loads(self.state_path.read_text(encoding="utf-8"))).time_chart_view_id
+            saved_chart = HubState.from_json(json.loads(self.state_path.read_text(encoding="utf-8"))).time_chart_view_id
         chart_id = self._time_chart(time_source, saved_chart)
         state = HubState(self.home_id, calendar.data_source_id, daily.data_source_id,
                          calendar.database_id, daily.database_id,
                          "", assignments.data_source_id,
                          "", views["授業課題"]["id"], daily_view_id,
-                         time_source.database_id, time_source.data_source_id, chart_id,
-                         reading_db_id=reading.database_id, reading_ds_id=reading.data_source_id,
-                         learning_db_id=learning.database_id, learning_ds_id=learning.data_source_id)
+                         time_source.database_id, time_source.data_source_id, chart_id)
         write_json_atomic(self.state_path, state.__dict__)
         return state
 
@@ -373,7 +361,7 @@ def main() -> None:
         if args.apply:
             state = setup.run()
             print(f"適用完了: 日別記録 {state.daily_ds_id}、カレンダー {state.calendar_ds_id}、"
-                  f"時間記録 {state.time_ds_id}、読みもの {state.reading_ds_id}、学びのノート {state.learning_ds_id}")
+                  f"時間記録 {state.time_ds_id}")
             for warning in setup.warnings:
                 print(f"注意: {warning}")
         else:
