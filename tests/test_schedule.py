@@ -642,8 +642,8 @@ async def test_daily_digest_is_capped_and_does_not_ask_the_agents_again(env, con
     task = assistant.notion.add_task("今日の締切の Task", "vlm", status=NOT_STARTED)
     task.due = today.isoformat()
     for i in range(40):
-        assistant.notion.notes.append(Note(f"note-{i}", f"考察{i}", "考察", "2026-09-17",
-                                           f"https://notion.example/note-{i}", "あ" * 2000))
+        assistant.hub.edited.append(Note(f"review-{i}", f"振り返り{i}", "振り返り", "2026-09-17",
+                                         f"https://notion.example/review-{i}", "あ" * 2000))
 
     text = await DigestBuilder(config, store, assistant).build(
         time.time() - 86400, time.time(), "Daily の材料", set())
