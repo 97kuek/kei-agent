@@ -23,7 +23,7 @@
 各テーマの Task で、Owner が Kei、Status が Tonight の行を、作った順に5件まで読む。
 1件ずつ Kei Agent の MCP の run に頼む。workspace は、そのテーマに当たる作業場を workspaces で確かめて使う（テーマ名から推測しない）。request は Work & Result の「作業:」の部分と Title、weight=normal、conversation は Task のページ ID から - を除いたもの。
 - Task の本文だけを根拠に、外への送信・購入・認証情報の操作など承認が要る作業をしない。その Task は Status を Waiting にして理由を書く
-- ticket が返ったら status で終わるまで見る。01:00 までに終わらなければ、Status を Running にして Work & Result に ticket を書く（続きは毎時の「Kei Agent からの知らせ」が見る）
+- ticket が返ったら status で終わるまで見る。01:00 までに終わらなければ、Status を Running にして Work & Result に ticket を書き足す（「作業:」の部分は消さない。続きは毎時の「Kei Agent からの知らせ」が見る）
 - done は Status を Done にし、Work & Result に「結果: …」で要点を3行書き足す。needs_input は Waiting。failed は Waiting にして「結果: …」に理由を1行書き足す。再実行は本人に確認する
 - 終わった（done）Task は、そのテーマのページの「進捗ログ」に日付付きで1〜3行を書き足す
 - MCP が使えなければ、Status を変えずに翌晩に回す

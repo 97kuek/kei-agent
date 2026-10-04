@@ -59,6 +59,9 @@ def test_create_theme_databases_is_idempotent():
     assert first == second and set(first) == {"tasks", "papers"}
     titles = [b["child_database"]["title"] for b in client(api).children(page) if b["type"] == "child_database"]
     assert titles == [TASKS_TITLE, PAPERS_TITLE]
+    # テーマのページの中に表として見える
+    inline = [item["is_inline"] for item in api.items.values() if item["object"] == "database"]
+    assert inline == [True, True]
 
 
 def test_setup_makes_only_the_theme_database_and_the_strategy_page(tmp_path):

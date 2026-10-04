@@ -18,6 +18,7 @@ from pathlib import Path
 from kei_agent.configuration.config import Config
 from kei_agent.storage.notion import (
     BLOCKS_PER_REQUEST,
+    PREMISES_HEADING,
     TASKS_TITLE,
     Notion,
     NotionError,
@@ -278,10 +279,20 @@ class NotionStore:
                 log.warning("テーマ「%s」のページに「%s」の DB がありません", theme, TASKS_TITLE)
         return self._task_sources[page_id]
 
+    def _has_heading(self, page_id: str, heading: str) -> bool:
+        return any(b["type"] == "heading_2" and plain_text(b["heading_2"]["rich_text"]) == heading
+                   for b in self.notion.children(page_id))
+
     def ensure_theme(self, name: str) -> bool:
         """テーマの行がなければ作り、ページに見出しと Task・先行研究の DB を置く。作ったら True。"""
         name = workspace_name(name)
-        if self.theme_page_id(name):
+        existing = self.theme_page_id(name)
+        if existing:
+            # 作りかけ・古いページも整える（何度やっても同じ）
+            create_theme_databases(self.notion, existing)
+            if not self._has_heading(existing, PREMISES_HEADING):
+                self.notion.request("PATCH", f"/blocks/{existing}/children",
+                                    {"children": theme_page_blocks(), "position": {"type": "start"}})
             return False
         page = self.notion.request("POST", "/pages", {
             "parent": {"type": "data_source_id", "data_source_id": self._db("themes")["data_source_id"]},

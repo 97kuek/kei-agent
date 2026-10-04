@@ -3,7 +3,15 @@ from datetime import date
 
 import pytest
 
-from kei_agent.storage.notion import THEMES, Notion, NotionError, create_theme_databases
+from kei_agent.storage.notion import (
+    PREMISES_HEADING,
+    TASKS_TITLE,
+    THEME_TASKS,
+    THEMES,
+    Notion,
+    NotionError,
+    create_theme_databases,
+)
 from kei_agent.storage.notion_store import (
     DONE,
     OWNER_KEI,
@@ -195,6 +203,29 @@ def test_ensure_theme_uses_the_workspace_name_and_builds_the_page(home):
     assert kinds.count("heading_2") == 2 and kinds.count("child_database") == 2
 
 
+def test_two_task_databases_on_a_theme_page_stop_reads_with_the_theme_named(home):
+    api, ds, store = home
+    page, _ = _theme(api, ds, "amr-query")
+    api.add_database(page, TASKS_TITLE, THEME_TASKS["properties"])
+    with pytest.raises(NotionError, match="amr-query"):
+        store.tonight_tasks(5)
+
+
+def test_ensure_theme_repairs_an_existing_theme_page_without_creating_a_row(home):
+    api, ds, store = home
+    page = api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": "amr-query"}}]},
+                                                    "Status": {"status": {"name": "In progress"}}})
+    api.add_block(page, "paragraph", "手で書いたメモ")
+    assert store.ensure_theme("amr-query") is False
+    assert store.ensure_theme("amr-query") is False
+    blocks = _client(api).children(page)
+    headings = [b["heading_2"]["rich_text"][0]["plain_text"] for b in blocks if b["type"] == "heading_2"]
+    assert headings == [PREMISES_HEADING, "進捗ログ"]
+    assert blocks[0]["type"] == "heading_2"
+    assert [b["child_database"]["title"] for b in blocks if b["type"] == "child_database"] == ["Task", "先行研究"]
+    assert len(store.active_themes()) == 1
+
+
 # Notion の項目のずれ（起動時の確認）
 
 
@@ -215,3 +246,38 @@ def test_schema_problems_reports_theme_and_per_theme_database_drift(home):
 
     del store.state["databases"]["themes"]
     assert any("themes: notion.json にありません" in p for p in store.schema_problems())
+
+
+def test_schema_problems_skips_themes_that_are_not_in_progress(home):
+    api, ds, store = home
+    _theme(api, ds, "done-theme", status="Done")
+    api.add_page(data_source=ds, properties={"Name": {"title": [{"text": {"content": "held"}}]},
+                                             "Status": {"status": {"name": "On hold"}}})
+    assert store.schema_problems() == []
+
+
+def test_schema_problems_keeps_going_when_one_theme_page_cannot_be_read(home):
+    api, ds, store = home
+    page, _ = _theme(api, ds, "broken")
+    _theme(api, ds, "fine")
+    inner = store.notion
+    real = inner.children
+
+    def children(block_id):
+        if api.key(block_id) == api.key(page):
+            raise NotionError("boom")
+        return real(block_id)
+
+    inner.children = children
+    problems = store.schema_problems()
+    assert len(problems) == 1 and "broken" in problems[0] and "boom" in problems[0]
+
+
+def test_schema_problems_reads_each_theme_page_once(home):
+    api, ds, store = home
+    _theme(api, ds, "amr-query")
+    calls = []
+    real = store.notion.children
+    store.notion.children = lambda block_id: calls.append(block_id) or real(block_id)
+    assert store.schema_problems() == []
+    assert len(calls) == 1

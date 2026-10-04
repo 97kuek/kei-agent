@@ -1022,6 +1022,17 @@ git commit -m "docs: point Dot prompts at theme-scoped research databases"
 
 **Files:** なし（Notion と Dot の設定の操作）
 
+**順序の決まり:** Notion の移し替え（Step 2〜5）が終わるまで、新しいコードを配備・再起動しない（起動時の確認と `ensure_theme` は新しい列を前提にする）。古い DB を消す（Step 7）のは、Step 0 の前提が片付いてから。
+
+- [ ] **Step 0: 古い Task DB に頼っているものを先に直す（Step 7 の前提）**
+
+`src/kei_agent/storage/notion_hub_setup.py`（151 行目あたりと 309 行目あたり）の `kei-agent-hub-setup` は、研究ホームの「Task」DB（タイトル・期日・状態）を必須とし、共通ホームの「今週のタスク」の表示をそれから作る。`docs/architecture.md` の 187 行目も同じことを書いている。古い Task DB を消すと、この表示と `kei-agent-hub-setup` が壊れる。次のどちらかを先に済ませる。
+
+- `notion_hub_setup.py` を直す（テーマごとの Task DB から作る、または研究ホームの Task DB を必須にしない）。あわせて `docs/architecture.md` を今の状態に書き換える
+- 共通ホームの「今週のタスク」を外す
+
+どちらにするかは利用者に聞く。済むまで Step 7 に進まない。
+
 - [ ] **Step 1: 作る前に、何が変わるかを見せる**
 
 Run: `uv run kei-agent-notion-setup`（`--apply` なし）
@@ -1029,7 +1040,7 @@ Expected: 「テーマ」に足す列（Status・Start・End・Duration）と、
 
 - [ ] **Step 2: テーマの DB の列を新しくする**
 
-Notion の MCP（`notion-update-data-source`）で、テーマの DB の列を次の順で変える。
+Notion の MCP（`notion-update-data-source`）で、テーマの DB の列を次の順で変える。**Step 3 の `kei-agent-notion-setup --apply` より前に**、`名前`→`Name`、`状態`→`Status` などの名前を変えておく（先に apply すると、タイトル列を2つ目として足そうとして Notion が 400 を返す）。
 
 1. `名前` を `Name` に、`状態`（select）を消して `Status`（status: In progress / On hold / Done）を足す。各テーマの今の状態を写す（進行中→In progress、保留→On hold、完了→Done）
 2. `Start`・`End`（date）と `Duration`（Task 1 の式）を足す
@@ -1038,7 +1049,12 @@ Notion の MCP（`notion-update-data-source`）で、テーマの DB の列を�
 - [ ] **Step 3: テーマのページに見出しと DB を置く**
 
 Run: `uv run kei-agent-notion-setup --apply`
-Expected: 各テーマのページに「Task」「先行研究」の DB ができる。見出し（前提とキーワード・進捗ログ）が無いページには、Notion の MCP でページの先頭に足す。
+Expected: 各テーマのページに「Task」「先行研究」の DB ができる。実 API で、次の3点を確かめる。
+- Status の選択肢がグループつき（To-do / In progress / Complete）で作られていること
+- Duration の式が通ること。混ざった型の `if` で落ちるなら `dateBetween(if(empty(prop("End")), now(), prop("End")), prop("Start"), "days")` に変える（Task 1 の式も合わせて直す）
+- Task と先行研究の DB が、テーマのページの中に表（`is_inline`）として見えること
+
+見出し（前提とキーワード・進捗ログ）が無いページには、Notion の MCP でページの先頭に足す。
 
 - [ ] **Step 4: 古い行を移す**
 
@@ -1055,12 +1071,16 @@ Notion の MCP で、古い Task と先行研究の DB を全部読み（`notion
 
 - [ ] **Step 6: Dot を切り替える**
 
-PR をマージしたあと、Task 6 の全文を、今日と同じやり方で Kei に送る（「要約・言い換え・追記をせず、全文をそのまま保存して」）。保存後の照合の返事を確かめる。
+Step 2〜5 が済んでから、PR をマージして新しいコードを配備・再起動する。そのあと Task 6 の全文を、今日と同じやり方で Kei に送る（「要約・言い換え・追記をせず、全文をそのまま保存して」）。保存後の照合の返事を確かめる。
 
 - [ ] **Step 7: 古い DB を消す（利用者の確認のあと）**
 
 古い Task・ノート・マイルストーン・先行研究の DB と、研究ホームの「自分の Task」「近いマイルストーン」の表について、消してよいかを利用者に確認する。よければ Notion の MCP でゴミ箱に入れる（30日間は戻せる）。`~/.local/state/kei-agent/notion.json` から `tasks`・`notes`・`milestones`・`papers` の鍵が消えていること（Step 3 の setup で書き直される）を確かめる。
 
-- [ ] **Step 8: 翌日に確かめる**
+- [ ] **Step 8: deploy/README.md の古い記述を人に頼む**
+
+`deploy/README.md` の 141 行目に、ノートのテンプレートについての古い記述が残っている。`deploy/` は柵なので、このリポジトリの作業では直さない。利用者に直してもらう。
+
+- [ ] **Step 9: 翌日に確かめる**
 
 翌朝の Daily、00:00 の夜間の Task、07:00 の先行研究の新着で、テーマのページの Task・先行研究・進捗ログが読み書きされていることを、Slack と Notion で確かめる。「今夜やって」で頼んだ Task が、そのテーマの Task に Tonight で入ることも確かめる。

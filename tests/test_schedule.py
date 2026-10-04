@@ -222,6 +222,17 @@ async def test_night_runs_other_tasks_in_a_new_theme_thread(env, config, slack_u
     assert task.slack_url == slack_url
 
 
+async def test_night_task_with_empty_work_says_there_is_no_work(env, config):
+    scheduler, assistant, slack, claude = env
+    make_theme(config)
+    task = assistant.notion.add_task("中身なし", "vlm", body="")
+
+    await scheduler.run_task("night", "2026-09-18")
+
+    assert "（作業の中身なし）" in claude.calls[0]["prompt"]
+    assert task.status == DONE
+
+
 async def test_night_marks_awaiting(env, config):
     scheduler, assistant, slack, claude = env
     make_theme(config)

@@ -305,6 +305,7 @@ def create_theme_databases(notion, page_id: str) -> dict[str, str]:
         else:
             db_id = notion.request("POST", "/databases", {
                 "parent": {"type": "page_id", "page_id": page_id},
+                "is_inline": True,
                 "title": [{"text": {"content": title}}],
                 "description": [{"text": {"content": spec["description"]}}],
                 "icon": {"type": "emoji", "emoji": spec["icon"]},
@@ -349,16 +350,23 @@ def schema_problems(notion: Notion, state: dict) -> list[str]:
     problems = _spec_problems("themes", THEMES, live)
     if problems:
         return problems
-    for row in notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {"page_size": 100}):
+    rows = notion.paginate("POST", f"/data_sources/{db['data_source_id']}/query", {
+        "page_size": 100, "filter": {"property": "Status", "status": {"equals": "In progress"}}})
+    for row in rows:
         name = "".join(t.get("plain_text", "") for t in row["properties"]["Name"]["title"])
-        for _, title, spec in THEME_DATABASES:
-            ids = _child_databases(notion, row["id"], title)
-            if len(ids) != 1:
-                problems.append(f"テーマ「{name}」: 「{title}」の DB が {len(ids)} つあります（1つのはず）")
-                continue
-            ds = notion.request("GET", f"/databases/{ids[0]}")["data_sources"][0]["id"]
-            problems += _spec_problems(f"テーマ「{name}」の{title}", spec,
-                                       notion.request("GET", f"/data_sources/{ds}")["properties"])
+        try:
+            children = notion.children(row["id"])
+            for _, title, spec in THEME_DATABASES:
+                ids = [b["id"] for b in children
+                       if b["type"] == "child_database" and b["child_database"]["title"] == title]
+                if len(ids) != 1:
+                    problems.append(f"テーマ「{name}」: 「{title}」の DB が {len(ids)} つあります（1つのはず）")
+                    continue
+                ds = notion.request("GET", f"/databases/{ids[0]}")["data_sources"][0]["id"]
+                problems += _spec_problems(f"テーマ「{name}」の{title}", spec,
+                                           notion.request("GET", f"/data_sources/{ds}")["properties"])
+        except NotionError as e:
+            problems.append(f"テーマ「{name}」: ページを読めません（{e}）")
     return problems
 
 

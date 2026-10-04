@@ -438,7 +438,7 @@ class FakeNotionAPI:
                     page[key] = body[key]
         return self._ok(page)
 
-    def _append(self, parent_id: str, child: dict, after: str | None = None) -> dict:
+    def _append(self, parent_id: str, child: dict, after: str | None = None, start: bool = False) -> dict:
         kind = child["type"]
         block_id = self.new_id()
         parent = self.items[self.key(parent_id)]
@@ -448,7 +448,8 @@ class FakeNotionAPI:
                  kind: {**child.get(kind, {}), "rich_text": self._rich(child.get(kind, {}).get("rich_text") or [])}}
         self.items[self.key(block_id)] = block
         kids = self.children.setdefault(self.key(parent_id), [])
-        kids.insert(kids.index(self.key(after)) + 1 if after else len(kids), self.key(block_id))
+        at = kids.index(self.key(after)) + 1 if after else 0 if start else len(kids)
+        kids.insert(at, self.key(block_id))
         return block
 
     def _blocks(self, method, item_id, tail, body, query):
@@ -458,9 +459,10 @@ class FakeNotionAPI:
         if tail == "children":
             if method == "PATCH":
                 after = ((body.get("position") or {}).get("after_block") or {}).get("id")
+                start = (body.get("position") or {}).get("type") == "start"
                 added = []
                 for child in body["children"]:
-                    added.append(self._append(item_id, child, after))
+                    added.append(self._append(item_id, child, after, start and not added))
                     after = added[-1]["id"]
                 return self._ok({"object": "list", "results": added})
             kids = [self._block_view(self.items[key]) for key in self.children.get(self.key(item_id), [])
@@ -479,6 +481,7 @@ class FakeNotionAPI:
 
             db_id, _ = self.add_database(parent, plain_text(body.get("title") or []),
                                          (body.get("initial_data_source") or {}).get("properties"))
+            self.items[self.key(db_id)]["is_inline"] = bool(body.get("is_inline"))
             return self._ok(self.items[self.key(db_id)])
         db = self._get(item_id, "database")
         if db is None:
