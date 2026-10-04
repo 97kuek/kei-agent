@@ -67,11 +67,12 @@ Notion・Box の閲覧や Notion の更新に Mac は不要。Dot から `run(wo
 | 成績 | Name・Grade・GP・Credits・Category（科目区分）・Group（科目群）・Course・Requirement・Record ID |
 | 単位要件 | Name・Remaining・Required・Counted・Group（大区分）・Kind（Category / Subtotal / Total / Other）・Grades・Record ID |
 
-- 取得済みかは Grade が F でないことで見る。GPA は保存せず、Dot が成績から計算する（GP×Credits の合計÷Credits の合計）。大学の公式の GPA と小数点以下がずれることがある
+- 取得済みかは Grade が F でないことで見る。GPA は保存せず、Dot が成績から計算する（GP が空の行は除き、GP×Credits の合計÷Credits の合計）。大学の公式の GPA と小数点以下がずれることがある
 - 単位の残りは単位要件の Remaining（Kind が Total の行が卒業要件の全体）。既得単位は取り込まない
 - 勉強時間は共通ホームの「時間記録」（領域＝大学）で持つ
 - 既にある授業ホームでは、API で授業時間表のページを先頭に挿せない。`setup` のあと、授業時間表を手で一度いちばん上へ動かす
-- `setup` は、題の列が Name でない DB や「📊 成績履歴」が残るホームには何も書かずに止まる
+- `setup` は、題の列が Name でない DB や「📊 成績履歴」「🎓 単位要件」が残るホームには何も書かずに止まる
+- 課題の Status を手で Overdue や Submitted にしても、Moodle の取り込みは変えない
 
 ## コマンド
 
