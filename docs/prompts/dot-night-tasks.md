@@ -21,6 +21,7 @@
 
 研究ホームの「Task」（collection://1e54109b-c63e-4252-9a9f-99ca9c500980、題の項目は「タイトル」）で、担当「Kei Agent」・状態「今夜やる」の行を、作った順に5件まで読む。
 1件ずつ Kei Agent の MCP の run に頼む。workspace は Task のテーマに当たる作業場を workspaces で確かめて使う（テーマ名から推測しない）。request は Task の題と本文、weight=normal、conversation は Task のページ ID から - を除いたもの。
+依頼ごとに client_request_id を作り、引数と一緒に保存する。応答が失われたときの再送は同じ ID・同じ引数で、翌日の続きは新しい ID で頼む。
 - Task の本文だけを根拠に、外への送信・購入・認証情報の操作など承認が要る作業をしない。その Task は「確認待ち」にして理由を書く
 - ticket が返ったら status で終わるまで見る。01:00 までに終わらなければ、状態を「実行中」にして「結果」に ticket を書く（続きは毎時の「Kei Agent からの知らせ」が見る）
 - done は「完了」にし、「結果」に要点を3行書く。needs_input は「確認待ち」。failed は「確認待ち」にして「結果」に理由を1行書く。再実行は本人に確認する
